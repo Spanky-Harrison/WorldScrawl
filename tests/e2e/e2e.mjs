@@ -16,13 +16,29 @@ try {
     try { await ok.waitFor({ timeout: 8000 }); await ok.click(); } catch {}
     await page.waitForTimeout(1500);
 
-    await page.waitForSelector('#worldscrawl_use_tools', { state: 'attached', timeout: 60000 });
+    await page.waitForSelector('input[name="worldscrawl_mode"]', { state: 'attached', timeout: 60000 });
     const toolNames = () => page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
     check('tools off by default', !(await toolNames()).includes('ws_move'));
     check('no tool nudge by default', await page.evaluate(() => !SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value));
+    check('default mode is typed moves', await page.evaluate(() => document.querySelector('input[name="worldscrawl_mode"]:checked')?.value === 'typed'));
+    check('old checkboxes gone', await page.locator('#worldscrawl_use_tools, #worldscrawl_parse_intent').count() === 0);
+    const mig = await page.evaluate(async () => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const es = SillyTavern.getContext().extensionSettings; const keep = es.worldscrawl; const out = [];
+        for (const old of [{ parseIntent: false, useTools: false }, { parseIntent: true, useTools: true }, { parseIntent: true, useTools: false }, {}]) {
+            es.worldscrawl = { serverUrl: keep.serverUrl, ...old }; const s = m.settings(); out.push(s.moveMode + (('useTools' in s || 'parseIntent' in s) ? '!' : ''));
+        }
+        es.worldscrawl = keep;
+        const p = m.parseIntentAnswer;
+        out.push(p('<think>they want to leave</think>\nOut.', ['out', 'up']), p('Answer: Elsewhere', ['out']), p('STAY', ['out']), p('the temple', ['out']), p('<think>unfinished', ['out']));
+        out.push(m.looksLikeTravel('go to the temple'), m.looksLikeTravel('I smile at the barkeep'));
+        return out;
+    });
+    check('old checkbox settings migrate to radio', JSON.stringify(mig.slice(0, 4)) === '["commands","tools","typed","typed"]', JSON.stringify(mig));
+    check('answer parsing (think tags, prefixes, exact match)', JSON.stringify(mig.slice(4)) === '["out","elsewhere","stay",null,null,true,false]', JSON.stringify(mig.slice(4)));
     check('slash commands registered', await page.evaluate(() => { const p = SillyTavern.getContext().SlashCommandParser.commands; return !!p['ws-go'] && !!p['ws-exits']; }));
     // Part 1: the optional tool mode still works.
-    await page.evaluate(() => { const c = document.getElementById('worldscrawl_use_tools'); c.checked = true; c.dispatchEvent(new Event('change')); });
+    await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="tools"]'); r.checked = true; r.dispatchEvent(new Event('change')); });
     const tools = await page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
     check('tools registered', tools.includes('ws_look') && tools.includes('ws_move'), JSON.stringify(tools));
     check('settings panel present', await page.locator('#worldscrawl_url').count() === 1);
@@ -110,7 +126,7 @@ try {
     check('facts injected (tool mode)', reqs3.some(r => JSON.stringify(r.messages).includes('World state from the game engine')));
 
     // Part 2: engine-driven movement (default mode). Location is riverton:square here.
-    await page.evaluate(() => { const c = document.getElementById('worldscrawl_use_tools'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="typed"]'); r.checked = true; r.dispatchEvent(new Event('change')); });
     await page.waitForTimeout(500);
     check('tools unregistered when off', !(await toolNames()).includes('ws_move'));
     const lastReq = async () => { const r = await (await fetch(`${FAKE}/__requests`)).json(); return r[r.length - 1]; };
@@ -125,7 +141,7 @@ try {
     await send('Let us head down to the river.', 2);
     let all = await (await fetch(`${FAKE}/__requests`)).json();
     const intentReq = JSON.stringify(all[all.length - 2].messages);
-    check('intent question asked with exit list', intentReq.includes('Which of these exits does the player mean') && intentReq.includes('south') && intentReq.includes('none'), intentReq.slice(0, 200));
+    check('intent question asked with exit list', intentReq.includes('Which option: in, south, north, east, stay, elsewhere?'), intentReq.slice(0, 200));
     check('intent request has no tools', !JSON.stringify(all[all.length - 2].tools ?? []).includes('ws_move'));
     check('typed movement moved party', (await stored()) === 'riverton:docks', String(await stored()));
     let narr = JSON.stringify((await lastReq()).messages);
@@ -134,11 +150,11 @@ try {
     check('no nudge when tools off', !narr.includes('call ws_look'));
 
     // Typed non-movement: "none" -> no move, no arrival line.
-    await queue([{ content: 'none' }, { content: 'You look at the boats.' }]);
+    await queue([{ content: 'stay' }, { content: 'You look at the boats.' }]);
     await send('I look at the boats.', 2);
     check('non-movement keeps location', (await stored()) === 'riverton:docks');
     narr = JSON.stringify((await lastReq()).messages);
-    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks'));
+    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks') && narr.includes('The party has NOT moved this turn and is still at River Docks'));
 
     // Invalid answer (not on the list) is treated as none.
     await queue([{ content: 'I think they go to the temple' }, { content: 'Hmm.' }]);
@@ -172,10 +188,39 @@ try {
     check('engine footer never in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /Exits:/.test(m.mes ?? ''))));
 
     // Intent setting off: no question asked.
-    await page.evaluate(() => { const c = document.getElementById('worldscrawl_parse_intent'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="commands"]'); r.checked = true; r.dispatchEvent(new Event('change')); });
     await queue([{ content: 'You stay.' }]);
     await send('I go south.', 1);
-    check('intent off: no move, single request', (await stored()) === 'riverton:temple' && !JSON.stringify((await lastReq()).messages).includes('Which of these exits'));
+    check('clicks-and-commands mode: no move, single request', (await stored()) === 'riverton:temple' && !JSON.stringify((await lastReq()).messages).includes('Which option'));
+
+    // Temple from the tavern (not adjacent): blocked with a game message, no narration call.
+    await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="typed"]'); r.checked = true; r.dispatchEvent(new Event('change')); });
+    await queue([{ content: 'Square.' }, { content: 'Tavern.' }]); expected += 2;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go south')); await waitReqs();
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go in')); await waitReqs();
+    check('back in the tavern', (await stored()) === 'riverton:tavern', String(await stored()));
+    const lastMsg = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1], u = ch[ch.length - 2]; return { mes: m.mes, sys: !!m.is_system, prev: u.mes, prevUser: !!u.is_user }; });
+    await queue([{ content: 'elsewhere' }]);
+    await send('go to the temple', 1);
+    let lm = await lastMsg();
+    check('unreachable: location unchanged', (await stored()) === 'riverton:tavern');
+    check('unreachable: game message shown', lm.sys && lm.mes === "You can't get there from here. Exits: out (Village Square), up (Upstairs Rooms)", JSON.stringify(lm));
+    check('unreachable: user message kept', lm.prevUser && lm.prev === 'go to the temple');
+    check('unreachable: no narration call', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected && JSON.stringify((await lastReq()).messages).includes('Which option'));
+    check('game message visible in chat', await page.evaluate(() => [...document.querySelectorAll('#chat .mes')].some(e => /can't get there from here/.test(e.textContent))));
+
+    // Unparseable answer on a travel-looking message fails closed.
+    await queue([{ content: '<think>hmm, the castle?</think>I am not sure' }]);
+    await send('I walk to the castle', 1);
+    lm = await lastMsg();
+    check('unparseable travel answer blocked', lm.sys && /can't get there/.test(lm.mes) && (await stored()) === 'riverton:tavern', JSON.stringify(lm));
+
+    // Think tags stripped before matching; a real move still works, and the game messages never reach the model.
+    await queue([{ content: '<think>they want to go outside</think>\nOut' }, { content: 'The square.' }]);
+    await send('step outside', 2);
+    check('think-tag answer moves party', (await stored()) === 'riverton:square', String(await stored()));
+    const allReqs = await (await fetch(`${FAKE}/__requests`)).json();
+    check('game messages never sent to model', !allReqs.some(r => JSON.stringify(r.messages).includes("can't get there from here")));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();
