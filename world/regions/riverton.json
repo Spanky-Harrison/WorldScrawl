@@ -1,0 +1,53 @@
+{
+  "id": "riverton",
+  "name": "Riverton",
+  "start": "tavern",
+  "locations": {
+    "tavern": {
+      "name": "The Drowned Rat",
+      "description": "A low-beamed tavern smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.",
+      "exits": [
+        { "direction": "out", "to": "square", "description": "The front door opens onto the village square." },
+        { "direction": "up", "to": "tavern_rooms", "description": "A creaking staircase." }
+      ]
+    },
+    "tavern_rooms": {
+      "name": "Upstairs Rooms",
+      "description": "A narrow hallway with four plain guest rooms. The floorboards groan underfoot and the window at the end looks out over the river.",
+      "exits": [
+        { "direction": "down", "to": "tavern", "description": "The staircase back down to the common room." }
+      ]
+    },
+    "square": {
+      "name": "Village Square",
+      "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river and the temple hill.",
+      "exits": [
+        { "direction": "in", "to": "tavern", "description": "The Drowned Rat's swinging sign hangs over the door." },
+        { "direction": "south", "to": "docks", "description": "A muddy lane slopes down to the river." },
+        { "direction": "north", "to": "temple", "description": "Steps climb the hill to the temple." },
+        { "direction": "east", "to": "east_road" }
+      ]
+    },
+    "docks": {
+      "name": "River Docks",
+      "description": "Weathered wooden piers jut into the slow brown river. Fishing boats bob at their moorings and gulls squabble over scraps.",
+      "exits": [
+        { "direction": "north", "to": "square", "description": "Back up the lane to the square." }
+      ]
+    },
+    "temple": {
+      "name": "Temple of the Tides",
+      "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
+      "exits": [
+        { "direction": "south", "to": "square", "description": "The steps lead back down to the square." }
+      ]
+    },
+    "east_road": {
+      "name": "East Road",
+      "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton.",
+      "exits": [
+        { "direction": "west", "to": "square", "description": "Back into the village square." }
+      ]
+    }
+  }
+}
