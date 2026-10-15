@@ -66,6 +66,15 @@ try {
     check('move out -> square', (await stored()) === 'riverton:square', String(await stored()));
     const reqs = await (await fetch(`${FAKE}/__requests`)).json();
     const last = JSON.stringify(reqs[reqs.length - 1].messages);
+    const footer = () => page.evaluate(() => { const els = [...document.querySelectorAll('#chat .mes')]; return els[els.length - 1]?.querySelector('.worldscrawl_exits')?.textContent ?? null; });
+    const f1 = await footer();
+    check('exits footer shown under reply', /^Exits: .*\(/.test(f1 ?? '') && f1.includes('north'), String(f1));
+    check('footer not in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /Exits:/.test(m.mes ?? ''))));
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_show_exits'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    check('footer toggles off', await page.locator('#chat .worldscrawl_exits').count() === 0);
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_show_exits'); c.checked = true; c.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(1000);
+    check('footer toggles back on', await page.locator('#chat .worldscrawl_exits').count() > 0);
     check('model got the new location in the tool result', last.includes('Village Square'));
     check('tools sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_move'));
 
@@ -89,6 +98,9 @@ try {
     await page.evaluate(async () => { await SillyTavern.getContext().selectCharacterById(0); });
     await page.waitForTimeout(3000);
     check('location persisted with chat', (await stored()) === 'riverton:square', String(await stored()));
+    check('footer re-rendered on chat load', ((await footer()) ?? '').startsWith('Exits:'), String(await footer()));
+    const reqs3 = await (await fetch(`${FAKE}/__requests`)).json();
+    check('footer never sent to model', !reqs3.some(r => JSON.stringify(r.messages).includes('Exits: ')));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();
