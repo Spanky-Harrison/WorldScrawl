@@ -143,3 +143,12 @@ def test_temple_not_reachable_from_tavern():
     assert "riverton:temple" not in [e["to"] for e in tavern["exits"]]
     r = client.post("/move", json={"from": "riverton:tavern", "direction": "north"})
     assert r.status_code == 400 and sorted(r.json()["detail"]["valid_directions"]) == ["out", "up"]
+
+
+def test_route_tavern_to_temple_via_square():
+    # The engine walks routes one POST /move at a time: tavern -out-> square -north-> temple.
+    client = TestClient(create_app(ROOT))
+    a = client.post("/move", json={"from": "riverton:tavern", "direction": "out"}).json()
+    assert a["address"] == "riverton:square"
+    b = client.post("/move", json={"from": a["address"], "direction": "north"}).json()
+    assert b["address"] == "riverton:temple"

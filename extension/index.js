@@ -68,7 +68,7 @@ function describe(loc) {
         address: loc.address,
         region: loc.region?.name,
         description: loc.description,
-        exits: loc.exits.map(e => ({ direction: e.direction, leads_to: e.to_name, ...(e.description ? { description: e.description } : {}) })),
+        exits: loc.exits.map(e => ({ direction: e.direction, ...(revealsDestination(e) ? { leads_to: e.to_name } : {}), ...(e.description ? { description: e.description } : {}) })),
     });
 }
 
@@ -166,17 +166,112 @@ export function parseChoice(answer, options) {
     return options.find(o => o.toLowerCase() === a) ?? null;
 }
 
-/** Click / /ws-go: move, add a short user note saying so, then let the model narrate. */
+// ---- Discovered places and route-finding (read-only map; visited set derived from this chat's messages).
+/**
+ * The one place that decides whether an exit reveals where it leads. Later a hidden/obscured exit
+ * (e.g. exit.hidden or exit.obscured in the region file) can return false here.
+ */
+export const revealsDestination = exit => !(exit?.hidden || exit?.obscured);
+/** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
+export const exitLabel = (exit, fmt = n => ` (${n})`) => exit.direction + (revealsDestination(exit) ? fmt(exit.to_name) : '');
+
+/** Places stood in during this chat: the start plus every location (and route step) saved on its messages. */
+async function stoodInAddresses() {
+    const set = new Set();
+    const start = await fetchLocationCached(null);
+    if (start) set.add(start.address);
+    for (const m of ctx().chat ?? []) {
+        const loc = m?.extra?.[LOC_KEY];
+        if (loc) set.add(loc);
+        for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) set.add(a);
+    }
+    return set;
+}
+
+/** Where the party was just before arriving at `current` (from saved message locations), or null. */
+export function previousAddress(current, chat = ctx().chat ?? []) {
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i]?.extra;
+        const mv = m?.[MOVE_KEY];
+        if (mv && mv.to === current) { const via = mv.via ?? []; return via.length > 1 ? via[via.length - 2] : mv.from; }
+        if (m?.[LOC_KEY] && m[LOC_KEY] !== current) return m[LOC_KEY];
+    }
+    return null;
+}
+
+/** Discovered = stood in, plus any destination seen listed (and revealed) as an exit from a place stood in. */
+async function discoveredAddresses() {
+    const stood = await stoodInAddresses();
+    const set = new Set(stood);
+    for (const a of stood) for (const e of (await fetchLocationCached(a))?.exits ?? []) if (revealsDestination(e)) set.add(e.to);
+    return set;
+}
+
+/** Discovered places that are not here and not one exit away: [{address, name}]. */
+async function discoveredTargets(loc) {
+    const adjacent = new Set(loc.exits.map(e => e.to));
+    const out = [];
+    for (const a of await discoveredAddresses()) {
+        if (a === loc.address || adjacent.has(a)) continue;
+        const l = await fetchLocationCached(a);
+        if (l) out.push({ address: a, name: l.name });
+    }
+    return out;
+}
+
+/** Shortest path (BFS over exits, within the current region) from `from` to `target`: [{direction, to}] or null. */
+export async function findPath(from, target, getLoc = fetchLocationCached) {
+    const region = from.split(':')[0];
+    const prev = new Map([[from, null]]);
+    const queue = [from];
+    while (queue.length) {
+        const cur = queue.shift();
+        if (cur === target) break;
+        const loc = await getLoc(cur);
+        for (const e of loc?.exits ?? []) {
+            if (prev.has(e.to) || (e.to.split(':')[0] !== region && e.to !== target)) continue;
+            prev.set(e.to, { from: cur, direction: e.direction });
+            queue.push(e.to);
+        }
+    }
+    if (!prev.has(target)) return null;
+    const steps = [];
+    for (let a = target; prev.get(a); a = prev.get(a).from) steps.unshift({ direction: prev.get(a).direction, to: a });
+    return steps;
+}
+
+/** Walk a route step by step through POST /move. Returns {ok, to, move} like engineMove. */
+async function engineTravel(target) {
+    const from = await currentLocation();
+    const steps = await findPath(from.address, target);
+    if (!steps?.length) return { ok: false, error: 'No known route.', valid: from.exits.map(e => e.direction) };
+    let at = from, names = [from.name], via = [];
+    for (const st of steps) {
+        const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: at.address, direction: st.direction }) });
+        if (!r.ok) return { ok: false, error: 'Route blocked.', valid: from.exits.map(e => e.direction) };
+        at = r.body; names.push(at.name); via.push(at.address);
+    }
+    return { ok: true, to: at, move: { direction: steps.length === 1 ? steps[0].direction : null, from: from.address, from_name: from.name, to: at.address, to_name: at.name, path: names, via } };
+}
+
+/** Click / /ws-go: move (exit direction, or a discovered place by name), add a short user note, then narrate. */
 async function goAction(direction) {
     const c = ctx();
     if (engineBusy) return 'WorldScrawl: already moving.';
-    if (!direction) { toastr.warning('Usage: /ws-go <direction>'); return ''; }
+    if (!direction) { toastr.warning('Usage: /ws-go <direction or known place>'); return ''; }
     if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
     engineBusy = true;
     try {
-        const res = await engineMove(direction);
+        const here = await currentLocation();
+        let res;
+        if (here.exits.some(e => e.direction.toLowerCase() === direction.toLowerCase())) res = await engineMove(direction);
+        else {
+            const t = (await discoveredTargets(here)).find(v => v.name.toLowerCase() === direction.toLowerCase());
+            res = t ? await engineTravel(t.address) : await engineMove(direction);
+        }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
-        await c.executeSlashCommandsWithOptions(`/send *The party goes ${res.move.direction}.*`);
+        const note = res.move.direction ? `*The party goes ${res.move.direction}.*` : `*The party heads to ${res.move.to_name}.*`;
+        await c.executeSlashCommandsWithOptions(`/send ${note}`);
         const msg = c.chat[c.chat.length - 1];
         stamp(msg, res.to, res.move);
         msg.extra.worldscrawl_engine = true; // no intent question for this message
@@ -192,21 +287,22 @@ async function goAction(direction) {
 }
 
 export const STAY = 'stay', ELSEWHERE = 'elsewhere';
-const TRAVEL_RE = /\b(go|goes|going|went|head|heads|heading|walk|walks|run|runs|travel|travels|leave|leaves|exit|enter|enters|return|returns|climb|climbs|move|moves|step|steps|journey|make (?:my|our|their) way|set off|back to|over to|toward|towards|into)\b/i;
-export const looksLikeTravel = text => TRAVEL_RE.test(String(text ?? ''));
 
 /** Strip reasoning blocks, keep the last non-empty line, then exact-match against the options. */
-export function parseIntentAnswer(answer, dirs) {
-    let a = String(answer ?? '').replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').replace(/<\/?(think|thinking|reasoning)>/gi, '');
+export function cleanAnswer(answer) {
+    const a = String(answer ?? '').replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').replace(/<(think|thinking|reasoning)>[\s\S]*$/gi, '').replace(/<\/?(think|thinking|reasoning)>/gi, '');
     const lines = a.split('\n').map(l => l.trim()).filter(Boolean);
-    a = (lines[lines.length - 1] ?? '').replace(/^(answer|option|choice)\s*:\s*/i, '');
-    return parseChoice(a, [...dirs, STAY, ELSEWHERE]);
+    return (lines[lines.length - 1] ?? '').replace(/^(answer|option|choice)\s*:\s*/i, '');
 }
+export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(answer), [...options, STAY, ELSEWHERE]);
+export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
+
+const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
 
 /**
  * Ask the model one multiple-choice question about the player's message.
- * Returns {kind:'move'|'stay'|'elsewhere', loc}. Unparseable answers fail closed:
- * 'elsewhere' when the message looks like travel, else 'stay'.
+ * Returns {kind:'move'|'stay'|'elsewhere', loc}. An unreadable answer gets a yes/no follow-up
+ * ("trying to travel?"): a clear yes is 'elsewhere', anything else is 'stay'.
  */
 async function parseIntent(msg) {
     const c = ctx();
@@ -214,29 +310,39 @@ async function parseIntent(msg) {
     msg.extra.worldscrawl_intent_checked = true;
     const loc = await currentLocation();
     const dirs = loc.exits.map(e => e.direction);
-    const options = [...dirs, STAY, ELSEWHERE];
-    const prompt = `The party is at ${loc.name}. Its exits are:\n${loc.exits.map(e => `- ${e.direction} (to ${e.to_name})`).join('\n') || '- (none)'}\n\n`
-        + `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"\n\n`
-        + `Answer with one option:\n${dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now`).join('\n')}${dirs.length ? '\n' : ''}`
+    const places = await discoveredTargets(loc);
+    const prev = previousAddress(loc.address);
+    const options = [...dirs, ...places.map(p => p.name), STAY, ELSEWHERE];
+    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const prompt = `The party is at ${loc.name}. Its exits are:\n${loc.exits.map(e => `- ${exitLabel(e, n => ` (to ${n}${e.to === prev ? ', where you came from' : ''})`)}`).join('\n') || '- (none)'}\n\n`
+        + `${said}\n\nAnswer with one option:\n`
+        + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
+        + places.map(p => `- ${p.name}: the player travels to ${p.name}, a place they know about\n`).join('')
         + `- ${STAY}: the player is not trying to travel anywhere\n`
-        + `- ${ELSEWHERE}: the player wants to go to a place that is not one of the exits listed above\n\n`
-        + `Which option: ${options.join(', ')}? Reply with exactly one word from that list.`;
-    const answer = await c.generateRaw({ prompt, systemPrompt: 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.', responseLength: 48 });
-    let choice = parseIntentAnswer(answer, dirs);
-    if (!choice) choice = looksLikeTravel(msg.mes) ? ELSEWHERE : STAY;
+        + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n\n`
+        + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
+    const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
+    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.name)]);
+    if (!choice) {
+        const yn = await c.generateRaw({ prompt: `The party is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`, systemPrompt: 'Reply with exactly one word: yes or no.', responseLength: 48 });
+        choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
+        console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
+    }
     console.log(`[WorldScrawl] intent: ${JSON.stringify(String(answer).slice(0, 80))} -> ${choice}`);
     if (choice === STAY) return { kind: STAY, loc };
     if (choice === ELSEWHERE) return { kind: ELSEWHERE, loc };
-    const res = await engineMove(choice);
+    const place = places.find(p => p.name === choice);
+    const res = place ? await engineTravel(place.address) : await engineMove(choice);
     if (!res.ok) return { kind: ELSEWHERE, loc };
     stamp(msg, res.to, res.move);
     return { kind: 'move', loc: res.to };
 }
 
 /** Display-only game message: a system message, which SillyTavern never puts in the prompt. */
-async function addNotice(text) {
+async function addNotice(text, loc) {
     const c = ctx();
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true } };
+    // worldscrawl_notice_loc lets the exit buttons be rebuilt after a reload.
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_loc: loc?.address ?? null } };
     c.chat.push(msg);
     c.addOneMessage(msg);
     await c.saveChat();
@@ -251,7 +357,8 @@ export function factsText(loc, move, toolsOn) {
         loc.description ?? '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
     ];
-    if (move) lines.push(`What just happened: The party moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
+    if (move?.path?.length > 2) lines.push(`What just happened: The party travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}. Describe the journey briefly and arriving at ${move.to_name}.`);
+    else if (move) lines.push(`What just happened: The party moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
     else lines.push(`The party has NOT moved this turn and is still at ${loc.name}. Do not narrate travel to any other place.`);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
@@ -285,7 +392,7 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             await c.saveChat();
             if (r.kind === ELSEWHERE) {
                 abort(true); // no model call: the model would only narrate a trip that didn't happen
-                await addNotice(unreachableText(r.loc));
+                await addNotice(unreachableText(r.loc), r.loc);
                 renderAllExits();
                 return;
             }
@@ -340,7 +447,7 @@ function locationAt(id) {
 
 export function exitsText(loc) {
     const exits = loc?.exits ?? [];
-    return 'Exits: ' + (exits.length ? exits.map(e => `${e.direction} (${e.to_name})`).join(', ') : 'none');
+    return 'Exits: ' + (exits.length ? exits.map(e => exitLabel(e)).join(', ') : 'none');
 }
 
 async function renderExits(id) {
@@ -362,24 +469,50 @@ async function renderExits(id) {
     while (lastReal >= 0 && ch[lastReal]?.extra?.worldscrawl_notice) lastReal--;
     const isLast = id === lastReal;
     if (!isLast || !loc.exits?.length) div.textContent = exitsText(loc);
-    else {
-        div.append('Exits: ');
-        loc.exits.forEach((e, i) => {
-            if (i) div.append(', ');
-            const b = document.createElement('span');
-            b.className = 'worldscrawl_exit';
-            b.dataset.direction = e.direction;
-            b.title = `Go ${e.direction}`;
-            b.style.cssText = 'cursor:pointer;text-decoration:underline;font-style:normal;';
-            b.textContent = `${e.direction} (${e.to_name})`;
-            b.addEventListener('click', () => goAction(e.direction));
-            div.appendChild(b);
-        });
-    }
+    else appendExitButtons(div, loc);
     (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
 }
 
+/** "Exits: " followed by one clickable entry per exit (shared by the footer and the can't-get-there message). */
+function appendExitButtons(el, loc) {
+    el.append('Exits: ');
+    loc.exits.forEach((e, i) => {
+        if (i) el.append(', ');
+        const b = document.createElement('span');
+        b.className = 'worldscrawl_exit';
+        b.dataset.direction = e.direction;
+        b.title = `Go ${e.direction}`;
+        b.style.cssText = 'cursor:pointer;text-decoration:underline;font-style:normal;';
+        b.textContent = exitLabel(e);
+        b.addEventListener('click', () => goAction(e.direction));
+        el.appendChild(b);
+    });
+}
+
+/** The latest can't-get-there message gets clickable exits (rebuilt from stored data, so it survives reloads). */
+async function renderNotices() {
+    const ch = ctx().chat ?? [];
+    const last = ch.length - 1;
+    for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
+        const id = Number(el.getAttribute('mesid'));
+        const msg = ch[id];
+        if (!msg?.extra?.worldscrawl_notice) continue;
+        const text = el.querySelector('.mes_text');
+        if (!text) continue;
+        const addr = msg.extra.worldscrawl_notice_loc;
+        const loc = id === last && addr ? await fetchLocationCached(addr) : null;
+        if (!loc?.exits?.length || id !== (ctx().chat?.length ?? 0) - 1) {
+            if (text.querySelector('.worldscrawl_exit')) text.textContent = msg.mes;
+            continue;
+        }
+        text.textContent = '';
+        text.append("You can't get there from here. ");
+        appendExitButtons(text, loc);
+    }
+}
+
 function renderAllExits() {
+    renderNotices();
     document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
     if (!settings().showExits) return;
     document.querySelectorAll('#chat .mes[mesid]').forEach(el => renderExits(el.getAttribute('mesid')));
