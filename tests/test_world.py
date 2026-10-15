@@ -127,3 +127,10 @@ def test_move(client):
 def test_cors(client):
     r = client.get("/start", headers={"Origin": "http://127.0.0.1:8000"})
     assert r.headers.get("access-control-allow-origin") in ("*", "http://127.0.0.1:8000")
+
+
+def test_move_direction_case_and_whitespace_insensitive():
+    # /ws-go and the intent parser send directions as typed (e.g. " North ").
+    client = TestClient(create_app(ROOT))
+    r = client.post("/move", json={"from": "riverton:square", "direction": " North "})
+    assert r.status_code == 200 and r.json()["address"] == "riverton:temple"
