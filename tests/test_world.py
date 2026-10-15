@@ -134,3 +134,12 @@ def test_move_direction_case_and_whitespace_insensitive():
     client = TestClient(create_app(ROOT))
     r = client.post("/move", json={"from": "riverton:square", "direction": " North "})
     assert r.status_code == 200 and r.json()["address"] == "riverton:temple"
+
+
+def test_temple_not_reachable_from_tavern():
+    # The engine relies on this: the temple is two steps away (tavern -> square -> temple).
+    client = TestClient(create_app(ROOT))
+    tavern = client.get("/location/riverton:tavern").json()
+    assert "riverton:temple" not in [e["to"] for e in tavern["exits"]]
+    r = client.post("/move", json={"from": "riverton:tavern", "direction": "north"})
+    assert r.status_code == 400 and sorted(r.json()["detail"]["valid_directions"]) == ["out", "up"]

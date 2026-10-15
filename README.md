@@ -123,7 +123,7 @@ ST_SRC=/path/to/SillyTavern tests/e2e/run.sh   # headless: real ST 1.19 + fake m
 By default the model never touches the map:
 
 - **Click an exit** in the "Exits:" line under the latest reply, or type `/ws-go north`. The extension moves the party, adds a short note ("*The party goes north.*") and asks the model to narrate the arrival.
-- **Typed movement** ("let's head to the docks"): before each reply the extension asks the model one multiple-choice question, "Which of these exits does the player mean: south, north, none?". Only an exact answer from that list moves the party; anything else means no move. Toggle: "Understand typed movement".
+- **Typed movement** ("let's head to the docks"): before each reply the extension asks the model one multiple-choice question, "Which of these exits does the player mean: south, north, none?". Only an exact answer from that list moves the party; anything else means no move. The answer can also be "stay" (not travelling) or "elsewhere" (wants a place that isn't an exit from here). For "elsewhere", or an unreadable answer to a message that sounds like travel, the model isn't called at all; a game message says "You can't get there from here." with the exits (shown in chat, never sent to the model).
 - Every turn the model gets the current location, its exits and what just happened as authoritative facts, and is told not to move the party or invent exits.
 - `/ws-exits` shows the current exits.
-- The old `ws_look` / `ws_move` tools are an off-by-default setting.
+- Movement setting (radio): "Clicks and commands only", "Clicks, commands and typed moves" (default), "Model moves with map tools (not recommended)" (the old `ws_look` / `ws_move` tools).
