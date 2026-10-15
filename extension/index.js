@@ -4,7 +4,7 @@
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE };
+const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true };
 const NUDGE_KEY = 'worldscrawl_nudge';
 
 const ctx = () => SillyTavern.getContext();
@@ -120,6 +120,63 @@ function applyNudge() {
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
+// ---- Exits footer: display-only (DOM), never written into message.mes, so the model never sees it.
+const exitsCache = new Map(); // address -> Promise<location|null>
+
+function fetchLocationCached(address) {
+    const key = address ?? '(start)';
+    if (!exitsCache.has(key)) {
+        const p = (async () => {
+            try {
+                const r = await api(address ? `/location/${encodeURIComponent(address)}` : '/start');
+                return r.ok ? r.body : null;
+            } catch { return null; }
+        })();
+        p.then(v => { if (!v) exitsCache.delete(key); }); // don't cache failures (server down)
+        exitsCache.set(key, p);
+    }
+    return exitsCache.get(key);
+}
+
+/** Location in effect at message `id`: latest stamped at or before it, else null (= start). */
+function locationAt(id) {
+    const chat = ctx().chat ?? [];
+    for (let i = Math.min(id, chat.length - 1); i >= 0; i--) {
+        const loc = chat[i]?.extra?.[LOC_KEY];
+        if (loc) return loc;
+    }
+    return null;
+}
+
+export function exitsText(loc) {
+    const exits = loc?.exits ?? [];
+    return 'Exits: ' + (exits.length ? exits.map(e => `${e.direction} (${e.to_name})`).join(', ') : 'none');
+}
+
+async function renderExits(id) {
+    id = Number(id);
+    const el = document.querySelector(`#chat .mes[mesid="${id}"]`);
+    if (!el) return;
+    el.querySelector('.worldscrawl_exits')?.remove();
+    const msg = ctx().chat?.[id];
+    if (!settings().showExits || !msg || msg.is_user || msg.is_system) return;
+    const loc = await fetchLocationCached(locationAt(id));
+    const fresh = document.querySelector(`#chat .mes[mesid="${id}"]`);
+    if (!loc || !fresh || !settings().showExits) return;
+    fresh.querySelector('.worldscrawl_exits')?.remove();
+    const div = document.createElement('div');
+    div.className = 'worldscrawl_exits';
+    div.style.cssText = 'opacity:0.75;font-size:0.9em;margin-top:4px;font-style:italic;';
+    div.textContent = exitsText(loc);
+    (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
+}
+
+function renderAllExits() {
+    document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
+    if (!settings().showExits) return;
+    document.querySelectorAll('#chat .mes[mesid]').forEach(el => renderExits(el.getAttribute('mesid')));
+}
+
 async function testConnection() {
     const status = document.getElementById('worldscrawl_status');
     status.textContent = 'Testing...';
@@ -142,6 +199,7 @@ function addSettingsPanel() {
       <input id="worldscrawl_url" class="text_pole" type="text">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
       <small id="worldscrawl_status"></small>
+      <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <label for="worldscrawl_nudge">Tool instructions (sent to the model each turn; leave empty to send nothing)</label>
       <textarea id="worldscrawl_nudge" class="text_pole" rows="4"></textarea>
       <div class="flex-container"><div id="worldscrawl_nudge_reset" class="menu_button">Restore default</div></div>
@@ -151,7 +209,10 @@ function addSettingsPanel() {
     document.getElementById('extensions_settings2')?.insertAdjacentHTML('beforeend', html);
     const input = document.getElementById('worldscrawl_url');
     input.value = settings().serverUrl;
-    input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); ctx().saveSettingsDebounced(); });
+    input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
+    const showExits = document.getElementById('worldscrawl_show_exits');
+    showExits.checked = !!settings().showExits;
+    showExits.addEventListener('change', () => { settings().showExits = showExits.checked; ctx().saveSettingsDebounced(); renderAllExits(); });
     document.getElementById('worldscrawl_test').addEventListener('click', testConnection);
     const nudge = document.getElementById('worldscrawl_nudge');
     nudge.value = settings().nudge;
@@ -165,7 +226,11 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
-    eventSource.on(eventTypes.CHAT_CHANGED, () => { pendingLocation = null; });
+    eventSource.on(eventTypes.CHAT_CHANGED, () => { pendingLocation = null; setTimeout(renderAllExits, 0); });
+    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, id => renderExits(id));
+    for (const ev of ['MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MORE_MESSAGES_LOADED']) {
+        if (eventTypes[ev]) eventSource.on(eventTypes[ev], () => setTimeout(renderAllExits, 0));
+    }
     addSettingsPanel();
     applyNudge();
     console.log('[WorldScrawl] loaded');
