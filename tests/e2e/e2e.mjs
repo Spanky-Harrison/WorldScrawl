@@ -35,12 +35,21 @@ try {
         const g = { a: ['b'], b: ['a', 'c'], c: ['b'] };
         const getLoc = async x => ({ exits: g[x.split(':')[1]].map(t => ({ direction: 'to_' + t, to: 'r:' + t })) });
         out.push(JSON.stringify(await m.findPath('r:a', 'r:c', getLoc)));
+        // Routing limits: intermediates must be stood in; hidden exits never used.
+        const G = { a: [['east', 'b'], ['south', 'd'], ['secret', 'c', true]], b: [['east', 'c']], d: [['east', 'e']], e: [['north', 'c']], c: [] };
+        const gl = async x => ({ exits: G[x.split(':')[1]].map(([direction, t, hidden]) => ({ direction, to: 'r:' + t, hidden: !!hidden })) });
+        const path = async (vis) => JSON.stringify((await m.findPath('r:a', 'r:c', gl, new Set(vis.map(v => 'r:' + v))))?.map(x => x.direction) ?? null);
+        window.__routeTests = [await path(['a']), await path(['a', 'd', 'e']), await path(['a', 'b']), await path(['a', 'b', 'd', 'e'])];
         const hid = { exits: [{ direction: 'north', to_name: 'Secret Vault', hidden: true }, { direction: 'out', to_name: 'Village Square' }] };
         out.push(m.exitsText(hid), m.exitLabel(hid.exits[0]), m.revealsDestination(hid.exits[1]));
         return out;
     });
     check('old checkbox settings migrate to radio', JSON.stringify(mig.slice(0, 4)) === '["commands","tools","typed","typed"]', JSON.stringify(mig));
     check('answer parsing (think tags, prefixes, exact match)', JSON.stringify(mig.slice(4)) === '["out","elsewhere","stay",null,null,"yes",null,"[{\\"direction\\":\\"to_b\\",\\"to\\":\\"r:b\\"},{\\"direction\\":\\"to_c\\",\\"to\\":\\"r:c\\"}]","Exits: north, out (Village Square)","north",true]', JSON.stringify(mig.slice(4)));
+    const rt = await page.evaluate(() => window.__routeTests);
+    check('route refused when shortest path needs an unvisited room', rt[0] === 'null', JSON.stringify(rt));
+    check('route goes the long way via visited rooms only', rt[1] === '["south","east","north"]', JSON.stringify(rt));
+    check('hidden exit never used for routing', rt[2] === '["east","east"]' && rt[3] === '["east","east"]', JSON.stringify(rt));
     check('slash commands registered', await page.evaluate(() => { const p = SillyTavern.getContext().SlashCommandParser.commands; return !!p['ws-go'] && !!p['ws-exits']; }));
     // Part 1: the optional tool mode still works.
     await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="tools"]'); r.checked = true; r.dispatchEvent(new Event('change')); });

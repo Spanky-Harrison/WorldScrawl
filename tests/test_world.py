@@ -152,3 +152,12 @@ def test_route_tavern_to_temple_via_square():
     assert a["address"] == "riverton:square"
     b = client.post("/move", json={"from": a["address"], "direction": "north"}).json()
     assert b["address"] == "riverton:temple"
+
+
+def test_docks_only_reachable_through_square():
+    # Routing from the tavern to the docks must pass through the square, so it needs the square visited.
+    client = TestClient(create_app(ROOT))
+    tavern = client.get("/location/riverton:tavern").json()
+    assert "riverton:docks" not in [e["to"] for e in tavern["exits"]]
+    square = client.get("/location/riverton:square").json()
+    assert "riverton:docks" in [e["to"] for e in square["exits"]]
