@@ -20,6 +20,7 @@ try {
     const tools = await page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
     check('tools registered', tools.includes('ws_look') && tools.includes('ws_move'), JSON.stringify(tools));
     check('settings panel present', await page.locator('#worldscrawl_url').count() === 1);
+    check('tool instructions injected', await page.evaluate(() => /call ws_look/.test(SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value ?? '')));
 
     // Point the extension at the test server and connect ST to the fake model with function calling on.
     await page.evaluate(() => { const c = SillyTavern.getContext(); c.extensionSettings.worldscrawl.serverUrl = 'http://127.0.0.1:5199'; });
