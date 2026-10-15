@@ -3,7 +3,9 @@
 // deleting or swiping messages rolls the location back with them.
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100' };
+const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
+const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE };
+const NUDGE_KEY = 'worldscrawl_nudge';
 
 const ctx = () => SillyTavern.getContext();
 let pendingLocation = null;
@@ -112,6 +114,12 @@ function registerTools() {
     });
 }
 
+/** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
+function applyNudge() {
+    const text = String(settings().nudge ?? '').trim();
+    ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+}
+
 async function testConnection() {
     const status = document.getElementById('worldscrawl_status');
     status.textContent = 'Testing...';
@@ -134,6 +142,9 @@ function addSettingsPanel() {
       <input id="worldscrawl_url" class="text_pole" type="text">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
       <small id="worldscrawl_status"></small>
+      <label for="worldscrawl_nudge">Tool instructions (sent to the model each turn; leave empty to send nothing)</label>
+      <textarea id="worldscrawl_nudge" class="text_pole" rows="4"></textarea>
+      <div class="flex-container"><div id="worldscrawl_nudge_reset" class="menu_button">Restore default</div></div>
     </div>
   </div>
 </div>`;
@@ -142,6 +153,10 @@ function addSettingsPanel() {
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); ctx().saveSettingsDebounced(); });
     document.getElementById('worldscrawl_test').addEventListener('click', testConnection);
+    const nudge = document.getElementById('worldscrawl_nudge');
+    nudge.value = settings().nudge;
+    nudge.addEventListener('input', () => { settings().nudge = nudge.value; applyNudge(); ctx().saveSettingsDebounced(); });
+    document.getElementById('worldscrawl_nudge_reset').addEventListener('click', () => { nudge.value = settings().nudge = DEFAULT_NUDGE; applyNudge(); ctx().saveSettingsDebounced(); });
 }
 
 (function init() {
@@ -152,5 +167,6 @@ function addSettingsPanel() {
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
     eventSource.on(eventTypes.CHAT_CHANGED, () => { pendingLocation = null; });
     addSettingsPanel();
+    applyNudge();
     console.log('[WorldScrawl] loaded');
 })();
