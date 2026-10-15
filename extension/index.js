@@ -1,10 +1,15 @@
-// WorldScrawl: gives the model two tools (ws_look, ws_move) backed by the WorldScrawl map server.
+// WorldScrawl: engine-driven movement on the WorldScrawl map server. The engine (this extension) owns
+// the party's location; the model only interprets what the player meant (one multiple-choice question)
+// and narrates. Optional, off by default: the old ws_look/ws_move tools.
 // The party's location is stored on chat messages (message.extra.worldscrawl_location) so that
 // deleting or swiping messages rolls the location back with them.
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true };
+const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, parseIntent: true, useTools: false };
+const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
+const FACTS_KEY = 'worldscrawl_facts';
+const TOOL_NAMES = ['ws_look', 'ws_move'];
 const NUDGE_KEY = 'worldscrawl_nudge';
 
 const ctx = () => SillyTavern.getContext();
@@ -89,6 +94,12 @@ function stampLocation() {
     pendingLocation = null;
 }
 
+function applyTools() {
+    const c = ctx();
+    if (!settings().useTools) { TOOL_NAMES.forEach(n => { try { c.unregisterFunctionTool(n); } catch {} }); return; }
+    registerTools();
+}
+
 function registerTools() {
     const { registerFunctionTool } = ctx();
     registerFunctionTool({
@@ -116,8 +127,139 @@ function registerTools() {
 
 /** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
 function applyNudge() {
-    const text = String(settings().nudge ?? '').trim();
+    const text = settings().useTools ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+}
+
+// ---- Engine-driven movement. The engine moves the party; the model never touches the map.
+let engineBusy = false;
+const lastUserIndex = chat => { for (let i = chat.length - 1; i >= 0; i--) if (chat[i]?.is_user && !chat[i]?.is_system) return i; return -1; };
+
+function stamp(msg, loc, move) {
+    msg.extra = msg.extra ?? {};
+    msg.extra[LOC_KEY] = loc.address;
+    if (move) msg.extra[MOVE_KEY] = move;
+}
+
+/** Move through an exit of the current location. Returns {ok, to, move} or {ok:false, error, valid}. */
+async function engineMove(direction) {
+    const from = await currentLocation();
+    const exit = from.exits.find(e => e.direction.toLowerCase() === String(direction).trim().toLowerCase());
+    const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: from.address, direction: String(direction).trim() }) });
+    if (!r.ok) {
+        const d = r.body?.detail ?? {};
+        return { ok: false, error: d.error ?? `Move failed (${r.status})`, valid: d.valid_directions ?? from.exits.map(e => e.direction) };
+    }
+    return { ok: true, to: r.body, move: { direction: exit?.direction ?? direction, from: from.address, from_name: from.name, to: r.body.address, to_name: r.body.name } };
+}
+
+/** Normalize the model's answer and accept it only if it is exactly one of the options. */
+export function parseChoice(answer, options) {
+    const a = String(answer ?? '').trim().toLowerCase().replace(/^[\s"'`*_.:\-\[(]+|[\s"'`*_.:!?\])]+$/g, '');
+    return options.find(o => o.toLowerCase() === a) ?? null;
+}
+
+/** Click / /ws-go: move, add a short user note saying so, then let the model narrate. */
+async function goAction(direction) {
+    const c = ctx();
+    if (engineBusy) return 'WorldScrawl: already moving.';
+    if (!direction) { toastr.warning('Usage: /ws-go <direction>'); return ''; }
+    if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
+    engineBusy = true;
+    try {
+        const res = await engineMove(direction);
+        if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
+        await c.executeSlashCommandsWithOptions(`/send *The party goes ${res.move.direction}.*`);
+        const msg = c.chat[c.chat.length - 1];
+        stamp(msg, res.to, res.move);
+        msg.extra.worldscrawl_engine = true; // no intent question for this message
+        await c.saveChat();
+        renderAllExits();
+        await c.executeSlashCommandsWithOptions('/trigger await=true');
+        return '';
+    } catch (e) {
+        toastr.error(e.message); return e.message;
+    } finally {
+        engineBusy = false;
+    }
+}
+
+/** Ask the model one multiple-choice question: which exit (if any) does the player's message mean? */
+async function parseIntent(msg) {
+    const c = ctx();
+    msg.extra = msg.extra ?? {};
+    msg.extra.worldscrawl_intent_checked = true;
+    const loc = await currentLocation();
+    const dirs = loc.exits.map(e => e.direction);
+    if (!dirs.length) return;
+    const prompt = `The party is at ${loc.name}. Its exits are:\n${loc.exits.map(e => `- ${e.direction} (to ${e.to_name})`).join('\n')}\n\n`
+        + `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"\n\n`
+        + `Is the player taking the party through one of these exits right now? Which of these exits does the player mean: ${[...dirs, 'none'].join(', ')}? Answer with exactly one word from that list.`;
+    const answer = await c.generateRaw({ prompt, systemPrompt: 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.', responseLength: 16 });
+    const choice = parseChoice(answer, dirs);
+    console.log(`[WorldScrawl] intent: ${JSON.stringify(String(answer).slice(0, 60))} -> ${choice ?? 'none'}`);
+    if (!choice) return;
+    const res = await engineMove(choice);
+    if (res.ok) stamp(msg, res.to, res.move);
+}
+
+export function factsText(loc, move, toolsOn) {
+    const lines = [
+        '[World state from the game engine. This is authoritative.]',
+        `Current location: ${loc.name}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
+        loc.description ?? '',
+        exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
+    ];
+    if (move) lines.push(`What just happened: The party moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
+    lines.push(toolsOn
+        ? 'Do not invent locations or exits that are not listed.'
+        : 'You only narrate. The game engine controls movement: never move the party to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.');
+    return lines.filter(Boolean).join('\n');
+}
+
+async function applyFacts() {
+    const c = ctx();
+    let text = '';
+    try {
+        const loc = await currentLocation();
+        const ui = lastUserIndex(c.chat ?? []);
+        const move = ui >= 0 ? c.chat[ui].extra?.[MOVE_KEY] : null;
+        text = factsText(loc, move, settings().useTools);
+    } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
+    c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+}
+
+/** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
+globalThis.worldscrawlInterceptor = async function (_chat, _size, _abort, type) {
+    if (type === 'quiet' || type === 'impersonate') return;
+    try {
+        const c = ctx();
+        const chat = c.chat ?? [];
+        const last = chat[chat.length - 1];
+        const s = settings();
+        if ((!type || type === 'normal') && last?.is_user && s.parseIntent && !s.useTools
+            && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked) {
+            await parseIntent(last);
+            await c.saveChat();
+            renderAllExits();
+        }
+        await applyFacts();
+    } catch (e) { console.error('[WorldScrawl] interceptor failed', e); }
+};
+
+function registerSlashCommands() {
+    const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx();
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-go',
+        callback: (_args, dir) => goAction(String(dir ?? '').trim()),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction, e.g. north', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: move the party through an exit, then the model narrates the arrival.',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-exits',
+        callback: async () => { try { const t = exitsText(await currentLocation()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } },
+        helpString: 'WorldScrawl: show the exits from the current location.',
+    }));
 }
 
 // ---- Exits footer: display-only (DOM), never written into message.mes, so the model never sees it.
@@ -167,7 +309,22 @@ async function renderExits(id) {
     const div = document.createElement('div');
     div.className = 'worldscrawl_exits';
     div.style.cssText = 'opacity:0.75;font-size:0.9em;margin-top:4px;font-style:italic;';
-    div.textContent = exitsText(loc);
+    const isLast = id === (ctx().chat?.length ?? 0) - 1;
+    if (!isLast || !loc.exits?.length) div.textContent = exitsText(loc);
+    else {
+        div.append('Exits: ');
+        loc.exits.forEach((e, i) => {
+            if (i) div.append(', ');
+            const b = document.createElement('span');
+            b.className = 'worldscrawl_exit';
+            b.dataset.direction = e.direction;
+            b.title = `Go ${e.direction}`;
+            b.style.cssText = 'cursor:pointer;text-decoration:underline;font-style:normal;';
+            b.textContent = `${e.direction} (${e.to_name})`;
+            b.addEventListener('click', () => goAction(e.direction));
+            div.appendChild(b);
+        });
+    }
     (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
 }
 
@@ -200,6 +357,8 @@ function addSettingsPanel() {
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
       <small id="worldscrawl_status"></small>
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
+      <label class="checkbox_label"><input id="worldscrawl_parse_intent" type="checkbox"> Understand typed movement ("let's head to the docks")</label>
+      <label class="checkbox_label"><input id="worldscrawl_use_tools" type="checkbox"> Let the model use map tools (ws_look / ws_move) instead (not recommended)</label>
       <label for="worldscrawl_nudge">Tool instructions (sent to the model each turn; leave empty to send nothing)</label>
       <textarea id="worldscrawl_nudge" class="text_pole" rows="4"></textarea>
       <div class="flex-container"><div id="worldscrawl_nudge_reset" class="menu_button">Restore default</div></div>
@@ -213,6 +372,11 @@ function addSettingsPanel() {
     const showExits = document.getElementById('worldscrawl_show_exits');
     showExits.checked = !!settings().showExits;
     showExits.addEventListener('change', () => { settings().showExits = showExits.checked; ctx().saveSettingsDebounced(); renderAllExits(); });
+    for (const [elId, key] of [['worldscrawl_parse_intent', 'parseIntent'], ['worldscrawl_use_tools', 'useTools']]) {
+        const cb = document.getElementById(elId);
+        cb.checked = !!settings()[key];
+        cb.addEventListener('change', () => { settings()[key] = cb.checked; applyTools(); applyNudge(); ctx().saveSettingsDebounced(); });
+    }
     document.getElementById('worldscrawl_test').addEventListener('click', testConnection);
     const nudge = document.getElementById('worldscrawl_nudge');
     nudge.value = settings().nudge;
@@ -222,12 +386,14 @@ function addSettingsPanel() {
 
 (function init() {
     settings();
-    registerTools();
+    applyTools();
+    registerSlashCommands();
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
-    eventSource.on(eventTypes.CHAT_CHANGED, () => { pendingLocation = null; setTimeout(renderAllExits, 0); });
-    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, id => renderExits(id));
+    eventSource.on(eventTypes.CHAT_CHANGED, () => { pendingLocation = null; applyFacts(); setTimeout(renderAllExits, 0); });
+    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
+    eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     for (const ev of ['MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MORE_MESSAGES_LOADED']) {
         if (eventTypes[ev]) eventSource.on(eventTypes[ev], () => setTimeout(renderAllExits, 0));
     }

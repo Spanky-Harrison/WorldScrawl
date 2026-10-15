@@ -16,7 +16,13 @@ try {
     try { await ok.waitFor({ timeout: 8000 }); await ok.click(); } catch {}
     await page.waitForTimeout(1500);
 
-    await page.waitForFunction(() => window.SillyTavern?.getContext?.()?.ToolManager?.tools?.some(t => t.toFunctionOpenAI().function.name === 'ws_move'), null, { timeout: 60000 }).catch(() => {});
+    await page.waitForSelector('#worldscrawl_use_tools', { state: 'attached', timeout: 60000 });
+    const toolNames = () => page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
+    check('tools off by default', !(await toolNames()).includes('ws_move'));
+    check('no tool nudge by default', await page.evaluate(() => !SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value));
+    check('slash commands registered', await page.evaluate(() => { const p = SillyTavern.getContext().SlashCommandParser.commands; return !!p['ws-go'] && !!p['ws-exits']; }));
+    // Part 1: the optional tool mode still works.
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_use_tools'); c.checked = true; c.dispatchEvent(new Event('change')); });
     const tools = await page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
     check('tools registered', tools.includes('ws_look') && tools.includes('ws_move'), JSON.stringify(tools));
     check('settings panel present', await page.locator('#worldscrawl_url').count() === 1);
@@ -101,6 +107,75 @@ try {
     check('footer re-rendered on chat load', ((await footer()) ?? '').startsWith('Exits:'), String(await footer()));
     const reqs3 = await (await fetch(`${FAKE}/__requests`)).json();
     check('footer never sent to model', !reqs3.some(r => JSON.stringify(r.messages).includes('Exits: ')));
+    check('facts injected (tool mode)', reqs3.some(r => JSON.stringify(r.messages).includes('World state from the game engine')));
+
+    // Part 2: engine-driven movement (default mode). Location is riverton:square here.
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_use_tools'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(500);
+    check('tools unregistered when off', !(await toolNames()).includes('ws_move'));
+    const lastReq = async () => { const r = await (await fetch(`${FAKE}/__requests`)).json(); return r[r.length - 1]; };
+    const waitReqs = async () => { for (let i = 0; i < 60; i++) { const r = await (await fetch(`${FAKE}/__requests`)).json(); if (r.length >= expected) break; await page.waitForTimeout(500); } await page.waitForFunction(() => !jQuery('#mes_stop').is(':visible'), null, { timeout: 30000 }); await page.waitForTimeout(2000); };
+
+    // The reload above dropped the API connection; reconnect.
+    await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
+    await page.waitForTimeout(3000);
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
+    // Typed movement: intent question answered "south" -> engine moves to the docks.
+    await queue([{ content: ' South.' }, { content: 'You walk down to the docks.' }]);
+    await send('Let us head down to the river.', 2);
+    let all = await (await fetch(`${FAKE}/__requests`)).json();
+    const intentReq = JSON.stringify(all[all.length - 2].messages);
+    check('intent question asked with exit list', intentReq.includes('Which of these exits does the player mean') && intentReq.includes('south') && intentReq.includes('none'), intentReq.slice(0, 200));
+    check('intent request has no tools', !JSON.stringify(all[all.length - 2].tools ?? []).includes('ws_move'));
+    check('typed movement moved party', (await stored()) === 'riverton:docks', String(await stored()));
+    let narr = JSON.stringify((await lastReq()).messages);
+    check('narration got arrival facts', narr.includes('The party moved south from Village Square to River Docks') && narr.includes('never move the party'), '');
+    check('narration request has no tools', !JSON.stringify((await lastReq()).tools ?? []).includes('ws_move'));
+    check('no nudge when tools off', !narr.includes('call ws_look'));
+
+    // Typed non-movement: "none" -> no move, no arrival line.
+    await queue([{ content: 'none' }, { content: 'You look at the boats.' }]);
+    await send('I look at the boats.', 2);
+    check('non-movement keeps location', (await stored()) === 'riverton:docks');
+    narr = JSON.stringify((await lastReq()).messages);
+    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks'));
+
+    // Invalid answer (not on the list) is treated as none.
+    await queue([{ content: 'I think they go to the temple' }, { content: 'Hmm.' }]);
+    await send('Maybe the temple?', 2);
+    check('non-list answer = no move', (await stored()) === 'riverton:docks');
+
+    // Clicking an exit in the footer of the latest reply.
+    check('only latest footer has buttons', await page.evaluate(() => { const f = [...document.querySelectorAll('#chat .worldscrawl_exits')]; return f.length > 1 && f.slice(0, -1).every(x => !x.querySelector('.worldscrawl_exit')) && !!f[f.length - 1].querySelector('.worldscrawl_exit'); }));
+    await queue([{ content: 'Back in the square.' }]);
+    expected += 1;
+    await page.click('#chat .mes:last-child .worldscrawl_exit[data-direction="north"]');
+    await waitReqs();
+    check('click moves party', (await stored()) === 'riverton:square', String(await stored()));
+    check('click adds party note', await page.evaluate(() => SillyTavern.getContext().chat.some(m => m.is_user && m.mes === '*The party goes north.*')));
+    narr = JSON.stringify((await lastReq()).messages);
+    check('click narration has arrival facts', narr.includes('The party moved north from River Docks to Village Square'));
+    check('click did not ask intent', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected);
+
+    // /ws-go and /ws-exits.
+    await queue([{ content: 'The temple.' }]);
+    expected += 1;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go North'));
+    await waitReqs();
+    check('/ws-go moves party', (await stored()) === 'riverton:temple', String(await stored()));
+    const ex = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
+    check('/ws-exits lists exits', ex === 'Exits: south (Village Square)', String(ex));
+    const before = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go sideways'));
+    await page.waitForTimeout(1500);
+    check('/ws-go bad direction: no move, no generation', (await stored()) === 'riverton:temple' && (await (await fetch(`${FAKE}/__requests`)).json()).length === before);
+    check('engine footer never in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /Exits:/.test(m.mes ?? ''))));
+
+    // Intent setting off: no question asked.
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_parse_intent'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    await queue([{ content: 'You stay.' }]);
+    await send('I go south.', 1);
+    check('intent off: no move, single request', (await stored()) === 'riverton:temple' && !JSON.stringify((await lastReq()).messages).includes('Which of these exits'));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();

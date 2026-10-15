@@ -117,3 +117,13 @@ pip install -r requirements-dev.txt
 pytest
 ST_SRC=/path/to/SillyTavern tests/e2e/run.sh   # headless: real ST 1.19 + fake model + Chrome (needs playwright-core)
 ```
+
+## Movement (v0.2): the engine moves, the model narrates
+
+By default the model never touches the map:
+
+- **Click an exit** in the "Exits:" line under the latest reply, or type `/ws-go north`. The extension moves the party, adds a short note ("*The party goes north.*") and asks the model to narrate the arrival.
+- **Typed movement** ("let's head to the docks"): before each reply the extension asks the model one multiple-choice question, "Which of these exits does the player mean: south, north, none?". Only an exact answer from that list moves the party; anything else means no move. Toggle: "Understand typed movement".
+- Every turn the model gets the current location, its exits and what just happened as authoritative facts, and is told not to move the party or invent exits.
+- `/ws-exits` shows the current exits.
+- The old `ws_look` / `ws_move` tools are an off-by-default setting.
