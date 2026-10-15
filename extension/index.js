@@ -219,8 +219,12 @@ async function discoveredTargets(loc) {
     return out;
 }
 
-/** Shortest path (BFS over exits, within the current region) from `from` to `target`: [{direction, to}] or null. */
-export async function findPath(from, target, getLoc = fetchLocationCached) {
+/**
+ * Shortest path (BFS over exits, within the current region) from `from` to `target`: [{direction, to}] or null.
+ * Intermediate steps only pass through `stoodIn` places (when given); the target may be any known place.
+ * Hidden/obscured exits (same revealsDestination check) are never used.
+ */
+export async function findPath(from, target, getLoc = fetchLocationCached, stoodIn = null) {
     const region = from.split(':')[0];
     const prev = new Map([[from, null]]);
     const queue = [from];
@@ -229,7 +233,8 @@ export async function findPath(from, target, getLoc = fetchLocationCached) {
         if (cur === target) break;
         const loc = await getLoc(cur);
         for (const e of loc?.exits ?? []) {
-            if (prev.has(e.to) || (e.to.split(':')[0] !== region && e.to !== target)) continue;
+            if (prev.has(e.to) || !revealsDestination(e)) continue;
+            if (e.to !== target && (e.to.split(':')[0] !== region || (stoodIn && !stoodIn.has(e.to)))) continue;
             prev.set(e.to, { from: cur, direction: e.direction });
             queue.push(e.to);
         }
@@ -243,7 +248,7 @@ export async function findPath(from, target, getLoc = fetchLocationCached) {
 /** Walk a route step by step through POST /move. Returns {ok, to, move} like engineMove. */
 async function engineTravel(target) {
     const from = await currentLocation();
-    const steps = await findPath(from.address, target);
+    const steps = await findPath(from.address, target, fetchLocationCached, await stoodInAddresses());
     if (!steps?.length) return { ok: false, error: 'No known route.', valid: from.exits.map(e => e.direction) };
     let at = from, names = [from.name], via = [];
     for (const st of steps) {
