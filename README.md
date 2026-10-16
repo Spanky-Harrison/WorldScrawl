@@ -33,9 +33,11 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
   "name": "Riverton",
   "notes": "Flavor that applies to the whole region (optional).",
   "start": "drowned_rat/common_room",
+  "entrance": "streets/square",
   "subregions": {
     "drowned_rat": {
       "name": "The Drowned Rat",
+      "entrance": "common_room",
       "notes": "Flavor for this building/area (optional).",
       "inherit_notes": true,
       "locations": {
@@ -55,6 +57,7 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 }
 ```
 
+- `entrance` (optional): the room you arrive in when travelling to a building/area by name (subregion: a room id, default its first room) or to a region by name (region: `sub/loc`, default the region's start). Checked when the server starts.
 - Full address: `region:subregion/location` (`riverton:drowned_rat/common_room`).
 - Exit `to`: `loc` = same subregion, `sub/loc` = same region, `region:sub/loc` = another region. Every target must exist.
 - Optional exit flags `hidden` / `obscured` (true/false): such an exit never shows where it leads and is never used for route-finding.
@@ -136,3 +139,9 @@ By default the model never touches the map:
 - Every turn the model gets the current location, its exits and what just happened as authoritative facts, and is told not to move the party or invent exits.
 - `/ws-exits` shows the current exits.
 - Movement setting (radio): "Clicks and commands only", "Clicks, commands and typed moves" (default), "Model moves with map tools (not recommended)" (the old `ws_look` / `ws_move` tools).
+
+### Place names in typed travel
+
+- Rooms are offered to the model as "Name (Building)", e.g. "Common Room (The Gilded Goose)". Building and region names work too ("go to the Drowned Rat"): you arrive at the building's entrance, or at a room of that building you've already been in if it's nearer (e.g. the Drowned Rat's stable, through the stable gate on Market Lane). The Drowned Rat now has a common room, upstairs rooms, a courtyard, kitchens and a stable.
+- If the model answers "elsewhere" or "unclear", the extension checks your words against known places itself (case-insensitive, word-level: "upstairs" matches "Upstairs Rooms"). One match: you go there. Several: "Which one do you mean?" with buttons. Already inside the named building/region: "You're already in X." None: "You're not aware of such a place."
+- Locations are cached in memory (cleared on page reload or when the server URL changes), so each place is fetched from the server once.

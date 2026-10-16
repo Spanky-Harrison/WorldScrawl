@@ -160,8 +160,8 @@ def client():
 
 def test_start(client):
     r = client.get("/start").json()
-    assert r["address"] == TAVERN and r["name"] == "The Drowned Rat"
-    assert r["subregion"] == {"id": "drowned_rat", "name": "The Drowned Rat", "notes": r["subregion"]["notes"]}
+    assert r["address"] == TAVERN and r["name"] == "Common Room"
+    assert r["subregion"]["id"] == "drowned_rat" and r["subregion"]["name"] == "The Drowned Rat" and r["subregion"]["notes"]
     assert r["region"]["name"] == "Riverton" and r["region"]["notes"]
     out = next(e for e in r["exits"] if e["direction"] == "out")
     assert out["to"] == SQUARE and out["to_name"] == "Village Square" and out["to_subregion"]["name"] == "Riverton Streets"
@@ -196,7 +196,7 @@ def test_move(client):
     r = client.post("/move", json={"from": TAVERN, "direction": " OUT "})
     assert r.status_code == 200 and r.json()["address"] == SQUARE
     bad = client.post("/move", json={"from": TAVERN, "direction": "west"})
-    assert bad.status_code == 400 and set(bad.json()["detail"]["valid_directions"]) == {"out", "up"}
+    assert bad.status_code == 400 and set(bad.json()["detail"]["valid_directions"]) == {"out", "up", "back"}
     assert client.post("/move", json={"from": "x:y/z", "direction": "west"}).status_code == 404
 
 
@@ -216,3 +216,56 @@ def test_route_tavern_to_goose_upstairs(client):
 def test_temple_not_adjacent_to_tavern(client):
     tavern = client.get(f"/location/{TAVERN}").json()
     assert "riverton:temple/nave" not in [e["to"] for e in tavern["exits"]]
+
+
+def test_entrances(tmp_path):
+    w = load(tmp_path, region())
+    assert w.subregions["r:s"].entrance == "r:s/a"  # default: first room
+    assert w.regions["r"].entrance == "r:s/a"  # default: region start
+    r = region()
+    r["entrance"] = "t/x"
+    r["subregions"]["t"]["entrance"] = "y"
+    (tmp_path / "e").mkdir()
+    w = load(tmp_path / "e", r)
+    assert w.regions["r"].entrance == "r:t/x" and w.subregions["r:t"].entrance == "r:t/y"
+
+
+def test_bad_entrances(tmp_path):
+    r = region()
+    r["subregions"]["s"]["entrance"] = "zzz"
+    with pytest.raises(WorldError, match="entrance 'zzz' is not a room in this subregion"):
+        load(tmp_path, r)
+    r = region()
+    r["entrance"] = "s/zzz"
+    (tmp_path / "b").mkdir()
+    with pytest.raises(WorldError, match="entrance 's/zzz' does not exist"):
+        load(tmp_path / "b", r)
+
+
+def test_sample_entrances(client):
+    d = client.get("/location/riverton:drowned_rat/upstairs").json()
+    assert d["subregion"]["entrance"] == TAVERN and d["region"]["entrance"] == SQUARE
+    lane = client.get("/location/riverton:streets/market_lane").json()
+    goose = next(e for e in lane["exits"] if e["direction"] == "inn")
+    assert goose["to_subregion"]["entrance"] == "riverton:gilded_goose/common_room"
+
+
+def test_two_common_rooms(client):
+    a = client.get("/location/riverton:drowned_rat/common_room").json()
+    b = client.get("/location/riverton:gilded_goose/common_room").json()
+    assert a["name"] == b["name"] == "Common Room"
+    assert {a["subregion"]["name"], b["subregion"]["name"]} == {"The Drowned Rat", "The Gilded Goose"}
+
+
+def test_stable_gate_onto_market_lane(client):
+    stable = client.get("/location/riverton:drowned_rat/stable").json()
+    gate = next(e for e in stable["exits"] if e["direction"] == "gate")
+    assert gate["to"] == "riverton:streets/market_lane"  # not the square the front door opens onto
+    lane = client.get("/location/riverton:streets/market_lane").json()
+    assert any(e["to"] == "riverton:drowned_rat/stable" for e in lane["exits"])
+
+
+def test_drowned_rat_back_rooms(client):
+    yard = client.get("/location/riverton:drowned_rat/courtyard").json()
+    assert {e["to"] for e in yard["exits"]} == {TAVERN, "riverton:drowned_rat/kitchens", "riverton:drowned_rat/stable"}
+    assert client.get("/location/riverton:drowned_rat/kitchens").json()["name"] == "Kitchens"

@@ -14,4 +14,4 @@ node "$HERE/fake-openai.mjs" 9098 > /tmp/ws-fake.log 2>&1 & FAKE=$!
 (cd "$ST_SRC" && node server.js --port 8767 --dataRoot /tmp/st-ws --configPath /tmp/st-ws.yaml > /tmp/st-ws.log 2>&1) & ST=$!
 for i in $(seq 1 60); do curl -s -o /dev/null localhost:8767/csrf-token && break; sleep 2; done
 sleep 3
-node "$HERE/e2e.mjs"
+node "$HERE/${E2E_SCRIPT:-e2e.mjs}"
