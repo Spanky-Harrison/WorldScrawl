@@ -439,6 +439,18 @@ try {
     // Stable gate onto Market Lane: building travel uses the nearest room already stood in.
     await go("Marlow's General Store", 'The Drowned Rat');
     check('stable never visited: building -> common room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Leaving words: "I leave the Drowned Rat" takes the only exit out of the building; "we flee Riverton" has none -> not aware.
+    await queue([{ content: 'elsewhere' }, { content: 'You step out.' }]);
+    await send('I leave the Drowned Rat', 2);
+    check('leave the building: takes the one way out', (await stored()) === 'riverton:streets/square', String(await stored()));
+    await go('in');
+    const nF = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('we flee Riverton', 1);
+    const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1]; });
+    check('flee the region with no way out: not aware, no move, no narration', fl.is_system && fl.mes.startsWith("You're not aware of such a place.") && (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nF + 1, fl.mes);
+    const lw = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.LEAVING_RE.test('we get away from here'), m.LEAVING_RE.test('I go to the temple'), m.whichText([{ label: 'out (Village Square)' }, { label: 'gate (Market Lane)' }], m.WAY_OUT_PREFIX)]; });
+    check('leaving words + way-out text', JSON.stringify(lw) === '[true,false,"Which way out? out (Village Square), gate (Market Lane)"]', JSON.stringify(lw));
     await go('out', 'west', 'gate');
     check('stable reached via the gate', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
     await go('gate', 'store', 'The Drowned Rat');
