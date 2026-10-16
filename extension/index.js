@@ -382,6 +382,31 @@ const hereAreas = loc => [loc.subregion, loc.region].filter(a => a?.name).map(a 
 const sameName = (a, b) => keyWords(a).join(' ') === keyWords(b).join(' ');
 export const alreadyText = (loc, name) => `You're already in ${name}. ${exitsText(loc)}`;
 
+/**
+ * Ways out of the current building (or region) when this room has none: rooms of it the party has stood in
+ * that have an exit leaving it; returns the outside rooms reached at the shortest route length (ties = several).
+ */
+async function nearestWaysOut(loc, isRegion) {
+    const regionOf = a => a.split(':')[0];
+    const prefix = isRegion ? `${regionOf(loc.address)}:` : `${regionOf(loc.address)}:${loc.subregion?.id}/`;
+    const stood = await stoodInAddresses();
+    const outside = new Map();
+    for (const a of stood) {
+        if (!a.startsWith(prefix)) continue;
+        for (const e of (await fetchLocationCached(a))?.exits ?? []) {
+            if (revealsDestination(e) && !e.to.startsWith(prefix)) outside.set(e.to, e);
+        }
+    }
+    let best = [], bestLen = Infinity;
+    for (const [to, e] of outside) {
+        const steps = await findPath(loc.address, to, fetchLocationCached, stood);
+        if (!steps?.length) continue;
+        const item = { label: placeLabel(e.to_name, e.to_subregion?.name), name: e.to_name, address: to };
+        if (steps.length < bestLen) { best = [item]; bestLen = steps.length; } else if (steps.length === bestLen) best.push(item);
+    }
+    return best;
+}
+
 /** /ws-go <direction | place name>: an exit direction, else a known place; several matches ask which one. */
 async function goAction(arg) {
     const c = ctx();
@@ -502,7 +527,17 @@ async function parseIntent(msg) {
                 const outs = loc.exits.filter(e => revealsDestination(e) && (isRegion ? regionOf(e.to) !== regionOf(loc.address) : e.to_subregion?.id !== loc.subregion?.id));
                 if (outs.length === 1) choice = outs[0].direction;
                 else if (outs.length > 1) return { kind: 'which', loc, prefix: WAY_OUT_PREFIX, candidates: outs.map(e => ({ label: exitLabel(e), name: e.to_name, direction: e.direction, address: e.to })) };
-                else return { kind: ELSEWHERE, loc };
+                else { // no way out from this room: nearest way out through visited rooms (normal route rules)
+                    const best = await nearestWaysOut(loc, isRegion);
+                    if (best.length === 1) {
+                        const res = await engineTravel(best[0].address);
+                        if (!res.ok) return { kind: ELSEWHERE, loc };
+                        stamp(msg, res.to, res.move);
+                        return { kind: 'move', loc: res.to };
+                    }
+                    if (best.length > 1) return { kind: 'which', loc, prefix: WAY_OUT_PREFIX, candidates: best };
+                    return { kind: ELSEWHERE, loc };
+                }
             } else if (!namedInText(msg.mes, cands).length) return { kind: 'already', loc, name: inside.name };
         }
     }
@@ -529,7 +564,7 @@ async function parseIntent(msg) {
 export const WHICH_PREFIX = 'Which one do you mean?';
 export const WAY_OUT_PREFIX = 'Which way out?';
 /** Words that mean leaving the named place ("I leave the Drowned Rat", "flee out of town"). */
-export const LEAVING_RE = /\b(leave|leaves|leaving|left|out|exit|exits|exiting|flee|flees|fleeing|fled|escape|escapes|escaping|get away)\b/i;
+export const LEAVING_RE = /\b(leave|leaves|leaving|out|exit|exits|exiting|flee|flees|fleeing|fled|escape|escapes|escaping|get away)\b/i;
 /** (a) unknown place: "You're not aware of such a place."  (b) known place, no allowed route: "You don't know a way to X from here." */
 export const noticePrefix = noRoute => noRoute ? `You don't know a way to ${noRoute} from here.` : "You're not aware of such a place.";
 export const unreachableText = (loc, noRoute = null) => `${noticePrefix(noRoute)} ${exitsText(loc)}`;
