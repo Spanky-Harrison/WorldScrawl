@@ -272,7 +272,9 @@ async function goAction(direction) {
         if (here.exits.some(e => e.direction.toLowerCase() === direction.toLowerCase())) res = await engineMove(direction);
         else {
             const t = (await discoveredTargets(here)).find(v => v.name.toLowerCase() === direction.toLowerCase());
-            res = t ? await engineTravel(t.address) : await engineMove(direction);
+            if (!t) { await addNotice(unreachableText(here), here); renderAllExits(); return ''; }
+            res = await engineTravel(t.address);
+            if (!res.ok) { await addNotice(unreachableText(here, t.name), here, t.name); renderAllExits(); return ''; }
         }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
         const note = res.move.direction ? `*The party goes ${res.move.direction}.*` : `*The party heads to ${res.move.to_name}.*`;
@@ -338,22 +340,24 @@ async function parseIntent(msg) {
     if (choice === ELSEWHERE) return { kind: ELSEWHERE, loc };
     const place = places.find(p => p.name === choice);
     const res = place ? await engineTravel(place.address) : await engineMove(choice);
-    if (!res.ok) return { kind: ELSEWHERE, loc };
+    if (!res.ok) return { kind: ELSEWHERE, loc, noRoute: place?.name ?? null };
     stamp(msg, res.to, res.move);
     return { kind: 'move', loc: res.to };
 }
 
 /** Display-only game message: a system message, which SillyTavern never puts in the prompt. */
-async function addNotice(text, loc) {
+async function addNotice(text, loc, noRoute = null) {
     const c = ctx();
     // worldscrawl_notice_loc lets the exit buttons be rebuilt after a reload.
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_loc: loc?.address ?? null } };
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_loc: loc?.address ?? null, worldscrawl_notice_prefix: noticePrefix(noRoute) } };
     c.chat.push(msg);
     c.addOneMessage(msg);
     await c.saveChat();
 }
 
-export const unreachableText = loc => `You can't get there from here. ${exitsText(loc)}`;
+/** (a) unknown place: "You're not aware of such a place."  (b) known place, no allowed route: "You don't know a way to X from here." */
+export const noticePrefix = noRoute => noRoute ? `You don't know a way to ${noRoute} from here.` : "You're not aware of such a place.";
+export const unreachableText = (loc, noRoute = null) => `${noticePrefix(noRoute)} ${exitsText(loc)}`;
 
 export function factsText(loc, move, toolsOn) {
     const lines = [
@@ -397,7 +401,7 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             await c.saveChat();
             if (r.kind === ELSEWHERE) {
                 abort(true); // no model call: the model would only narrate a trip that didn't happen
-                await addNotice(unreachableText(r.loc), r.loc);
+                await addNotice(unreachableText(r.loc, r.noRoute), r.loc, r.noRoute);
                 renderAllExits();
                 return;
             }
@@ -511,7 +515,7 @@ async function renderNotices() {
             continue;
         }
         text.textContent = '';
-        text.append("You can't get there from here. ");
+        text.append((msg.extra.worldscrawl_notice_prefix ?? "You can't get there from here.") + ' ');
         appendExitButtons(text, loc);
     }
 }
