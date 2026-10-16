@@ -493,8 +493,18 @@ async function parseIntent(msg) {
     console.log(`[WorldScrawl] intent: ${JSON.stringify(String(answer).slice(0, 80))} -> ${choice}`);
     if (choice === STAY) return { kind: STAY, loc };
     if (choice === ELSEWHERE || choice === UNCLEAR) {
-        const inside = namedInText(msg.mes, [...cands, ...hereAreas(loc)]).find(x => x.here);
-        if (inside) return { kind: 'already', loc, name: inside.name };
+        const inside = namedInText(msg.mes, hereAreas(loc))[0];
+        if (inside) {
+            if (LEAVING_RE.test(msg.mes ?? '')) {
+                // "I leave the Drowned Rat": the exits from this room that lead out of the named building/region
+                const isRegion = sameName(inside.name, loc.region?.name ?? '') && !sameName(inside.name, loc.subregion?.name ?? '');
+                const regionOf = a => a.split(':')[0];
+                const outs = loc.exits.filter(e => revealsDestination(e) && (isRegion ? regionOf(e.to) !== regionOf(loc.address) : e.to_subregion?.id !== loc.subregion?.id));
+                if (outs.length === 1) choice = outs[0].direction;
+                else if (outs.length > 1) return { kind: 'which', loc, prefix: WAY_OUT_PREFIX, candidates: outs.map(e => ({ label: exitLabel(e), name: e.to_name, direction: e.direction, address: e.to })) };
+                else return { kind: ELSEWHERE, loc };
+            } else if (!namedInText(msg.mes, cands).length) return { kind: 'already', loc, name: inside.name };
+        }
     }
     if (choice === ELSEWHERE) { // safety net: the player named a known place the model didn't pick
         const named = namedInText(msg.mes, cands);
@@ -517,25 +527,28 @@ async function parseIntent(msg) {
 }
 
 export const WHICH_PREFIX = 'Which one do you mean?';
+export const WAY_OUT_PREFIX = 'Which way out?';
+/** Words that mean leaving the named place ("I leave the Drowned Rat", "flee out of town"). */
+export const LEAVING_RE = /\b(leave|leaves|leaving|left|out|exit|exits|exiting|flee|flees|fleeing|fled|escape|escapes|escaping|get away)\b/i;
 /** (a) unknown place: "You're not aware of such a place."  (b) known place, no allowed route: "You don't know a way to X from here." */
 export const noticePrefix = noRoute => noRoute ? `You don't know a way to ${noRoute} from here.` : "You're not aware of such a place.";
 export const unreachableText = (loc, noRoute = null) => `${noticePrefix(noRoute)} ${exitsText(loc)}`;
-export const whichText = cands => `${WHICH_PREFIX} ${cands.map(x => x.label).join(', ')}`;
+export const whichText = (cands, prefix = WHICH_PREFIX) => `${prefix} ${cands.map(x => x.label).join(', ')}`;
 
 /**
  * Display-only game message: a system message, which SillyTavern never puts in the prompt.
  * kind 'which' lists candidate buttons; otherwise the not-aware / no-route text plus exit buttons.
  * Everything needed to rebuild the buttons is stored on the message, so they survive reloads.
  */
-async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '' }) {
+async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '', prefix = WHICH_PREFIX }) {
     const c = ctx();
     const which = kind === 'which';
     const cands = candidates.map(x => ({ label: x.label, name: x.name, ...(x.direction ? { direction: x.direction } : {}), ...(x.prefix ? { prefix: x.prefix } : {}), address: x.address }));
     const msg = {
         name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: which ? whichText(cands) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute),
+        mes: which ? whichText(cands, prefix) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute),
         extra: { worldscrawl_notice: true, worldscrawl_notice_kind: kind, worldscrawl_notice_loc: loc?.address ?? null,
-            worldscrawl_notice_prefix: which ? WHICH_PREFIX : kind === 'already' ? `You're already in ${name}.` : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
+            worldscrawl_notice_prefix: which ? prefix : kind === 'already' ? `You're already in ${name}.` : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
     };
     c.chat.push(msg);
     c.addOneMessage(msg);
@@ -587,7 +600,7 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             await c.saveChat();
             if (r.kind === ELSEWHERE || r.kind === 'which' || r.kind === 'already') {
                 abort(true); // no model call: the model would only narrate a trip that didn't happen
-                await addNotice(r.kind === 'which' ? { loc: r.loc, kind: 'which', candidates: r.candidates }
+                await addNotice(r.kind === 'which' ? { loc: r.loc, kind: 'which', candidates: r.candidates, prefix: r.prefix ?? WHICH_PREFIX }
                     : r.kind === 'already' ? { loc: r.loc, kind: 'already', name: r.name } : { loc: r.loc, noRoute: r.noRoute });
                 renderAllExits();
                 return;
