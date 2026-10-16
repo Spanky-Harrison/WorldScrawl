@@ -9,6 +9,8 @@ const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome'
 try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.on('console', m => { if (m.type() === 'error' || /WorldScrawl/.test(m.text())) console.log('[console]', m.type(), m.text().slice(0, 300)); });
+    const apiCalls = [];
+    page.on('request', r => { const u = r.url(); if (u.includes(':5199/')) apiCalls.push(decodeURIComponent(new URL(u).pathname)); });
     page.on('pageerror', e => console.log('[pageerror]', e.message));
     await page.goto(BASE);
     await page.waitForSelector('#send_textarea', { timeout: 90000 });
@@ -159,10 +161,10 @@ try {
     const intentReq = JSON.stringify(all[all.length - 2].messages);
     check('intent question asked with exit list', /Which option: in, south, north, east, west, [^?]*stay, elsewhere, unclear\?/.test(intentReq), intentReq.slice(0, 200));
     check('intent request has no tools', !JSON.stringify(all[all.length - 2].tools ?? []).includes('ws_move'));
-    check('intent marks where you came from', intentReq.includes('in (to The Drowned Rat, where you came from)'), intentReq.slice(0, 400));
+    check('intent marks where you came from', intentReq.includes('in (to Common Room, The Drowned Rat, where you came from)'), intentReq.slice(0, 400));
     check('typed movement moved party', (await stored()) === 'riverton:docks/piers', String(await stored()));
     let narr = JSON.stringify((await lastReq()).messages);
-    check('narration got arrival facts', narr.includes('The party moved south from Village Square to River Docks') && narr.includes('never move the party'), '');
+    check('narration got arrival facts', narr.includes('The party moved south from Village Square (Riverton Streets) to River Docks') && narr.includes('never move the party'), '');
     check('narration request has no tools', !JSON.stringify((await lastReq()).tools ?? []).includes('ws_move'));
     check('no nudge when tools off', !narr.includes('call ws_look'));
 
@@ -187,7 +189,7 @@ try {
     check('click moves party', (await stored()) === 'riverton:streets/square', String(await stored()));
     check('click adds party note', await page.evaluate(() => SillyTavern.getContext().chat.some(m => m.is_user && m.mes === '*The party goes north.*')));
     narr = JSON.stringify((await lastReq()).messages);
-    check('click narration has arrival facts', narr.includes('The party moved north from River Docks to Village Square'));
+    check('click narration has arrival facts', narr.includes('The party moved north from River Docks to Village Square (Riverton Streets)'));
     check('click did not ask intent', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected);
 
     // /ws-go and /ws-exits.
@@ -221,14 +223,14 @@ try {
     check('back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     const lastMsg = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1], u = ch[ch.length - 2]; return { mes: m.mes, sys: !!m.is_system, prev: u.mes, prevUser: !!u.is_user }; });
     await queue([{ content: 'elsewhere' }]);
-    await send('go to the temple', 1);
+    await send('go to the castle', 1);
     let lm = await lastMsg();
     check('unreachable: location unchanged', (await stored()) === 'riverton:drowned_rat/common_room');
-    check('unreachable: game message shown', lm.sys && lm.mes === "You're not aware of such a place. Exits: out (Village Square), up (Upstairs Rooms)", JSON.stringify(lm));
-    check('unreachable: user message kept', lm.prevUser && lm.prev === 'go to the temple');
+    check('unreachable: game message shown', lm.sys && lm.mes === "You're not aware of such a place. Exits: out (Village Square), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
+    check('unreachable: user message kept', lm.prevUser && lm.prev === 'go to the castle');
     check('unreachable: no narration call', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected && JSON.stringify((await lastReq()).messages).includes('Which option'));
     const noticeBtns = () => page.evaluate(() => { const els = [...document.querySelectorAll('#chat .mes')]; return els.filter(e => /not aware of such a place|know a way to/.test(e.textContent)).map(e => [...e.querySelectorAll('.worldscrawl_exit')].map(b => b.textContent)); });
-    check('game message exits are buttons', JSON.stringify((await noticeBtns()).pop()) === '["out (Village Square)","up (Upstairs Rooms)"]', JSON.stringify(await noticeBtns()));
+    check('game message exits are buttons', JSON.stringify((await noticeBtns()).pop()) === '["out (Village Square)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(await noticeBtns()));
     check('game message visible in chat', await page.evaluate(() => [...document.querySelectorAll('#chat .mes')].some(e => /not aware of such a place|know a way to/.test(e.textContent))));
 
     // Unparseable answer on a travel-looking message fails closed.
@@ -239,13 +241,13 @@ try {
     check('follow-up question asked', JSON.stringify((await lastReq()).messages).includes('Is the player trying to travel to a different place? Answer yes or no.'));
 
     let nb = await noticeBtns();
-    check('only latest game message clickable', nb.length >= 2 && nb.slice(0, -1).every(x => x.length === 0) && nb[nb.length - 1].length === 2, JSON.stringify(nb));
+    check('only latest game message clickable', nb.length >= 2 && nb.slice(0, -1).every(x => x.length === 0) && nb[nb.length - 1].length === 3, JSON.stringify(nb));
     // Survives a reload (rebuilt from stored data).
     await page.reload(); await page.waitForSelector('#send_textarea', { timeout: 60000 }); await page.waitForTimeout(3000);
     await page.evaluate(async () => { await SillyTavern.getContext().selectCharacterById(0); });
     await page.waitForTimeout(3000);
     nb = await noticeBtns();
-    check('game message buttons survive reload', nb.length >= 2 && nb[nb.length - 1].length === 2, JSON.stringify(nb));
+    check('game message buttons survive reload', nb.length >= 2 && nb[nb.length - 1].length === 3, JSON.stringify(nb));
     await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
     await page.waitForTimeout(3000);
     await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
@@ -265,7 +267,7 @@ try {
     lm = await lastMsg();
     narr = JSON.stringify((await lastReq()).messages);
     check('bar: normal reply, no game message', !lm.sys && lm.mes === 'The wood is smooth.' && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
-    check('bar: not-moved injection', narr.includes('The party has NOT moved this turn and is still at The Drowned Rat'));
+    check('bar: not-moved injection', narr.includes('The party has NOT moved this turn and is still at Common Room (The Drowned Rat)'));
 
     // Think tags stripped before matching; a real move still works, and the game messages never reach the model.
     await queue([{ content: '<think>they want to go outside</think>\nOut' }, { content: 'The square.' }]);
@@ -280,9 +282,9 @@ try {
     await queue([{ content: 'Temple of the Tides' }, { content: 'A walk up the hill.' }]);
     await send('go to the temple', 2);
     const routeQ = JSON.stringify(all = (await (await fetch(`${FAKE}/__requests`)).json()), null, 0);
-    check('visited place offered as option', /Which option: out, up, [^?]*Temple of the Tides[^?]*, stay, elsewhere, unclear\?/.test(JSON.stringify(all[all.length - 2].messages)), JSON.stringify(all[all.length - 2].messages).slice(-200));
+    check('visited place offered as option', /Which option: out, up, back, [^?]*Temple of the Tides[^?]*, stay, elsewhere, unclear\?/.test(JSON.stringify(all[all.length - 2].messages)), JSON.stringify(all[all.length - 2].messages).slice(-200));
     check('route: arrived at temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
-    check('route: journey facts', JSON.stringify((await lastReq()).messages).includes('The party travelled from The Drowned Rat through Village Square to Temple of the Tides'));
+    check('route: journey facts', JSON.stringify((await lastReq()).messages).includes('The party travelled from Common Room (The Drowned Rat) through Village Square (Riverton Streets) to Temple of the Tides'));
     check('route: saved the path', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = ch.filter(m => m.is_user).pop(); return JSON.stringify(u.extra.worldscrawl_move.via) === '["riverton:streets/square","riverton:temple/nave"]'; }));
     await queue([{ content: 'Back at the tavern.' }]); expected += 1;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go The Drowned Rat')); await waitReqs();
@@ -296,15 +298,16 @@ try {
     await send('go to the temple', 1);
     lm = await lastMsg();
     const q = JSON.stringify((await lastReq()).messages);
-    check('new chat: temple not offered', q.includes('Which option: out, up, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
-    check('new chat: temple refused', lm.sys && /not aware of such a place/.test(lm.mes) && (await stored()) === null, JSON.stringify(lm));
+    check('new chat: temple not offered', q.includes('Which option: out, up, back, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
+    check('new chat: temple refused', lm.sys && /not aware of such a place/.test(lm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
 
     // Known place but no allowed route: visit the temple, return to the tavern, then hide the square's
     // north exit (stubbed server response; routing never uses hidden exits).
     await queue([{ content: 'a' }, { content: 'b' }, { content: 'c' }, { content: 'd' }]); expected += 4;
     for (const d of ['out', 'north', 'south', 'in']) { await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
     check('new chat: back in tavern after visiting temple', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
-    await page.route(u => u.href.includes('/location/riverton%3Astreets%2Fsquare'), async route => {
+    const squareStub = u => u.href.includes('/location/riverton%3Astreets%2Fsquare');
+    await page.route(squareStub, async route => {
         const r = await route.fetch(); const b = await r.json();
         b.exits = b.exits.map(e => e.direction === 'north' ? { ...e, hidden: true } : e);
         await route.fulfill({ response: r, json: b });
@@ -314,11 +317,12 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Temple of the Tides'));
     await page.waitForTimeout(2000);
     lm = await lastMsg();
-    check('no route: know-a-way message', lm.sys && lm.mes === "You don't know a way to Temple of the Tides from here. Exits: out (Village Square), up (Upstairs Rooms)", JSON.stringify(lm));
+    check('no route: know-a-way message', lm.sys && lm.mes === "You don't know a way to Temple of the Tides from here. Exits: out (Village Square), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
     check('no route: no move, no generation', (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nReq);
     nb = await noticeBtns();
-    check('no route message exits clickable', JSON.stringify(nb[nb.length - 1]) === '["out (Village Square)","up (Upstairs Rooms)"]', JSON.stringify(nb));
-    await page.unroute(u => u.href.includes('/location/riverton%3Astreets%2Fsquare')).catch(() => {});
+    check('no route message exits clickable', JSON.stringify(nb[nb.length - 1]) === '["out (Village Square)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(nb));
+    await page.unroute(squareStub);
+    await page.evaluate(() => { const i = document.getElementById('worldscrawl_url'); i.dispatchEvent(new Event('input')); }); // drop the stubbed location from the cache
     const nr = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.noticePrefix('Temple of the Tides'), m.unreachableText({ exits: [{ direction: 'out', to_name: 'Village Square' }] }, 'Temple of the Tides')]; });
     check('no-route message text', nr[0] === "You don't know a way to Temple of the Tides from here." && nr[1] === "You don't know a way to Temple of the Tides from here. Exits: out (Village Square)", JSON.stringify(nr));
 
@@ -364,7 +368,7 @@ try {
     await waitReqs();
     check('which button routes to the Goose upstairs', (await stored()) === 'riverton:gilded_goose/upstairs', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('route via Market Lane narrated', narr.includes('The party travelled from The Drowned Rat through Village Square, Market Lane, The Gilded Goose to Upstairs Rooms'), narr.slice(0, 400));
+    check('route via Market Lane narrated', narr.includes('The party travelled from Common Room (The Drowned Rat) through Village Square (Riverton Streets), Market Lane (Riverton Streets), Common Room (The Gilded Goose) to Upstairs Rooms (The Gilded Goose)'), narr.slice(0, 400));
 
     // 'unclear' answer -> which one, no generation.
     await queue([{ content: 'unclear' }]);
@@ -377,6 +381,89 @@ try {
         m.exitsText({ exits: [{ direction: 'down', to_name: 'The Gilded Goose', to_subregion: { name: 'The Gilded Goose' } }] }),
         m.exitsText({ exits: [{ direction: 'left', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Drowned Rat' } }, { direction: 'right', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Gilded Goose' } }] })]; });
     check('footer short / subregion only on collision', fx[0] === 'Exits: down (The Gilded Goose)' && fx[1] === 'Exits: left (Upstairs Rooms, The Drowned Rat), right (Upstairs Rooms, The Gilded Goose)', JSON.stringify(fx));
+
+    // ---- Area names and generic room names (Knarfy's reports).
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    const go = async (...dirs) => { await queue(dirs.map(d => ({ content: 'went ' + d }))); expected += dirs.length; for (const d of dirs) { await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); } };
+    await go('out', 'north');
+    check('at the temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
+    // Only one Common Room known -> "flee to the common room" goes there even if the model says elsewhere.
+    await queue([{ content: 'elsewhere' }, { content: 'You flee.' }]);
+    await send('I flee to the common room', 2);
+    check('one known Common Room: goes there', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Walk to Marlow's, then the building name "The Drowned Rat" (typed) resolves to its entrance.
+    await go('out', 'west', 'store');
+    check('at the store', (await stored()) === 'riverton:general_store/shop', String(await stored()));
+    await queue([{ content: 'The Drowned Rat' }, { content: 'Back to the Rat.' }]);
+    await send('go to the drowned rat', 2);
+    check('typed building name -> entrance room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    check('building name narrated as journey', JSON.stringify((await lastReq()).messages).includes("travelled from Marlow's General Store through Market Lane (Riverton Streets), Village Square (Riverton Streets) to Common Room (The Drowned Rat)"));
+    await go("Marlow's General Store");
+    check('/ws-go shop name routes back', (await stored()) === 'riverton:general_store/shop', String(await stored()));
+    await go('The Drowned Rat');
+    check('/ws-go building name -> entrance', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Both Common Rooms known (the Goose was seen from Market Lane) -> which one.
+    await go('Temple of the Tides');
+    const nGen = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('I flee to the common room', 1);
+    const wn = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
+    check('two Common Rooms: which one', wn.sys && wn.mes.startsWith('Which one do you mean?') && JSON.stringify([...wn.btns].sort()) === '["Common Room (The Drowned Rat)","Common Room (The Gilded Goose)"]', JSON.stringify(wn));
+    check('two Common Rooms: no narration, no move', (await (await fetch(`${FAKE}/__requests`)).json()).length === nGen + 1 && (await stored()) === 'riverton:temple/nave');
+    const iq2 = JSON.stringify((await lastReq()).messages);
+    check('intent labels rooms with their building', iq2.includes('Common Room (The Drowned Rat)') && iq2.includes('Common Room (The Gilded Goose)'), iq2.slice(-400));
+    // Both Upstairs Rooms known -> "go upstairs" from the temple asks which one.
+    await go('Common Room (The Gilded Goose)', 'up', 'down', 'Temple of the Tides');
+    check('back at the temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
+    await queue([{ content: 'elsewhere' }]);
+    await send('go upstairs', 1);
+    const wu = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
+    check('"go upstairs" with both known: which one', wu.sys && JSON.stringify([...wu.btns].sort()) === '["Upstairs Rooms (The Drowned Rat)","Upstairs Rooms (The Gilded Goose)"]', JSON.stringify(wu));
+    const pm = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const c = [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms (The Drowned Rat)', address: 'a' }, { name: 'Upstairs', label: 'Upstairs (The Gilded Goose)', address: 'b' }, { name: 'Common Room', label: 'Common Room (The Drowned Rat)', address: 'c' }, { name: 'Common Room', label: 'Common Room (The Gilded Goose)', address: 'd' }];
+        return [m.namedInText('I flee UPSTAIRS!', c).map(x => x.address).join(), m.namedInText('to the common room of the drowned rat', c).map(x => x.address).join(), m.namedInText('I smile', c).length]; });
+    check('name matching: partial words, case, building tiebreak', JSON.stringify(pm) === '["a,b","c",0]', JSON.stringify(pm));
+    // Already inside the named building/region: short notice, no move, no narration.
+    const nA = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('go to the temple', 1);
+    let al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_exit')].length }; });
+    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square)" && al.btns === 1, JSON.stringify(al));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Riverton'));
+    await page.waitForTimeout(1500);
+    al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
+    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square)", al);
+    check('already: no move, no narration', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nA + 1);
+
+    // Stable gate onto Market Lane: building travel uses the nearest room already stood in.
+    await go("Marlow's General Store", 'The Drowned Rat');
+    check('stable never visited: building -> common room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    await go('out', 'west', 'gate');
+    check('stable reached via the gate', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    await go('gate', 'store', 'The Drowned Rat');
+    check('after visiting the stable: building -> stable', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+
+    // ---- Request trimming: cold cache, fresh chat, one typed turn -> /start at most once, each location once.
+    await page.evaluate(() => { const i = document.getElementById('worldscrawl_url'); i.dispatchEvent(new Event('input')); }); // clears the cache
+    apiCalls.length = 0;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    check('greeting stamped with start location', await page.evaluate(() => SillyTavern.getContext().chat[0]?.extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
+    await queue([{ content: 'stay' }, { content: 'You sip your ale.' }]);
+    await send('I sip my ale', 2);
+    const starts = apiCalls.filter(u => u === '/start').length;
+    const locs = apiCalls.filter(u => u.startsWith('/location/'));
+    check('fresh-chat turn: /start at most once', starts <= 1, JSON.stringify(apiCalls));
+    check('fresh-chat turn: each location fetched at most once', new Set(locs).size === locs.length, JSON.stringify(apiCalls));
+    apiCalls.length = 0;
+    await queue([{ content: 'out' }, { content: 'The square.' }]);
+    await send('I head outside', 2);
+    check('move turn: no /start, no refetch of known places', !apiCalls.includes('/start') && new Set(apiCalls.filter(u => u.startsWith('/location/'))).size === apiCalls.filter(u => u.startsWith('/location/')).length, JSON.stringify(apiCalls));
+    // Swiping the greeting keeps/restamps the start location.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
+    await page.waitForTimeout(1000);
+    check('greeting restamped after swipe', await page.evaluate(() => SillyTavern.getContext().chat[0]?.extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();

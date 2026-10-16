@@ -54,6 +54,7 @@ class Region:
     id: str
     name: str
     notes: str | None
+    entrance: str = ""  # full address of the way in (default: the region's start room)
 
 
 @dataclass
@@ -62,6 +63,7 @@ class Subregion:
     name: str
     notes: str | None
     inherit_notes: bool = True
+    entrance: str = ""  # full address of the entrance room (default: first room)
 
 
 @dataclass
@@ -100,8 +102,8 @@ class World:
         region, sub = self.regions[loc.region], self.sub_of(loc)
         return {
             "address": loc.address,
-            "region": {"id": region.id, "name": region.name, "notes": region.notes},
-            "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes},
+            "region": {"id": region.id, "name": region.name, "notes": region.notes, "entrance": region.entrance},
+            "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance},
             "name": loc.name,
             "description": loc.description,
             "effective_notes": self.effective_notes(loc),
@@ -115,7 +117,7 @@ class World:
             "direction": e.direction,
             "to": e.to,
             "to_name": target.name,
-            "to_subregion": {"id": tsub.id, "name": tsub.name},
+            "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance},
             **({"description": e.description} if e.description else {}),
             **e.flags,
         }
@@ -188,6 +190,10 @@ def load_world(root: str | Path) -> World:
         if start.count("/") != 1:
             raise WorldError(f"{fname}: \"start\" must look like \"subregion/location\", got {start!r}")
         region_starts[rid] = start
+        region_entrance = _require_str(data, "entrance", fname, optional=True)
+        if region_entrance is not None and region_entrance.count("/") != 1:
+            raise WorldError(f"{fname}: \"entrance\" must look like \"subregion/location\", got {region_entrance!r}")
+        regions[rid].entrance = f"{rid}:{region_entrance or start}"
         subs = data.get("subregions")
         if not isinstance(subs, dict) or not subs:
             raise WorldError(f"{fname}: \"subregions\" must be a non-empty object keyed by subregion id")
@@ -197,12 +203,15 @@ def load_world(root: str | Path) -> World:
             if not isinstance(sub, dict):
                 raise WorldError(f"{swhere}: must be an object")
             inherit = _optional_bool(sub, "inherit_notes", swhere)
-            subregions[f"{rid}:{sid}"] = Subregion(sid, _require_str(sub, "name", swhere),
-                                                   _require_str(sub, "notes", swhere, optional=True),
-                                                   True if inherit is None else inherit)
             locs = sub.get("locations")
             if not isinstance(locs, dict) or not locs:
                 raise WorldError(f"{swhere}: \"locations\" must be a non-empty object keyed by location id")
+            entrance = _require_str(sub, "entrance", swhere, optional=True) or next(iter(locs))
+            if entrance not in locs:
+                raise WorldError(f"{swhere}: entrance {entrance!r} is not a room in this subregion")
+            subregions[f"{rid}:{sid}"] = Subregion(sid, _require_str(sub, "name", swhere),
+                                                   _require_str(sub, "notes", swhere, optional=True),
+                                                   True if inherit is None else inherit, f"{rid}:{sid}/{entrance}")
             for lid, loc in locs.items():
                 where = f"{fname}: location {sid}/{lid}"
                 _check_slug(lid, f"{fname}: location id")
@@ -243,6 +252,8 @@ def load_world(root: str | Path) -> World:
     for rid, start in region_starts.items():
         if f"{rid}:{start}" not in locations:
             raise WorldError(f"{rid}.json: start location {start!r} does not exist in region {rid!r}")
+        if regions[rid].entrance not in locations:
+            raise WorldError(f"{rid}.json: entrance {regions[rid].entrance.split(':', 1)[1]!r} does not exist in region {rid!r}")
     if start_region not in regions:
         raise WorldError(f"world.json: start_region {start_region!r} has no matching file in regions/")
 
