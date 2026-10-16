@@ -8,6 +8,8 @@ from app.main import create_app
 from app.world import WorldError, load_world
 
 ROOT = Path(__file__).resolve().parent.parent / "world"
+TAVERN = "riverton:drowned_rat/common_room"
+SQUARE = "riverton:streets/square"
 
 
 def make_world(tmp_path, regions, start_region="r", raw=None):
@@ -20,81 +22,135 @@ def make_world(tmp_path, regions, start_region="r", raw=None):
     return tmp_path
 
 
-def region(rid="r", start="a", locations=None):
-    return {"id": rid, "name": rid.title(), "start": start, "locations": locations or {
-        "a": {"name": "A", "description": "da", "exits": [{"direction": "east", "to": "b"}]},
-        "b": {"name": "B", "description": "db", "exits": [{"direction": "west", "to": "a"}]},
+def region(start="s/a", subs=None, notes="region notes"):
+    return {"name": "R", "notes": notes, "start": start, "subregions": subs or {
+        "s": {"name": "S", "notes": "sub notes", "locations": {
+            "a": {"name": "A", "description": "da", "exits": [{"direction": "east", "to": "b"}, {"direction": "out", "to": "t/x"}]},
+            "b": {"name": "B", "description": "db", "exits": [{"direction": "west", "to": "a"}]},
+        }},
+        "t": {"name": "T", "notes": "t notes", "inherit_notes": False, "locations": {
+            "x": {"name": "X", "description": "dx", "exits": [{"direction": "in", "to": "s/a"}]},
+            "y": {"name": "Y", "description": "dy", "inherit_region_notes": True, "inherit_subregion_notes": False, "exits": []},
+        }},
     }}
+
+
+def load(tmp_path, r, **kw):
+    return load_world(make_world(tmp_path, {"r": r}, **kw))
 
 
 def test_sample_world_loads():
     w = load_world(ROOT)
-    assert w.start == "riverton:tavern"
-    assert len(w.locations) >= 5
+    assert w.start == TAVERN
+    assert len(w.locations) >= 10
+    assert all(loc.address.count("/") == 1 for loc in w.locations.values())
 
 
-def test_minimal_ok(tmp_path):
-    w = load_world(make_world(tmp_path, {"r": region()}))
-    assert w.get("r:a").exits[0].to == "r:b"
+def test_minimal_and_exit_resolution(tmp_path):
+    w = load(tmp_path, region())
+    assert w.get("r:s/a").exits[0].to == "r:s/b"  # bare = same subregion
+    assert w.get("r:s/a").exits[1].to == "r:t/x"  # sub/loc = same region
+    assert w.start == "r:s/a"
+
+
+def test_notes_inheritance(tmp_path):
+    w = load(tmp_path, region())
+    assert w.effective_notes(w.get("r:s/a")) == {"region": "region notes", "subregion": "sub notes"}
+    # subregion inherit_notes false drops region notes for its rooms
+    assert w.effective_notes(w.get("r:t/x")) == {"region": None, "subregion": "t notes"}
+    # explicit location flags override the subregion
+    assert w.effective_notes(w.get("r:t/y")) == {"region": "region notes", "subregion": None}
+
+
+def test_location_can_drop_region_notes(tmp_path):
+    r = region()
+    r["subregions"]["s"]["locations"]["b"]["inherit_region_notes"] = False
+    w = load(tmp_path, r)
+    assert w.effective_notes(w.get("r:s/b")) == {"region": None, "subregion": "sub notes"}
+
+
+def test_bad_flag_types(tmp_path):
+    r = region()
+    r["subregions"]["s"]["inherit_notes"] = "no"
+    with pytest.raises(WorldError, match="inherit_notes\" must be true or false"):
+        load(tmp_path, r)
+    r = region()
+    r["subregions"]["s"]["locations"]["a"]["exits"][0]["hidden"] = 1
+    with pytest.raises(WorldError, match="hidden\" must be true or false"):
+        (tmp_path / "x").mkdir()
+        load(tmp_path / "x", r)
+
+
+def test_exit_flags_exposed(tmp_path):
+    r = region()
+    r["subregions"]["s"]["locations"]["a"]["exits"][0]["hidden"] = True
+    c = TestClient(create_app(make_world(tmp_path, {"r": r})))
+    ex = c.get("/location/r:s/a").json()["exits"]
+    assert ex[0]["hidden"] is True and "hidden" not in ex[1]
 
 
 def test_duplicate_keys_rejected(tmp_path):
-    text = '{"id":"r","name":"R","start":"a","locations":{"a":{"name":"A","description":"x","exits":[]},"a":{"name":"A2","description":"y","exits":[]}}}'
+    text = '{"name":"R","start":"s/a","subregions":{"s":{"name":"S","locations":{"a":{"name":"A","description":"x"},"a":{"name":"A2","description":"y"}}}}}'
     with pytest.raises(WorldError, match="r.json: duplicate key 'a'"):
         load_world(make_world(tmp_path, {}, raw={"r.json": text}))
 
 
 def test_missing_exit_target(tmp_path):
     r = region()
-    r["locations"]["a"]["exits"].append({"direction": "north", "to": "nowhere"})
-    with pytest.raises(WorldError, match="exit target 'nowhere' does not exist"):
-        load_world(make_world(tmp_path, {"r": r}))
+    r["subregions"]["s"]["locations"]["a"]["exits"].append({"direction": "north", "to": "nowhere"})
+    with pytest.raises(WorldError, match="exit target 'nowhere' does not exist \\(looked for 'r:s/nowhere'\\)"):
+        load(tmp_path, r)
 
 
 def test_cross_region_exit(tmp_path):
     r = region()
-    r["locations"]["a"]["exits"].append({"direction": "north", "to": "s:x"})
-    s = region("s", "x", {"x": {"name": "X", "description": "dx", "exits": [{"direction": "south", "to": "r:a"}]}})
-    w = load_world(make_world(tmp_path, {"r": r, "s": s}))
-    assert w.get("r:a").exits[1].to == "s:x"
-    r["locations"]["a"]["exits"][1]["to"] = "q:x"
-    with pytest.raises(WorldError, match="'q:x'"):
-        (tmp_path / "2").mkdir()
-        load_world(make_world(tmp_path / "2", {"r": r, "s": s}))
+    r["subregions"]["s"]["locations"]["a"]["exits"].append({"direction": "north", "to": "q:z/x"})
+    q = {"name": "Q", "start": "z/x", "subregions": {"z": {"name": "Z", "locations": {"x": {"name": "X", "description": "dx", "exits": [{"direction": "south", "to": "r:s/a"}]}}}}}
+    w = load_world(make_world(tmp_path, {"r": r, "q": q}))
+    assert w.get("r:s/a").exits[2].to == "q:z/x"
+    r["subregions"]["s"]["locations"]["a"]["exits"][2]["to"] = "nope:z/x"
+    (tmp_path / "2").mkdir()
+    with pytest.raises(WorldError, match="'nope:z/x'"):
+        load_world(make_world(tmp_path / "2", {"r": r, "q": q}))
 
 
 def test_bad_slug(tmp_path):
     r = region()
-    r["locations"]["Bad Name"] = {"name": "x", "description": "x", "exits": []}
+    r["subregions"]["s"]["locations"]["Bad Name"] = {"name": "x", "description": "x", "exits": []}
     with pytest.raises(WorldError, match="not a valid id"):
-        load_world(make_world(tmp_path, {"r": r}))
+        load(tmp_path, r)
 
 
 def test_region_id_must_match_file(tmp_path):
+    r = region()
+    r["id"] = "other"
     with pytest.raises(WorldError, match="must match the file name"):
-        load_world(make_world(tmp_path, {"r": region(rid="other")}))
+        load(tmp_path, r)
 
 
 def test_bad_start(tmp_path):
-    with pytest.raises(WorldError, match="start location 'zzz'"):
-        load_world(make_world(tmp_path, {"r": region(start="zzz")}))
+    with pytest.raises(WorldError, match="start location 's/zzz'"):
+        load(tmp_path, region(start="s/zzz"))
+    (tmp_path / "x").mkdir()
+    with pytest.raises(WorldError, match="must look like"):
+        load(tmp_path / "x", region(start="a"))
+    (tmp_path / "y").mkdir()
     with pytest.raises(WorldError, match="start_region 'nope'"):
-        (tmp_path / "x").mkdir()
-        load_world(make_world(tmp_path / "x", {"r": region()}, start_region="nope"))
+        load(tmp_path / "y", region(), start_region="nope")
 
 
 def test_missing_field(tmp_path):
     r = region()
-    del r["locations"]["a"]["description"]
-    with pytest.raises(WorldError, match="location 'a': missing \"description\""):
-        load_world(make_world(tmp_path, {"r": r}))
+    del r["subregions"]["s"]["locations"]["a"]["description"]
+    with pytest.raises(WorldError, match="location s/a: missing \"description\""):
+        load(tmp_path, r)
 
 
 def test_duplicate_direction(tmp_path):
     r = region()
-    r["locations"]["a"]["exits"].append({"direction": "East", "to": "a"})
+    r["subregions"]["s"]["locations"]["a"]["exits"].append({"direction": "East", "to": "a"})
     with pytest.raises(WorldError, match="used twice"):
-        load_world(make_world(tmp_path, {"r": r}))
+        load(tmp_path, r)
 
 
 @pytest.fixture
@@ -104,24 +160,44 @@ def client():
 
 def test_start(client):
     r = client.get("/start").json()
-    assert r["address"] == "riverton:tavern"
-    assert r["name"] == "The Drowned Rat"
+    assert r["address"] == TAVERN and r["name"] == "The Drowned Rat"
+    assert r["subregion"] == {"id": "drowned_rat", "name": "The Drowned Rat", "notes": r["subregion"]["notes"]}
+    assert r["region"]["name"] == "Riverton" and r["region"]["notes"]
     out = next(e for e in r["exits"] if e["direction"] == "out")
-    assert out["to"] == "riverton:square" and out["to_name"] == "Village Square"
+    assert out["to"] == SQUARE and out["to_name"] == "Village Square" and out["to_subregion"]["name"] == "Riverton Streets"
 
 
-def test_location(client):
-    assert client.get("/location/riverton:docks").json()["name"] == "River Docks"
-    assert client.get("/location/riverton:nope").status_code == 404
+def test_sample_notes(client):
+    up = client.get("/location/riverton:drowned_rat/upstairs").json()["effective_notes"]
+    assert up["region"] and up["subregion"] is None  # quiet room drops the tavern's noise
+    nave = client.get("/location/riverton:temple/nave").json()["effective_notes"]
+    assert nave["region"] is None and nave["subregion"]  # temple drops village notes
+
+
+def test_two_upstairs_rooms(client):
+    a = client.get("/location/riverton:drowned_rat/upstairs").json()
+    b = client.get("/location/riverton:gilded_goose/upstairs").json()
+    assert a["name"] == b["name"] == "Upstairs Rooms"
+    assert a["subregion"]["name"] != b["subregion"]["name"]
+
+
+def test_shops_are_separate_subregions(client):
+    lane = client.get("/location/riverton:streets/market_lane").json()
+    subs = {e["to_subregion"]["id"] for e in lane["exits"]}
+    assert {"gilded_goose", "general_store", "smithy", "streets"} <= subs
+
+
+def test_location_404(client):
+    assert client.get("/location/riverton:docks/piers").json()["name"] == "River Docks"
+    assert client.get("/location/riverton:nope/x").status_code == 404
 
 
 def test_move(client):
-    r = client.post("/move", json={"from": "riverton:tavern", "direction": "OUT"})
-    assert r.status_code == 200 and r.json()["address"] == "riverton:square"
-    bad = client.post("/move", json={"from": "riverton:tavern", "direction": "west"})
-    assert bad.status_code == 400
-    assert set(bad.json()["detail"]["valid_directions"]) == {"out", "up"}
-    assert client.post("/move", json={"from": "x:y", "direction": "west"}).status_code == 404
+    r = client.post("/move", json={"from": TAVERN, "direction": " OUT "})
+    assert r.status_code == 200 and r.json()["address"] == SQUARE
+    bad = client.post("/move", json={"from": TAVERN, "direction": "west"})
+    assert bad.status_code == 400 and set(bad.json()["detail"]["valid_directions"]) == {"out", "up"}
+    assert client.post("/move", json={"from": "x:y/z", "direction": "west"}).status_code == 404
 
 
 def test_cors(client):
@@ -129,35 +205,14 @@ def test_cors(client):
     assert r.headers.get("access-control-allow-origin") in ("*", "http://127.0.0.1:8000")
 
 
-def test_move_direction_case_and_whitespace_insensitive():
-    # /ws-go and the intent parser send directions as typed (e.g. " North ").
-    client = TestClient(create_app(ROOT))
-    r = client.post("/move", json={"from": "riverton:square", "direction": " North "})
-    assert r.status_code == 200 and r.json()["address"] == "riverton:temple"
+def test_route_tavern_to_goose_upstairs(client):
+    # tavern -out-> square -west-> market lane -inn-> goose common room -up-> goose upstairs
+    at = TAVERN
+    for d in ["out", "west", "inn", "up"]:
+        at = client.post("/move", json={"from": at, "direction": d}).json()["address"]
+    assert at == "riverton:gilded_goose/upstairs"
 
 
-def test_temple_not_reachable_from_tavern():
-    # The engine relies on this: the temple is two steps away (tavern -> square -> temple).
-    client = TestClient(create_app(ROOT))
-    tavern = client.get("/location/riverton:tavern").json()
-    assert "riverton:temple" not in [e["to"] for e in tavern["exits"]]
-    r = client.post("/move", json={"from": "riverton:tavern", "direction": "north"})
-    assert r.status_code == 400 and sorted(r.json()["detail"]["valid_directions"]) == ["out", "up"]
-
-
-def test_route_tavern_to_temple_via_square():
-    # The engine walks routes one POST /move at a time: tavern -out-> square -north-> temple.
-    client = TestClient(create_app(ROOT))
-    a = client.post("/move", json={"from": "riverton:tavern", "direction": "out"}).json()
-    assert a["address"] == "riverton:square"
-    b = client.post("/move", json={"from": a["address"], "direction": "north"}).json()
-    assert b["address"] == "riverton:temple"
-
-
-def test_docks_only_reachable_through_square():
-    # Routing from the tavern to the docks must pass through the square, so it needs the square visited.
-    client = TestClient(create_app(ROOT))
-    tavern = client.get("/location/riverton:tavern").json()
-    assert "riverton:docks" not in [e["to"] for e in tavern["exits"]]
-    square = client.get("/location/riverton:square").json()
-    assert "riverton:docks" in [e["to"] for e in square["exits"]]
+def test_temple_not_adjacent_to_tavern(client):
+    tavern = client.get(f"/location/{TAVERN}").json()
+    assert "riverton:temple/nave" not in [e["to"] for e in tavern["exits"]]

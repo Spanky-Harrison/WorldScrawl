@@ -173,7 +173,17 @@ export function parseChoice(answer, options) {
  */
 export const revealsDestination = exit => !(exit?.hidden || exit?.obscured);
 /** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
-export const exitLabel = (exit, fmt = n => ` (${n})`) => exit.direction + (revealsDestination(exit) ? fmt(exit.to_name) : '');
+export const exitLabel = (exit, fmt = n => ` (${n})`, withSub = false) =>
+    exit.direction + (revealsDestination(exit) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : exit.to_name) : '');
+/** Destination names shown more than once among these exits (those get their subregion added). */
+export function collidingNames(exits) {
+    const seen = new Map();
+    for (const e of exits ?? []) if (revealsDestination(e)) seen.set(e.to_name, (seen.get(e.to_name) ?? 0) + 1);
+    return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+}
+export const exitLabels = (exits, fmt) => { const c = collidingNames(exits); return (exits ?? []).map(e => exitLabel(e, fmt, c.has(e.to_name))); };
+/** "Name (Subregion)", or just the name when the subregion has the same name. */
+export const placeLabel = (name, sub) => (sub && sub !== name ? `${name} (${sub})` : name);
 
 /** Places stood in during this chat: the start plus every location (and route step) saved on its messages. */
 async function stoodInAddresses() {
@@ -214,8 +224,10 @@ async function discoveredTargets(loc) {
     for (const a of await discoveredAddresses()) {
         if (a === loc.address || adjacent.has(a)) continue;
         const l = await fetchLocationCached(a);
-        if (l) out.push({ address: a, name: l.name });
+        if (l) out.push({ address: a, name: l.name, label: placeLabel(l.name, l.subregion?.name) });
     }
+    const used = new Map(); // keep labels unique
+    for (const p of out) { const n = (used.get(p.label) ?? 0) + 1; used.set(p.label, n); if (n > 1) p.label = `${p.label} #${n}`; }
     return out;
 }
 
@@ -259,22 +271,54 @@ async function engineTravel(target) {
     return { ok: true, to: at, move: { direction: steps.length === 1 ? steps[0].direction : null, from: from.address, from_name: from.name, to: at.address, to_name: at.name, path: names, via } };
 }
 
-/** Click / /ws-go: move (exit direction, or a discovered place by name), add a short user note, then narrate. */
-async function goAction(direction) {
+/**
+ * Everything the party could head for from here: exits (by direction, label = destination) and known
+ * non-adjacent places. [{label, name, direction?, address}]
+ */
+async function travelCandidates(here) {
+    const coll = collidingNames(here.exits);
+    const exits = here.exits.filter(revealsDestination).map(e => ({ label: placeLabel(e.to_name, e.to_subregion?.name), name: e.to_name, direction: e.direction, address: e.to }));
+    return [...exits, ...(await discoveredTargets(here)).map(p => ({ label: p.label, name: p.name, address: p.address }))];
+}
+
+/** Candidates matching a typed name: exact label first, else every candidate with that plain name. */
+export function matchCandidates(text, cands) {
+    const t = String(text ?? '').trim().toLowerCase();
+    const byLabel = cands.filter(c => c.label.toLowerCase() === t);
+    return byLabel.length ? byLabel : cands.filter(c => c.name.toLowerCase() === t);
+}
+
+/** /ws-go <direction | place name>: an exit direction, else a known place; several matches ask which one. */
+async function goAction(arg) {
     const c = ctx();
     if (engineBusy) return 'WorldScrawl: already moving.';
-    if (!direction) { toastr.warning('Usage: /ws-go <direction or known place>'); return ''; }
+    if (!arg) { toastr.warning('Usage: /ws-go <direction or known place>'); return ''; }
+    if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
+    const here = await currentLocation();
+    const exit = here.exits.find(e => e.direction.toLowerCase() === arg.toLowerCase());
+    if (exit) return goTarget({ direction: exit.direction });
+    const found = matchCandidates(arg, await travelCandidates(here));
+    if (found.length === 1) return goTarget(found[0]);
+    if (found.length > 1) { await addNotice({ loc: here, kind: 'which', candidates: found }); renderAllExits(); return ''; }
+    await addNotice({ loc: here }); renderAllExits(); return '';
+}
+
+/** Move to a target ({direction} or {address,label}), add a short user note, then let the model narrate. */
+async function goTarget(t) {
+    const c = ctx();
+    if (engineBusy) return 'WorldScrawl: already moving.';
     if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
     engineBusy = true;
     try {
         const here = await currentLocation();
+        const exit = t.direction ? here.exits.find(e => e.direction.toLowerCase() === t.direction.toLowerCase())
+            : here.exits.find(e => e.to === t.address && revealsDestination(e));
         let res;
-        if (here.exits.some(e => e.direction.toLowerCase() === direction.toLowerCase())) res = await engineMove(direction);
+        if (exit) res = await engineMove(exit.direction);
+        else if (t.direction) res = await engineMove(t.direction);
         else {
-            const t = (await discoveredTargets(here)).find(v => v.name.toLowerCase() === direction.toLowerCase());
-            if (!t) { await addNotice(unreachableText(here), here); renderAllExits(); return ''; }
             res = await engineTravel(t.address);
-            if (!res.ok) { await addNotice(unreachableText(here, t.name), here, t.name); renderAllExits(); return ''; }
+            if (!res.ok) { await addNotice({ loc: here, noRoute: t.label ?? t.name }); renderAllExits(); return ''; }
         }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
         const note = res.move.direction ? `*The party goes ${res.move.direction}.*` : `*The party heads to ${res.move.to_name}.*`;
@@ -293,7 +337,7 @@ async function goAction(direction) {
     }
 }
 
-export const STAY = 'stay', ELSEWHERE = 'elsewhere';
+export const STAY = 'stay', ELSEWHERE = 'elsewhere', UNCLEAR = 'unclear';
 
 /** Strip reasoning blocks, keep the last non-empty line, then exact-match against the options. */
 export function cleanAnswer(answer) {
@@ -301,7 +345,7 @@ export function cleanAnswer(answer) {
     const lines = a.split('\n').map(l => l.trim()).filter(Boolean);
     return (lines[lines.length - 1] ?? '').replace(/^(answer|option|choice)\s*:\s*/i, '');
 }
-export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(answer), [...options, STAY, ELSEWHERE]);
+export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(answer), [...options, STAY, ELSEWHERE, UNCLEAR]);
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
 
 const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
@@ -319,17 +363,28 @@ async function parseIntent(msg) {
     const dirs = loc.exits.map(e => e.direction);
     const places = await discoveredTargets(loc);
     const prev = previousAddress(loc.address);
-    const options = [...dirs, ...places.map(p => p.name), STAY, ELSEWHERE];
+    const options = [...dirs, ...places.map(p => p.label), STAY, ELSEWHERE, UNCLEAR];
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
-    const prompt = `The party is at ${loc.name}. Its exits are:\n${loc.exits.map(e => `- ${exitLabel(e, n => ` (to ${n}${e.to === prev ? ', where you came from' : ''})`)}`).join('\n') || '- (none)'}\n\n`
+    const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
+        const e = loc.exits[i];
+        return `- ${e.direction}${revealsDestination(e) ? ` (to ${lbl.slice(e.direction.length)}${e.to === prev ? ', where you came from' : ''})` : ''}`;
+    });
+    const prompt = `The party is at ${placeLabel(loc.name, loc.subregion?.name)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
         + `${said}\n\nAnswer with one option:\n`
         + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
-        + places.map(p => `- ${p.name}: the player travels to ${p.name}, a place they know about\n`).join('')
+        + places.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
         + `- ${STAY}: the player is not trying to travel anywhere\n`
-        + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n\n`
+        + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
+        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`
         + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
-    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.name)]);
+    const cands = await travelCandidates(loc);
+    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label)]);
+    if (!choice) { // a bare name that matches known places (e.g. "Upstairs Rooms")
+        const m = matchCandidates(cleanAnswer(answer).replace(/^[\s"'`*_.:\-\[(]+|[\s"'`*_.:!?\])]+$/g, ''), cands);
+        if (m.length > 1) return { kind: 'which', loc, candidates: m };
+        if (m.length === 1) choice = m[0].direction ?? m[0].label;
+    }
     if (!choice) {
         const yn = await c.generateRaw({ prompt: `The party is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`, systemPrompt: 'Reply with exactly one word: yes or no.', responseLength: 48 });
         choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
@@ -338,32 +393,53 @@ async function parseIntent(msg) {
     console.log(`[WorldScrawl] intent: ${JSON.stringify(String(answer).slice(0, 80))} -> ${choice}`);
     if (choice === STAY) return { kind: STAY, loc };
     if (choice === ELSEWHERE) return { kind: ELSEWHERE, loc };
-    const place = places.find(p => p.name === choice);
+    if (choice === UNCLEAR) {
+        const text = String(msg.mes ?? '').toLowerCase();
+        let m = cands.filter(x => text.includes(x.name.toLowerCase()));
+        if (m.length < 2) m = cands;
+        return { kind: 'which', loc, candidates: m };
+    }
+    const place = places.find(p => p.label === choice);
     const res = place ? await engineTravel(place.address) : await engineMove(choice);
-    if (!res.ok) return { kind: ELSEWHERE, loc, noRoute: place?.name ?? null };
+    if (!res.ok) return { kind: ELSEWHERE, loc, noRoute: place?.label ?? null };
     stamp(msg, res.to, res.move);
     return { kind: 'move', loc: res.to };
 }
 
-/** Display-only game message: a system message, which SillyTavern never puts in the prompt. */
-async function addNotice(text, loc, noRoute = null) {
+export const WHICH_PREFIX = 'Which one do you mean?';
+/** (a) unknown place: "You're not aware of such a place."  (b) known place, no allowed route: "You don't know a way to X from here." */
+export const noticePrefix = noRoute => noRoute ? `You don't know a way to ${noRoute} from here.` : "You're not aware of such a place.";
+export const unreachableText = (loc, noRoute = null) => `${noticePrefix(noRoute)} ${exitsText(loc)}`;
+export const whichText = cands => `${WHICH_PREFIX} ${cands.map(x => x.label).join(', ')}`;
+
+/**
+ * Display-only game message: a system message, which SillyTavern never puts in the prompt.
+ * kind 'which' lists candidate buttons; otherwise the not-aware / no-route text plus exit buttons.
+ * Everything needed to rebuild the buttons is stored on the message, so they survive reloads.
+ */
+async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [] }) {
     const c = ctx();
-    // worldscrawl_notice_loc lets the exit buttons be rebuilt after a reload.
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_loc: loc?.address ?? null, worldscrawl_notice_prefix: noticePrefix(noRoute) } };
+    const which = kind === 'which';
+    const cands = candidates.map(x => ({ label: x.label, name: x.name, ...(x.direction ? { direction: x.direction } : {}), address: x.address }));
+    const msg = {
+        name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
+        mes: which ? whichText(cands) : unreachableText(loc, noRoute),
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: kind, worldscrawl_notice_loc: loc?.address ?? null,
+            worldscrawl_notice_prefix: which ? WHICH_PREFIX : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
+    };
     c.chat.push(msg);
     c.addOneMessage(msg);
     await c.saveChat();
 }
 
-/** (a) unknown place: "You're not aware of such a place."  (b) known place, no allowed route: "You don't know a way to X from here." */
-export const noticePrefix = noRoute => noRoute ? `You don't know a way to ${noRoute} from here.` : "You're not aware of such a place.";
-export const unreachableText = (loc, noRoute = null) => `${noticePrefix(noRoute)} ${exitsText(loc)}`;
-
 export function factsText(loc, move, toolsOn) {
     const lines = [
         '[World state from the game engine. This is authoritative.]',
-        `Current location: ${loc.name}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
-        loc.description ?? '',
+        `Current location: ${loc.name}${loc.subregion?.name && loc.subregion.name !== loc.name ? `, ${loc.subregion.name}` : ''}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
+        loc.effective_notes?.region ? `About ${loc.region?.name ?? 'the region'}: ${loc.effective_notes.region}` : '',
+        loc.effective_notes?.subregion ? `About ${loc.subregion?.name ?? 'this area'}: ${loc.effective_notes.subregion}` : '',
+        `This location: ${loc.description ?? ''}`,
+        (loc.effective_notes?.region || loc.effective_notes?.subregion) ? 'If this location\'s own description contradicts the broader notes above, the location description wins.' : '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
     ];
     if (move?.path?.length > 2) lines.push(`What just happened: The party travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}. Describe the journey briefly and arriving at ${move.to_name}.`);
@@ -399,9 +475,9 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked) {
             const r = await parseIntent(last);
             await c.saveChat();
-            if (r.kind === ELSEWHERE) {
+            if (r.kind === ELSEWHERE || r.kind === 'which') {
                 abort(true); // no model call: the model would only narrate a trip that didn't happen
-                await addNotice(unreachableText(r.loc, r.noRoute), r.loc, r.noRoute);
+                await addNotice(r.kind === 'which' ? { loc: r.loc, kind: 'which', candidates: r.candidates } : { loc: r.loc, noRoute: r.noRoute });
                 renderAllExits();
                 return;
             }
@@ -456,7 +532,7 @@ function locationAt(id) {
 
 export function exitsText(loc) {
     const exits = loc?.exits ?? [];
-    return 'Exits: ' + (exits.length ? exits.map(e => exitLabel(e)).join(', ') : 'none');
+    return 'Exits: ' + (exits.length ? exitLabels(exits).join(', ') : 'none');
 }
 
 async function renderExits(id) {
@@ -483,17 +559,33 @@ async function renderExits(id) {
 }
 
 /** "Exits: " followed by one clickable entry per exit (shared by the footer and the can't-get-there message). */
+function makeButton(label, title, onClick) {
+    const b = document.createElement('span');
+    b.className = 'worldscrawl_exit';
+    b.title = title;
+    b.style.cssText = 'cursor:pointer;text-decoration:underline;font-style:normal;';
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+}
+
 function appendExitButtons(el, loc) {
     el.append('Exits: ');
+    const labels = exitLabels(loc.exits);
     loc.exits.forEach((e, i) => {
         if (i) el.append(', ');
-        const b = document.createElement('span');
-        b.className = 'worldscrawl_exit';
+        const b = makeButton(labels[i], `Go ${e.direction}`, () => goTarget({ direction: e.direction }));
         b.dataset.direction = e.direction;
-        b.title = `Go ${e.direction}`;
-        b.style.cssText = 'cursor:pointer;text-decoration:underline;font-style:normal;';
-        b.textContent = exitLabel(e);
-        b.addEventListener('click', () => goAction(e.direction));
+        el.appendChild(b);
+    });
+}
+
+function appendCandidateButtons(el, cands) {
+    cands.forEach((x, i) => {
+        if (i) el.append(', ');
+        const b = makeButton(x.label, `Go to ${x.label}`, () => goTarget(x));
+        b.classList.add('worldscrawl_candidate');
+        b.dataset.address = x.address;
         el.appendChild(b);
     });
 }
@@ -508,15 +600,17 @@ async function renderNotices() {
         if (!msg?.extra?.worldscrawl_notice) continue;
         const text = el.querySelector('.mes_text');
         if (!text) continue;
+        const cands = msg.extra.worldscrawl_notice_kind === 'which' ? msg.extra.worldscrawl_notice_candidates ?? [] : null;
         const addr = msg.extra.worldscrawl_notice_loc;
-        const loc = id === last && addr ? await fetchLocationCached(addr) : null;
-        if (!loc?.exits?.length || id !== (ctx().chat?.length ?? 0) - 1) {
+        const loc = id === last && addr && !cands ? await fetchLocationCached(addr) : null;
+        const isLatest = id === (ctx().chat?.length ?? 0) - 1;
+        if (!isLatest || (cands ? !cands.length : !loc?.exits?.length)) {
             if (text.querySelector('.worldscrawl_exit')) text.textContent = msg.mes;
             continue;
         }
         text.textContent = '';
         text.append((msg.extra.worldscrawl_notice_prefix ?? "You can't get there from here.") + ' ');
-        appendExitButtons(text, loc);
+        if (cands) appendCandidateButtons(text, cands); else appendExitButtons(text, loc);
     }
 }
 
