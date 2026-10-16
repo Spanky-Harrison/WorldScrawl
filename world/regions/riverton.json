@@ -1,53 +1,144 @@
 {
-  "id": "riverton",
   "name": "Riverton",
-  "start": "tavern",
-  "locations": {
-    "tavern": {
+  "notes": "Riverton is a small river-trading village on a slow brown river. Folk are plain-spoken and wary of strangers until coin changes hands. Barges and fishing boats bring most of the news, and the smell of river mud is never far away.",
+  "start": "drowned_rat/common_room",
+  "subregions": {
+    "drowned_rat": {
       "name": "The Drowned Rat",
-      "description": "A low-beamed tavern smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.",
-      "exits": [
-        { "direction": "out", "to": "square", "description": "The front door opens onto the village square." },
-        { "direction": "up", "to": "tavern_rooms", "description": "A creaking staircase." }
-      ]
+      "notes": "Riverton's oldest tavern, run by the gruff widow Hesk. Cheap ale, dice games and dockhands; it gets loud after dark.",
+      "locations": {
+        "common_room": {
+          "name": "The Drowned Rat",
+          "description": "A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.",
+          "exits": [
+            { "direction": "out", "to": "streets/square", "description": "The front door opens onto the village square." },
+            { "direction": "up", "to": "upstairs", "description": "A creaking staircase." }
+          ]
+        },
+        "upstairs": {
+          "name": "Upstairs Rooms",
+          "description": "A narrow, quiet hallway with four plain guest rooms. The floorboards groan underfoot, the noise of the bar is only a murmur, and the window at the end looks out over the river.",
+          "inherit_subregion_notes": false,
+          "exits": [
+            { "direction": "down", "to": "common_room", "description": "The staircase back down to the common room." }
+          ]
+        }
+      }
     },
-    "tavern_rooms": {
-      "name": "Upstairs Rooms",
-      "description": "A narrow hallway with four plain guest rooms. The floorboards groan underfoot and the window at the end looks out over the river.",
-      "exits": [
-        { "direction": "down", "to": "tavern", "description": "The staircase back down to the common room." }
-      ]
+    "gilded_goose": {
+      "name": "The Gilded Goose",
+      "notes": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and a host, Perrin Vale, who looks down on the Drowned Rat.",
+      "locations": {
+        "common_room": {
+          "name": "The Gilded Goose",
+          "description": "A bright common room with whitewashed walls, brass lamps and round tables set with linen. A painted goose with a gilt crown hangs over the bar, and a carpeted stair leads up.",
+          "exits": [
+            { "direction": "out", "to": "streets/market_lane", "description": "The door opens onto Market Lane." },
+            { "direction": "up", "to": "upstairs", "description": "A carpeted staircase." }
+          ]
+        },
+        "upstairs": {
+          "name": "Upstairs Rooms",
+          "description": "The Goose's second floor: a carpeted corridor of well-kept rooms with brass numbers on the doors and a vase of river lilies on a side table.",
+          "exits": [
+            { "direction": "down", "to": "common_room", "description": "The carpeted staircase down to the common room." }
+          ]
+        }
+      }
     },
-    "square": {
-      "name": "Village Square",
-      "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river and the temple hill.",
-      "exits": [
-        { "direction": "in", "to": "tavern", "description": "The Drowned Rat's swinging sign hangs over the door." },
-        { "direction": "south", "to": "docks", "description": "A muddy lane slopes down to the river." },
-        { "direction": "north", "to": "temple", "description": "Steps climb the hill to the temple." },
-        { "direction": "east", "to": "east_road" }
-      ]
+    "general_store": {
+      "name": "Marlow's General Store",
+      "notes": "A cluttered shop run by old Marlow, who sells a bit of everything and haggles over every copper.",
+      "locations": {
+        "shop": {
+          "name": "Marlow's General Store",
+          "description": "Shelves crammed with rope, lamp oil, sacks of flour, fishing tackle and dusty oddments. A brass bell hangs over the door and Marlow's counter is buried in ledgers.",
+          "exits": [
+            { "direction": "out", "to": "streets/market_lane" }
+          ]
+        }
+      }
+    },
+    "smithy": {
+      "name": "Brask's Smithy",
+      "notes": "A hot, noisy forge run by the smith Brask and her apprentice. Horseshoes, boat fittings and the occasional blade.",
+      "locations": {
+        "forge": {
+          "name": "Brask's Smithy",
+          "description": "A soot-black workshop around a roaring forge. Hammers ring on the anvil, tools hang from every beam, and a water barrel hisses whenever hot iron is quenched.",
+          "exits": [
+            { "direction": "out", "to": "streets/market_lane" }
+          ]
+        }
+      }
+    },
+    "streets": {
+      "name": "Riverton Streets",
+      "notes": "Cobbled village streets, busy with carts, chickens and gossip by day and nearly empty after dark.",
+      "locations": {
+        "square": {
+          "name": "Village Square",
+          "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river, the temple hill, Market Lane and the open country.",
+          "exits": [
+            { "direction": "in", "to": "drowned_rat/common_room", "description": "The Drowned Rat's swinging sign hangs over the door." },
+            { "direction": "south", "to": "docks/piers", "description": "A muddy lane slopes down to the river." },
+            { "direction": "north", "to": "temple/nave", "description": "Steps climb the hill to the temple." },
+            { "direction": "east", "to": "east_road/road" },
+            { "direction": "west", "to": "market_lane", "description": "A narrow lane of shops." }
+          ]
+        },
+        "market_lane": {
+          "name": "Market Lane",
+          "description": "A narrow lane of timber-framed shops. The Gilded Goose's gilt sign gleams on one side, Marlow's bell jangles on the other, and the clang of Brask's forge echoes from the end.",
+          "exits": [
+            { "direction": "east", "to": "square" },
+            { "direction": "inn", "to": "gilded_goose/common_room", "description": "The Gilded Goose." },
+            { "direction": "store", "to": "general_store/shop", "description": "Marlow's General Store." },
+            { "direction": "smithy", "to": "smithy/forge", "description": "Brask's Smithy." }
+          ]
+        }
+      }
     },
     "docks": {
       "name": "River Docks",
-      "description": "Weathered wooden piers jut into the slow brown river. Fishing boats bob at their moorings and gulls squabble over scraps.",
-      "exits": [
-        { "direction": "north", "to": "square", "description": "Back up the lane to the square." }
-      ]
+      "notes": "Fishermen, bargemen and the occasional smuggler. Everyone here knows the river's moods.",
+      "locations": {
+        "piers": {
+          "name": "River Docks",
+          "description": "Weathered wooden piers jut into the slow brown river. Fishing boats bob at their moorings and gulls squabble over scraps.",
+          "exits": [
+            { "direction": "north", "to": "streets/square", "description": "Back up the lane to the square." }
+          ]
+        }
+      }
     },
     "temple": {
       "name": "Temple of the Tides",
-      "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
-      "exits": [
-        { "direction": "south", "to": "square", "description": "The steps lead back down to the square." }
-      ]
+      "notes": "A hushed, holy place tended by Sister Amara. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
+      "inherit_notes": false,
+      "locations": {
+        "nave": {
+          "name": "Temple of the Tides",
+          "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
+          "exits": [
+            { "direction": "south", "to": "streets/square", "description": "The steps lead back down to the square." }
+          ]
+        }
+      }
     },
     "east_road": {
       "name": "East Road",
-      "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton.",
-      "exits": [
-        { "direction": "west", "to": "square", "description": "Back into the village square." }
-      ]
+      "notes": "Open farmland beyond the village. Travellers, drovers and the odd highwayman use the road.",
+      "locations": {
+        "road": {
+          "name": "East Road",
+          "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton.",
+          "inherit_region_notes": true,
+          "exits": [
+            { "direction": "west", "to": "streets/square", "description": "Back into the village square." }
+          ]
+        }
+      }
     }
   }
 }

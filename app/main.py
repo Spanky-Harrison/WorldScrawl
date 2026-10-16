@@ -27,18 +27,18 @@ def create_app(world_dir: str | Path | None = None) -> FastAPI:
     def find(address: str):
         loc = world.get(address)
         if loc is None:
-            raise HTTPException(404, detail=f"Unknown location {address!r}. Addresses look like 'region:location'.")
+            raise HTTPException(404, detail=f"Unknown location {address!r}. Addresses look like 'region:subregion/location'.")
         return loc
 
     @app.get("/health")
     def health():
-        return {"ok": True, "regions": len(world.regions), "locations": len(world.locations), "start": world.start}
+        return {"ok": True, "regions": len(world.regions), "locations": len(world.locations), "subregions": len(world.subregions), "start": world.start}
 
     @app.get("/start")
     def start():
         return world.to_dict(world.get(world.start))
 
-    @app.get("/location/{address}")
+    @app.get("/location/{address:path}")
     def location(address: str):
         return world.to_dict(find(address))
 

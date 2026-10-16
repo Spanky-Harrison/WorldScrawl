@@ -26,34 +26,42 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 { "start_region": "riverton" }
 ```
 
-`world/regions/<region_id>.json`:
+`world/regions/<region_id>.json` (the region id is the file name). Every location lives in a subregion (a building, a street, a single-room stub...):
 
 ```json
 {
-  "id": "riverton",
   "name": "Riverton",
-  "start": "tavern",
-  "locations": {
-    "tavern": {
+  "notes": "Flavor that applies to the whole region (optional).",
+  "start": "drowned_rat/common_room",
+  "subregions": {
+    "drowned_rat": {
       "name": "The Drowned Rat",
-      "description": "...",
-      "exits": [
-        { "direction": "out", "to": "square", "description": "optional" },
-        { "direction": "east", "to": "hollowmere:gate" }
-      ]
+      "notes": "Flavor for this building/area (optional).",
+      "inherit_notes": true,
+      "locations": {
+        "common_room": {
+          "name": "The Drowned Rat",
+          "description": "...",
+          "exits": [
+            { "direction": "out", "to": "streets/square", "description": "optional" },
+            { "direction": "up", "to": "upstairs" },
+            { "direction": "east", "to": "hollowmere:gate/road", "hidden": false }
+          ]
+        },
+        "upstairs": { "name": "Upstairs Rooms", "description": "...", "inherit_subregion_notes": false, "exits": [] }
+      }
     }
   }
 }
 ```
 
-Rules (checked when the server starts; it refuses to start and says what's wrong otherwise):
-
-- Region and location ids are lowercase slugs: letters, digits and single underscores (`old_mill`).
-- The region `id` must match its file name.
-- Location ids only need to be unique within their region. A full address is `region:location` (`riverton:tavern`).
-- An exit's `to` is a bare id for the same region or a full address for another region. Every target must exist.
-- No duplicate keys anywhere (two `"tavern"` entries is an error, not a silent overwrite), and no duplicate directions in one location.
-- `start_region` and each region's `start` must exist.
+- Full address: `region:subregion/location` (`riverton:drowned_rat/common_room`).
+- Exit `to`: `loc` = same subregion, `sub/loc` = same region, `region:sub/loc` = another region. Every target must exist.
+- Optional exit flags `hidden` / `obscured` (true/false): such an exit never shows where it leads and is never used for route-finding.
+- Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
+  - Subregion `"inherit_notes": false` drops the region notes for all its rooms.
+  - A location's `inherit_region_notes` / `inherit_subregion_notes` override that when present (true/false). Missing = follow the subregion.
+- Ids are lowercase slugs (`old_mill`). No duplicate keys anywhere, no duplicate directions in one location. The server refuses to start and says what's wrong otherwise.
 
 ## Setup on Windows (PowerShell)
 
@@ -105,7 +113,7 @@ The server is stateless. The extension stores the party's location on the chat m
 
 - `GET /start` returns the start location.
 - `GET /location/{address}` returns `{ address, region: {id, name}, name, description, exits: [{ direction, to, to_name, description? }] }`.
-- `POST /move` with `{ "from": "riverton:tavern", "direction": "out" }` returns the new location, or 400 with `{ "detail": { "error", "valid_directions" } }`.
+- `POST /move` with `{ "from": "riverton:drowned_rat/common_room", "direction": "out" }` returns the new location, or 400 with `{ "detail": { "error", "valid_directions" } }`.
 - `GET /health` returns counts and the start address.
 
 Set `WORLDSCRAWL_WORLD_DIR` to use a world folder somewhere else.

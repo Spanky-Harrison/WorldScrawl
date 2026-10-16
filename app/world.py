@@ -1,4 +1,12 @@
-"""Loads and validates the static world map (world/world.json + world/regions/*.json)."""
+"""Loads and validates the static world map (world/world.json + world/regions/*.json).
+
+Region file layout:
+  {name, notes?, start: "sub/loc",
+   subregions: {sub_id: {name, notes?, inherit_notes?: bool (default true),
+                         locations: {loc_id: {name, description, inherit_region_notes?: bool,
+                                              inherit_subregion_notes?: bool, exits: [...]}}}}}
+Full address: "region:sub/loc". Exit "to": "loc" (same subregion), "sub/loc" (same region) or "region:sub/loc".
+"""
 from __future__ import annotations
 
 import json
@@ -7,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SLUG = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
+EXIT_FLAGS = ("hidden", "obscured")  # optional booleans on an exit
 
 
 class WorldError(Exception):
@@ -35,44 +44,80 @@ def _load_json(path: Path):
 @dataclass
 class Exit:
     direction: str
-    to: str  # full address region:location
+    to: str  # full address region:sub/loc after loading
     description: str | None = None
+    flags: dict = field(default_factory=dict)
+
+
+@dataclass
+class Region:
+    id: str
+    name: str
+    notes: str | None
+
+
+@dataclass
+class Subregion:
+    id: str
+    name: str
+    notes: str | None
+    inherit_notes: bool = True
 
 
 @dataclass
 class Location:
     address: str
     region: str
+    subregion: str
     id: str
     name: str
     description: str
     exits: list[Exit] = field(default_factory=list)
+    inherit_region_notes: bool | None = None  # None = follow the subregion
+    inherit_subregion_notes: bool | None = None  # None = included
 
 
 @dataclass
 class World:
     start: str
-    regions: dict[str, str]  # region id -> region name
+    regions: dict[str, Region]
+    subregions: dict[str, Subregion]  # "region:sub" -> Subregion
     locations: dict[str, Location]
 
     def get(self, address: str) -> Location | None:
         return self.locations.get(address)
 
+    def sub_of(self, loc: Location) -> Subregion:
+        return self.subregions[f"{loc.region}:{loc.subregion}"]
+
+    def effective_notes(self, loc: Location) -> dict:
+        region, sub = self.regions[loc.region], self.sub_of(loc)
+        use_region = sub.inherit_notes if loc.inherit_region_notes is None else loc.inherit_region_notes
+        use_sub = True if loc.inherit_subregion_notes is None else loc.inherit_subregion_notes
+        return {"region": region.notes if use_region else None, "subregion": sub.notes if use_sub else None}
+
     def to_dict(self, loc: Location) -> dict:
+        region, sub = self.regions[loc.region], self.sub_of(loc)
         return {
             "address": loc.address,
-            "region": {"id": loc.region, "name": self.regions[loc.region]},
+            "region": {"id": region.id, "name": region.name, "notes": region.notes},
+            "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes},
             "name": loc.name,
             "description": loc.description,
-            "exits": [
-                {
-                    "direction": e.direction,
-                    "to": e.to,
-                    "to_name": self.locations[e.to].name,
-                    **({"description": e.description} if e.description else {}),
-                }
-                for e in loc.exits
-            ],
+            "effective_notes": self.effective_notes(loc),
+            "exits": [self._exit_dict(e) for e in loc.exits],
+        }
+
+    def _exit_dict(self, e: Exit) -> dict:
+        target = self.locations[e.to]
+        tsub = self.sub_of(target)
+        return {
+            "direction": e.direction,
+            "to": e.to,
+            "to_name": target.name,
+            "to_subregion": {"id": tsub.id, "name": tsub.name},
+            **({"description": e.description} if e.description else {}),
+            **e.flags,
         }
 
 
@@ -87,13 +132,25 @@ def _require_str(obj: dict, key: str, where: str, optional: bool = False):
     return value
 
 
+def _optional_bool(obj: dict, key: str, where: str):
+    if key not in obj:
+        return None
+    if not isinstance(obj[key], bool):
+        raise WorldError(f"{where}: \"{key}\" must be true or false")
+    return obj[key]
+
+
 def _check_slug(value: str, where: str):
     if not SLUG.match(value):
         raise WorldError(f"{where}: {value!r} is not a valid id (use lowercase letters, digits and single underscores, e.g. \"old_mill\")")
 
 
-def resolve_address(ref: str, region: str) -> str:
-    return ref if ":" in ref else f"{region}:{ref}"
+def resolve_address(ref: str, region: str, sub: str) -> str:
+    if ":" in ref:
+        return ref
+    if "/" in ref:
+        return f"{region}:{ref}"
+    return f"{region}:{sub}/{ref}"
 
 
 def load_world(root: str | Path) -> World:
@@ -111,52 +168,74 @@ def load_world(root: str | Path) -> World:
     if not files:
         raise WorldError(f"no region files found in {region_dir}")
 
-    regions: dict[str, str] = {}
+    regions: dict[str, Region] = {}
+    subregions: dict[str, Subregion] = {}
     region_starts: dict[str, str] = {}
     locations: dict[str, Location] = {}
-    raw_exits: list[tuple[str, str, Exit]] = []  # (where, region, exit with unresolved 'to')
+    raw_exits: list[tuple[str, str, str, Exit]] = []
 
     for path in files:
         fname = path.name
         data = _load_json(path)
         if not isinstance(data, dict):
             raise WorldError(f"{fname}: must be a JSON object")
-        rid = _require_str(data, "id", fname)
-        _check_slug(rid, f"{fname}: region id")
-        if rid != path.stem:
-            raise WorldError(f"{fname}: region id {rid!r} must match the file name ({path.stem!r})")
-        regions[rid] = _require_str(data, "name", fname)
-        region_starts[rid] = _require_str(data, "start", fname)
-        locs = data.get("locations")
-        if not isinstance(locs, dict) or not locs:
-            raise WorldError(f"{fname}: \"locations\" must be a non-empty object keyed by location id")
-        for lid, loc in locs.items():
-            where = f"{fname}: location {lid!r}"
-            _check_slug(lid, f"{fname}: location id")
-            if not isinstance(loc, dict):
-                raise WorldError(f"{where}: must be an object")
-            address = f"{rid}:{lid}"
-            exits_raw = loc.get("exits", [])
-            if not isinstance(exits_raw, list):
-                raise WorldError(f"{where}: \"exits\" must be a list")
-            exits = []
-            seen_dirs = set()
-            for i, ex in enumerate(exits_raw):
-                ewhere = f"{where}, exit #{i + 1}"
-                if not isinstance(ex, dict):
-                    raise WorldError(f"{ewhere}: must be an object")
-                direction = _require_str(ex, "direction", ewhere).strip()
-                if direction.lower() in seen_dirs:
-                    raise WorldError(f"{ewhere}: direction {direction!r} is used twice")
-                seen_dirs.add(direction.lower())
-                e = Exit(direction, _require_str(ex, "to", ewhere).strip(), _require_str(ex, "description", ewhere, optional=True))
-                exits.append(e)
-                raw_exits.append((ewhere, rid, e))
-            locations[address] = Location(address, rid, lid, _require_str(loc, "name", where),
-                                          _require_str(loc, "description", where), exits)
+        rid = path.stem
+        _check_slug(rid, f"{fname}: region id (file name)")
+        if "id" in data and data["id"] != rid:
+            raise WorldError(f"{fname}: region id {data['id']!r} must match the file name ({rid!r})")
+        regions[rid] = Region(rid, _require_str(data, "name", fname), _require_str(data, "notes", fname, optional=True))
+        start = _require_str(data, "start", fname)
+        if start.count("/") != 1:
+            raise WorldError(f"{fname}: \"start\" must look like \"subregion/location\", got {start!r}")
+        region_starts[rid] = start
+        subs = data.get("subregions")
+        if not isinstance(subs, dict) or not subs:
+            raise WorldError(f"{fname}: \"subregions\" must be a non-empty object keyed by subregion id")
+        for sid, sub in subs.items():
+            swhere = f"{fname}: subregion {sid!r}"
+            _check_slug(sid, f"{fname}: subregion id")
+            if not isinstance(sub, dict):
+                raise WorldError(f"{swhere}: must be an object")
+            inherit = _optional_bool(sub, "inherit_notes", swhere)
+            subregions[f"{rid}:{sid}"] = Subregion(sid, _require_str(sub, "name", swhere),
+                                                   _require_str(sub, "notes", swhere, optional=True),
+                                                   True if inherit is None else inherit)
+            locs = sub.get("locations")
+            if not isinstance(locs, dict) or not locs:
+                raise WorldError(f"{swhere}: \"locations\" must be a non-empty object keyed by location id")
+            for lid, loc in locs.items():
+                where = f"{fname}: location {sid}/{lid}"
+                _check_slug(lid, f"{fname}: location id")
+                if not isinstance(loc, dict):
+                    raise WorldError(f"{where}: must be an object")
+                exits_raw = loc.get("exits", [])
+                if not isinstance(exits_raw, list):
+                    raise WorldError(f"{where}: \"exits\" must be a list")
+                exits, seen_dirs = [], set()
+                for i, ex in enumerate(exits_raw):
+                    ewhere = f"{where}, exit #{i + 1}"
+                    if not isinstance(ex, dict):
+                        raise WorldError(f"{ewhere}: must be an object")
+                    direction = _require_str(ex, "direction", ewhere).strip()
+                    if direction.lower() in seen_dirs:
+                        raise WorldError(f"{ewhere}: direction {direction!r} is used twice")
+                    seen_dirs.add(direction.lower())
+                    flags = {}
+                    for flag in EXIT_FLAGS:
+                        v = _optional_bool(ex, flag, ewhere)
+                        if v is not None:
+                            flags[flag] = v
+                    e = Exit(direction, _require_str(ex, "to", ewhere).strip(),
+                             _require_str(ex, "description", ewhere, optional=True), flags)
+                    exits.append(e)
+                    raw_exits.append((ewhere, rid, sid, e))
+                address = f"{rid}:{sid}/{lid}"
+                locations[address] = Location(
+                    address, rid, sid, lid, _require_str(loc, "name", where), _require_str(loc, "description", where), exits,
+                    _optional_bool(loc, "inherit_region_notes", where), _optional_bool(loc, "inherit_subregion_notes", where))
 
-    for where, rid, e in raw_exits:
-        target = resolve_address(e.to, rid)
+    for where, rid, sid, e in raw_exits:
+        target = resolve_address(e.to, rid, sid)
         if target not in locations:
             raise WorldError(f"{where}: exit target {e.to!r} does not exist (looked for {target!r})")
         e.to = target
@@ -167,4 +246,4 @@ def load_world(root: str | Path) -> World:
     if start_region not in regions:
         raise WorldError(f"world.json: start_region {start_region!r} has no matching file in regions/")
 
-    return World(start=f"{start_region}:{region_starts[start_region]}", regions=regions, locations=locations)
+    return World(start=f"{start_region}:{region_starts[start_region]}", regions=regions, subregions=subregions, locations=locations)
