@@ -270,7 +270,7 @@ def test_stable_gate_onto_market_lane(client):
 
 def test_drowned_rat_back_rooms(client):
     yard = client.get("/location/riverton:drowned_rat/courtyard").json()
-    assert {e["to"] for e in yard["exits"]} == {TAVERN, "riverton:drowned_rat/kitchens", "riverton:drowned_rat/stable"}
+    assert {e["to"] for e in yard["exits"] if "to" in e} == {TAVERN, "riverton:drowned_rat/kitchens", "riverton:drowned_rat/stable"}
     assert client.get("/location/riverton:drowned_rat/kitchens").json()["name"] == "Kitchens"
 
 
@@ -366,3 +366,62 @@ def test_label_rooms_flag(tmp_path):
     bad.mkdir()
     with pytest.raises(WorldError, match="label_rooms"):
         load(bad, r)
+
+
+# ---- obscured / hidden doors
+COURTYARD, CELLAR = "riverton:drowned_rat/courtyard", "riverton:drowned_rat/cellar"
+NAVE, CATA, TUNNEL = "riverton:temple/nave", "riverton:temple/catacombs", "riverton:secret_tunnel/tunnel"
+DEST_KEYS = {"to", "to_name", "to_display_name", "to_label", "to_subregion", "to_region"}
+
+
+def _exit(room, direction):
+    return next(e for e in room["exits"] if e["direction"] == direction)
+
+
+def test_riverton_obscured_exits_reveal_nothing():
+    c = TestClient(create_app(ROOT))
+    for addr, d, flag in [(COURTYARD, "trapdoor", "obscured"), (NAVE, "grate", "obscured"), (CELLAR, "narrow door", "hidden"), (TUNNEL, "narrow door", "hidden")]:
+        e = _exit(c.get(f"/location/{addr}").json(), d)
+        assert e[flag] is True and e["door"].startswith("door_") and not DEST_KEYS & e.keys()
+        dest = load_world(ROOT).get(next(x.to for x in load_world(ROOT).get(addr).exits if x.direction == d))
+        assert dest.address not in json.dumps(e) and dest.name not in json.dumps(e)
+
+
+def test_doors_paired_with_return_exit():
+    w = load_world(ROOT)
+    door = lambda a, d: next(e for e in w.get(a).exits if e.direction == d).door
+    assert door(COURTYARD, "trapdoor") == door(CELLAR, "up")
+    assert door(NAVE, "grate") == door(CATA, "up")
+    assert door(CELLAR, "narrow door") == door(TUNNEL, "narrow door")
+    assert door(CATA, "tunnel") is None and door(COURTYARD, "in") is None
+    assert len({door(COURTYARD, "trapdoor"), door(NAVE, "grate"), door(CELLAR, "narrow door")}) == 3
+    # the normal return side still names where it goes
+    up = _exit(TestClient(create_app(ROOT)).get(f"/location/{CATA}").json(), "up")
+    assert up["to"] == NAVE and up["door"] == door(NAVE, "grate")
+
+
+def test_doors_endpoint_reveals_only_requested_doors():
+    c = TestClient(create_app(ROOT))
+    grate = _exit(c.get(f"/location/{NAVE}").json(), "grate")["door"]
+    ex = c.post("/doors", json={"doors": [grate]}).json()["exits"]
+    assert len(ex) == 1 and ex[0]["from"] == NAVE and ex[0]["direction"] == "grate" and ex[0]["to"] == CATA
+    assert ex[0]["to_label"] == "Temple Catacombs"
+    assert c.post("/doors", json={"doors": ["door_nope"]}).json()["exits"] == []
+    both = c.post("/doors", json={"doors": [_exit(c.get(f"/location/{CELLAR}").json(), "narrow door")["door"]]}).json()["exits"]
+    assert {(x["from"], x["to"]) for x in both} == {(CELLAR, TUNNEL), (TUNNEL, CELLAR)}
+
+
+def test_move_and_travel_through_obscured_exits():
+    c = TestClient(create_app(ROOT))
+    assert c.post("/move", json={"from": COURTYARD, "direction": "trapdoor"}).json()["address"] == CELLAR
+    r = c.post("/travel", json={"from": CELLAR, "steps": ["narrow door", "catacombs", "up"]}).json()
+    assert r["location"]["address"] == NAVE and r["steps_completed"] == 3
+
+
+def test_one_way_flagged_exit_warns(tmp_path, caplog):
+    r = region()
+    r["subregions"]["t"]["locations"]["y"]["exits"] = [{"direction": "chute", "to": "s/b", "obscured": True}]
+    with caplog.at_level("WARNING"):
+        w = load(tmp_path, r)
+    assert "no return exit" in caplog.text
+    assert w.get("r:t/y").exits[0].door

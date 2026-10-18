@@ -36,6 +36,10 @@ class TravelRequest(BaseModel):
     steps: list[str]
 
 
+class DoorsRequest(BaseModel):
+    doors: list[str]
+
+
 def create_app(world_dir: str | Path | None = None) -> FastAPI:
     root = Path(world_dir or os.environ.get("WORLDSCRAWL_WORLD_DIR") or DEFAULT_WORLD_DIR)
     world: World = load_world(root)
@@ -102,6 +106,11 @@ def create_app(world_dir: str | Path | None = None) -> FastAPI:
             "error": f"There is no exit {req.direction!r} from {loc.name}.",
             "valid_directions": valid,
         })
+
+    @app.post("/doors")
+    def doors(req: DoorsRequest):
+        """Where hidden/obscured exits lead, only for doors the client has passed through (from its own history)."""
+        return {"exits": world.door_reveals(req.doors)}
 
     @app.post("/travel")
     def travel(req: TravelRequest):

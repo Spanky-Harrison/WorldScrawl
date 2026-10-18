@@ -9,13 +9,16 @@ Full address: "region:sub/loc". Exit "to": "loc" (same subregion), "sub/loc" (sa
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 SLUG = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
-EXIT_FLAGS = ("hidden", "obscured")  # optional booleans on an exit
+EXIT_FLAGS = ("hidden", "obscured")  # optional booleans on an exit (today both mean "obscured"; see README)
+log = logging.getLogger("uvicorn.error")
 
 
 class WorldError(Exception):
@@ -47,6 +50,11 @@ class Exit:
     to: str  # full address region:sub/loc after loading
     description: str | None = None
     flags: dict = field(default_factory=dict)
+    door: str | None = None  # opaque id shared by a flagged exit and its return exit (derived at load)
+
+    @property
+    def flagged(self) -> bool:
+        return bool(self.flags.get("hidden") or self.flags.get("obscured"))
 
 
 @dataclass
@@ -123,6 +131,16 @@ class World:
         """Same rule as the extension's revealsDestination: hidden/obscured exits don't say where they lead."""
         return not (e.flags.get("hidden") or e.flags.get("obscured"))
 
+    def door_reveals(self, doors) -> list[dict]:
+        """Destinations behind flagged exits whose door the client says it has passed through (either side).
+        [{from, direction, door, to, to_name, ...}]. The client derives passed doors from its message stamps."""
+        want, out = set(doors), []
+        for loc in self.locations.values():
+            for e in loc.exits:
+                if e.flagged and e.door in want:
+                    out.append({"from": loc.address, **self.destination_dict(e, loc, {"direction": e.direction, **e.flags, "door": e.door})})
+        return out
+
     def exit_label(self, src: Location, target: Location) -> str:
         """What an exit's destination is called from `src`: the room name within the same building; the building
         name when entering another building at its entrance; "Building, Room" for another room of that building;
@@ -144,9 +162,13 @@ class World:
         """An exit plus everything about its destination the client needs (name, area, region, label), so the
         client never has to fetch a neighbouring room just to name it. Hidden/obscured exits reveal nothing
         about the destination: only the direction, description and flags."""
-        out = {"direction": e.direction, **({"description": e.description} if e.description else {}), **e.flags}
+        out = {"direction": e.direction, **({"description": e.description} if e.description else {}), **e.flags,
+               **({"door": e.door} if e.door else {})}
         if not self.reveals_destination(e):
             return out
+        return self.destination_dict(e, src, out)
+
+    def destination_dict(self, e: Exit, src: Location | None, out: dict) -> dict:
         target = self.locations[e.to]
         tsub, treg = self.sub_of(target), self.regions[target.region]
         return {
@@ -295,5 +317,19 @@ def load_world(root: str | Path) -> World:
             raise WorldError(f"{rid}.json: entrance {regions[rid].entrance.split(':', 1)[1]!r} does not exist in region {rid!r}")
     if start_region not in regions:
         raise WorldError(f"world.json: start_region {start_region!r} has no matching file in regions/")
+
+    # Pair every hidden/obscured exit with its return exit (in the destination room, pointing back): passing
+    # through either side reveals both. A flagged exit with no way back is allowed (one-way doors) but warned about.
+    for loc in locations.values():
+        for e in loc.exits:
+            if not e.flagged or e.door:
+                continue
+            back = next((b for b in locations[e.to].exits if b.to == loc.address), None)
+            ends = sorted([f"{loc.address}|{e.direction.lower()}"] + ([f"{e.to}|{back.direction.lower()}"] if back else []))
+            e.door = "door_" + hashlib.sha1("&".join(ends).encode()).hexdigest()[:10]
+            if back is None:
+                log.warning("world: %s exit %r is hidden/obscured but has no return exit (one-way door)", loc.address, e.direction)
+            elif back.door is None:
+                back.door = e.door
 
     return World(start=f"{start_region}:{region_starts[start_region]}", regions=regions, subregions=subregions, locations=locations)

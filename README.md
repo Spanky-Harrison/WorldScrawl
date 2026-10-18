@@ -60,7 +60,8 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 - `entrance` (optional): the room you arrive in when travelling to a building/area by name (subregion: a room id, default its first room) or to a region by name (region: `sub/loc`, default the region's start). Checked when the server starts.
 - Full address: `region:subregion/location` (`riverton:drowned_rat/common_room`).
 - Exit `to`: `loc` = same subregion, `sub/loc` = same region, `region:sub/loc` = another region. Every target must exist.
-- Optional exit flags `hidden` / `obscured` (true/false): such an exit never shows where it leads and is never used for route-finding.
+- Optional exit flags `obscured` / `hidden` (true/false). `obscured` = you can see the door but not what's behind it: it is listed by its label only ("trapdoor", "grate") until the party has walked through that door, from either side. `hidden` is reserved for true secret doors (not listed at all until found, which needs per-chat state); **for now `hidden` behaves exactly like `obscured`**.
+- Doors are paired at load time: a flagged exit and its return exit (the exit in its destination room pointing back) share an opaque `door` id, so walking through either side reveals both. A flagged exit with no return exit is allowed (one-way door) and logs a warning at load.
 - Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
   - Subregion `"inherit_notes": false` drops the region notes for all its rooms.
   - A location's `inherit_region_notes` / `inherit_subregion_notes` override that when present (true/false). Missing = follow the subregion.
@@ -117,7 +118,7 @@ The server is stateless. The extension stores the party's location on the chat m
 Design principle: **the server does the map work, the extension stays thin.** Every reply carries everything
 derived from the map that the extension needs (display names, the destination's name/building/region/entrance on
 each exit), so the extension never fetches a neighbouring room just to name it, and never re-implements map rules.
-Hidden/obscured exits reveal nothing about where they lead (no `to`, no destination name). Each player action
+Hidden/obscured exits reveal nothing about where they lead (no `to`, no destination name), only an opaque `door` id. `POST /doors {doors: [ids]}` returns the destination data (`from`, `direction`, `to`, `to_name`, `to_label`, ...) of the flagged exits behind those doors; the extension asks only for doors this chat has walked through (derived from the move stamps: room left + direction, including each fast-travel step), so reveals roll back with swipes/deletes. The server stays stateless and lets `/move` and `/travel` go through any exit; it's the extension that never routes through an unrevealed door. Each player action
 costs one request: a step is one `/move`, a whole fast-travel trip is one `/travel`, and rebuilding after a reload
 is at most one `/rooms` batch.
 

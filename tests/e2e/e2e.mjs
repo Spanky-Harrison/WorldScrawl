@@ -202,12 +202,12 @@ try {
     narr = JSON.stringify((await lastReq()).messages);
     check('notes: temple drops region notes (inherit_notes false)', narr.includes('About Temple of the Tides: A hushed') && !narr.includes('About Riverton:'), narr.slice(0, 300));
     const ex = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
-    check('/ws-exits lists exits', ex === 'Exits: south (Village Square)', String(ex));
+    check('/ws-exits lists exits', ex === 'Exits: south (Village Square), grate', String(ex));
     const before = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go sideways'));
     await page.waitForTimeout(1500);
     check('/ws-go bad direction: no move, no generation', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === before);
-    check('/ws-go unknown name: not-aware message', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.mes === "You're not aware of such a place. Exits: south (Village Square)"; }));
+    check('/ws-go unknown name: not-aware message', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.mes === "You're not aware of such a place. Exits: south (Village Square), grate"; }));
     check('engine footer never in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => !m.extra?.worldscrawl_notice && /Exits:/.test(m.mes ?? ''))));
 
     // Intent setting off: no question asked.
@@ -387,7 +387,7 @@ try {
         return [m.exitsText(await get('riverton:streets/market_lane')), m.exitsText(await get('riverton:drowned_rat/courtyard')), m.exitsText({ exits: [{ direction: 'crack', hidden: true }] })]; });
     check('exit labels: building on entrance, building + room otherwise, room within the building, hidden = label only',
         bl[0] === "Exits: east (Village Square), inn (The Gilded Goose), store (Marlow's General Store), smithy (Brask's Smithy), gate (The Drowned Rat, Stable)"
-        && bl[1] === 'Exits: in (Common Room), kitchen, stable' && bl[2] === 'Exits: crack', JSON.stringify(bl));
+        && bl[1] === 'Exits: in (Common Room), kitchen, stable, trapdoor' && bl[2] === 'Exits: crack', JSON.stringify(bl));
     const mn = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const mv = { direction: 'x', to_name: 'Secret Vault' };
         return [m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
             m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })]; });
@@ -447,11 +447,11 @@ try {
     await queue([{ content: 'elsewhere' }]);
     await send('go to the temple', 1);
     let al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_exit')].length }; });
-    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square)" && al.btns === 1, JSON.stringify(al));
+    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square), grate" && al.btns === 2, JSON.stringify(al));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Riverton'));
     await page.waitForTimeout(1500);
     al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
-    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square)", al);
+    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square), grate", al);
     check('already: no move, no narration', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nA + 1);
 
     // Stable gate onto Market Lane: building travel uses the nearest room already stood in.
@@ -586,6 +586,38 @@ try {
     const chatLeaks = await page.evaluate(() => SillyTavern.getContext().chat.filter(m => m.mes?.includes('{{')).map(m => m.mes));
     check('no hardcoded "The party" in model requests or chat', !everyReq.some(r => /the party/i.test(JSON.stringify(r.messages))) && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /the party/i.test(m.mes ?? ''))));
     check('no raw {{macros}} in any model request (intent questions, notes) or chat message', !leaks.length && !chatLeaks.length, (leaks[0] ?? '').slice(0, 300) + JSON.stringify(chatLeaks));
+    // Obscured exits: label only until the party walks through that door (either side); derived from move stamps.
+    const wsExits = () => page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
+    const wsGo = async arg => { await page.evaluate(a => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + a), arg); await page.waitForTimeout(1500); };
+    const lastMes = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
+    await go('north');
+    check('obscured: temple grate shows only its label', (await wsExits()) === 'Exits: south (Village Square), grate');
+    const reqsBefore = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await wsGo('Temple Catacombs');
+    check('obscured: destination not a known place before passing', (await lastMes()).startsWith("You're not aware of such a place.") && (await stored()) === 'riverton:temple/nave');
+    const nl = (await (await fetch(`${FAKE}/__requests`)).json()).slice(0, reqsBefore).map(r => JSON.stringify(r));
+    check('obscured: destination never in any model request before reveal', !nl.some(t => t.includes('Catacombs')));
+    const chatLen = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await go('grate');
+    check('obscured: move through grate works, message names no destination', (await stored()) === 'riverton:temple/catacombs'
+        && await page.evaluate(() => SillyTavern.getContext().chat.some(m => m.is_user && m.mes === '*User goes through the grate.*')));
+    await go('up');
+    check('obscured: revealed after passing through', (await wsExits()) === 'Exits: south (Village Square), grate (Temple Catacombs)', String(await wsExits()));
+    // Swipe/delete back past the move: the reveal rolls back.
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, n); }, chatLen);
+    check('obscured: deleting the move un-reveals the door', (await stored()) === 'riverton:temple/nave' && (await wsExits()) === 'Exits: south (Village Square), grate', String(await wsExits()));
+    // Stood in the catacombs (location stamp) without passing the door: fast travel refuses the unrevealed exit.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'x', extra: { worldscrawl_location: 'riverton:temple/catacombs', worldscrawl_intent_checked: true } },
+        { name: 'User', is_user: true, mes: 'y', extra: { worldscrawl_location: 'riverton:streets/square', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    await wsGo('Temple Catacombs');
+    check('obscured: fast travel never routes through an unrevealed door', (await lastMes()).startsWith("You don't know a way to Temple Catacombs") && (await stored()) === 'riverton:streets/square', await lastMes());
+    // Walking the OTHER side (catacombs -> temple, a normal exit) reveals the temple's grate too; then travel uses it.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'z', extra: { worldscrawl_location: 'riverton:temple/nave', worldscrawl_intent_checked: true,
+        worldscrawl_move: { direction: 'up', from: 'riverton:temple/catacombs', to: 'riverton:temple/nave' } } }, { name: 'User', is_user: true, mes: 'w', extra: { worldscrawl_location: 'riverton:streets/square', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    apiCalls.length = 0;
+    await go('Temple Catacombs');
+    check('obscured: return side reveals it; fast travel through revealed door', (await stored()) === 'riverton:temple/catacombs' && apiCalls.includes('/travel'), JSON.stringify(apiCalls));
+    check('obscured: travel stamp records steps', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return JSON.stringify(ch[ch.length - 2].extra.worldscrawl_move?.steps ?? ch.findLast(m => m.extra?.worldscrawl_move?.steps)?.extra.worldscrawl_move.steps); }) === '["north","grate"]');
     // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
     await page.waitForTimeout(1000);

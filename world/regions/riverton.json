@@ -24,7 +24,16 @@
           "exits": [
             { "direction": "in", "to": "common_room", "description": "The back door into the common room." },
             { "direction": "kitchen", "to": "kitchens", "description": "The kitchen door." },
-            { "direction": "stable", "to": "stable", "description": "Across the yard to the stable." }
+            { "direction": "stable", "to": "stable", "description": "Across the yard to the stable." },
+            { "direction": "trapdoor", "to": "cellar", "obscured": true, "description": "A heavy cellar door set into the flagstones, its iron ring worn smooth." }
+          ]
+        },
+        "cellar": {
+          "name": "Cellar",
+          "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
+          "exits": [
+            { "direction": "up", "to": "courtyard", "description": "Wooden steps up to the trapdoor." },
+            { "direction": "narrow door", "to": "secret_tunnel/tunnel", "hidden": true, "description": "A narrow door half-hidden behind the casks." }
           ]
         },
         "kitchens": {
@@ -152,7 +161,31 @@
           "name": "Temple of the Tides",
           "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
           "exits": [
-            { "direction": "south", "to": "streets/square", "description": "The steps lead back down to the square." }
+            { "direction": "south", "to": "streets/square", "description": "The steps lead back down to the square." },
+            { "direction": "grate", "to": "catacombs", "obscured": true, "description": "A stone stair behind an iron grate beside the altar." }
+          ]
+        },
+        "catacombs": {
+          "name": "Temple Catacombs",
+          "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
+          "exits": [
+            { "direction": "up", "to": "nave", "description": "The stone stair up to the temple." },
+            { "direction": "tunnel", "to": "secret_tunnel/tunnel", "description": "A low, rough-cut passage leading away into the dark." }
+          ]
+        }
+      }
+    },
+    "secret_tunnel": {
+      "name": "Secret Tunnel",
+      "notes": "A forgotten smugglers' passage under the village. Few living folk know it exists.",
+      "inherit_notes": false,
+      "locations": {
+        "tunnel": {
+          "name": "Secret Tunnel",
+          "description": "A cramped, dripping tunnel shored up with rotting timbers. It slopes gently uphill, and the floor is scuffed by boots that came this way not so long ago.",
+          "exits": [
+            { "direction": "narrow door", "to": "drowned_rat/cellar", "hidden": true, "description": "A narrow door in the tunnel wall." },
+            { "direction": "catacombs", "to": "temple/catacombs", "description": "The tunnel climbs toward old stonework." }
           ]
         }
       }
