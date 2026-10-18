@@ -87,6 +87,9 @@ def test_exit_flags_exposed(tmp_path):
     c = TestClient(create_app(make_world(tmp_path, {"r": r})))
     ex = c.get("/location/r:s/a").json()["exits"]
     assert ex[0]["hidden"] is True and "hidden" not in ex[1]
+    # a hidden exit says nothing about where it leads; a normal one carries its destination's data
+    assert not {"to", "to_name", "to_display_name", "to_subregion", "to_region"} & ex[0].keys()
+    assert ex[1]["to"] == "r:t/x" and ex[1]["to_display_name"] == "X (T)" and ex[1]["to_region"]["name"] == "R"
 
 
 def test_duplicate_keys_rejected(tmp_path):
@@ -269,3 +272,60 @@ def test_drowned_rat_back_rooms(client):
     yard = client.get("/location/riverton:drowned_rat/courtyard").json()
     assert {e["to"] for e in yard["exits"]} == {TAVERN, "riverton:drowned_rat/kitchens", "riverton:drowned_rat/stable"}
     assert client.get("/location/riverton:drowned_rat/kitchens").json()["name"] == "Kitchens"
+
+
+def test_travel_whole_route(client):
+    r = client.post("/travel", json={"from": TAVERN, "steps": ["out", "west", "inn", "up"]})
+    b = r.json()
+    assert r.status_code == 200 and b["location"]["address"] == "riverton:gilded_goose/upstairs"
+    assert [p["address"] for p in b["path"]] == [SQUARE, "riverton:streets/market_lane", "riverton:gilded_goose/common_room", "riverton:gilded_goose/upstairs"]
+    assert b["steps_completed"] == 4 and b["stopped"] is False and b["reason"] is None
+
+
+def test_travel_stops_at_last_valid_room(client):
+    b = client.post("/travel", json={"from": TAVERN, "steps": ["out", "sideways", "north"]}).json()
+    assert b["location"]["address"] == SQUARE and b["steps_completed"] == 1
+    assert b["stopped"] is True and b["reason"] == "blocked" and "sideways" in b["error"]
+    assert client.post("/travel", json={"from": "x:y/z", "steps": ["out"]}).status_code == 404
+
+
+def test_map_version_header(client, tmp_path):
+    v = client.get("/start").headers["x-worldscrawl-map-version"]
+    assert v and client.post("/move", json={"from": TAVERN, "direction": "nope"}).headers["x-worldscrawl-map-version"] == v
+    assert client.get("/health").json()["map_version"] == v
+    w = make_world(tmp_path, {"r": region()})
+    v1 = TestClient(create_app(w)).get("/start").headers["x-worldscrawl-map-version"]
+    (w / "regions" / "r.json").write_text(json.dumps(region(notes="changed")))
+    v2 = TestClient(create_app(w)).get("/start").headers["x-worldscrawl-map-version"]
+    assert v1 != v2
+
+
+def test_version_header_exposed_to_browser(client):
+    r = client.get("/start", headers={"Origin": "http://127.0.0.1:8000"})
+    assert "x-worldscrawl-map-version" in r.headers.get("access-control-expose-headers", "").lower()
+
+
+def test_move_and_travel_logged(client, caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        client.post("/move", json={"from": TAVERN, "direction": "out"})
+        client.post("/travel", json={"from": TAVERN, "steps": ["out", "north"]})
+    text = caplog.text
+    assert "move riverton:drowned_rat/common_room -out-> riverton:streets/square" in text
+    assert "travel riverton:drowned_rat/common_room steps=['out', 'north'] -> riverton:temple/nave (2/2 steps)" in text
+
+
+def test_exits_carry_destination_data(client):
+    loc = client.get(f"/location/{SQUARE}").json()
+    assert loc["display_name"] == "Village Square (Riverton Streets)"
+    rat = next(e for e in loc["exits"] if e["to"] == TAVERN)
+    assert rat["to_display_name"] == "Common Room (The Drowned Rat)"
+    assert rat["to_subregion"] == {"id": "drowned_rat", "name": "The Drowned Rat", "entrance": TAVERN}
+    assert rat["to_region"]["name"] == "Riverton" and rat["to_region"]["entrance"]
+
+
+def test_rooms_batch(client):
+    b = client.get("/rooms", params={"addresses": f"{TAVERN},{SQUARE},{TAVERN},nowhere:x/y"}).json()
+    assert [r["address"] for r in b["rooms"]] == [TAVERN, SQUARE]
+    assert b["unknown"] == ["nowhere:x/y"] and b["start"]["address"] == TAVERN
+    assert client.get("/rooms").json()["rooms"] == []

@@ -98,6 +98,11 @@ class World:
         use_sub = True if loc.inherit_subregion_notes is None else loc.inherit_subregion_notes
         return {"region": region.notes if use_region else None, "subregion": sub.notes if use_sub else None}
 
+    @staticmethod
+    def place_label(name: str, sub_name: str | None) -> str:
+        """"Name (Subregion)", or just the name when the subregion has the same name (same rule as the extension)."""
+        return f"{name} ({sub_name})" if sub_name and sub_name != name else name
+
     def to_dict(self, loc: Location) -> dict:
         region, sub = self.regions[loc.region], self.sub_of(loc)
         return {
@@ -105,21 +110,34 @@ class World:
             "region": {"id": region.id, "name": region.name, "notes": region.notes, "entrance": region.entrance},
             "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance},
             "name": loc.name,
+            "display_name": self.place_label(loc.name, sub.name),
             "description": loc.description,
             "effective_notes": self.effective_notes(loc),
             "exits": [self._exit_dict(e) for e in loc.exits],
         }
 
+    @staticmethod
+    def reveals_destination(e: Exit) -> bool:
+        """Same rule as the extension's revealsDestination: hidden/obscured exits don't say where they lead."""
+        return not (e.flags.get("hidden") or e.flags.get("obscured"))
+
     def _exit_dict(self, e: Exit) -> dict:
+        """An exit plus everything about its destination the client needs (name, area, region, label), so the
+        client never has to fetch a neighbouring room just to name it. Hidden/obscured exits reveal nothing
+        about the destination: only the direction, description and flags."""
+        out = {"direction": e.direction, **({"description": e.description} if e.description else {}), **e.flags}
+        if not self.reveals_destination(e):
+            return out
         target = self.locations[e.to]
-        tsub = self.sub_of(target)
+        tsub, treg = self.sub_of(target), self.regions[target.region]
         return {
             "direction": e.direction,
             "to": e.to,
             "to_name": target.name,
+            "to_display_name": self.place_label(target.name, tsub.name),
             "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance},
-            **({"description": e.description} if e.description else {}),
-            **e.flags,
+            "to_region": {"id": treg.id, "name": treg.name, "entrance": treg.entrance},
+            **out,
         }
 
 

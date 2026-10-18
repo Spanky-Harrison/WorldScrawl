@@ -6,7 +6,7 @@
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed' };
+const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}' };
 const MODES = ['commands', 'typed', 'tools'];
 const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
 const FACTS_KEY = 'worldscrawl_facts';
@@ -30,13 +30,25 @@ export function settings() {
 
 const baseUrl = () => String(settings().serverUrl || DEFAULTS.serverUrl).replace(/\/+$/, '');
 
+let mapVersion = null;
+/** Every server reply carries the map version; when it changes (map files edited, server restarted) drop remembered rooms. */
+export function noteMapVersion(v) {
+    if (!v) return;
+    if (mapVersion && v !== mapVersion) { exitsCache.clear(); console.log(`[WorldScrawl] map changed (${mapVersion} -> ${v}); cleared remembered rooms`); }
+    mapVersion = v;
+}
+export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
+
 async function api(path, options = {}) {
     let res;
     try {
-        res = await fetch(baseUrl() + path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) } });
+        // JSON content type only when sending a body: on a GET it would force a CORS preflight (an extra OPTIONS request).
+        const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers ?? {}) };
+        res = await fetch(baseUrl() + path, { ...options, headers });
     } catch (e) {
         throw new Error(`WorldScrawl server not reachable at ${baseUrl()} (${e.message}). Is it running?`);
     }
+    noteMapVersion(res.headers.get('X-WorldScrawl-Map-Version'));
     const body = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, body };
 }
@@ -128,7 +140,7 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_look',
         displayName: 'WorldScrawl: Look',
-        description: 'Get the party\'s current location in the world map: its name, description and the exits leading out of it. Use this before describing where the characters are or where they can go.',
+        description: 'Get the characters\' current location in the world map: its name, description and the exits leading out of it. Use this before describing where the characters are or where they can go.',
         parameters: { $schema: 'http://json-schema.org/draft-04/schema#', type: 'object', properties: {}, required: [] },
         action: lookAction,
         formatMessage: () => 'Looking around...',
@@ -136,7 +148,7 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_move',
         displayName: 'WorldScrawl: Move',
-        description: 'Move the party through one of the current location\'s exits when the characters travel there. Returns the new location. If the direction is not valid, returns an error with the valid directions.',
+        description: 'Move the characters through one of the current location\'s exits when the characters travel there. Returns the new location. If the direction is not valid, returns an error with the valid directions.',
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
@@ -202,19 +214,28 @@ export const exitLabels = (exits, fmt) => { const c = collidingNames(exits); ret
 /** "Name (Subregion)", or just the name when the subregion has the same name. */
 export const placeLabel = (name, sub) => (sub && sub !== name ? `${name} (${sub})` : name);
 /** Unambiguous name for the model: "Common Room (The Drowned Rat)". */
-export const displayName = loc => placeLabel(loc.name, loc.subregion?.name);
+export const displayName = loc => loc.display_name ?? placeLabel(loc.name, loc.subregion?.name);
 
 /** Places stood in during this chat: the start plus every location (and route step) saved on its messages. */
 async function stoodInAddresses() {
+    const saved = chatAddresses();
+    await warmRooms(saved); // anything not remembered yet (e.g. after a reload) comes in one batch request
     const set = new Set();
     const start = await fetchLocationCached(null);
     if (start) set.add(start.address);
+    for (const a of saved) set.add(a);
+    return set;
+}
+/** Every address saved on this chat's messages (locations and route steps), in order. */
+function chatAddresses() {
+    const out = [];
     for (const m of ctx().chat ?? []) {
         const loc = m?.extra?.[LOC_KEY];
-        if (loc) set.add(loc);
-        for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) set.add(a);
+        if (loc) out.push(loc);
+        for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) out.push(a);
+        if (m?.extra?.worldscrawl_notice_loc) out.push(m.extra.worldscrawl_notice_loc);
     }
-    return set;
+    return [...new Set(out)];
 }
 
 /** Where the party was just before arriving at `current` (from saved message locations), or null. */
@@ -228,12 +249,23 @@ export function previousAddress(current, chat = ctx().chat ?? []) {
     return null;
 }
 
-/** Discovered = stood in, plus any destination seen listed (and revealed) as an exit from a place stood in. */
-async function discoveredAddresses() {
+/**
+ * Discovered = stood in, plus any destination seen listed (and revealed) as an exit from a place stood in.
+ * Map address -> {address, name, display_name, subregion, region}. Places only seen as exits are described by
+ * the exit itself (the server puts the destination's name/area/region on every revealed exit), so neighbouring
+ * rooms are never fetched just to name them.
+ */
+async function discoveredPlaces() {
     const stood = await stoodInAddresses();
-    const set = new Set(stood);
-    for (const a of stood) for (const e of (await fetchLocationCached(a))?.exits ?? []) if (revealsDestination(e)) set.add(e.to);
-    return set;
+    const known = new Map();
+    for (const a of stood) {
+        const l = await fetchLocationCached(a);
+        if (l) known.set(a, { address: a, name: l.name, display_name: displayName(l), subregion: l.subregion, region: l.region });
+    }
+    for (const a of stood) for (const e of (await fetchLocationCached(a))?.exits ?? []) {
+        if (revealsDestination(e) && e.to && !known.has(e.to)) known.set(e.to, { address: e.to, name: e.to_name, display_name: e.to_display_name ?? placeLabel(e.to_name, e.to_subregion?.name), subregion: e.to_subregion, region: e.to_region });
+    }
+    return known;
 }
 
 /**
@@ -243,8 +275,7 @@ async function discoveredAddresses() {
  */
 async function areaTargets(known) {
     const out = [], seen = new Set();
-    for (const a of known) {
-        const l = await fetchLocationCached(a);
+    for (const [a, l] of known) {
         for (const [area, prefix] of [[l?.subregion, l?.subregion && `${a.split(':')[0]}:${l.subregion.id}/`], [l?.region, null]]) {
             if (!area?.entrance || !known.has(area.entrance)) continue;
             const key = `${area.name}|${area.entrance}`;
@@ -269,13 +300,12 @@ function mergeAreas(list, areas) {
 
 /** Discovered places that are not here and not one exit away, plus area names: [{address, name, label}]. */
 async function discoveredTargets(loc) {
-    const adjacent = new Set(loc.exits.map(e => e.to));
+    const adjacent = new Set(loc.exits.filter(revealsDestination).map(e => e.to));
     const out = [];
-    const known = await discoveredAddresses();
-    for (const a of known) {
+    const known = await discoveredPlaces();
+    for (const [a, l] of known) {
         if (a === loc.address || adjacent.has(a)) continue;
-        const l = await fetchLocationCached(a);
-        if (l) out.push({ address: a, name: l.name, label: placeLabel(l.name, l.subregion?.name) });
+        out.push({ address: a, name: l.name, label: l.display_name });
     }
     mergeAreas(out, (await areaTargets(known)).filter(ar => ar.address !== loc.address && !adjacent.has(ar.address)));
     const used = new Map(); // keep labels unique
@@ -325,13 +355,18 @@ async function engineTravel(target, prefix = null) {
         console.warn(`[WorldScrawl] no route ${from.address} -> ${target}; stood in: ${[...(await stoodInAddresses())].join(', ')}`);
         return { ok: false, error: 'No known route.', valid: from.exits.map(e => e.direction) };
     }
-    let at = from, names = [displayName(from)], via = [];
-    for (const st of steps) {
-        const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: at.address, direction: st.direction }) });
-        if (!r.ok) return { ok: false, error: 'Route blocked.', valid: from.exits.map(e => e.direction) };
-        at = r.body; primeCache(at); names.push(displayName(at)); via.push(at.address);
-    }
-    return { ok: true, to: at, move: { direction: steps.length === 1 ? steps[0].direction : null, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via } };
+    // One request for the whole trip. The server walks it step by step and may stop early (blocked step now,
+    // encounters later): the party goes where the server says it ended up, not where we asked to go.
+    const r = await api('/travel', { method: 'POST', body: JSON.stringify({ from: from.address, steps: steps.map(st => st.direction) }) });
+    if (!r.ok || !r.body?.path?.length) return { ok: false, error: r.body?.error ?? 'Route blocked.', valid: from.exits.map(e => e.direction) };
+    r.body.path.forEach(primeCache);
+    const at = r.body.location;
+    const names = [displayName(from), ...r.body.path.map(displayName)];
+    const via = r.body.path.map(l => l.address);
+    if (r.body.stopped) console.warn(`[WorldScrawl] travel stopped at ${at.address} after ${r.body.steps_completed}/${steps.length} steps (${r.body.reason})`);
+    const single = r.body.path.length === 1 ? steps[0].direction : null;
+    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via,
+        ...(r.body.stopped ? { stopped: r.body.reason ?? 'stopped' } : {}) } };
 }
 
 /**
@@ -342,7 +377,7 @@ async function travelCandidates(here) {
     const coll = collidingNames(here.exits);
     const exits = here.exits.filter(revealsDestination).map(e => ({ label: placeLabel(e.to_name, e.to_subregion?.name), name: e.to_name, direction: e.direction, address: e.to }));
     // area names whose entrance is one exit away travel through that exit
-    const near = (await areaTargets(await discoveredAddresses())).map(ar => ({ ...ar, direction: exits.find(x => x.address === ar.address)?.direction })).filter(ar => ar.direction);
+    const near = (await areaTargets(await discoveredPlaces())).map(ar => ({ ...ar, direction: exits.find(x => x.address === ar.address)?.direction })).filter(ar => ar.direction);
     return mergeAreas([...exits, ...(await discoveredTargets(here)).map(p => ({ ...p }))], near);
 }
 
@@ -408,6 +443,19 @@ async function nearestWaysOut(loc, isRegion) {
 }
 
 /** /ws-go <direction | place name>: an exit direction, else a known place; several matches ask which one. */
+/**
+ * Who moves, as shown in the auto-sent move message and the notes to the model ("Knarfy goes north.").
+ * Macros ({{user}}, {{char}}, ...) are resolved here, so no raw macro ever reaches a message or prompt.
+ */
+export function whoMoves() {
+    const c = ctx();
+    const raw = (settings().whoMoves ?? '').trim() || DEFAULTS.whoMoves;
+    let out = raw;
+    try { if (typeof c.substituteParams === 'function') out = c.substituteParams(raw); } catch (e) { console.warn('[WorldScrawl] substituteParams failed', e); }
+    out = String(out ?? '').replace(/\{\{[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
+    return out || 'You';
+}
+
 async function goAction(arg) {
     const c = ctx();
     if (engineBusy) return 'WorldScrawl: already moving.';
@@ -442,7 +490,8 @@ async function goTarget(t) {
             if (!res.ok) { await addNotice({ loc: here, noRoute: t.label ?? t.name }); renderAllExits(); return ''; }
         }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
-        const note = res.move.direction ? `*The party goes ${res.move.direction}.*` : `*The party heads to ${res.move.to_name}.*`;
+        const who = whoMoves();
+        const note = res.move.direction ? `*${who} goes ${res.move.direction}.*` : `*${who} heads to ${res.move.to_name}.*`;
         await c.executeSlashCommandsWithOptions(`/send ${note}`);
         const msg = c.chat[c.chat.length - 1];
         stamp(msg, res.to, res.move);
@@ -491,7 +540,7 @@ async function parseIntent(msg) {
         const nm = e.to_subregion?.name && e.to_subregion.name !== e.to_name ? `${e.to_name}, ${e.to_subregion.name}` : lbl.slice(e.direction.length);
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
-    const prompt = `The party is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
+    const prompt = `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
         + `${said}\n\nAnswer with one option:\n`
         + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
         + places.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
@@ -511,7 +560,7 @@ async function parseIntent(msg) {
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
     }
     if (!choice) {
-        const yn = await c.generateRaw({ prompt: `The party is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`, systemPrompt: 'Reply with exactly one word: yes or no.', responseLength: 48 });
+        const yn = await c.generateRaw({ prompt: `${whoMoves()} is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`, systemPrompt: 'Reply with exactly one word: yes or no.', responseLength: 48 });
         choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
         console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
     }
@@ -591,6 +640,7 @@ async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates
 }
 
 export function factsText(loc, move, toolsOn) {
+    const who = whoMoves();
     const lines = [
         '[World state from the game engine. This is authoritative.]',
         `Current location: ${loc.name}${loc.subregion?.name && loc.subregion.name !== loc.name ? `, ${loc.subregion.name}` : ''}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
@@ -600,12 +650,12 @@ export function factsText(loc, move, toolsOn) {
         (loc.effective_notes?.region || loc.effective_notes?.subregion) ? 'If this location\'s own description contradicts the broader notes above, the location description wins.' : '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
     ];
-    if (move?.path?.length > 2) lines.push(`What just happened: The party travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}. Describe the journey briefly and arriving at ${move.to_name}.`);
-    else if (move) lines.push(`What just happened: The party moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
-    else lines.push(`The party has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
+    if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}. Narrate the journey briefly, in that order, ending with arriving at ${move.to_name}.`);
+    else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
+    else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
-        : 'You only narrate. The game engine controls movement: never move the party to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.');
+        : `You only narrate. The game engine controls movement: never move ${who} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.`);
     return lines.filter(Boolean).join('\n');
 }
 
@@ -666,6 +716,23 @@ const exitsCache = new Map(); // address -> Promise<location|null>
 
 /** /move returns the full new location: remember it so the next lookup needs no request. */
 function primeCache(loc) { if (loc?.address && !exitsCache.has(loc.address)) exitsCache.set(loc.address, Promise.resolve(loc)); }
+
+/**
+ * Make sure these rooms (and the start room) are remembered, fetching all missing ones in ONE request
+ * (GET /rooms). Used when rebuilding after a reload, instead of one /location request per room.
+ */
+function warmRooms(addresses) {
+    const missing = [...new Set(addresses)].filter(a => a && !exitsCache.has(a));
+    const needStart = !exitsCache.has('(start)');
+    if (!missing.length) return needStart ? fetchLocationCached(null) : Promise.resolve();
+    const batch = (async () => {
+        try { const r = await api(`/rooms?addresses=${encodeURIComponent(missing.join(','))}`); return r.ok ? r.body : null; } catch { return null; }
+    })();
+    const remember = (key, p) => { exitsCache.set(key, p); p.then(v => { if (!v && exitsCache.get(key) === p) exitsCache.delete(key); }); };
+    for (const a of missing) remember(a, batch.then(b => b?.rooms?.find(x => x.address === a) ?? null));
+    if (needStart) remember('(start)', batch.then(b => { if (b?.start) primeCache(b.start); return b?.start ?? null; }));
+    return batch;
+}
 
 function fetchLocationCached(address) {
     const key = address ?? '(start)';
@@ -777,7 +844,8 @@ async function renderNotices() {
     }
 }
 
-function renderAllExits() {
+async function renderAllExits() {
+    if (ctx().chat?.length) await warmRooms(chatAddresses()); // after a reload: one batch request instead of one per message
     renderNotices();
     document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
     if (!settings().showExits) return;
@@ -806,6 +874,8 @@ function addSettingsPanel() {
       <input id="worldscrawl_url" class="text_pole" type="text">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
       <small id="worldscrawl_status"></small>
+      <label for="worldscrawl_who">Who moves (used in move messages and notes to the model; macros like {{user}} work)</label>
+      <input id="worldscrawl_who" class="text_pole" type="text" placeholder="{{user}}">
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
@@ -821,6 +891,9 @@ function addSettingsPanel() {
     const input = document.getElementById('worldscrawl_url');
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
+    const who = document.getElementById('worldscrawl_who');
+    who.value = settings().whoMoves ?? DEFAULTS.whoMoves;
+    who.addEventListener('input', () => { settings().whoMoves = who.value; applyFacts(); ctx().saveSettingsDebounced(); });
     const showExits = document.getElementById('worldscrawl_show_exits');
     showExits.checked = !!settings().showExits;
     showExits.addEventListener('change', () => { settings().showExits = showExits.checked; ctx().saveSettingsDebounced(); renderAllExits(); });
@@ -842,7 +915,11 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
-    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; await ensureStartStamp(); applyFacts(); setTimeout(renderAllExits, 0); });
+    eventSource.on(eventTypes.CHAT_CHANGED, async () => {
+        pendingLocation = null;
+        if (ctx().chat?.length) await warmRooms(chatAddresses()); // one request for every room this chat needs (none if all remembered)
+        await ensureStartStamp(); applyFacts(); setTimeout(renderAllExits, 0);
+    });
     eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));

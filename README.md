@@ -114,10 +114,21 @@ The server is stateless. The extension stores the party's location on the chat m
 
 ## API
 
+Design principle: **the server does the map work, the extension stays thin.** Every reply carries everything
+derived from the map that the extension needs (display names, the destination's name/building/region/entrance on
+each exit), so the extension never fetches a neighbouring room just to name it, and never re-implements map rules.
+Hidden/obscured exits reveal nothing about where they lead (no `to`, no destination name). Each player action
+costs one request: a step is one `/move`, a whole fast-travel trip is one `/travel`, and rebuilding after a reload
+is at most one `/rooms` batch.
+
 - `GET /start` returns the start location.
-- `GET /location/{address}` returns `{ address, region: {id, name}, name, description, exits: [{ direction, to, to_name, description? }] }`.
+- `GET /location/{address}` returns `{ address, region: {id, name, notes, entrance}, subregion: {id, name, notes, entrance}, name, display_name, description, effective_notes, exits: [{ direction, to, to_name, to_display_name, to_subregion: {id, name, entrance}, to_region: {id, name, entrance}, description?, hidden?, obscured? }] }` (hidden/obscured exits carry only direction, description and flags).
+- `GET /rooms?addresses=a,b,c` returns `{ start, rooms: [...], unknown: [...] }`: several rooms in one request.
 - `POST /move` with `{ "from": "riverton:drowned_rat/common_room", "direction": "out" }` returns the new location, or 400 with `{ "detail": { "error", "valid_directions" } }`.
-- `GET /health` returns counts and the start address.
+- `POST /travel` with `{ "from": "...", "steps": ["out", "north"] }` walks the route step by step with the same rules as `/move` and returns `{ location, path, steps_completed, steps_requested, stopped, reason }`. `location` is the room actually reached; the walk stops early at the last valid room if a step is blocked (`reason: "blocked"`; `null` when the whole route was walked; later, encounters may stop a trip too). The extension always trusts `location`.
+- `GET /health` returns counts, the start address and the map version.
+- Every reply has an `X-WorldScrawl-Map-Version` header (a hash of the map files at load). When it changes, the extension forgets the rooms it remembered.
+- The server log has one line per move and per trip (from, direction/steps, result).
 
 Set `WORLDSCRAWL_WORLD_DIR` to use a world folder somewhere else.
 
@@ -133,9 +144,9 @@ ST_SRC=/path/to/SillyTavern tests/e2e/run.sh   # headless: real ST 1.19 + fake m
 
 By default the model never touches the map:
 
-- **Click an exit** in the "Exits:" line under the latest reply, or type `/ws-go north`. The extension moves the party, adds a short note ("*The party goes north.*") and asks the model to narrate the arrival.
+- **Click an exit** in the "Exits:" line under the latest reply, or type `/ws-go north`. The extension moves you, adds a short note ("*Knarfy goes north.*") and asks the model to narrate the arrival. The **Who moves** setting (default `{{user}}`) sets that phrase; macros like `{{user}}` are resolved by the extension before the text is used in the note, the questions to the model or the notes for the model.
 - **Typed movement** ("let's head to the docks"): before each reply the extension asks the model one multiple-choice question, "Which of these exits does the player mean: south, north, none?". Only an exact answer from that list moves the party; anything else means no move. The answer can also be "stay" (not travelling) or "elsewhere" (wants a place that isn't an exit or a known place). If the answer is unreadable, a second question asks "Is the player trying to travel to a different place? yes/no"; only a clear yes counts as travel. For "elsewhere" the model isn't called at all; a game message says "You're not aware of such a place." (unknown place) or "You don't know a way to <place> from here." (known place, no allowed route), with clickable exits (shown in chat, never sent to the model). The exit back to where the party came from is marked, so "go back" works.
-- **Known places**: places the party has stood in plus places seen listed as exits from them (per chat, rolls back with swipes/deletes). Typing "go to the temple" or `/ws-go Temple of the Tides` walks the shortest route through the exits, passing only through places the party has stood in and never using hidden exits, and the model narrates the journey. Unknown places can't be reached. Whether an exit reveals its destination is decided in one function (`revealsDestination`), ready for hidden exits later.
+- **Known places**: places the party has stood in plus places seen listed as exits from them (per chat, rolls back with swipes/deletes). Typing "go to the temple" or `/ws-go Temple of the Tides` walks the shortest route through the exits, passing only through places the party has stood in and never using hidden exits, in one `/travel` request, and the model is told the rooms passed through in order and asked to narrate the journey briefly, ending at the arrival room. Unknown places can't be reached. Whether an exit reveals its destination is decided in one function (`revealsDestination`), ready for hidden exits later.
 - Every turn the model gets the current location, its exits and what just happened as authoritative facts, and is told not to move the party or invent exits.
 - `/ws-exits` shows the current exits.
 - Movement setting (radio): "Clicks and commands only", "Clicks, commands and typed moves" (default), "Model moves with map tools (not recommended)" (the old `ws_look` / `ws_move` tools).
