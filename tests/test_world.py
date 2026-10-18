@@ -329,3 +329,27 @@ def test_rooms_batch(client):
     assert [r["address"] for r in b["rooms"]] == [TAVERN, SQUARE]
     assert b["unknown"] == ["nowhere:x/y"] and b["start"]["address"] == TAVERN
     assert client.get("/rooms").json()["rooms"] == []
+
+
+def test_exit_labels_name_the_building(client, tmp_path):
+    lane = {e["direction"]: e for e in client.get("/location/riverton:streets/market_lane").json()["exits"]}
+    assert lane["east"]["to_label"] == "Village Square"            # same building: room name
+    assert lane["inn"]["to_label"] == "The Gilded Goose"           # other building, its entrance
+    assert lane["gate"]["to_label"] == "The Drowned Rat, Stable"   # other building, not its entrance
+    rat = {e["direction"]: e for e in client.get(f"/location/{TAVERN}").json()["exits"]}
+    assert rat["out"]["to_label"] == "Riverton Streets"
+    # crossing into another region adds the region name; hidden exits say nothing
+    r = region()
+    r["subregions"]["s"]["locations"]["b"]["exits"].append({"direction": "road", "to": "q:m/n"})
+    r["subregions"]["s"]["locations"]["b"]["exits"].append({"direction": "crack", "to": "a", "hidden": True})
+    q = {"name": "Q", "start": "m/n", "subregions": {"m": {"name": "M", "locations": {
+        "n": {"name": "N", "description": "dn", "exits": []}, "o": {"name": "O", "description": "do", "exits": []}}}}}
+    c = TestClient(create_app(make_world(tmp_path, {"r": r, "q": q})))
+    ex = {e["direction"]: e for e in c.get("/location/r:s/b").json()["exits"]}
+    assert ex["road"]["to_label"] == "M, Q" and ex["west"]["to_label"] == "A"
+    assert "to_label" not in ex["crack"] and "to" not in ex["crack"]
+
+
+def test_subregion_entrance_name(client):
+    sub = client.get("/location/riverton:drowned_rat/stable").json()["subregion"]
+    assert sub["entrance"] == TAVERN and sub["entrance_name"] == "Common Room"

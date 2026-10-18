@@ -10,6 +10,7 @@ const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, sho
 const MODES = ['commands', 'typed', 'tools'];
 const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
 const FACTS_KEY = 'worldscrawl_facts';
+const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
 const TOOL_NAMES = ['ws_look', 'ws_move'];
 const NUDGE_KEY = 'worldscrawl_nudge';
 
@@ -186,12 +187,24 @@ async function engineMove(direction) {
         return { ok: false, error: d.error ?? `Move failed (${r.status})`, valid: d.valid_directions ?? from.exits.map(e => e.direction) };
     }
     primeCache(r.body);
-    return { ok: true, to: r.body, move: { direction: exit?.direction ?? direction, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body) } };
+    return { ok: true, to: r.body, move: { direction: exit?.direction ?? direction, prev_name: from.name, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body) } };
 }
 
 /** Normalize the model's answer and accept it only if it is exactly one of the options. */
+/**
+ * Strip quotes, markdown and trailing punctuation from a model answer, but keep a closing ")" that belongs to the
+ * answer: option labels look like "Common Room (The Drowned Rat)" and used to lose their ")" here, so a correct
+ * answer naming a room "Name (Building)" never matched.
+ */
+export function trimAnswer(answer) {
+    let a = String(answer ?? '').trim().replace(/^[\s"'`*_.:\-\[]+|[\s"'`*_.:!?\]]+$/g, '');
+    while (a.startsWith('(') && a.endsWith(')')) a = a.slice(1, -1).trim(); // "(north)"
+    if (a.startsWith('(') && !a.includes(')')) a = a.slice(1).trim();
+    if (a.endsWith(')') && !a.includes('(')) a = a.slice(0, -1).trim();
+    return a;
+}
 export function parseChoice(answer, options) {
-    const a = String(answer ?? '').trim().toLowerCase().replace(/^[\s"'`*_.:\-\[(]+|[\s"'`*_.:!?\])]+$/g, '');
+    const a = trimAnswer(answer).toLowerCase();
     return options.find(o => o.toLowerCase() === a) ?? null;
 }
 
@@ -203,14 +216,16 @@ export function parseChoice(answer, options) {
 export const revealsDestination = exit => !(exit?.hidden || exit?.obscured);
 /** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
 export const exitLabel = (exit, fmt = n => ` (${n})`, withSub = false) =>
-    exit.direction + (revealsDestination(exit) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : exit.to_name) : '');
-/** Destination names shown more than once among these exits (those get their subregion added). */
+    exit.direction + (revealsDestination(exit) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : destLabel(exit)) : '');
+/** The server's label for where an exit leads, seen from this room: "Courtyard", "The Gilded Goose", "The Drowned Rat, Stable". */
+export const destLabel = exit => exit.to_label ?? exit.to_name;
+/** Destination labels shown more than once among these exits (those get the full "Room (Building)" name). */
 export function collidingNames(exits) {
     const seen = new Map();
-    for (const e of exits ?? []) if (revealsDestination(e)) seen.set(e.to_name, (seen.get(e.to_name) ?? 0) + 1);
+    for (const e of exits ?? []) if (revealsDestination(e)) seen.set(destLabel(e), (seen.get(destLabel(e)) ?? 0) + 1);
     return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
 }
-export const exitLabels = (exits, fmt) => { const c = collidingNames(exits); return (exits ?? []).map(e => exitLabel(e, fmt, c.has(e.to_name))); };
+export const exitLabels = (exits, fmt) => { const c = collidingNames(exits); return (exits ?? []).map(e => exitLabel(e, fmt, c.has(destLabel(e)))); };
 /** "Name (Subregion)", or just the name when the subregion has the same name. */
 export const placeLabel = (name, sub) => (sub && sub !== name ? `${name} (${sub})` : name);
 /** Unambiguous name for the model: "Common Room (The Drowned Rat)". */
@@ -365,7 +380,9 @@ async function engineTravel(target, prefix = null) {
     const via = r.body.path.map(l => l.address);
     if (r.body.stopped) console.warn(`[WorldScrawl] travel stopped at ${at.address} after ${r.body.steps_completed}/${steps.length} steps (${r.body.reason})`);
     const single = r.body.path.length === 1 ? steps[0].direction : null;
-    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via,
+    const lastDir = steps[r.body.path.length - 1]?.direction ?? null;
+    const prevName = (r.body.path.length > 1 ? r.body.path[r.body.path.length - 2] : from).name;
+    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, last_direction: lastDir, prev_name: prevName,
         ...(r.body.stopped ? { stopped: r.body.reason ?? 'stopped' } : {}) } };
 }
 
@@ -473,6 +490,19 @@ async function goAction(arg) {
 }
 
 /** Move to a target ({direction} or {address,label}), add a short user note, then let the model narrate. */
+const DOOR_LIKE = /\b(door|doorway|gate|hatch|trapdoor|arch|archway|curtain|portal|passage|opening|crack|gap|hole|tunnel|grate|panel)s?$/i;
+/**
+ * The auto-sent move message. Hidden/obscured exits never reveal where they lead:
+ * "Knarfy goes through the trapdoor." (door-like label) or "Knarfy takes the crawlspace exit.".
+ */
+export function moveNote(who, move, exit) {
+    if (move.direction && exit && !revealsDestination(exit)) {
+        const label = exit.direction;
+        return DOOR_LIKE.test(label) ? `*${who} goes through the ${label}.*` : `*${who} takes the ${label} exit.*`;
+    }
+    return move.direction ? `*${who} goes ${move.direction}.*` : `*${who} heads to ${move.to_name}.*`;
+}
+
 async function goTarget(t) {
     const c = ctx();
     if (engineBusy) return 'WorldScrawl: already moving.';
@@ -491,7 +521,7 @@ async function goTarget(t) {
         }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
         const who = whoMoves();
-        const note = res.move.direction ? `*${who} goes ${res.move.direction}.*` : `*${who} heads to ${res.move.to_name}.*`;
+        const note = moveNote(who, res.move, exit ?? here.exits.find(e => e.direction.toLowerCase() === String(res.move.direction ?? '').toLowerCase()));
         await c.executeSlashCommandsWithOptions(`/send ${note}`);
         const msg = c.chat[c.chat.length - 1];
         stamp(msg, res.to, res.move);
@@ -537,7 +567,7 @@ async function parseIntent(msg) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
-        const nm = e.to_subregion?.name && e.to_subregion.name !== e.to_name ? `${e.to_name}, ${e.to_subregion.name}` : lbl.slice(e.direction.length);
+        const nm = lbl.slice(e.direction.length); // same label as the footer: room, or building (+ room / region)
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
     const prompt = `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
@@ -551,11 +581,11 @@ async function parseIntent(msg) {
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
     const cands = await travelCandidates(loc);
     let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label)]);
-    const ans = cleanAnswer(answer).replace(/^[\s"'`*_.:\-\[(]+|[\s"'`*_.:!?\])]+$/g, '');
+    const ans = trimAnswer(cleanAnswer(answer));
     const insideAns = !dirs.includes(choice) && hereAreas(loc).find(a => sameName(a.name, choice ?? ans));
     if (insideAns) return { kind: 'already', loc, name: insideAns.name };
     if (!choice) { // a bare name that matches known places (e.g. "Upstairs Rooms")
-        const m = matchCandidates(cleanAnswer(answer).replace(/^[\s"'`*_.:\-\[(]+|[\s"'`*_.:!?\])]+$/g, ''), cands);
+        const m = matchCandidates(trimAnswer(cleanAnswer(answer)), cands);
         if (m.length > 1) return { kind: 'which', loc, candidates: m };
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
     }
@@ -601,7 +631,15 @@ async function parseIntent(msg) {
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
         else return { kind: 'which', loc, candidates: m.length ? m : cands };
     }
-    const place = places.find(p => p.label === choice) ?? (dirs.includes(choice) ? null : cands.find(x => x.label === choice && !x.direction));
+    let place = places.find(p => p.label === choice) ?? (dirs.includes(choice) ? null : cands.find(x => x.label === choice && !x.direction));
+    if (place && !place.area) {
+        // The player named a building ("go to the Drowned Rat") but the model picked one of its rooms (often the
+        // entrance). Unless the room's own name was said, go to the building: its nearest known room.
+        const said = new Set(words(msg.mes));
+        const area = !keyWords(place.name).some(w => said.has(w))
+            && cands.find(x => x.area && x.prefix && place.address.startsWith(x.prefix) && namedInText(msg.mes, [x]).length);
+        if (area) { console.log(`[WorldScrawl] building named, model picked a room: ${place.label} -> ${area.label}`); place = area; }
+    }
     const nearArea = !dirs.includes(choice) && cands.find(x => x.label === choice && x.area);
     if (nearArea && hereAreas(loc).some(a => sameName(a.name, nearArea.name))) return { kind: 'already', loc, name: nearArea.name };
     const res = place ? await engineTravel(place.address, place.prefix ?? null) : await engineMove(choice);
@@ -639,6 +677,35 @@ async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates
     await c.saveChat();
 }
 
+const PLAIN_DIRECTIONS = new Set(['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest', 'ne', 'nw', 'se', 'sw', 'n', 's', 'e', 'w', 'up', 'down', 'in', 'out', 'inside', 'outside', 'back', 'forward', 'left', 'right']);
+const withArticle = name => (/^(the|a|an)\s/i.test(name) || /^[A-Z][\w-]*'s\s/.test(name) ? name : `the ${name}`);
+/**
+ * Where exactly the party arrived, room before building, so the model doesn't put them in the building's main room:
+ * "arrives in the Stable of The Drowned Rat, entering through the gate (not the Common Room or any other part of
+ * The Drowned Rat)". Built only from the room the server returned.
+ */
+export function arrival(loc, move) {
+    const sub = loc.subregion ?? {};
+    const room = loc.name;
+    const where = sub.name && sub.name !== room ? `${withArticle(room)} of ${sub.name}` : room;
+    const subOf = a => String(a ?? '').split('/')[0];
+    const newBuilding = !!move?.from && subOf(move.from) !== subOf(loc.address);
+    const dir = move?.last_direction ?? move?.direction;
+    let text = `arrives in ${where}`;
+    if (newBuilding && dir && !PLAIN_DIRECTIONS.has(String(dir).toLowerCase())) text += `, entering through the ${dir}${move.prev_name ? ` from ${move.prev_name}` : ''}`;
+    let not = '';
+    if (newBuilding && sub.name && sub.name !== room && sub.entrance && sub.entrance !== loc.address)
+        not = ` They are in ${withArticle(room)}, not ${withArticle(sub.entrance_name ?? 'main room')} or any other part of ${sub.name}`;
+    return { text: text + (not ? '.' + not : ''), where };
+}
+
+/** Short last-line reminder for move/travel turns (empty otherwise). */
+export function arrivalReminder(loc, move) {
+    if (!move || move.to !== loc.address) return '';
+    const where = arrival(loc, move).where;
+    return `[Engine: this turn ends in ${where}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in ${where}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]`;
+}
+
 export function factsText(loc, move, toolsOn) {
     const who = whoMoves();
     const lines = [
@@ -650,8 +717,9 @@ export function factsText(loc, move, toolsOn) {
         (loc.effective_notes?.region || loc.effective_notes?.subregion) ? 'If this location\'s own description contradicts the broader notes above, the location description wins.' : '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
     ];
-    if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}. Narrate the journey briefly, in that order, ending with arriving at ${move.to_name}.`);
-    else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}. Describe arriving at ${move.to_name}.`);
+    const arr = move && move.to === loc.address ? arrival(loc, move) : null;
+    if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
+    else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
@@ -661,14 +729,17 @@ export function factsText(loc, move, toolsOn) {
 
 async function applyFacts() {
     const c = ctx();
-    let text = '';
+    let text = '', reminder = '';
     try {
         const loc = await currentLocation();
         const ui = lastUserIndex(c.chat ?? []);
         const move = ui >= 0 ? c.chat[ui].extra?.[MOVE_KEY] : null;
         text = factsText(loc, move, toolsOn());
+        reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    // Small models weigh the last lines most: on a move/travel turn, repeat where the turn ends after the player's message.
+    c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
 }
 
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
