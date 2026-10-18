@@ -35,7 +35,7 @@ let mapVersion = null;
 /** Every server reply carries the map version; when it changes (map files edited, server restarted) drop remembered rooms. */
 export function noteMapVersion(v) {
     if (!v) return;
-    if (mapVersion && v !== mapVersion) { exitsCache.clear(); console.log(`[WorldScrawl] map changed (${mapVersion} -> ${v}); cleared remembered rooms`); }
+    if (mapVersion && v !== mapVersion) { exitsCache.clear(); doorInfo.clear(); doorFetched.clear(); console.log(`[WorldScrawl] map changed (${mapVersion} -> ${v}); cleared remembered rooms`); }
     mapVersion = v;
 }
 export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
@@ -66,6 +66,7 @@ export function getStoredLocation() {
 
 /** Current location, from the in-memory cache (one shared request per address; /start fetched once). */
 async function currentLocation() {
+    await syncDoors();
     const stored = getStoredLocation();
     if (stored) {
         const loc = await fetchLocationCached(stored);
@@ -213,7 +214,53 @@ export function parseChoice(answer, options) {
  * The one place that decides whether an exit reveals where it leads. Later a hidden/obscured exit
  * (e.g. exit.hidden or exit.obscured in the region file) can return false here.
  */
-export const revealsDestination = exit => !(exit?.hidden || exit?.obscured);
+export const revealsDestination = exit => !(exit?.hidden || exit?.obscured) || !!exit?.revealed;
+
+// ---- Obscured/hidden doors. The server gives each flagged exit and its return exit the same opaque `door` id.
+// Walking through either side reveals both. Which doors were walked through is derived from this chat's move
+// stamps (room left + direction taken), so it rolls back with swipes/deletes. Destinations behind passed doors
+// come from POST /doors and are merged into rooms by fetchLocationCached; nothing else ever sees them.
+let revealedDoors = new Set();
+const doorInfo = new Map(); // "address|direction" -> revealed exit data
+/** [{from, direction}] for every step this chat's messages record. */
+export function stepsTaken(chat = ctx().chat ?? []) {
+    const out = [];
+    for (const m of chat) {
+        const mv = m?.extra?.[MOVE_KEY];
+        if (!mv?.from) continue;
+        if (mv.steps?.length) mv.steps.forEach((d, i) => out.push({ from: i ? mv.via?.[i - 1] : mv.from, direction: d }));
+        else if (mv.direction) out.push({ from: mv.from, direction: mv.direction });
+    }
+    return out.filter(x => x.from && x.direction);
+}
+/** Recompute the passed doors from the chat (fetching any missing reveal data in one request). */
+export async function syncDoors() {
+    const steps = stepsTaken();
+    await warmRooms(steps.map(s => s.from));
+    const doors = new Set();
+    for (const st of steps) {
+        const e = (await fetchRaw(st.from))?.exits?.find(x => x.direction.toLowerCase() === String(st.direction).toLowerCase());
+        if (e?.door) doors.add(e.door);
+    }
+    const missing = [...doors].filter(d => !doorFetched.has(d));
+    if (missing.length) {
+        try {
+            const r = await api('/doors', { method: 'POST', body: JSON.stringify({ doors: missing }) });
+            if (r.ok) { for (const x of r.body.exits ?? []) doorInfo.set(`${x.from}|${x.direction.toLowerCase()}`, x); missing.forEach(d => doorFetched.add(d)); }
+        } catch {}
+    }
+    revealedDoors = doors;
+    return doors;
+}
+const doorFetched = new Set();
+/** A room as the party knows it: flagged exits whose door was passed carry their destination (revealed: true). */
+export function applyReveals(loc) {
+    if (!loc?.exits?.some(e => e.door && (e.hidden || e.obscured))) return loc;
+    return { ...loc, exits: loc.exits.map(e => {
+        const info = (e.hidden || e.obscured) && revealedDoors.has(e.door) ? doorInfo.get(`${loc.address}|${e.direction.toLowerCase()}`) : null;
+        return info ? { ...e, ...info, revealed: true } : e;
+    }) };
+}
 /** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
 /** "Stable" vs "stable", "Kitchens" vs "kitchen", "The Forge" vs "forge": the same word, so show it once. */
 const labelKey = x => String(x ?? '').toLowerCase().trim().replace(/^the\s+/, '').replace(/(es|s)$/, '');
@@ -236,6 +283,7 @@ export const displayName = loc => loc.display_name ?? placeLabel(loc.name, loc.s
 
 /** Places stood in during this chat: the start plus every location (and route step) saved on its messages. */
 async function stoodInAddresses() {
+    await syncDoors();
     const saved = chatAddresses();
     await warmRooms(saved); // anything not remembered yet (e.g. after a reload) comes in one batch request
     const set = new Set();
@@ -385,7 +433,7 @@ async function engineTravel(target, prefix = null) {
     const single = r.body.path.length === 1 ? steps[0].direction : null;
     const lastDir = steps[r.body.path.length - 1]?.direction ?? null;
     const prevName = (r.body.path.length > 1 ? r.body.path[r.body.path.length - 2] : from).name;
-    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, last_direction: lastDir, prev_name: prevName,
+    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, steps: steps.slice(0, r.body.path.length).map(st => st.direction), last_direction: lastDir, prev_name: prevName,
         ...(r.body.stopped ? { stopped: r.body.reason ?? 'stopped' } : {}) } };
 }
 
@@ -821,7 +869,8 @@ function warmRooms(addresses) {
     return batch;
 }
 
-function fetchLocationCached(address) {
+function fetchLocationCached(address) { return fetchRaw(address).then(applyReveals); }
+function fetchRaw(address) {
     const key = address ?? '(start)';
     if (!exitsCache.has(key)) {
         const p = (async () => {
@@ -933,6 +982,7 @@ async function renderNotices() {
 
 async function renderAllExits() {
     if (ctx().chat?.length) await warmRooms(chatAddresses()); // after a reload: one batch request instead of one per message
+    await syncDoors();
     renderNotices();
     document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
     if (!settings().showExits) return;
