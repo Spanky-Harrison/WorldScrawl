@@ -468,6 +468,14 @@ try {
     const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1]; });
     check('flee the region with no way out: not aware, no move, no narration', fl.is_system && fl.mes.startsWith("You're not aware of such a place.") && (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nF + 1, fl.mes);
     const lw = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.LEAVING_RE.test('we get away from here'), m.LEAVING_RE.test('I go to the temple') || m.LEAVING_RE.test('the stairs on the left'), m.whichText([{ label: 'out (Village Square)' }, { label: 'gate (Market Lane)' }], m.WAY_OUT_PREFIX)]; });
+    const pl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const grate = { direction: 'grate', description: 'A stone stair behind an iron grate.' };
+        return [m.sameWord('grate', 'grates'), m.sameWord('Stables', 'stable'), m.sameWord('box', 'boxes'), m.sameWord('kitchen', 'Kitchens'), m.sameWord('grate', 'grat'), m.sameWord('stable', 'stabl'), m.sameWord('box', 'boxe') && false,
+            m.sameLabel('Kitchens', 'kitchen'), m.sameLabel('The Forge', 'forge'), m.sameLabel('Stable', 'stables'), m.sameLabel('Upstairs Rooms', 'upstairs'),
+            m.sameAsDirection({ direction: 'stable', to_name: 'Stable' }), m.sameAsDirection({ direction: 'kitchen', to_label: 'Kitchens' }),
+            m.exitMentioned('I go through the grates', grate), m.exitMentioned('I take the stairs down', grate), m.exitMentioned('I go to the temple', grate),
+            m.namedInText('go upstairs', [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms', address: 'u' }]).length, m.namedInText('the common room', [{ name: 'Common Room', label: 'Common Room', address: 'c' }]).length]; });
+    check('plural-tolerant word matching (grate/grates, stable/stables, box/boxes, kitchen/kitchens; no stem mangling)',
+        JSON.stringify(pl) === '[true,true,true,true,false,false,false,true,true,true,false,true,true,true,true,false,1,1]', JSON.stringify(pl));
     check('leaving words + way-out text', JSON.stringify(lw) === '[true,false,"Which way out? out (Village Square), gate (Market Lane)"]', JSON.stringify(lw));
     await go('out', 'west', 'gate');
     check('stable reached via the gate', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
