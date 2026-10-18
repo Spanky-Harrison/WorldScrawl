@@ -263,8 +263,12 @@ export function applyReveals(loc) {
 }
 /** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
 /** "Stable" vs "stable", "Kitchens" vs "kitchen", "The Forge" vs "forge": the same word, so show it once. */
-const labelKey = x => String(x ?? '').toLowerCase().trim().replace(/^the\s+/, '').replace(/(es|s)$/, '');
-export const sameAsDirection = exit => labelKey(exit.direction) === labelKey(destLabel(exit));
+/** Plural-tolerant word match: equal, or one is the other + "s" / + "es" (grate/grates, box/boxes, kitchen/kitchens). */
+export const sameWord = (a, b) => { a = String(a ?? '').toLowerCase(); b = String(b ?? '').toLowerCase(); return a === b || a === b + 's' || a === b + 'es' || b === a + 's' || b === a + 'es'; };
+const labelWords = x => String(x ?? '').toLowerCase().trim().replace(/^the\s+/, '').split(/\s+/).filter(Boolean);
+/** Same label word for word, ignoring case, a leading "the" and plurals ("Kitchens" vs "kitchen", "Stable" vs "stable"). */
+export const sameLabel = (a, b) => { const x = labelWords(a), y = labelWords(b); return x.length === y.length && x.every((w, i) => sameWord(w, y[i])); };
+export const sameAsDirection = exit => sameLabel(exit.direction, destLabel(exit));
 export const exitLabel = (exit, fmt = n => ` (${n})`, withSub = false) =>
     exit.direction + (revealsDestination(exit) && (withSub || !sameAsDirection(exit)) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : destLabel(exit)) : '');
 /** The server's label for where an exit leads, seen from this room: "Courtyard", "The Gilded Goose", "The Drowned Rat, Stable". */
@@ -718,9 +722,7 @@ const MENTION_STOP = new Set(['the', 'a', 'an', 'of', 'to', 'into', 'onto', 'in'
 export function exitMentioned(text, exit) {
     const said = new Set(words(text));
     const own = [...words(exit?.direction), ...words(exit?.description)].filter(w => w.length > 2 && !MENTION_STOP.has(w));
-    const stem = w => w.replace(/(es|s)$/, '');
-    const saidStems = new Set([...said].map(stem));
-    return words(exit?.direction).some(w => said.has(w)) || own.some(w => saidStems.has(stem(w)));
+    return words(exit?.direction).some(w => said.has(w)) || own.some(w => [...said].some(t => sameWord(t, w)));
 }
 /**
  * Second look at an exit the model picked (null = keep it). The model tends to guess an exit for a place it
