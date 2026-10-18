@@ -202,12 +202,12 @@ try {
     narr = JSON.stringify((await lastReq()).messages);
     check('notes: temple drops region notes (inherit_notes false)', narr.includes('About Temple of the Tides: A hushed') && !narr.includes('About Riverton:'), narr.slice(0, 300));
     const ex = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
-    check('/ws-exits lists exits', ex === 'Exits: south (Riverton Streets)', String(ex));
+    check('/ws-exits lists exits', ex === 'Exits: south (Village Square)', String(ex));
     const before = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go sideways'));
     await page.waitForTimeout(1500);
     check('/ws-go bad direction: no move, no generation', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === before);
-    check('/ws-go unknown name: not-aware message', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.mes === "You're not aware of such a place. Exits: south (Riverton Streets)"; }));
+    check('/ws-go unknown name: not-aware message', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.mes === "You're not aware of such a place. Exits: south (Village Square)"; }));
     check('engine footer never in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => !m.extra?.worldscrawl_notice && /Exits:/.test(m.mes ?? ''))));
 
     // Intent setting off: no question asked.
@@ -227,11 +227,11 @@ try {
     await send('go to the castle', 1);
     let lm = await lastMsg();
     check('unreachable: location unchanged', (await stored()) === 'riverton:drowned_rat/common_room');
-    check('unreachable: game message shown', lm.sys && lm.mes === "You're not aware of such a place. Exits: out (Riverton Streets), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
+    check('unreachable: game message shown', lm.sys && lm.mes === "You're not aware of such a place. Exits: out (Village Square), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
     check('unreachable: user message kept', lm.prevUser && lm.prev === 'go to the castle');
     check('unreachable: no narration call', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected && JSON.stringify((await lastReq()).messages).includes('Which option'));
     const noticeBtns = () => page.evaluate(() => { const els = [...document.querySelectorAll('#chat .mes')]; return els.filter(e => /not aware of such a place|know a way to/.test(e.textContent)).map(e => [...e.querySelectorAll('.worldscrawl_exit')].map(b => b.textContent)); });
-    check('game message exits are buttons', JSON.stringify((await noticeBtns()).pop()) === '["out (Riverton Streets)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(await noticeBtns()));
+    check('game message exits are buttons', JSON.stringify((await noticeBtns()).pop()) === '["out (Village Square)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(await noticeBtns()));
     check('game message visible in chat', await page.evaluate(() => [...document.querySelectorAll('#chat .mes')].some(e => /not aware of such a place|know a way to/.test(e.textContent))));
 
     // Unparseable answer on a travel-looking message fails closed.
@@ -319,10 +319,10 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Temple of the Tides'));
     await page.waitForTimeout(2000);
     lm = await lastMsg();
-    check('no route: know-a-way message', lm.sys && lm.mes === "You don't know a way to Temple of the Tides from here. Exits: out (Riverton Streets), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
+    check('no route: know-a-way message', lm.sys && lm.mes === "You don't know a way to Temple of the Tides from here. Exits: out (Village Square), up (Upstairs Rooms), back (Courtyard)", JSON.stringify(lm));
     check('no route: no move, no generation', (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nReq);
     nb = await noticeBtns();
-    check('no route message exits clickable', JSON.stringify(nb[nb.length - 1]) === '["out (Riverton Streets)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(nb));
+    check('no route message exits clickable', JSON.stringify(nb[nb.length - 1]) === '["out (Village Square)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(nb));
     await page.unroute(squareStub);
     await page.evaluate(() => { const i = document.getElementById('worldscrawl_url'); i.dispatchEvent(new Event('input')); }); // drop the stubbed location from the cache
     const nr = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.noticePrefix('Temple of the Tides'), m.unreachableText({ exits: [{ direction: 'out', to_name: 'Village Square' }] }, 'Temple of the Tides')]; });
@@ -387,10 +387,16 @@ try {
         return [m.exitsText(await get('riverton:streets/market_lane')), m.exitsText(await get('riverton:drowned_rat/courtyard')), m.exitsText({ exits: [{ direction: 'crack', hidden: true }] })]; });
     check('exit labels: building on entrance, building + room otherwise, room within the building, hidden = label only',
         bl[0] === "Exits: east (Village Square), inn (The Gilded Goose), store (Marlow's General Store), smithy (Brask's Smithy), gate (The Drowned Rat, Stable)"
-        && bl[1] === 'Exits: in (Common Room), kitchen (Kitchens), stable (Stable)' && bl[2] === 'Exits: crack', JSON.stringify(bl));
+        && bl[1] === 'Exits: in (Common Room), kitchen, stable' && bl[2] === 'Exits: crack', JSON.stringify(bl));
     const mn = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const mv = { direction: 'x', to_name: 'Secret Vault' };
         return [m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
             m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })]; });
+    const mv2 = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const get = async a => (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent(a))).json();
+        const note = async (from, dir) => { const l = await get(from); const e = l.exits.find(x => x.direction === dir); return m.moveNote('User', { direction: dir, to_name: e.to_name }, e); };
+        return [await note('riverton:drowned_rat/courtyard', 'stable'), await note('riverton:streets/market_lane', 'gate'), await note('riverton:streets/market_lane', 'inn'),
+            await note('riverton:drowned_rat/stable', 'gate'), await note('riverton:drowned_rat/common_room', 'out')]; });
+    check('non-compass move messages say where they go', JSON.stringify(mv2) === JSON.stringify(['*User goes to the Stable.*', '*User goes through the gate to the Stable of The Drowned Rat.*', '*User goes to The Gilded Goose.*', '*User goes through the gate to Market Lane.*', '*User goes out.*']), JSON.stringify(mv2));
     check('hidden exit move message never names the destination', JSON.stringify(mn) === JSON.stringify(['*User goes through the trapdoor.*', '*User takes the crawlspace exit.*', '*User goes north.*']), JSON.stringify(mn));
     check('footer short / subregion only on collision', fx[0] === 'Exits: down (The Gilded Goose)' && fx[1] === 'Exits: left (Upstairs Rooms, The Drowned Rat), right (Upstairs Rooms, The Gilded Goose)', JSON.stringify(fx));
 
@@ -441,11 +447,11 @@ try {
     await queue([{ content: 'elsewhere' }]);
     await send('go to the temple', 1);
     let al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_exit')].length }; });
-    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Riverton Streets)" && al.btns === 1, JSON.stringify(al));
+    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square)" && al.btns === 1, JSON.stringify(al));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Riverton'));
     await page.waitForTimeout(1500);
     al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
-    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Riverton Streets)", al);
+    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square)", al);
     check('already: no move, no narration', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nA + 1);
 
     // Stable gate onto Market Lane: building travel uses the nearest room already stood in.
@@ -533,6 +539,9 @@ try {
     await send('I head outside', 2);
     check('typed move turn: only /move', JSON.stringify(apiCalls) === '["/move"]', JSON.stringify(apiCalls));
     // 'Who moves' setting: macros resolved by the extension.
+    const oldWho = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const es = SillyTavern.getContext().extensionSettings;
+        const keep = es.worldscrawl; es.worldscrawl = { serverUrl: keep.serverUrl, moveMode: 'typed' }; const w = [m.settings().whoMoves, m.whoMoves()]; es.worldscrawl = keep; return w; });
+    check('old saved settings without Who moves get {{user}}', oldWho[0] === '{{user}}' && oldWho[1] === 'User', JSON.stringify(oldWho));
     await page.evaluate(() => { const i = document.getElementById('worldscrawl_who'); i.value = 'Sir {{user}}'; i.dispatchEvent(new Event('input')); });
     apiCalls.length = 0;
     await go('north');
@@ -575,6 +584,7 @@ try {
     const everyReq = await (await fetch(`${FAKE}/__requests`)).json();
     const leaks = everyReq.map(r => JSON.stringify(r)).filter(t => t.includes('{{'));
     const chatLeaks = await page.evaluate(() => SillyTavern.getContext().chat.filter(m => m.mes?.includes('{{')).map(m => m.mes));
+    check('no hardcoded "The party" in model requests or chat', !everyReq.some(r => /the party/i.test(JSON.stringify(r.messages))) && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /the party/i.test(m.mes ?? ''))));
     check('no raw {{macros}} in any model request (intent questions, notes) or chat message', !leaks.length && !chatLeaks.length, (leaks[0] ?? '').slice(0, 300) + JSON.stringify(chatLeaks));
     // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });

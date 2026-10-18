@@ -215,8 +215,11 @@ export function parseChoice(answer, options) {
  */
 export const revealsDestination = exit => !(exit?.hidden || exit?.obscured);
 /** Every displayed/prompted exit goes through here: "north (Village Square)", or just "north" if not revealed. */
+/** "Stable" vs "stable", "Kitchens" vs "kitchen", "The Forge" vs "forge": the same word, so show it once. */
+const labelKey = x => String(x ?? '').toLowerCase().trim().replace(/^the\s+/, '').replace(/(es|s)$/, '');
+export const sameAsDirection = exit => labelKey(exit.direction) === labelKey(destLabel(exit));
 export const exitLabel = (exit, fmt = n => ` (${n})`, withSub = false) =>
-    exit.direction + (revealsDestination(exit) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : destLabel(exit)) : '');
+    exit.direction + (revealsDestination(exit) && (withSub || !sameAsDirection(exit)) ? fmt(withSub && exit.to_subregion?.name ? `${exit.to_name}, ${exit.to_subregion.name}` : destLabel(exit)) : '');
 /** The server's label for where an exit leads, seen from this room: "Courtyard", "The Gilded Goose", "The Drowned Rat, Stable". */
 export const destLabel = exit => exit.to_label ?? exit.to_name;
 /** Destination labels shown more than once among these exits (those get the full "Room (Building)" name). */
@@ -495,10 +498,23 @@ const DOOR_LIKE = /\b(door|doorway|gate|hatch|trapdoor|arch|archway|curtain|port
  * The auto-sent move message. Hidden/obscured exits never reveal where they lead:
  * "Knarfy goes through the trapdoor." (door-like label) or "Knarfy takes the crawlspace exit.".
  */
+/** Where an exit leads, for prose: "the Stable", "The Gilded Goose", "the Stable of The Drowned Rat", "Village Square". */
+function exitDestPhrase(e) {
+    const sub = e.to_subregion ?? {};
+    const lbl = destLabel(e);
+    if (sub.name && lbl.startsWith(`${sub.name}, `)) return `${withArticle(e.to_name)} of ${sub.name}`;
+    if (sub.label_rooms) return e.to_name; // named public places: "Market Lane", not "the Market Lane"
+    return lbl === e.to_name ? withArticle(e.to_name) : lbl;
+}
 export function moveNote(who, move, exit) {
     if (move.direction && exit && !revealsDestination(exit)) {
         const label = exit.direction;
         return DOOR_LIKE.test(label) ? `*${who} goes through the ${label}.*` : `*${who} takes the ${label} exit.*`;
+    }
+    if (move.direction && exit && !PLAIN_DIRECTIONS.has(move.direction.toLowerCase())) {
+        // "gate", "stable", "inn": not a compass word, so say where it goes ("Knarfy goes to the Stable.")
+        const dest = exitDestPhrase(exit);
+        return DOOR_LIKE.test(move.direction) && !sameAsDirection(exit) ? `*${who} goes through the ${move.direction} to ${dest}.*` : `*${who} goes to ${dest}.*`;
     }
     return move.direction ? `*${who} goes ${move.direction}.*` : `*${who} heads to ${move.to_name}.*`;
 }
@@ -567,7 +583,7 @@ async function parseIntent(msg) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
-        const nm = lbl.slice(e.direction.length); // same label as the footer: room, or building (+ room / region)
+        const nm = lbl.length > e.direction.length ? lbl.slice(e.direction.length) : destLabel(e); // same label as the footer: room, or building (+ room / region)
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
     const prompt = `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
@@ -687,7 +703,7 @@ const withArticle = name => (/^(the|a|an)\s/i.test(name) || /^[A-Z][\w-]*'s\s/.t
 export function arrival(loc, move) {
     const sub = loc.subregion ?? {};
     const room = loc.name;
-    const where = sub.name && sub.name !== room ? `${withArticle(room)} of ${sub.name}` : room;
+    const where = sub.name && sub.name !== room && !sub.label_rooms ? `${withArticle(room)} of ${sub.name}` : room;
     const subOf = a => String(a ?? '').split('/')[0];
     const newBuilding = !!move?.from && subOf(move.from) !== subOf(loc.address);
     const dir = move?.last_direction ?? move?.direction;
@@ -773,7 +789,7 @@ function registerSlashCommands() {
         name: 'ws-go',
         callback: (_args, dir) => goAction(String(dir ?? '').trim()),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction, e.g. north', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-        helpString: 'WorldScrawl: move the party through an exit, then the model narrates the arrival.',
+        helpString: 'WorldScrawl: move through an exit or to a known place, then the model narrates the arrival.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-exits',
