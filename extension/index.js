@@ -659,6 +659,7 @@ async function parseIntent(msg) {
         console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
     }
     console.log(`[WorldScrawl] intent: ${JSON.stringify(String(answer).slice(0, 80))} -> ${choice}`);
+    if (dirs.includes(choice)) choice = checkExitChoice(msg.mes, loc.exits.find(e => e.direction === choice), cands) ?? choice;
     if (choice === STAY) return { kind: STAY, loc };
     if (choice === ELSEWHERE || choice === UNCLEAR) {
         const inside = namedInText(msg.mes, hereAreas(loc))[0];
@@ -710,6 +711,32 @@ async function parseIntent(msg) {
     if (!res.ok) return { kind: ELSEWHERE, loc, noRoute: place?.label ?? null };
     stamp(msg, res.to, res.move);
     return { kind: 'move', loc: res.to };
+}
+
+const MENTION_STOP = new Set(['the', 'a', 'an', 'of', 'to', 'into', 'onto', 'in', 'on', 'at', 'by', 'and', 'or', 'with', 'from', 'back', 'behind', 'beside', 'down', 'up', 'out', 'its', 'set', 'leading', 'leads', 'way', 'room', 'rooms']);
+/** Does the player's text refer to this exit itself (its word, or a word of its description: "down the stair" -> grate)? */
+export function exitMentioned(text, exit) {
+    const said = new Set(words(text));
+    const own = [...words(exit?.direction), ...words(exit?.description)].filter(w => w.length > 2 && !MENTION_STOP.has(w));
+    const stem = w => w.replace(/(es|s)$/, '');
+    const saidStems = new Set([...said].map(stem));
+    return words(exit?.direction).some(w => said.has(w)) || own.some(w => saidStems.has(stem(w)));
+}
+/**
+ * Second look at an exit the model picked (null = keep it). The model tends to guess an exit for a place it
+ * doesn't know ("the secret tunnel" -> the grate). Unless the player referred to the exit itself:
+ * an unrevealed hidden/obscured exit is never a guess for a named place (-> elsewhere: the normal notices);
+ * a normal exit loses to a single known place the player named that it doesn't lead to.
+ */
+export function checkExitChoice(text, exit, cands) {
+    if (!exit || exitMentioned(text, exit)) return null;
+    if (!revealsDestination(exit)) { console.log(`[WorldScrawl] model picked the unrevealed "${exit.direction}" exit, not mentioned by the player -> elsewhere`); return ELSEWHERE; }
+    const named = namedInText(text, cands);
+    if (named.length !== 1) return null;
+    const n = named[0];
+    if (n.address === exit.to || n.direction === exit.direction || (n.prefix && String(exit.to).startsWith(n.prefix))) return null;
+    console.log(`[WorldScrawl] model picked "${exit.direction}" but the player named ${n.label}`);
+    return n.direction ?? n.label;
 }
 
 export const WHICH_PREFIX = 'Which one do you mean?';

@@ -390,7 +390,7 @@ def test_riverton_obscured_exits_reveal_nothing():
 def test_doors_paired_with_return_exit():
     w = load_world(ROOT)
     door = lambda a, d: next(e for e in w.get(a).exits if e.direction == d).door
-    assert door(COURTYARD, "trapdoor") == door(CELLAR, "up")
+    assert door(COURTYARD, "trapdoor") == door(CELLAR, "trapdoor")
     assert door(NAVE, "grate") == door(CATA, "up")
     assert door(CELLAR, "narrow door") == door(TUNNEL, "narrow door")
     assert door(CATA, "tunnel") is None and door(COURTYARD, "in") is None
@@ -425,3 +425,10 @@ def test_one_way_flagged_exit_warns(tmp_path, caplog):
         w = load(tmp_path, r)
     assert "no return exit" in caplog.text
     assert w.get("r:t/y").exits[0].door
+
+
+def test_cellar_trapdoor_obscured_both_sides():
+    c = TestClient(create_app(ROOT))
+    e = _exit(c.get(f"/location/{CELLAR}").json(), "trapdoor")
+    assert e["obscured"] is True and "to" not in e
+    assert c.post("/move", json={"from": CELLAR, "direction": "trapdoor"}).json()["address"] == COURTYARD
