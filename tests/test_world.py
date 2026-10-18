@@ -320,7 +320,7 @@ def test_exits_carry_destination_data(client):
     assert loc["display_name"] == "Village Square (Riverton Streets)"
     rat = next(e for e in loc["exits"] if e["to"] == TAVERN)
     assert rat["to_display_name"] == "Common Room (The Drowned Rat)"
-    assert rat["to_subregion"] == {"id": "drowned_rat", "name": "The Drowned Rat", "entrance": TAVERN}
+    assert rat["to_subregion"] == {"id": "drowned_rat", "name": "The Drowned Rat", "entrance": TAVERN, "label_rooms": False}
     assert rat["to_region"]["name"] == "Riverton" and rat["to_region"]["entrance"]
 
 
@@ -337,7 +337,7 @@ def test_exit_labels_name_the_building(client, tmp_path):
     assert lane["inn"]["to_label"] == "The Gilded Goose"           # other building, its entrance
     assert lane["gate"]["to_label"] == "The Drowned Rat, Stable"   # other building, not its entrance
     rat = {e["direction"]: e for e in client.get(f"/location/{TAVERN}").json()["exits"]}
-    assert rat["out"]["to_label"] == "Riverton Streets"
+    assert rat["out"]["to_label"] == "Village Square"  # streets have label_rooms: the room is the place
     # crossing into another region adds the region name; hidden exits say nothing
     r = region()
     r["subregions"]["s"]["locations"]["b"]["exits"].append({"direction": "road", "to": "q:m/n"})
@@ -353,3 +353,16 @@ def test_exit_labels_name_the_building(client, tmp_path):
 def test_subregion_entrance_name(client):
     sub = client.get("/location/riverton:drowned_rat/stable").json()["subregion"]
     assert sub["entrance"] == TAVERN and sub["entrance_name"] == "Common Room"
+
+
+def test_label_rooms_flag(tmp_path):
+    r = region()
+    r["subregions"]["t"]["label_rooms"] = True
+    c = TestClient(create_app(make_world(tmp_path, {"r": r})))
+    out = {e["direction"]: e for e in c.get("/location/r:s/a").json()["exits"]}["out"]
+    assert out["to_label"] == "X" and out["to_subregion"]["label_rooms"] is True
+    r["subregions"]["t"]["label_rooms"] = "yes"
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    with pytest.raises(WorldError, match="label_rooms"):
+        load(bad, r)

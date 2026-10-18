@@ -64,6 +64,7 @@ class Subregion:
     notes: str | None
     inherit_notes: bool = True
     entrance: str = ""  # full address of the entrance room (default: first room)
+    label_rooms: bool = False  # streets/outdoor groups: exits into it name the room, not the group
 
 
 @dataclass
@@ -109,7 +110,7 @@ class World:
             "address": loc.address,
             "region": {"id": region.id, "name": region.name, "notes": region.notes, "entrance": region.entrance},
             "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance,
-                          "entrance_name": self.locations[sub.entrance].name},
+                          "entrance_name": self.locations[sub.entrance].name, "label_rooms": sub.label_rooms},
             "name": loc.name,
             "display_name": self.place_label(loc.name, sub.name),
             "description": loc.description,
@@ -129,7 +130,12 @@ class World:
         tsub = self.sub_of(target)
         if target.region == src.region and target.subregion == src.subregion:
             return target.name
-        label = tsub.name if tsub.entrance == target.address or target.name == tsub.name else f"{tsub.name}, {target.name}"
+        if tsub.label_rooms or target.name == tsub.name:  # streets etc.: the room is the place ("Village Square")
+            label = target.name
+        elif tsub.entrance == target.address:
+            label = tsub.name
+        else:
+            label = f"{tsub.name}, {target.name}"
         if target.region != src.region:
             label += f", {self.regions[target.region].name}"
         return label
@@ -149,7 +155,7 @@ class World:
             "to_name": target.name,
             "to_display_name": self.place_label(target.name, tsub.name),
             "to_label": self.exit_label(src, target) if src is not None else target.name,
-            "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance},
+            "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance, "label_rooms": tsub.label_rooms},
             "to_region": {"id": treg.id, "name": treg.name, "entrance": treg.entrance},
             **out,
         }
@@ -243,7 +249,8 @@ def load_world(root: str | Path) -> World:
                 raise WorldError(f"{swhere}: entrance {entrance!r} is not a room in this subregion")
             subregions[f"{rid}:{sid}"] = Subregion(sid, _require_str(sub, "name", swhere),
                                                    _require_str(sub, "notes", swhere, optional=True),
-                                                   True if inherit is None else inherit, f"{rid}:{sid}/{entrance}")
+                                                   True if inherit is None else inherit, f"{rid}:{sid}/{entrance}",
+                                                   bool(_optional_bool(sub, "label_rooms", swhere)))
             for lid, loc in locs.items():
                 where = f"{fname}: location {sid}/{lid}"
                 _check_slug(lid, f"{fname}: location id")

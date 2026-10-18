@@ -103,6 +103,7 @@
     "streets": {
       "name": "Riverton Streets",
       "entrance": "square",
+      "label_rooms": true,
       "notes": "Cobbled village streets, busy with carts, chickens and gossip by day and nearly empty after dark.",
       "locations": {
         "square": {
