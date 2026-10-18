@@ -108,12 +108,13 @@ class World:
         return {
             "address": loc.address,
             "region": {"id": region.id, "name": region.name, "notes": region.notes, "entrance": region.entrance},
-            "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance},
+            "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance,
+                          "entrance_name": self.locations[sub.entrance].name},
             "name": loc.name,
             "display_name": self.place_label(loc.name, sub.name),
             "description": loc.description,
             "effective_notes": self.effective_notes(loc),
-            "exits": [self._exit_dict(e) for e in loc.exits],
+            "exits": [self._exit_dict(e, loc) for e in loc.exits],
         }
 
     @staticmethod
@@ -121,7 +122,19 @@ class World:
         """Same rule as the extension's revealsDestination: hidden/obscured exits don't say where they lead."""
         return not (e.flags.get("hidden") or e.flags.get("obscured"))
 
-    def _exit_dict(self, e: Exit) -> dict:
+    def exit_label(self, src: Location, target: Location) -> str:
+        """What an exit's destination is called from `src`: the room name within the same building; the building
+        name when entering another building at its entrance; "Building, Room" for another room of that building;
+        plus ", Region" when the exit crosses into another region."""
+        tsub = self.sub_of(target)
+        if target.region == src.region and target.subregion == src.subregion:
+            return target.name
+        label = tsub.name if tsub.entrance == target.address or target.name == tsub.name else f"{tsub.name}, {target.name}"
+        if target.region != src.region:
+            label += f", {self.regions[target.region].name}"
+        return label
+
+    def _exit_dict(self, e: Exit, src: Location | None = None) -> dict:
         """An exit plus everything about its destination the client needs (name, area, region, label), so the
         client never has to fetch a neighbouring room just to name it. Hidden/obscured exits reveal nothing
         about the destination: only the direction, description and flags."""
@@ -135,6 +148,7 @@ class World:
             "to": e.to,
             "to_name": target.name,
             "to_display_name": self.place_label(target.name, tsub.name),
+            "to_label": self.exit_label(src, target) if src is not None else target.name,
             "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance},
             "to_region": {"id": treg.id, "name": treg.name, "entrance": treg.entrance},
             **out,
