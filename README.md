@@ -61,6 +61,7 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 - Full address: `region:subregion/location` (`riverton:drowned_rat/common_room`).
 - Exit `to`: `loc` = same subregion, `sub/loc` = same region, `region:sub/loc` = another region. Every target must exist.
 - Optional exit flags `obscured` / `hidden` (true/false). `obscured` = you can see the door but not what's behind it: it is listed by its label only ("trapdoor", "grate") until the party has walked through that door, from either side. `hidden` is reserved for true secret doors (not listed at all until found, which needs per-chat state); **for now `hidden` behaves exactly like `obscured`**.
+- Typed moves: when the model picks an exit the player didn't refer to (its word or a word of its description, e.g. "down the stair" for the grate), an unrevealed hidden/obscured exit is rejected (normal notices: "You're not aware of such a place." for unknown places), and a normal exit loses to a single known place the player named that it doesn't lead to (that place is travelled to instead).
 - Doors are paired at load time: a flagged exit and its return exit (the exit in its destination room pointing back) share an opaque `door` id, so walking through either side reveals both. A flagged exit with no return exit is allowed (one-way door) and logs a warning at load.
 - Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
   - Subregion `"inherit_notes": false` drops the region notes for all its rooms.

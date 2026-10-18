@@ -7,7 +7,7 @@
     "drowned_rat": {
       "name": "The Drowned Rat",
       "entrance": "common_room",
-      "notes": "Riverton's oldest tavern, run by the gruff widow Hesk. Cheap ale, dice games and dockhands; it gets loud after dark.",
+      "notes": "Riverton's oldest tavern, run by Hesk, a striking, sharp-tongued widow with copper braids who can silence a brawl with one look. Cheap ale, dice games and dockhands; it gets loud after dark.",
       "locations": {
         "common_room": {
           "name": "Common Room",
@@ -32,13 +32,13 @@
           "name": "Cellar",
           "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
           "exits": [
-            { "direction": "up", "to": "courtyard", "description": "Wooden steps up to the trapdoor." },
+            { "direction": "trapdoor", "to": "courtyard", "obscured": true, "description": "Wooden steps up to a heavy trapdoor." },
             { "direction": "narrow door", "to": "secret_tunnel/tunnel", "hidden": true, "description": "A narrow door half-hidden behind the casks." }
           ]
         },
         "kitchens": {
           "name": "Kitchens",
-          "description": "Hot, smoky kitchens where a cook and two scullions keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
+          "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
             { "direction": "out", "to": "courtyard", "description": "Back out to the courtyard." }
           ]
@@ -64,7 +64,7 @@
     "gilded_goose": {
       "name": "The Gilded Goose",
       "entrance": "common_room",
-      "notes": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and a host, Perrin Vale, who looks down on the Drowned Rat.",
+      "notes": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and its host, Perrin Vale, an elegant, silver-gowned trans woman with a lovely laugh who looks down on the Drowned Rat.",
       "locations": {
         "common_room": {
           "name": "Common Room",
@@ -85,7 +85,7 @@
     },
     "general_store": {
       "name": "Marlow's General Store",
-      "notes": "A cluttered shop run by old Marlow, who sells a bit of everything and haggles over every copper.",
+      "notes": "A cluttered shop run by Marlow, a curvy, bespectacled beauty who sells a bit of everything and haggles over every copper with a sweet smile.",
       "locations": {
         "shop": {
           "name": "Marlow's General Store",
@@ -98,7 +98,7 @@
     },
     "smithy": {
       "name": "Brask's Smithy",
-      "notes": "A hot, noisy forge run by the smith Brask and her apprentice. Horseshoes, boat fittings and the occasional blade.",
+      "notes": "A hot, noisy forge run by Brask, a tall, broad-shouldered trans woman with soot-streaked arms and a confident grin, and her journeyman Tobin, a slender, pretty young man in his twenties who blushes easily. Horseshoes, boat fittings and the occasional blade.",
       "locations": {
         "forge": {
           "name": "Brask's Smithy",
@@ -154,7 +154,7 @@
     },
     "temple": {
       "name": "Temple of the Tides",
-      "notes": "A hushed, holy place tended by Sister Amara. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
+      "notes": "A hushed, holy place tended by Sister Amara, a serene, dark-eyed beauty in sea-green robes. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
       "inherit_notes": false,
       "locations": {
         "nave": {

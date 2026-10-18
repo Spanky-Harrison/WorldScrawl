@@ -606,6 +606,14 @@ try {
     // Swipe/delete back past the move: the reveal rolls back.
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, n); }, chatLen);
     check('obscured: deleting the move un-reveals the door', (await stored()) === 'riverton:temple/nave' && (await wsExits()) === 'Exits: south (Village Square), grate', String(await wsExits()));
+    // (B) Unknown place named, model guesses the unrevealed grate: rejected -> "not aware" notice, no move.
+    await queue([{ content: 'grate' }]);
+    await send('I go to the secret tunnel', 1); await page.waitForTimeout(1500);
+    check('typed: unknown place never mapped onto an unrevealed obscured exit', (await stored()) === 'riverton:temple/nave' && (await lastMes()).startsWith("You're not aware of such a place."), await lastMes());
+    const lenB = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await typedTo('I go down the stair', 'grate');
+    check('typed: naming the door itself still goes through it', (await stored()) === 'riverton:temple/catacombs', String(await stored()));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, n); }, lenB);
     // Stood in the catacombs (location stamp) without passing the door: fast travel refuses the unrevealed exit.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'x', extra: { worldscrawl_location: 'riverton:temple/catacombs', worldscrawl_intent_checked: true } },
         { name: 'User', is_user: true, mes: 'y', extra: { worldscrawl_location: 'riverton:streets/square', worldscrawl_intent_checked: true } }); await c.saveChat(); });
@@ -618,6 +626,14 @@ try {
     await go('Temple Catacombs');
     check('obscured: return side reveals it; fast travel through revealed door', (await stored()) === 'riverton:temple/catacombs' && apiCalls.includes('/travel'), JSON.stringify(apiCalls));
     check('obscured: travel stamp records steps', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return JSON.stringify(ch[ch.length - 2].extra.worldscrawl_move?.steps ?? ch.findLast(m => m.extra?.worldscrawl_move?.steps)?.extra.worldscrawl_move.steps); }) === '["north","grate"]');
+    // (A) Tunnel visited, grate revealed: from the nave "the secret tunnel" ends in the Secret Tunnel, even if the model picks the grate.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 't', extra: { worldscrawl_location: 'riverton:secret_tunnel/tunnel', worldscrawl_intent_checked: true } },
+        { name: 'User', is_user: true, mes: 'n', extra: { worldscrawl_location: 'riverton:temple/nave', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    await typedTo('I go to the secret tunnel', 'Secret Tunnel');
+    check('typed: nave -> Secret Tunnel through the revealed grate', (await stored()) === 'riverton:secret_tunnel/tunnel', String(await stored()));
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'n', extra: { worldscrawl_location: 'riverton:temple/nave', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    await typedTo('I go to the secret tunnel', 'grate');
+    check('typed: model picks the grate for a named known place beyond it -> still the Secret Tunnel', (await stored()) === 'riverton:secret_tunnel/tunnel', String(await stored()));
     // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
     await page.waitForTimeout(1000);
