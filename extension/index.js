@@ -67,7 +67,9 @@ const versionWarned = new Set();
 let activeWorld = ''; // '' = server default
 let defaultWorldId = null; // learned from GET /worlds; '' and the default id are the same world
 const worldNames = new Map(); // id -> display name (from GET /worlds and saves)
-const rememberWorlds = body => { if (body?.default) defaultWorldId = body.default; for (const w of body?.worlds ?? []) worldNames.set(w.id, w.name); };
+const worldLiving = new Map(); // id -> true for living saves (can be saved over)
+const rememberWorlds = body => { if (body?.default) defaultWorldId = body.default; for (const w of body?.worlds ?? []) { worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); } };
+let placeholderAuto = true; // is the Save box placeholder a generated name (vs. the living world's own name)?
 /** What the user sees for a world: its display name, else its id. */
 export const worldName = id => worldNames.get(id || defaultWorldId) ?? (id || defaultWorldId || 'World');
 let lastSyncChat = null;
@@ -1027,7 +1029,18 @@ export function defaultWorldName(now = new Date()) {
 }
 /** Readable folder hint for a generated name: "riverton-desirae-oct-19" (the server adds -2, -3... if taken). */
 const autoIdHint = (now = new Date()) => { const c = ctx(); return [worldName(chatWorld()?.id ?? activeWorld), c.name2 || 'chat', now.toLocaleString('en-US', { month: 'short' }), now.getDate()].map(slug).filter(Boolean).join('-'); };
-function refreshSaveName() { const i = document.getElementById('worldscrawl_save_name'); if (i) i.placeholder = defaultWorldName(); }
+/**
+ * Save box placeholder (= what a blank save uses): on a living save, that world's own name (blank = save over it);
+ * on a pristine world, a generated "<base> - <character> - <date>" name. Typing a new name branches a copy.
+ */
+function refreshSaveName() {
+    const i = document.getElementById('worldscrawl_save_name');
+    if (!i) return;
+    const cur = chatWorld()?.id ?? activeWorld ?? '';
+    const id = cur || defaultWorldId;
+    placeholderAuto = !worldLiving.get(id);
+    i.placeholder = placeholderAuto ? defaultWorldName() : worldName(id);
+}
 /**
  * Render this chat (its world + its changes) into a new world folder. With switchChat, stamp a rebase on the
  * latest message: from then on the chat is built on the new world and only changes stamped after it are replayed.
@@ -1036,8 +1049,9 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false) 
     syncWorld();
     if (!worldNames.size) rememberWorlds((await api('/worlds').catch(() => null))?.body);
     name = String(name ?? '').trim();
-    const auto = !name || name === document.getElementById('worldscrawl_save_name')?.placeholder;
-    if (!name) name = defaultWorldName();
+    const cur = activeWorld || defaultWorldId;
+    if (!name) name = worldLiving.get(cur) ? worldName(cur) : defaultWorldName(); // same rule as the placeholder
+    const auto = !worldLiving.get(cur) && (name === defaultWorldName() || (name === document.getElementById('worldscrawl_save_name')?.placeholder && placeholderAuto));
     let knowledge = null;
     if (withKnowledge) { // what this chat knows, for new chats on the saved world (written to knowledge.json)
         const here = await currentLocation();
@@ -1047,11 +1061,15 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false) 
     }
     const r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ base: activeWorld || null, name, auto, ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) }) });
     if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
-    worldNames.set(r.body.id, r.body.name);
+    worldNames.set(r.body.id, r.body.name); worldLiving.set(r.body.id, !!r.body.living);
+    // Saved over the world this chat is on: always rebase here, or changes since the last switch would be replayed twice.
+    const overSelf = !!r.body.overwritten && r.body.id === cur;
+    if (overSelf) switchChat = true;
+    if (r.body.overwritten) { for (const k of [...exitsCache.keys()]) if (k.startsWith(`${r.body.id}|`)) exitsCache.delete(k); doorInfo.clear(); doorFetched.clear(); }
     // A system message records the save; with switch on it carries the rebase stamp (delete it to go back).
     const c = ctx();
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'saved' },
-        mes: `[Engine: world saved as "${r.body.name}".${switchChat ? ' This chat now uses it.' : ''}]` };
+        mes: overSelf ? `[Engine: world "${r.body.name}" saved over its previous version.]` : `[Engine: world saved as "${r.body.name}"${r.body.overwritten ? ' (over its previous version)' : ''}.${switchChat ? ' This chat now uses it.' : ''}]` };
     c.chat.push(msg);
     if (switchChat) { lastSyncChat = null; msg.extra[WORLD_KEY] = { id: r.body.id, name: r.body.name, version: r.body.map_version, rebase: true, at: c.chat.length - 1, from: activeWorld || null }; }
     c.addOneMessage(msg);

@@ -668,7 +668,7 @@ try {
     const rendered = await (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent('riverton:streets/square') + '?world=test-world')).json();
     check('save world: rendered world has the changes, chat keeps working on it', !rendered.exits.some(e => e.direction === 'east') && !(await wsExits()).includes('east (') && (await stored()) === 'riverton:streets/square');
     check('save world: pristine by default (no knowledge file)', (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds.find(w => w.id === 'test-world')?.has_knowledge === false);
-    check('save world: refuses to overwrite', (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'test-world' }) })).status === 409);
+    check('save world: refuses to overwrite', (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'riverton' }) })).status === 409);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-removeexit south'));
     await page.waitForTimeout(1000);
     check('after rebase only later changes are replayed', JSON.stringify(await M(m => m.chatChanges().map(c => c.type + ':' + c.direction))) === '["remove_exit:south"]' && !(await wsExits()).includes('south ('));
@@ -767,7 +767,7 @@ try {
     const nBefore = (await worldsNow()).length;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false test world'));
     await page.waitForTimeout(1500);
-    check('typed name matching an existing display name is refused', (await worldsNow()).length === nBefore);
+    check('typed name matching an existing living save saves over it (no new world)', (await worldsNow()).length === nBefore);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false Test-World'));
     await page.waitForTimeout(1500);
     check('only the folder slug clashes: -2 added, name kept as typed', (await worldsNow()).some(w => w.id === 'test-world-2' && w.name === 'Test-World'));
@@ -803,6 +803,22 @@ try {
     const ncEx = await wsExits();
     check('repro: dug passage shown in the new chat', ncEx.includes('passage'), ncEx);
     await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = ''; s.dispatchEvent(new Event('change')); });
+    // Living saves: the save box offers the current living world's name; a blank save goes over it, always rebasing here.
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig hatch riverton:streets/square')); await page.waitForTimeout(1000);
+    await page.evaluate(() => { document.getElementById('worldscrawl_save_switch').checked = false; const i = document.getElementById('worldscrawl_save_name'); i.value = ''; });
+    await page.evaluate(() => document.querySelector('.worldscrawl_settings .inline-drawer-toggle').click()); await page.waitForTimeout(800);
+    const ph2 = await page.evaluate(() => document.getElementById('worldscrawl_save_name').placeholder);
+    check('living save: save box offers its own name', ph2 === 'My Riverton', ph2);
+    const before3 = (await worldsNow()).length;
+    await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
+    const ov = await M(m => ({ w: m.chatWorld(), ch: m.chatChanges().length }));
+    check('save over the current world: rebase stamped even with switch off, no double replay', ov.w?.id === mr?.id && ov.w.rebase && ov.ch === 0 && (await worldsNow()).length === before3
+        && (await lastMes()) === '[Engine: world "My Riverton" saved over its previous version.]', JSON.stringify(ov) + (await lastMes()));
+    const hx = await wsExits();
+    check('saved-over world: dug exit listed once and walkable', hx.split('hatch').length === 2, hx);
+    await go('hatch');
+    check('saved-over world: moving through the baked-in exit', (await stored()) === 'riverton:streets/square', String(await stored()));
+    check('backup folder is never listed as a world', !(await worldsNow()).some(w => w.id.startsWith('.') || w.id === 'backups'));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();
