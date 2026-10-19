@@ -182,3 +182,31 @@ def test_save_over_living_world_keeps_one_backup(client, wd):
     assert {w["id"] for w in TestClient(create_app(worlds_dir=wd)).get("/worlds").json()["worlds"]} == {"riverton", "mine"}
     # moves on the saved-over world see the new version
     assert client.post("/move", json={"from": SQUARE, "direction": "dig"}, params={"world": "mine"}).status_code == 400
+
+
+def test_rescan_and_world_not_found(client, wd):
+    shutil.copytree(wd / "riverton", wd / "by-hand")
+    assert "by-hand" in {w["id"] for w in client.get("/worlds").json()["worlds"]}
+    assert client.get("/start?world=by-hand").status_code == 200
+    shutil.rmtree(wd / "by-hand")
+    assert "by-hand" not in {w["id"] for w in client.get("/worlds").json()["worlds"]}
+    r = client.get("/start?world=by-hand")
+    assert r.status_code == 404 and r.json()["detail"]["error"] == "world_not_found" and r.json()["detail"]["world"] == "by-hand"
+    # a folder added by hand is found even without listing first
+    shutil.copytree(wd / "riverton", wd / "later")
+    assert client.get("/start?world=later").status_code == 200
+    # a broken folder on rescan is skipped, not fatal
+    (wd / "broken").mkdir(); (wd / "broken" / "world.json").write_text("{nope")
+    assert client.get("/worlds").status_code == 200
+
+
+def test_open_folder(client, wd):
+    opened = []
+    client.app.state.open_path = opened.append
+    assert client.post("/open-folder").json()["opened"] == str(wd.resolve())
+    assert client.post("/open-folder?world=riverton").status_code == 200 and opened[-1] == (wd / "riverton").resolve()
+    for bad in ["../x", "..", "a/b", "C:\\\\x"]:
+        assert client.post("/open-folder", params={"world": bad}).status_code == 400, bad
+    assert client.post("/open-folder?world=nope").status_code == 404
+    assert client.post("/open-folder", params={"path": "/etc"}).json()["opened"] == str(wd.resolve())  # no path parameter exists
+    assert len(opened) == 3

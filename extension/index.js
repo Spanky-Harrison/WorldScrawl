@@ -68,7 +68,60 @@ let activeWorld = ''; // '' = server default
 let defaultWorldId = null; // learned from GET /worlds; '' and the default id are the same world
 const worldNames = new Map(); // id -> display name (from GET /worlds and saves)
 const worldLiving = new Map(); // id -> true for living saves (can be saved over)
-const rememberWorlds = body => { if (body?.default) defaultWorldId = body.default; for (const w of body?.worlds ?? []) { worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); } };
+const listedWorlds = new Set(); // ids in the latest GET /worlds (the server rescans its folder on each list)
+const missingWorlds = new Set(); // world ids the server says no longer exist
+const rememberWorlds = body => {
+    if (body?.default) defaultWorldId = body.default;
+    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); } }
+};
+/**
+ * The world requests actually go to. Normally the chat's stamped world; if that world's folder is gone, the world it
+ * was saved from (the switch stamp's "from", if that still exists), else the default. Stamps are never changed.
+ */
+export function effectiveWorld(chat = ctx().chat ?? []) {
+    let w = chatWorld(chat)?.id ?? '';
+    for (let i = chat.length - 1; i >= 0 && w && missingWorlds.has(w); i--) {
+        const st = chat[i]?.extra?.[WORLD_KEY];
+        if (st?.id === w) w = st.rebase && st.from ? st.from : '';
+    }
+    return w && missingWorlds.has(w) ? '' : w;
+}
+/** The server says this chat's world is gone: remember it, switch to the fallback, post the one-time notice. */
+function worldMissing(id) {
+    if (!id || missingWorlds.has(id)) return;
+    missingWorlds.add(id);
+    console.warn(`[WorldScrawl] world ${id} not found; falling back to ${effectiveWorld() || '(default)'}`);
+    setTimeout(() => postMissingWorldNotice(id), 0);
+}
+async function postMissingWorldNotice(id) {
+    const c = ctx();
+    if (!isOn() || chatWorld()?.id !== id) return;
+    if ((c.chat ?? []).some(m => m?.extra?.worldscrawl_notice_kind === 'missing_world' && m.extra.worldscrawl_notice_world === id)) return; // once per chat
+    rememberWorlds((await api('/worlds').catch(() => null))?.body);
+    const fb = effectiveWorld();
+    const worlds = [...listedWorlds].map(w => ({ id: w, name: worldName(w) }));
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
+        mes: `[Engine: the world "${chatWorld()?.name ?? worldName(id)}" this chat was built on is missing. Using "${worldName(fb)}" for now. Move this chat to: ${worlds.map(w => w.name).join(', ')}]`,
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing_world', worldscrawl_notice_world: id, worldscrawl_notice_worlds: worlds,
+            worldscrawl_notice_prefix: `[Engine: the world "${chatWorld()?.name ?? worldName(id)}" this chat was built on is missing. Using "${worldName(fb)}" for now. Move this chat to:` } };
+    c.chat.push(msg); c.addOneMessage(msg); await c.saveChat();
+    renderAllExits();
+}
+/** Picker button on the missing-world notice: move the chat onto that world (a rebase stamped on the notice; delete it to undo). */
+export async function moveChatToWorld(id, index) {
+    const c = ctx();
+    const msg = c.chat?.[index];
+    if (!msg) return;
+    const list = (await api('/worlds').catch(() => null))?.body;
+    rememberWorlds(list);
+    const info = list?.worlds?.find(w => w.id === id);
+    if (!info) { toastr.warning('That world is gone too.'); return; }
+    msg.extra[WORLD_KEY] = { id: info.id, name: info.name, version: info.map_version, rebase: true, at: index, from: chatWorld()?.id ?? null };
+    await c.saveChat();
+    lastSyncChat = null;
+    await rebuildFromChat();
+    toastr.success(`This chat now uses the world "${info.name}".`);
+}
 let placeholderAuto = true; // is the Save box placeholder a generated name (vs. the living world's own name)?
 /** What the user sees for a world: its display name, else its id. */
 export const worldName = id => worldNames.get(id || defaultWorldId) ?? (id || defaultWorldId || 'World');
@@ -84,7 +137,7 @@ export function worldSeed(chat = ctx().chat ?? []) {
 }
 /** Point all requests at the chat's world; switching worlds drops everything remembered about the old one. */
 export function syncWorld() {
-    const w = chatWorld()?.id ?? '';
+    const w = effectiveWorld();
     const same = (w || defaultWorldId) === (activeWorld || defaultWorldId);
     if (w !== activeWorld && same) activeWorld = w; // same world, just named: keep what's remembered
     const chatId = ctx().chatId ?? ctx().getCurrentChatId?.() ?? null;
@@ -132,13 +185,14 @@ async function api(path, options = {}) {
         const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers ?? {}) };
         const sep = path.includes('?') ? '&' : '?';
         const wid = activeWorld || defaultWorldId; // always name the world once it's known
-        const scoped = !path.startsWith('/worlds') && wid ? `${path}${sep}world=${encodeURIComponent(wid)}` : path;
+        const scoped = !path.startsWith('/worlds') && !path.startsWith('/open-folder') && !/[?&]world=/.test(path) && wid ? `${path}${sep}world=${encodeURIComponent(wid)}` : path;
         res = await fetch(baseUrl() + scoped, { ...options, headers });
     } catch (e) {
         throw new Error(`WorldScrawl server not reachable at ${baseUrl()} (${e.message}). Is it running?`);
     }
     if (!path.startsWith('/worlds')) noteMapVersion(res.headers.get('X-WorldScrawl-Map-Version'));
     const body = await res.json().catch(() => ({}));
+    if (res.status === 404 && body?.detail?.error === 'world_not_found') worldMissing(body.detail.world);
     return { ok: res.ok, status: res.status, body };
 }
 
@@ -161,7 +215,8 @@ async function currentLocation() {
         const loc = await fetchLocationCached(stored);
         if (loc) return loc;
         const r = await api(`/location/${encodeURIComponent(stored)}`).catch(() => null);
-        if (r?.status === 404) return missingRoomFallback(stored);
+        if (r?.status === 404 && r.body?.detail?.error === 'world_not_found') { syncWorld(); const again = await fetchLocationCached(stored); if (again) return again; }
+        else if (r?.status === 404) return missingRoomFallback(stored);
     }
     const start = await fetchLocationCached(null);
     if (!start) throw new Error(`WorldScrawl server not reachable at ${baseUrl()}, or /start failed. Is it running?`);
@@ -1086,7 +1141,9 @@ async function rebuildFromChat() {
     pendingLocation = null;
     // Resolve the chat's world BEFORE any room request: learn the default world, stamp a new chat's world from the
     // current setting (read fresh), then fetch.
-    if (!defaultWorldId) rememberWorlds((await api('/worlds').catch(() => null))?.body);
+    rememberWorlds((await api('/worlds').catch(() => null))?.body); // also rescans the server's worlds folder
+    const cw = chatWorld()?.id;
+    if (cw && listedWorlds.size && !listedWorlds.has(cw)) worldMissing(cw);
     await ensureStartStamp();
     syncWorld();
     if (ctx().chat?.length) await warmRooms(chatAddresses()); // one request for every room this chat needs (none if all remembered)
@@ -1289,6 +1346,15 @@ async function renderNotices() {
         if (!msg?.extra?.worldscrawl_notice) continue;
         const text = el.querySelector('.mes_text');
         if (!text) continue;
+        if (msg.extra.worldscrawl_notice_kind === 'missing_world') {
+            const ws = msg.extra[WORLD_KEY] ? [] : msg.extra.worldscrawl_notice_worlds ?? [];
+            if (!ws.length) { if (text.querySelector('.worldscrawl_exit')) text.textContent = msg.mes; continue; }
+            text.textContent = '';
+            text.append(msg.extra.worldscrawl_notice_prefix + ' ');
+            ws.forEach((w, i) => { if (i) text.append(', '); const b = makeButton(w.name, `Move this chat to ${w.name}`, () => moveChatToWorld(w.id, id)); b.classList.add('worldscrawl_world_button'); b.dataset.world = w.id; text.appendChild(b); });
+            text.append(']');
+            continue;
+        }
         const cands = msg.extra.worldscrawl_notice_kind === 'which' ? msg.extra.worldscrawl_notice_candidates ?? [] : null;
         const addr = msg.extra.worldscrawl_notice_loc;
         const loc = id === last && addr && !cands ? await fetchLocationCached(addr) : null;
@@ -1342,7 +1408,17 @@ async function fillWorlds() {
     refreshSaveName();
     sel.innerHTML = '<option value="">(server default)</option>';
     for (const w of r?.body?.worlds ?? []) { const o = document.createElement('option'); o.value = w.id; o.textContent = w.name; sel.appendChild(o); }
+    if (settings().world && r?.body?.worlds && !listedWorlds.has(settings().world)) { // picked world was deleted
+        toastr.info(`WorldScrawl: the world for new chats is gone; using ${worldName(defaultWorldId)}.`);
+        settings().world = ''; ctx().saveSettingsDebounced();
+    }
     sel.value = settings().world ?? '';
+}
+/** Open the worlds folder (no id) or one world's folder in the system file browser (the server opens it). */
+export async function openWorldFolder(id = '') {
+    const r = await api(`/open-folder${id ? `?world=${encodeURIComponent(id)}` : ''}`, { method: 'POST', body: '{}' });
+    if (!r.ok) toastr.warning(typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.message ?? 'Could not open the folder.');
+    return r.ok;
 }
 
 function addSettingsPanel() {
@@ -1360,7 +1436,9 @@ function addSettingsPanel() {
       <label for="worldscrawl_who">Who moves (used in move messages and notes to the model; macros like {{user}} work)</label>
       <input id="worldscrawl_who" class="text_pole" type="text" placeholder="{{user}}">
       <label for="worldscrawl_world">World for new chats</label>
-      <select id="worldscrawl_world" class="text_pole"><option value="">(server default)</option></select>
+      <div class="flex-container"><select id="worldscrawl_world" class="text_pole flex1"><option value="">(server default)</option></select>
+        <div id="worldscrawl_open_world" class="menu_button" title="Open this world's folder">Open</div></div>
+      <div class="flex-container"><div id="worldscrawl_open_folder" class="menu_button">Open worlds folder</div></div>
       <label for="worldscrawl_save_name">Save this chat's world as</label>
       <input id="worldscrawl_save_name" class="text_pole" type="text" placeholder="">
       <label class="checkbox_label"><input id="worldscrawl_save_knowledge" type="checkbox"> Include this chat's discoveries</label>
@@ -1401,6 +1479,8 @@ function addSettingsPanel() {
     document.getElementById('worldscrawl_test').addEventListener('click', () => { testConnection(); fillWorlds(); });
     const sel = document.getElementById('worldscrawl_world');
     sel.addEventListener('change', () => { settings().world = sel.value; ctx().saveSettingsDebounced(); });
+    document.getElementById('worldscrawl_open_folder').addEventListener('click', () => openWorldFolder(''));
+    document.getElementById('worldscrawl_open_world').addEventListener('click', () => openWorldFolder(sel.value || defaultWorldId || ''));
     document.querySelector('.worldscrawl_settings .inline-drawer-toggle')?.addEventListener('click', () => { refreshSaveName(); fillWorlds(); });
     document.getElementById('worldscrawl_save').addEventListener('click', () => saveWorld(document.getElementById('worldscrawl_save_name').value.trim() || document.getElementById('worldscrawl_save_name').placeholder, document.getElementById('worldscrawl_save_switch').checked, document.getElementById('worldscrawl_save_knowledge').checked).then(fillWorlds));
     fillWorlds();
