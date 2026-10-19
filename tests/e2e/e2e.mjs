@@ -541,7 +541,7 @@ try {
     check('greeting stamped with start location', await page.evaluate(() => SillyTavern.getContext().chat[0]?.extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
     await queue([{ content: 'stay' }, { content: 'You sip your ale.' }]);
     await send('I sip my ale', 2);
-    check('fresh chat + first turn: only /start (no neighbour fetches)', JSON.stringify(apiCalls) === '["/start"]', JSON.stringify(apiCalls));
+    check('fresh chat + first turn: only /start (no neighbour fetches)', JSON.stringify(apiCalls.filter(u => u !== '/worlds')) === '["/start"]', JSON.stringify(apiCalls));
     apiCalls.length = 0;
     await queue([{ content: 'out' }, { content: 'The square.' }]);
     await send('I head outside', 2);
@@ -564,7 +564,7 @@ try {
     narr = JSON.stringify((await lastReq()).messages);
     check('journey note lists rooms in order', narr.includes('User travelled from Temple of the Tides through Village Square (Riverton Streets) to Common Room (The Drowned Rat). User arrives in the Common Room of The Drowned Rat. Narrate the journey briefly, in that order, ending with arriving in the Common Room of The Drowned Rat.'), narr.slice(0, 300));
     // A server-side stop (here: a blocked step injected into the request) leaves the party at the last valid room.
-    const travelStub = u => u.href.endsWith('/travel');
+    const travelStub = u => u.pathname.endsWith('/travel');
     await page.route(travelStub, async route => { const b = JSON.parse(route.request().postData()); b.steps.splice(1, 0, 'bogus'); await route.continue({ postData: JSON.stringify(b) }); });
     await go('Temple of the Tides');
     await page.unroute(travelStub);
@@ -582,7 +582,7 @@ try {
     check('no Content-Type on GET requests (no CORS preflight)', typedGets.length === 0, JSON.stringify(typedGets.slice(0, 3)));
     // A changed map version on any reply drops the remembered rooms.
     const before2 = await page.evaluate(async () => (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).cacheInfo());
-    const verStub = u => u.href.endsWith('/health');
+    const verStub = u => u.pathname.endsWith('/health');
     await page.route(verStub, async route => { const r = await route.fetch(); await route.fulfill({ response: r, headers: { ...r.headers(), 'x-worldscrawl-map-version': 'changed-for-test', 'access-control-expose-headers': 'X-WorldScrawl-Map-Version' } }); });
     await page.evaluate(() => jQuery('#worldscrawl_test').trigger('click'));
     await page.waitForTimeout(1500);
@@ -642,10 +642,56 @@ try {
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'n', extra: { worldscrawl_location: 'riverton:temple/nave', worldscrawl_intent_checked: true } }); await c.saveChat(); });
     await typedTo('I go to the secret tunnel', 'grate');
     check('typed: model picks the grate for a named known place beyond it -> still the Secret Tunnel', (await stored()) === 'riverton:secret_tunnel/tunnel', String(await stored()));
-    // Swiping the greeting keeps/restamps the start location.
+    // Worlds: list, chat world stamp, dig/remove changes on system messages, save + rebase, delete-back revert, missing room.
+    const M = fn => page.evaluate(async src => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return (0, eval)(src)(m); }, fn.toString());
+    const wl = await (await fetch('http://127.0.0.1:5199/worlds')).json();
+    check('worlds: list has riverton as default', wl.default === 'riverton' && wl.worlds.some(w => w.id === 'riverton' && w.map_version), JSON.stringify(wl));
+    check('worlds: path traversal rejected', (await fetch('http://127.0.0.1:5199/start?world=..%2Fx')).status === 400 && (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '../evil' }) })).status === 400);
+    check('chat world stamped on the first message', await page.evaluate(() => { const w = SillyTavern.getContext().chat[0].extra?.worldscrawl_world; return w?.id === 'riverton' && w.version?.length === 12; }));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig shortcut Village Square'));
+    await page.waitForTimeout(1000);
+    check('dig: system message with the change', (await lastMes()) === '[Engine: a passage shortcut to Village Square was opened.]' && await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.extra.worldscrawl_change?.type === 'add_exit'; }), await lastMes());
+    check('dig: new exit listed', (await wsExits()).includes('shortcut (Village Square)'), String(await wsExits()));
+    await go('shortcut');
+    check('dig: moving through the dug exit (server applies the changes)', (await stored()) === 'riverton:streets/square', String(await stored()));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-removeexit east'));
+    await page.waitForTimeout(1000);
+    check('removeexit: system message + exit gone', (await lastMes()) === '[Engine: the east exit from Village Square was removed.]' && !(await wsExits()).includes('east ('), String(await wsExits()));
+    const rebaseAt = await page.evaluate(() => SillyTavern.getContext().chat.length - 1);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world Test World'));
+    await page.waitForTimeout(1500);
+    const rb = await M(m => ({ w: m.chatWorld(), ch: m.chatChanges().length }));
+    check('save world: chat rebased onto the new world, earlier changes baked in', rb.w?.id === 'test-world' && rb.w.rebase && rb.w.at === rebaseAt && rb.ch === 0, JSON.stringify(rb));
+    const rendered = await (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent('riverton:streets/square') + '?world=test-world')).json();
+    check('save world: rendered world has the changes, chat keeps working on it', !rendered.exits.some(e => e.direction === 'east') && !(await wsExits()).includes('east (') && (await stored()) === 'riverton:streets/square');
+    check('save world: pristine by default (no knowledge file)', (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds.find(w => w.id === 'test-world')?.has_knowledge === false);
+    check('save world: refuses to overwrite', (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'test-world' }) })).status === 409);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-removeexit south'));
+    await page.waitForTimeout(1000);
+    check('after rebase only later changes are replayed', JSON.stringify(await M(m => m.chatChanges().map(c => c.type + ':' + c.direction))) === '["remove_exit:south"]' && !(await wsExits()).includes('south ('));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, n); }, rebaseAt);
+    await page.waitForTimeout(1000);
+    const back = await M(m => ({ w: m.chatWorld()?.id, ch: m.chatChanges().map(c => c.type) }));
+    check('deleting back past the rebase reverts to the previous world and its changes', back.w === 'riverton' && JSON.stringify(back.ch) === '["add_exit"]' && (await wsExits()).includes('east (') && (await wsExits()).includes('south ('), JSON.stringify(back) + (await wsExits()));
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'v', extra: { worldscrawl_location: 'riverton:nowhere/void', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    const exMissing = await wsExits();
+    check('missing room: falls back to the start with a system notice', (await lastMes()).includes('no longer exists in this world') && (await stored()) === 'riverton:drowned_rat/common_room' && exMissing.startsWith('Exits: out'), exMissing + ' | ' + (await lastMes()));
+        // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
     await page.waitForTimeout(1000);
     check('greeting restamped after swipe', await page.evaluate(() => SillyTavern.getContext().chat[0]?.extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
+    // Save "with knowledge", then a new chat on that world starts from the saved knowledge (seed + later stamps).
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false Know World --knowledge'));
+    await page.waitForTimeout(1500);
+    const kn = (await (await fetch('http://127.0.0.1:5199/worlds/know-world/knowledge')).json()).knowledge;
+    check('save with knowledge: knowledge.json has location, places and revealed doors', kn && kn.location === 'riverton:drowned_rat/common_room' && kn.stood.includes('riverton:temple/catacombs') && kn.doors.length >= 1 && (await M(m => m.chatWorld()?.id)) === 'riverton', JSON.stringify(kn));
+    await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const c = SillyTavern.getContext();
+        c.chat.splice(1); for (const x of [c.chat[0], ...(c.chat[0].swipe_info ?? [])]) if (x?.extra) { delete x.extra.worldscrawl_location; delete x.extra.worldscrawl_world; }
+        c.extensionSettings.worldscrawl.world = 'know-world'; await m.ensureStartStamp(); c.extensionSettings.worldscrawl.world = ''; });
+    const seeded = await page.evaluate(() => SillyTavern.getContext().chat[0].extra);
+    check('new chat on a knowledge world: seeded on message 0 with start at the saved location', seeded.worldscrawl_world?.id === 'know-world' && seeded.worldscrawl_world.seed?.doors?.length >= 1 && seeded.worldscrawl_location === 'riverton:drowned_rat/common_room', JSON.stringify(seeded).slice(0, 300));
+    await go('Temple Catacombs');
+    check('seeded knowledge: fast travel through seeded places and seeded revealed door', (await stored()) === 'riverton:temple/catacombs', String(await stored()));
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();

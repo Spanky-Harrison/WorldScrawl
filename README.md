@@ -12,21 +12,21 @@ This is version 0.1: static map only. Nothing is generated or created at runtime
 ```
 app/world.py        loads + validates the world files
 app/main.py         FastAPI server (stateless)
-world/world.json    { "start_region": "riverton" }
-world/regions/      one JSON file per region
+worlds/riverton/world.json    { "start_region": "riverton" }
+worlds/riverton/regions/      one JSON file per region
 extension/          the SillyTavern extension (manifest.json, index.js)
 tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 ```
 
 ## World files
 
-`world/world.json`:
+`worlds/<id>/world.json`:
 
 ```json
 { "start_region": "riverton" }
 ```
 
-`world/regions/<region_id>.json` (the region id is the file name). Every location lives in a subregion (a building, a street, a single-room stub...):
+`worlds/<id>/regions/<region_id>.json` (the region id is the file name). Every location lives in a subregion (a building, a street, a single-room stub...):
 
 ```json
 {
@@ -132,7 +132,23 @@ is at most one `/rooms` batch.
 - Every reply has an `X-WorldScrawl-Map-Version` header (a hash of the map files at load). When it changes, the extension forgets the rooms it remembered.
 - The server log has one line per move and per trip (from, direction/steps, result).
 
-Set `WORLDSCRAWL_WORLD_DIR` to use a world folder somewhere else.
+## Worlds
+
+Every folder in `worlds/` with a `world.json` is a world; its id is the folder name (letters, digits and dashes only). `worlds/riverton` (the former `world/` folder) is the default world (`WORLDSCRAWL_DEFAULT_WORLD` changes it; `WORLDSCRAWL_WORLDS_DIR` points at another worlds folder; the old `WORLDSCRAWL_WORLD_DIR` still serves one folder as world `default`). `world.json` may have an optional `"name"`. Each world has its own map version. Saved worlds other than riverton are ignored by git.
+
+- Every map endpoint takes `?world=<id>` (default world if omitted). Bad ids are rejected (400), unknown ids are 404.
+- `GET /worlds` → `{default, worlds: [{id, name, start_region, start, map_version, has_knowledge}]}`.
+- `GET /worlds/{id}/knowledge` → `{knowledge}`: the saved chat knowledge, or null.
+- `POST /worlds/render {base?, id, name?, changes: [...], overwrite?: false, knowledge?: {location, stood, seen, doors}}` writes a full new world folder: the base world's files with `changes` applied, in the normal hand-written format (no derived data). It's loaded right away. It refuses an existing id (409) unless `overwrite` is true. With `knowledge` it also writes `knowledge.json` next to the region files (entries that don't exist in the new world are dropped).
+- `POST /move` and `POST /travel` accept `changes` (this chat's world changes), applied for that request only.
+- Change types (`app/changes.py`; anything else is rejected): `{type: "add_exit", from, direction, to, description?}`, `{type: "remove_exit", from, direction}`.
+
+**Per-chat world state** lives in message stamps (the server never stores gameplay state):
+- A new chat stamps its world (`{id, version}`) on the greeting, taken from the "World for new chats" setting (default: the server's default world). Chats with no world stamp use the default world. If the server's map version differs from the chat's, a warning (and one toast) is shown, but nothing is blocked.
+- `/ws-dig <direction> <known place>` and `/ws-removeexit <direction>` post a short system message ("[Engine: a passage north to Village Square was opened.]") carrying the change. Deleting that message undoes the change.
+- **Save world** (`/ws-save-world [switch=false] [knowledge=true] <name> [--knowledge]`, or the settings button) renders the chat's world plus its changes into a new world. Map changes are always baked in. **Pristine** (default) writes no knowledge, so new chats start fresh at the world's start. **With knowledge** also writes `knowledge.json` (places stood in, places seen, revealed doors, current location as the start). A new chat on that world seeds those from it on message 0 (seed + later stamps; swipes can't remove the seed).
+- **Rebase:** with switch on (default), the latest message gets a rebase stamp `{id, version, rebase: true, at, from}`. From then on the chat is built on the new world and only changes stamped after that message are replayed (earlier ones are baked in). Locations, known places and revealed doors keep working (same addresses). Deleting or swiping away that message puts the chat back on the previous world with its changes.
+- Missing rooms, exits or doors in stamps (e.g. edited out of the map) are skipped with a console warning. If the current location itself is gone, the party is put at the world's start with a short system notice (delete it to undo).
 
 ## Tests
 
