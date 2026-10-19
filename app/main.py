@@ -59,7 +59,6 @@ class RenderRequest(BaseModel):
     id: str  # new world id (folder name): letters, digits, dashes
     name: str | None = None
     changes: list = []
-    overwrite: bool = False
     # "with knowledge" saves: what the chat knew, written to knowledge.json (region files stay clean). None = pristine.
     knowledge: dict | None = None
 
@@ -198,8 +197,9 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         if not valid_world_id(req.id):
             raise HTTPException(400, detail=f"Invalid world id {req.id!r} (letters, digits and dashes only).")
         target = root_dir / req.id
-        if (target.exists() or req.id in worlds) and not req.overwrite:
-            raise HTTPException(409, detail=f"World {req.id!r} already exists.")
+        taken = {w.lower() for w in worlds} | {d.name.lower() for d in root_dir.iterdir()}
+        if req.id.lower() in taken or target.exists():  # never write into an existing folder (case-insensitive, for Windows)
+            raise HTTPException(409, detail=f"World {req.id!r} already exists. Saving never replaces a world; pick another name.")
         try:
             wj, raw = apply_changes(*base.raw, req.changes)
             wj["name"] = (req.name or "").strip() or req.id
@@ -216,7 +216,7 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
             if know is not None:
                 (tmp / "knowledge.json").write_text(json.dumps(know, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             if target.exists():
-                shutil.rmtree(target)
+                raise HTTPException(409, detail=f"World {req.id!r} already exists.")
             tmp.rename(target)
         finally:
             if tmp.exists():

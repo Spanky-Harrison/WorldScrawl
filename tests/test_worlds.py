@@ -53,11 +53,16 @@ def test_render_copy_identical_new_id(client, wd):
     assert "to_label" not in text and "door_" not in text and '"name": "My Copy"' in (wd / "my-copy" / "world.json").read_text()
 
 
-def test_render_refuses_overwrite(client):
+def test_render_refuses_overwrite(client, wd):
+    before = (wd / "riverton" / "regions" / "riverton.json").read_bytes()
     assert client.post("/worlds/render", json={"id": "w2"}).status_code == 200
     assert client.post("/worlds/render", json={"id": "w2"}).status_code == 409
     assert client.post("/worlds/render", json={"id": "riverton"}).status_code == 409
-    assert client.post("/worlds/render", json={"id": "w2", "overwrite": True}).status_code == 200
+    assert client.post("/worlds/render", json={"id": "w2", "overwrite": True}).status_code == 409
+    assert client.post("/worlds/render", json={"id": "riverton", "overwrite": True}).status_code == 409
+    assert client.post("/worlds/render", json={"id": "Riverton"}).status_code == 409
+    assert client.get("/worlds").json()["worlds"][0]["id"] == "riverton"
+    assert (wd / "riverton" / "regions" / "riverton.json").read_bytes() == before
 
 
 def test_render_with_changes_and_unknown_type(client, wd):
@@ -105,3 +110,11 @@ def test_render_with_knowledge(client, wd):
     assert "stood" not in (wd / "known" / "regions" / "riverton.json").read_text()
     # reload from disk keeps it
     assert TestClient(create_app(worlds_dir=wd)).get("/worlds/known/knowledge").json()["knowledge"] == got
+
+
+def test_render_never_touches_existing_folder(client, wd):
+    r = client.post("/worlds/render", json={"id": "riverton", "overwrite": True, "changes": [{"type": "remove_exit", "from": TAVERN, "direction": "up"}]})
+    assert r.status_code == 409
+    assert any(e.direction == "up" for e in load_world(wd / "riverton").get(TAVERN).exits)
+    (wd / "stray").mkdir()
+    assert client.post("/worlds/render", json={"id": "stray"}).status_code == 409

@@ -139,7 +139,7 @@ Every folder in `worlds/` with a `world.json` is a world; its id is the folder n
 - Every map endpoint takes `?world=<id>` (default world if omitted). Bad ids are rejected (400), unknown ids are 404.
 - `GET /worlds` → `{default, worlds: [{id, name, start_region, start, map_version, has_knowledge}]}`.
 - `GET /worlds/{id}/knowledge` → `{knowledge}`: the saved chat knowledge, or null.
-- `POST /worlds/render {base?, id, name?, changes: [...], overwrite?: false, knowledge?: {location, stood, seen, doors}}` writes a full new world folder: the base world's files with `changes` applied, in the normal hand-written format (no derived data). It's loaded right away. It refuses an existing id (409) unless `overwrite` is true. With `knowledge` it also writes `knowledge.json` next to the region files (entries that don't exist in the new world are dropped).
+- `POST /worlds/render {base?, id, name?, changes: [...], knowledge?: {location, stood, seen, doors}}` writes a full new world folder: the base world's files with `changes` applied, in the normal hand-written format (no derived data). It's loaded right away. It never replaces anything: an id that already exists (any world folder, including riverton; compared case-insensitively) is refused with 409. With `knowledge` it also writes `knowledge.json` next to the region files (entries that don't exist in the new world are dropped).
 - `POST /move` and `POST /travel` accept `changes` (this chat's world changes), applied for that request only.
 - Change types (`app/changes.py`; anything else is rejected): `{type: "add_exit", from, direction, to, description?}`, `{type: "remove_exit", from, direction}`.
 
