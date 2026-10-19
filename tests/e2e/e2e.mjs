@@ -819,6 +819,33 @@ try {
     await go('hatch');
     check('saved-over world: moving through the baked-in exit', (await stored()) === 'riverton:streets/square', String(await stored()));
     check('backup folder is never listed as a world', !(await worldsNow()).some(w => w.id.startsWith('.') || w.id === 'backups'));
+    // Missing world: folder deleted while a chat is on it -> one notice, fallback to the world it was saved from, stamps untouched.
+    await page.evaluate(() => { document.getElementById('worldscrawl_save_switch').checked = true; document.getElementById('worldscrawl_save_name').value = 'Doomed'; });
+    await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
+    const doomed = (await worldsNow()).find(w => w.name === 'Doomed');
+    check('missing world: setup on Doomed (saved from My Riverton)', (await M(m => m.chatWorld()?.id)) === doomed?.id && (await M(m => m.chatWorld()?.from)) === mr?.id);
+    (await import('node:fs')).rmSync(`/tmp/ws-worlds/${doomed.id}`, { recursive: true, force: true });
+    const emitCC = () => page.evaluate(async () => { const c = SillyTavern.getContext(); await c.eventSource.emit(c.eventTypes.CHAT_CHANGED); });
+    await emitCC(); await page.waitForTimeout(2500);
+    const mw = await page.evaluate(() => SillyTavern.getContext().chat.filter(m => m.extra?.worldscrawl_notice_kind === 'missing_world').map(m => m.mes));
+    check('missing world: one notice, fallback to the world it was saved from', mw.length === 1 && mw[0].includes('"Doomed"') && mw[0].includes('Using "My Riverton"') && (await M(m => m.effectiveWorld())) === mr?.id, JSON.stringify(mw));
+    check('missing world: stamps untouched, chat keeps working', (await M(m => m.chatWorld()?.id)) === doomed.id && (await stored()) === 'riverton:streets/square' && (await wsExits()).startsWith('Exits: in ('), String(await wsExits()));
+    await emitCC(); await page.waitForTimeout(2000);
+    check('missing world: notice only once', (await page.evaluate(() => SillyTavern.getContext().chat.filter(m => m.extra?.worldscrawl_notice_kind === 'missing_world').length)) === 1);
+    const wb = await page.evaluate(() => [...document.querySelectorAll('#chat .worldscrawl_world_button')].map(b => b.dataset.world));
+    check('missing world: picker buttons list existing worlds only', wb.includes('riverton') && !wb.includes(doomed.id), JSON.stringify(wb));
+    await page.evaluate(() => document.querySelector('#chat .worldscrawl_world_button[data-world="riverton"]').click()); await page.waitForTimeout(2500);
+    const mv3 = await M(m => ({ w: m.chatWorld(), e: m.effectiveWorld() }));
+    check('missing world: picking a world rebases the chat onto it', mv3.w?.id === 'riverton' && mv3.w.rebase && mv3.e === 'riverton' && (await wsExits()).startsWith('Exits: in ('), JSON.stringify(mv3));
+    await page.evaluate(id => { SillyTavern.getContext().extensionSettings.worldscrawl.world = id; }, doomed.id);
+    await page.evaluate(() => jQuery('#worldscrawl_test').trigger('click')); await page.waitForTimeout(1500);
+    check('deleted world dropped from the picker and the new-chats setting resets', await page.evaluate(id => SillyTavern.getContext().extensionSettings.worldscrawl.world === '' && ![...document.querySelectorAll('#worldscrawl_world option')].some(o => o.value === id), doomed.id));
+    apiUrls.length = 0;
+    await page.evaluate(() => document.getElementById('worldscrawl_open_folder').click()); await page.waitForTimeout(800);
+    await page.evaluate(() => document.getElementById('worldscrawl_open_world').click()); await page.waitForTimeout(800);
+    const of = apiUrls.filter(u => u.includes('/open-folder'));
+    check('open folder buttons call the server with no path (root, then a world id)', of.length === 2 && !of[0].includes('world=') && /world=riverton$/.test(of[1]), JSON.stringify(of));
+    check('open-folder refuses a path-like id', (await fetch('http://127.0.0.1:5199/open-folder?world=..%2F..', { method: 'POST' })).status === 400);
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();

@@ -128,13 +128,35 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         default_id = want if want in worlds else next(iter(worlds))
     app = FastAPI(title="WorldScrawl", version="0.2.0")
 
+    def rescan():
+        """Pick up world folders added, changed or deleted since startup (the default world is never dropped).
+        A broken folder found on a rescan is skipped with a warning instead of failing."""
+        if root_dir is None:
+            return
+        seen = set()
+        for d in sorted(root_dir.iterdir()) if root_dir.is_dir() else []:
+            if d.name.startswith(".") or not (d / "world.json").is_file() or not valid_world_id(d.name):
+                continue
+            seen.add(d.name)
+            try:
+                if d.name not in worlds or worlds[d.name].version != map_version(d):
+                    worlds[d.name] = LoadedWorld(d.name, d)
+                    log.info("worlds: loaded %s", d.name)
+            except (WorldError, OSError) as e:
+                log.warning("worlds: skipping %s (%s)", d.name, e)
+        for wid in [w for w in worlds if w not in seen and w != default_id]:
+            log.info("worlds: %s is gone", wid)
+            del worlds[wid]
+
     def get_world(wid: str | None) -> LoadedWorld:
         if wid in (None, ""):
             return worlds[default_id]
         if not valid_world_id(wid):
             raise HTTPException(400, detail=f"Invalid world id {wid!r} (letters, digits and dashes only).")
         if wid not in worlds:
-            raise HTTPException(404, detail=f"Unknown world {wid!r}.")
+            rescan()
+        if wid not in worlds:
+            raise HTTPException(404, detail={"error": "world_not_found", "world": wid, "message": f"World {wid!r} not found (its folder may have been deleted or renamed)."})
         return worlds[wid]
 
     changed_cache: OrderedDict = OrderedDict()
@@ -189,8 +211,34 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         w = lw.world
         return {"ok": True, "world": lw.id, "map_version": lw.version, "regions": len(w.regions), "locations": len(w.locations), "subregions": len(w.subregions), "start": w.start}
 
+    def open_path(path: Path):
+        """Open a folder in the system file browser (WORLDSCRAWL_NO_OPEN=1 skips it, for tests)."""
+        if os.environ.get("WORLDSCRAWL_NO_OPEN"):
+            return
+        import subprocess
+        import sys
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    app.state.open_path = open_path
+
+    @app.post("/open-folder")
+    def open_folder(world: str | None = None):
+        """Open the worlds folder (no id) or one world's folder. Takes only a world id, never a path."""
+        if root_dir is None:
+            raise HTTPException(400, detail="No worlds folder (single WORLDSCRAWL_WORLD_DIR mode).")
+        base = root_dir.resolve()
+        path = base if world in (None, "") else get_world(world).root.resolve()
+        if path != base and base not in path.parents:
+            raise HTTPException(400, detail="Refusing to open a folder outside worlds/.")
+        app.state.open_path(path)
+        return {"opened": str(path)}
+
     @app.get("/worlds")
     def list_worlds():
+        rescan()  # folders added/removed by hand show up without a restart
         return {"default": default_id, "worlds": [lw.info() for lw in worlds.values()]}
 
     @app.get("/worlds/{wid}/knowledge")
