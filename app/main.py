@@ -79,6 +79,7 @@ class LoadedWorld:
         self.world: World = build_world(*self.raw)
         self.version = map_version(root)
         self.name = self.raw[0].get("name") if isinstance(self.raw[0].get("name"), str) else wid
+        self.living = self.raw[0].get("living") is True  # living saves may be saved over; missing/false = protected
         kf = root / "knowledge.json"
         self.knowledge = None
         if kf.is_file():
@@ -89,7 +90,7 @@ class LoadedWorld:
 
     def info(self) -> dict:
         return {"id": self.id, "name": self.name, "start_region": self.world.start.split(":")[0], "start": self.world.start,
-                "map_version": self.version, "has_knowledge": self.knowledge is not None}
+                "map_version": self.version, "has_knowledge": self.knowledge is not None, "living": self.living}
 
 
 def clean_knowledge(k, world: World) -> dict:
@@ -115,7 +116,7 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
     else:
         root_dir = Path(worlds_dir or os.environ.get("WORLDSCRAWL_WORLDS_DIR") or DEFAULT_WORLDS_DIR)
         for d in sorted(root_dir.iterdir()) if root_dir.is_dir() else []:
-            if not (d / "world.json").is_file():
+            if d.name.startswith(".") or not (d / "world.json").is_file():  # .backups, temp folders
                 continue
             if not valid_world_id(d.name):
                 log.warning("worlds: skipping folder %r (world ids are letters, digits and dashes)", d.name)
@@ -205,6 +206,7 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         base = get_world(req.base)
         names = {lw.name.strip().lower() for lw in worlds.values()}
         name = (req.name or "").strip()
+        over = None  # the living world being saved over, if any
         if not name or req.auto:  # generated name ("<base> - <Mon D, h:mm AM>" if none was sent), made unique
             auto = name or f"{base.name} - {datetime.now().strftime('%b %d, %I:%M %p').replace(' 0', ' ')}"
             name, n = auto, 1
@@ -212,14 +214,22 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
                 n += 1
                 name = f"{auto} ({n})"
         elif name.lower() in names:
-            raise HTTPException(409, detail=f"A world named {name!r} already exists. Pick another name.")
+            over = next(lw for lw in worlds.values() if lw.name.strip().lower() == name.lower())
+            if not over.living:
+                raise HTTPException(409, detail=f"A world named {name!r} already exists and is protected (not a living save). Pick another name.")
         taken = {w.lower() for w in worlds} | {d.name.lower() for d in root_dir.iterdir()}
-        if req.id is not None:
+        if over is not None:
+            wid, name = over.id, over.name
+        elif req.id is not None:
             if not valid_world_id(req.id):
                 raise HTTPException(400, detail=f"Invalid world id {req.id!r} (letters, digits and dashes only).")
-            if req.id.lower() in taken:  # never write into an existing folder (case-insensitive, for Windows)
-                raise HTTPException(409, detail=f"World {req.id!r} already exists. Saving never replaces a world; pick another name.")
-            wid = req.id
+            existing = next((lw for lw in worlds.values() if lw.id.lower() == req.id.lower()), None)
+            if existing is not None and existing.living:
+                over, wid, name = existing, existing.id, existing.name
+            elif req.id.lower() in taken:  # never write into a protected or unknown existing folder
+                raise HTTPException(409, detail=f"World {req.id!r} already exists and is protected (not a living save). Pick another name.")
+            else:
+                wid = req.id
         else:
             stem = slugify(req.id_hint or name)
             wid, n = stem, 1
@@ -230,6 +240,7 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         try:
             wj, raw = apply_changes(*base.raw, req.changes)
             wj["name"] = name
+            wj["living"] = True  # saves are living: they can be saved over later
             new_world = build_world(wj, raw)  # validate before writing anything
             know = clean_knowledge(req.knowledge, new_world) if req.knowledge is not None else None
         except WorldError as e:
@@ -242,15 +253,30 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
                 (tmp / "regions" / f"{rid}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             if know is not None:
                 (tmp / "knowledge.json").write_text(json.dumps(know, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            if target.exists():
-                raise HTTPException(409, detail=f"World {wid!r} already exists.")
-            tmp.rename(target)
+            if over is None:
+                if target.exists():
+                    raise HTTPException(409, detail=f"World {wid!r} already exists.")
+                tmp.rename(target)
+            else:  # swap: the previous version becomes the one backup in .backups/<id>
+                backups = root_dir / ".backups"
+                backups.mkdir(exist_ok=True)
+                old = backups / wid
+                if old.exists():
+                    shutil.rmtree(old)
+                target.rename(old)
+                try:
+                    tmp.rename(target)
+                except OSError:
+                    old.rename(target)  # put the previous version back
+                    raise
         finally:
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
         worlds[wid] = LoadedWorld(wid, target)
-        log.info("render world %s -> %s (%d changes)", base.id, wid, len(req.changes))
-        return worlds[wid].info()
+        for k in [k for k in changed_cache if k[0] == wid]:
+            del changed_cache[k]
+        log.info("render world %s -> %s (%d changes%s)", base.id, wid, len(req.changes), ", saved over the previous version" if over else "")
+        return {**worlds[wid].info(), "overwritten": over is not None}
 
     @app.get("/start")
     def start(world: str | None = None):

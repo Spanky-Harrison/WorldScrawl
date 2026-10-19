@@ -238,6 +238,8 @@ def load_world(root: str | Path) -> World:
 def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
     """Validate and build a World from plain JSON (as read from a world folder, possibly with changes applied)."""
     start_region = _require_str(world_json, "start_region", "world.json")
+    if "living" in world_json and not isinstance(world_json["living"], bool):
+        raise WorldError('world.json: "living" must be true or false')
     files = sorted(raw_regions)
 
     regions: dict[str, Region] = {}

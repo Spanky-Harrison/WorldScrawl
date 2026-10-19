@@ -1,4 +1,5 @@
 {
   "name": "Riverton",
-  "start_region": "riverton"
+  "start_region": "riverton",
+  "living": false
 }

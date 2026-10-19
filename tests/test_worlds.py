@@ -56,9 +56,8 @@ def test_render_copy_identical_new_id(client, wd):
 def test_render_refuses_overwrite(client, wd):
     before = (wd / "riverton" / "regions" / "riverton.json").read_bytes()
     assert client.post("/worlds/render", json={"id": "w2"}).status_code == 200
-    assert client.post("/worlds/render", json={"id": "w2"}).status_code == 409
+    assert client.post("/worlds/render", json={"id": "w2"}).json()["overwritten"] is True  # saves are living
     assert client.post("/worlds/render", json={"id": "riverton"}).status_code == 409
-    assert client.post("/worlds/render", json={"id": "w2", "overwrite": True}).status_code == 409
     assert client.post("/worlds/render", json={"id": "riverton", "overwrite": True}).status_code == 409
     assert client.post("/worlds/render", json={"id": "Riverton"}).status_code == 409
     assert client.get("/worlds").json()["worlds"][0]["id"] == "riverton"
@@ -124,7 +123,8 @@ def test_display_names_and_slugs(client, wd):
     r = client.post("/worlds/render", json={"name": "My Riverton!"}).json()
     assert r["id"] == "my-riverton" and r["name"] == "My Riverton!"
     assert '"name": "My Riverton!"' in (wd / "my-riverton" / "world.json").read_text()
-    assert client.post("/worlds/render", json={"name": "  my riverton!  "}).status_code == 409  # same display name
+    again = client.post("/worlds/render", json={"name": "  my riverton!  "}).json()  # same display name: living -> saved over
+    assert again["overwritten"] is True and again["id"] == "my-riverton" and again["name"] == "My Riverton!"
     r2 = client.post("/worlds/render", json={"name": "My Riverton?"}).json()  # different name, same slug
     assert r2["id"] == "my-riverton-2" and r2["name"] == "My Riverton?"
     assert client.post("/worlds/render", json={"name": "Riverton"}).status_code == 409  # the default world's name
@@ -137,3 +137,48 @@ def test_auto_names(client):
     assert b["id"] == "riverton-desirae-oct-19-2" and b["name"] == "Riverton - Desirae - Oct 19, 4:14 PM (2)"
     c = client.post("/worlds/render", json={}).json()  # nothing sent: "<base> - <date>"
     assert c["name"].startswith("Riverton - ") and c["id"].startswith("riverton-")
+
+
+def test_living_flag_validated(tmp_path):
+    import json as _j
+    shutil.copytree(RIVERTON, tmp_path / "riverton")
+    wj = tmp_path / "riverton" / "world.json"
+    data = _j.loads(wj.read_text()); data["living"] = "yes"; wj.write_text(_j.dumps(data))
+    from app.world import WorldError
+    with pytest.raises(WorldError, match='"living" must be true or false'):
+        load_world(tmp_path / "riverton")
+
+
+def test_riverton_is_protected(client, wd):
+    assert client.get("/worlds").json()["worlds"][0]["living"] is False
+    before = (wd / "riverton" / "regions" / "riverton.json").read_bytes()
+    for body in [{"name": "Riverton"}, {"name": " riverton "}, {"id": "riverton"}, {"id": "Riverton", "name": "Other"}]:
+        assert client.post("/worlds/render", json=body).status_code == 409, body
+    assert (wd / "riverton" / "regions" / "riverton.json").read_bytes() == before and not (wd / ".backups").exists()
+
+
+def test_missing_living_is_protected(client, wd):
+    shutil.copytree(wd / "riverton", wd / "old-save")
+    import json as _j
+    wj = wd / "old-save" / "world.json"; d = _j.loads(wj.read_text()); d.pop("living", None); d["name"] = "Old Save"; wj.write_text(_j.dumps(d))
+    c = TestClient(create_app(worlds_dir=wd))
+    assert c.post("/worlds/render", json={"name": "Old Save"}).status_code == 409
+
+
+def test_save_over_living_world_keeps_one_backup(client, wd):
+    first = client.post("/worlds/render", json={"name": "Mine"}).json()
+    assert first["living"] is True and '"living": true' in (wd / "mine" / "world.json").read_text()
+    dig = [{"type": "add_exit", "from": SQUARE, "direction": "dig", "to": YARD}]
+    second = client.post("/worlds/render", json={"base": "mine", "name": "Mine", "changes": dig}).json()
+    assert second["overwritten"] and second["id"] == "mine" and second["map_version"] != first["map_version"]
+    assert any(e.direction == "dig" for e in load_world(wd / "mine").get(SQUARE).exits)
+    assert not any(e.direction == "dig" for e in load_world(wd / ".backups" / "mine").get(SQUARE).exits)  # previous version
+    rm = [{"type": "remove_exit", "from": SQUARE, "direction": "dig"}]
+    client.post("/worlds/render", json={"base": "mine", "name": "Mine", "changes": rm})
+    assert [p.name for p in (wd / ".backups").iterdir()] == ["mine"]  # exactly one backup
+    assert any(e.direction == "dig" for e in load_world(wd / ".backups" / "mine").get(SQUARE).exits)
+    # the backup folder is never a world
+    assert {w["id"] for w in client.get("/worlds").json()["worlds"]} == {"riverton", "mine"}
+    assert {w["id"] for w in TestClient(create_app(worlds_dir=wd)).get("/worlds").json()["worlds"]} == {"riverton", "mine"}
+    # moves on the saved-over world see the new version
+    assert client.post("/move", json={"from": SQUARE, "direction": "dig"}, params={"world": "mine"}).status_code == 400
