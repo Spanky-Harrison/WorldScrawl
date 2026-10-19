@@ -6,7 +6,20 @@
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}', world: '' };
+const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
+export const OFF_NOTICE = 'WorldScrawl is turned off.';
+const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
+/** Does this chat already have anything WorldScrawl stamped on it? */
+export const chatHasStamps = (chat = ctx().chat ?? []) => chat.some(m => { const e = m?.extra; return e && (e[LOC_KEY] || e[MOVE_KEY] || e[WORLD_KEY] || e[CHANGE_KEY] || e.worldscrawl_notice); });
+/**
+ * Is WorldScrawl on in this chat? The chat's saved choice; else on if the chat already has WorldScrawl stamps
+ * (older chats); else the global "Enable in new chats" setting (default off). When off it behaves as if uninstalled.
+ */
+export function isOn() {
+    const v = ctx().chatMetadata?.[ENABLED_KEY];
+    if (typeof v === 'boolean') return v;
+    return chatHasStamps() || !!settings().enableNewChats;
+}
 const WORLD_KEY = 'worldscrawl_world'; // {id, version, rebase?, at?, from?}: which world this chat is built on (latest stamp wins)
 const CHANGE_KEY = 'worldscrawl_change'; // {type: 'add_exit'|'remove_exit', ...} on the system message that made the change
 const MODES = ['commands', 'typed', 'tools'];
@@ -53,6 +66,11 @@ const versionWarned = new Set();
 // swiping away a rebase stamp puts the chat back on the previous world. No stamp = the server's default world.
 let activeWorld = ''; // '' = server default
 let defaultWorldId = null; // learned from GET /worlds; '' and the default id are the same world
+const worldNames = new Map(); // id -> display name (from GET /worlds and saves)
+const rememberWorlds = body => { if (body?.default) defaultWorldId = body.default; for (const w of body?.worlds ?? []) worldNames.set(w.id, w.name); };
+/** What the user sees for a world: its display name, else its id. */
+export const worldName = id => worldNames.get(id || defaultWorldId) ?? (id || defaultWorldId || 'World');
+let lastSyncChat = null;
 export function chatWorld(chat = ctx().chat ?? []) {
     for (let i = chat.length - 1; i >= 0; i--) { const w = chat[i]?.extra?.[WORLD_KEY]; if (w?.id) return { ...w, index: i }; }
     return null;
@@ -67,6 +85,9 @@ export function syncWorld() {
     const w = chatWorld()?.id ?? '';
     const same = (w || defaultWorldId) === (activeWorld || defaultWorldId);
     if (w !== activeWorld && same) activeWorld = w; // same world, just named: keep what's remembered
+    const chatId = ctx().chatId ?? ctx().getCurrentChatId?.() ?? null;
+    if (w !== activeWorld && lastSyncChat === chatId && chatId) { try { toastr.info(`WorldScrawl: this chat now uses the world "${worldName(w)}".`); } catch {} }
+    lastSyncChat = chatId;
     if (w !== activeWorld) {
         console.log(`[WorldScrawl] world: ${activeWorld || '(default)'} -> ${w || '(default)'}`);
         activeWorld = w; exitsCache.clear(); doorInfo.clear(); doorFetched.clear(); mapVersion = null;
@@ -100,6 +121,7 @@ async function applyChanges(loc) {
     return { ...loc, exits };
 }
 export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
+export const cacheKeys = () => [...exitsCache.keys()];
 
 async function api(path, options = {}) {
     let res;
@@ -107,7 +129,8 @@ async function api(path, options = {}) {
         // JSON content type only when sending a body: on a GET it would force a CORS preflight (an extra OPTIONS request).
         const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers ?? {}) };
         const sep = path.includes('?') ? '&' : '?';
-        const scoped = !path.startsWith('/worlds') && activeWorld ? `${path}${sep}world=${encodeURIComponent(activeWorld)}` : path;
+        const wid = activeWorld || defaultWorldId; // always name the world once it's known
+        const scoped = !path.startsWith('/worlds') && wid ? `${path}${sep}world=${encodeURIComponent(wid)}` : path;
         res = await fetch(baseUrl() + scoped, { ...options, headers });
     } catch (e) {
         throw new Error(`WorldScrawl server not reachable at ${baseUrl()} (${e.message}). Is it running?`);
@@ -158,17 +181,18 @@ async function missingRoomFallback(stored) {
 
 /** Every chat gets a location from turn one: stamp the start onto the greeting (message 0) if nothing is saved. */
 export async function ensureStartStamp() {
+    syncWorld();
     const c = ctx();
     const first = c.chat?.[0];
     if (!first || getStoredLocation()) return;
     if (!chatWorld()) { // new chat: built on the world chosen in the settings (default: the server's default world)
         const list = await api('/worlds').catch(() => null);
-        if (list?.body?.default) defaultWorldId = list.body.default;
+        rememberWorlds(list?.body);
         const id = settings().world || list?.body?.default;
         const info = list?.body?.worlds?.find(w => w.id === id);
         let seed = null;
         if (info?.has_knowledge) seed = (await api(`/worlds/${encodeURIComponent(info.id)}/knowledge`).catch(() => null))?.body?.knowledge ?? null;
-        if (info) { first.extra = first.extra ?? {}; first.extra[WORLD_KEY] = { id: info.id, version: info.map_version, ...(seed ? { seed } : {}) };
+        if (info) { first.extra = first.extra ?? {}; first.extra[WORLD_KEY] = { id: info.id, name: info.name, version: info.map_version, ...(seed ? { seed } : {}) };
             for (const sw of first.swipe_info ?? []) { if (sw) { sw.extra = sw.extra ?? {}; sw.extra[WORLD_KEY] = first.extra[WORLD_KEY]; } } }
         syncWorld();
     }
@@ -212,6 +236,7 @@ async function moveAction({ direction } = {}) {
 }
 
 function stampLocation() {
+    if (!isOn()) { pendingLocation = null; return; }
     if (!pendingLocation) return;
     const chat = ctx().chat;
     const msg = chat?.[chat.length - 1];
@@ -224,7 +249,7 @@ function stampLocation() {
 
 function applyTools() {
     const c = ctx();
-    if (!toolsOn()) { TOOL_NAMES.forEach(n => { try { c.unregisterFunctionTool(n); } catch {} }); return; }
+    if (!toolsOn() || !isOn()) { TOOL_NAMES.forEach(n => { try { c.unregisterFunctionTool(n); } catch {} }); return; }
     registerTools();
 }
 
@@ -255,7 +280,7 @@ function registerTools() {
 
 /** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
 function applyNudge() {
-    const text = toolsOn() ? String(settings().nudge ?? '').trim() : '';
+    const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
@@ -670,6 +695,7 @@ export function moveNote(who, move, exit) {
 
 async function goTarget(t) {
     const c = ctx();
+    if (!isOn()) { toastr.info(OFF_NOTICE); return OFF_NOTICE; }
     if (engineBusy) return 'WorldScrawl: already moving.';
     if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
     engineBusy = true;
@@ -919,6 +945,7 @@ export function factsText(loc, move, toolsOn) {
 
 async function applyFacts() {
     const c = ctx();
+    if (!isOn()) { c.setExtensionPrompt(FACTS_KEY, '', 1, 1, false, 0); c.setExtensionPrompt(REMINDER_KEY, '', 1, 0, false, 0); return; }
     let text = '', reminder = '';
     try {
         const loc = await currentLocation();
@@ -934,7 +961,7 @@ async function applyFacts() {
 
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
-    if (type === 'quiet' || type === 'impersonate') return;
+    if (type === 'quiet' || type === 'impersonate' || !isOn()) return;
     try {
         const c = ctx();
         const chat = c.chat ?? [];
@@ -990,14 +1017,27 @@ export async function removeExitAction(arg) {
     await addChangeMessage(`[Engine: the ${e.direction} exit from ${roomLabel(here)} was removed.]`, { type: 'remove_exit', from: here.address, direction: e.direction });
     return '';
 }
-export const worldIdFor = name => String(name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || `world-${Date.now()}`;
+const slug = x => String(x ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+/** The chat's default save name: "<base world> - <character or chat> - <Mon D, h:mm AM>" (also the Save box placeholder). */
+export function defaultWorldName(now = new Date()) {
+    const c = ctx();
+    const who = c.groupId ? (c.groups?.find?.(g => g.id === c.groupId)?.name ?? 'Group') : (c.name2 || c.chatId || 'Chat');
+    const when = now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `${worldName(chatWorld()?.id ?? activeWorld)} - ${who} - ${when}`;
+}
+/** Readable folder hint for a generated name: "riverton-desirae-oct-19" (the server adds -2, -3... if taken). */
+const autoIdHint = (now = new Date()) => { const c = ctx(); return [worldName(chatWorld()?.id ?? activeWorld), c.name2 || 'chat', now.toLocaleString('en-US', { month: 'short' }), now.getDate()].map(slug).filter(Boolean).join('-'); };
+function refreshSaveName() { const i = document.getElementById('worldscrawl_save_name'); if (i) i.placeholder = defaultWorldName(); }
 /**
  * Render this chat (its world + its changes) into a new world folder. With switchChat, stamp a rebase on the
  * latest message: from then on the chat is built on the new world and only changes stamped after it are replayed.
  */
 export async function saveWorld(name, switchChat = true, withKnowledge = false) {
     syncWorld();
-    const id = worldIdFor(name);
+    if (!worldNames.size) rememberWorlds((await api('/worlds').catch(() => null))?.body);
+    name = String(name ?? '').trim();
+    const auto = !name || name === document.getElementById('worldscrawl_save_name')?.placeholder;
+    if (!name) name = defaultWorldName();
     let knowledge = null;
     if (withKnowledge) { // what this chat knows, for new chats on the saved world (written to knowledge.json)
         const here = await currentLocation();
@@ -1005,91 +1045,142 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false) 
         const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
         knowledge = { location: here.address, stood, seen, doors: [...await syncDoors()] };
     }
-    const r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ base: activeWorld || null, id, name: String(name ?? '').trim() || id, changes: chatChanges(), ...(knowledge ? { knowledge } : {}) }) });
+    const r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ base: activeWorld || null, name, auto, ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) }) });
     if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
-    if (switchChat) {
-        const c = ctx();
-        const i = c.chat.length - 1;
-        const msg = c.chat[i];
-        msg.extra = msg.extra ?? {};
-        msg.extra[WORLD_KEY] = { id: r.body.id, version: r.body.map_version, rebase: true, at: i, from: activeWorld || null };
-        await c.saveChat();
-        syncWorld();
-        renderAllExits();
-    }
-    toastr.success(`Saved world "${r.body.name}" (${r.body.id})${switchChat ? '; this chat now uses it' : ''}.`);
+    worldNames.set(r.body.id, r.body.name);
+    // A system message records the save; with switch on it carries the rebase stamp (delete it to go back).
+    const c = ctx();
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'saved' },
+        mes: `[Engine: world saved as "${r.body.name}".${switchChat ? ' This chat now uses it.' : ''}]` };
+    c.chat.push(msg);
+    if (switchChat) { lastSyncChat = null; msg.extra[WORLD_KEY] = { id: r.body.id, name: r.body.name, version: r.body.map_version, rebase: true, at: c.chat.length - 1, from: activeWorld || null }; }
+    c.addOneMessage(msg);
+    await c.saveChat();
+    if (switchChat) { syncWorld(); renderAllExits(); }
+    refreshSaveName();
+    toastr.success(`Saved world "${r.body.name}"${switchChat ? '; this chat now uses it' : ''}.`);
     return { ok: true, world: r.body };
 }
+
+/** Rebuild everything from this chat's stamps (same as on chat load). */
+async function rebuildFromChat() {
+    if (!isOn()) return;
+    pendingLocation = null;
+    // Resolve the chat's world BEFORE any room request: learn the default world, stamp a new chat's world from the
+    // current setting (read fresh), then fetch.
+    if (!defaultWorldId) rememberWorlds((await api('/worlds').catch(() => null))?.body);
+    await ensureStartStamp();
+    syncWorld();
+    if (ctx().chat?.length) await warmRooms(chatAddresses()); // one request for every room this chat needs (none if all remembered)
+    await applyFacts(); setTimeout(renderAllExits, 0);
+}
+/** Entry in SillyTavern's Extensions (wand) menu that toggles the current chat; its text follows the state. */
+export const wandText = () => (isOn() ? 'Disable WorldScrawl for this chat' : 'Enable WorldScrawl for this chat');
+function addWandItem() {
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu || document.getElementById('worldscrawl_wand')) return;
+    const item = document.createElement('div');
+    item.id = 'worldscrawl_wand';
+    item.className = 'list-group-item flex-container flexGap5 interactable';
+    item.tabIndex = 0;
+    item.innerHTML = '<div class="fa-solid fa-map extensionsMenuExtensionButton"></div><span></span>';
+    item.addEventListener('click', () => setEnabled(!isOn()));
+    menu.appendChild(item);
+    updateWandItem();
+}
+function updateWandItem() { const t = document.querySelector('#worldscrawl_wand span'); if (t) t.textContent = wandText(); }
+/** Apply this chat's on/off state: off clears every injection and footer; on rebuilds exactly as on chat load. */
+async function applyChatState() {
+    const box = document.getElementById('worldscrawl_enabled'); if (box) box.checked = isOn();
+    updateWandItem(); refreshSaveName();
+    applyTools(); applyNudge();
+    if (!isOn()) { const c = ctx(); for (const [k, d] of [[NUDGE_KEY, 1], [FACTS_KEY, 1], [REMINDER_KEY, 0]]) c.setExtensionPrompt(k, '', 1, d, false, 0); await renderAllExits(); }
+    else await rebuildFromChat();
+}
+/** Turn WorldScrawl on/off for the current chat (saved in its metadata), without reloading. */
+export async function setEnabled(on) {
+    const c = ctx();
+    if (c.chatMetadata) { c.chatMetadata[ENABLED_KEY] = !!on; (c.saveMetadataDebounced ?? c.saveMetadata)?.(); }
+    await applyChatState();
+    return on ? 'WorldScrawl is on in this chat.' : 'WorldScrawl is off in this chat.';
+}
+const whenOn = fn => async (...a) => { if (!isOn()) { toastr.info(OFF_NOTICE); return OFF_NOTICE; } return fn(...a); };
 
 function registerSlashCommands() {
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, SlashCommandNamedArgument, ARGUMENT_TYPE } = ctx();
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-go',
-        callback: (_args, dir) => goAction(String(dir ?? '').trim()),
+        callback: whenOn((_args, dir) => goAction(String(dir ?? '').trim())),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction, e.g. north', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: move through an exit or to a known place, then the model narrates the arrival.',
     }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ws-dig', callback: (_a, v) => digAction(String(v ?? '')),
+        name: 'ws-dig', callback: whenOn((_a, v) => digAction(String(v ?? ''))),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'direction and known place, e.g. north Village Square', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: open a new exit from the current room to a known place (delete the system message to undo).',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ws-removeexit', callback: (_a, v) => removeExitAction(String(v ?? '')),
+        name: 'ws-removeexit', callback: whenOn((_a, v) => removeExitAction(String(v ?? ''))),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: remove an exit from the current room (delete the system message to undo).',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-save-world',
-        callback: async (args, v) => {
+        callback: whenOn(async (args, v) => {
             let name = String(v ?? '');
             const flag = /(^|\s)--knowledge(\s|$)/.test(name);
             name = name.replace(/(^|\s)--knowledge(?=\s|$)/g, ' ').trim();
             const r = await saveWorld(name, String(args?.switch ?? 'true') !== 'false', flag || String(args?.knowledge ?? 'false') === 'true');
             return r.ok ? r.world.id : '';
-        },
+        }),
         namedArgumentList: [SlashCommandNamedArgument.fromProps({ name: 'knowledge', description: 'also save what this chat knows (places, revealed doors, location) for new chats; default false (pristine)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'false' }),SlashCommandNamedArgument.fromProps({ name: 'switch', description: 'move this chat onto the new world (default true)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'true' })],
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'world name', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: save this chat\'s world (with its dug/removed exits) as a new world; switch=false keeps the chat on its current world; --knowledge (or knowledge=true) also saves what this chat knows.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-exits',
-        callback: async () => { try { const t = exitsText(await currentLocation()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } },
+        callback: whenOn(async () => { try { const t = exitsText(await currentLocation()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
         helpString: 'WorldScrawl: show the exits from the current location.',
     }));
 }
 
 // ---- Exits footer: display-only (DOM), never written into message.mes, so the model never sees it.
-const exitsCache = new Map(); // address -> Promise<location|null>
+const exitsCache = new Map(); // "world|address" -> Promise<location|null> (never shared between worlds)
+/** Cache key: the world the request goes to plus the address ("(start)" for the start room). */
+const ck = (a, w = activeWorld || defaultWorldId || '') => `${w}|${a ?? '(start)'}`;
 
 /** /move returns the full new location: remember it so the next lookup needs no request. */
-function primeCache(loc) { if (loc?.address && !exitsCache.has(loc.address)) exitsCache.set(loc.address, Promise.resolve(loc)); }
+function primeCache(loc, w) { const k = ck(loc?.address, w); if (loc?.address && !exitsCache.has(k)) exitsCache.set(k, Promise.resolve(loc)); }
 
 /**
  * Make sure these rooms (and the start room) are remembered, fetching all missing ones in ONE request
  * (GET /rooms). Used when rebuilding after a reload, instead of one /location request per room.
  */
 function warmRooms(addresses) {
-    const missing = [...new Set(addresses)].filter(a => a && !exitsCache.has(a));
-    const needStart = !exitsCache.has('(start)');
+    const w = activeWorld || defaultWorldId || '';
+    const missing = [...new Set(addresses)].filter(a => a && !exitsCache.has(ck(a, w)));
+    const needStart = !exitsCache.has(ck(null, w));
     if (!missing.length) return needStart ? fetchLocationCached(null) : Promise.resolve();
     const batch = (async () => {
         try { const r = await api(`/rooms?addresses=${encodeURIComponent(missing.join(','))}`); return r.ok ? r.body : null; } catch { return null; }
     })();
     const remember = (key, p) => { exitsCache.set(key, p); p.then(v => { if (!v && exitsCache.get(key) === p) exitsCache.delete(key); }); };
-    for (const a of missing) remember(a, batch.then(b => b?.rooms?.find(x => x.address === a) ?? null));
-    if (needStart) remember('(start)', batch.then(b => { if (b?.start) primeCache(b.start); return b?.start ?? null; }));
+    for (const a of missing) remember(ck(a, w), batch.then(b => b?.rooms?.find(x => x.address === a) ?? null));
+    if (needStart) remember(ck(null, w), batch.then(b => { if (b?.start) primeCache(b.start, w); return b?.start ?? null; }));
     return batch;
 }
 
 function fetchLocationCached(address) { return fetchRaw(address).then(applyReveals).then(applyChanges); }
 function fetchRaw(address) {
-    const key = address ?? '(start)';
+    const w = activeWorld || defaultWorldId || '';
+    const key = ck(address, w);
     if (!exitsCache.has(key)) {
         const p = (async () => {
             try {
                 const r = await api(address ? `/location/${encodeURIComponent(address)}` : '/start');
-                if (r.ok && !address) primeCache(r.body);
+                if (r.ok && !address) primeCache(r.body, w);
                 return r.ok ? r.body : null;
             } catch { return null; }
         })();
@@ -1115,6 +1206,7 @@ export function exitsText(loc) {
 }
 
 async function renderExits(id) {
+    if (!isOn()) return;
     id = Number(id);
     const el = document.querySelector(`#chat .mes[mesid="${id}"]`);
     if (!el) return;
@@ -1194,6 +1286,15 @@ async function renderNotices() {
 }
 
 async function renderAllExits() {
+    if (!isOn()) { // off: strip footers and notice buttons, no server calls
+        document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
+        for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
+            const msg = ctx().chat?.[Number(el.getAttribute('mesid'))];
+            const text = el.querySelector('.mes_text');
+            if (msg?.extra?.worldscrawl_notice && text?.querySelector('.worldscrawl_exit')) text.textContent = msg.mes;
+        }
+        return;
+    }
     syncWorld();
     if (ctx().chat?.length) await warmRooms(chatAddresses()); // after a reload: one batch request instead of one per message
     await syncDoors();
@@ -1219,9 +1320,10 @@ async function fillWorlds() {
     const sel = document.getElementById('worldscrawl_world');
     if (!sel) return;
     const r = await api('/worlds').catch(() => null);
-    if (r?.body?.default) defaultWorldId = r.body.default;
+    rememberWorlds(r?.body);
+    refreshSaveName();
     sel.innerHTML = '<option value="">(server default)</option>';
-    for (const w of r?.body?.worlds ?? []) { const o = document.createElement('option'); o.value = w.id; o.textContent = `${w.name} (${w.id})`; sel.appendChild(o); }
+    for (const w of r?.body?.worlds ?? []) { const o = document.createElement('option'); o.value = w.id; o.textContent = w.name; sel.appendChild(o); }
     sel.value = settings().world ?? '';
 }
 
@@ -1231,6 +1333,8 @@ function addSettingsPanel() {
   <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header"><b>WorldScrawl</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
     <div class="inline-drawer-content">
+      <label class="checkbox_label"><input id="worldscrawl_enabled" type="checkbox"> <b>Enabled in this chat</b></label>
+      <label class="checkbox_label"><input id="worldscrawl_enable_new" type="checkbox"> Enable in new chats</label>
       <label for="worldscrawl_url">Server URL</label>
       <input id="worldscrawl_url" class="text_pole" type="text">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
@@ -1240,10 +1344,11 @@ function addSettingsPanel() {
       <label for="worldscrawl_world">World for new chats</label>
       <select id="worldscrawl_world" class="text_pole"><option value="">(server default)</option></select>
       <label for="worldscrawl_save_name">Save this chat's world as</label>
-      <input id="worldscrawl_save_name" class="text_pole" type="text" placeholder="My Riverton">
-      <label class="checkbox_label"><input id="worldscrawl_save_switch" type="checkbox" checked> Switch this chat to the saved world</label>
-      <label class="checkbox_label"><input id="worldscrawl_save_knowledge" type="checkbox"> With knowledge (known places, revealed doors, current location) instead of pristine</label>
+      <input id="worldscrawl_save_name" class="text_pole" type="text" placeholder="">
+      <label class="checkbox_label"><input id="worldscrawl_save_knowledge" type="checkbox"> Include this chat's discoveries</label>
+      <small>New chats on this world start where you are and already know the places and doors you've found. If it's off, new chats start fresh.</small>
       <div class="flex-container"><div id="worldscrawl_save" class="menu_button">Save world</div></div>
+      <label class="checkbox_label"><input id="worldscrawl_save_switch" type="checkbox" checked> Switch this chat to the saved world</label>
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
@@ -1256,6 +1361,12 @@ function addSettingsPanel() {
   </div>
 </div>`;
     document.getElementById('extensions_settings2')?.insertAdjacentHTML('beforeend', html);
+    const en = document.getElementById('worldscrawl_enabled');
+    en.checked = isOn();
+    en.addEventListener('change', () => setEnabled(en.checked));
+    const enNew = document.getElementById('worldscrawl_enable_new');
+    enNew.checked = !!settings().enableNewChats;
+    enNew.addEventListener('change', () => { settings().enableNewChats = enNew.checked; ctx().saveSettingsDebounced(); applyChatState(); });
     const input = document.getElementById('worldscrawl_url');
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
@@ -1272,7 +1383,8 @@ function addSettingsPanel() {
     document.getElementById('worldscrawl_test').addEventListener('click', () => { testConnection(); fillWorlds(); });
     const sel = document.getElementById('worldscrawl_world');
     sel.addEventListener('change', () => { settings().world = sel.value; ctx().saveSettingsDebounced(); });
-    document.getElementById('worldscrawl_save').addEventListener('click', () => saveWorld(document.getElementById('worldscrawl_save_name').value, document.getElementById('worldscrawl_save_switch').checked, document.getElementById('worldscrawl_save_knowledge').checked).then(fillWorlds));
+    document.querySelector('.worldscrawl_settings .inline-drawer-toggle')?.addEventListener('click', () => { refreshSaveName(); fillWorlds(); });
+    document.getElementById('worldscrawl_save').addEventListener('click', () => saveWorld(document.getElementById('worldscrawl_save_name').value.trim() || document.getElementById('worldscrawl_save_name').placeholder, document.getElementById('worldscrawl_save_switch').checked, document.getElementById('worldscrawl_save_knowledge').checked).then(fillWorlds));
     fillWorlds();
     const nudge = document.getElementById('worldscrawl_nudge');
     nudge.value = settings().nudge;
@@ -1287,19 +1399,15 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
-    eventSource.on(eventTypes.CHAT_CHANGED, async () => {
-        pendingLocation = null;
-        syncWorld();
-        if (ctx().chat?.length) await warmRooms(chatAddresses()); // one request for every room this chat needs (none if all remembered)
-        await ensureStartStamp(); applyFacts(); setTimeout(renderAllExits, 0);
-    });
-    eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
+    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; await applyChatState(); });
+    eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0 && isOn()) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     for (const ev of ['MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MORE_MESSAGES_LOADED']) {
         if (eventTypes[ev]) eventSource.on(eventTypes[ev], () => setTimeout(renderAllExits, 0));
     }
     addSettingsPanel();
+    addWandItem();
     applyNudge();
     console.log('[WorldScrawl] loaded');
 })();

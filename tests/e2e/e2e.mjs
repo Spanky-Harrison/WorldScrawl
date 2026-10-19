@@ -10,8 +10,9 @@ try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.on('console', m => { if (m.type() === 'error' || /WorldScrawl/.test(m.text())) console.log('[console]', m.type(), m.text().slice(0, 300)); });
     const apiCalls = [];
+    const apiUrls = [];
     const typedGets = []; // GETs to the map server that carry a Content-Type (would force a CORS preflight)
-    page.on('request', r => { const u = r.url(); if (!u.includes(':5199/')) return; apiCalls.push(decodeURIComponent(new URL(u).pathname)); if (r.method() === 'GET' && r.headers()['content-type']) typedGets.push(u); });
+    page.on('request', r => { const u = r.url(); if (!u.includes(':5199/')) return; apiCalls.push(decodeURIComponent(new URL(u).pathname)); apiUrls.push(u); if (r.method() === 'GET' && r.headers()['content-type']) typedGets.push(u); });
     page.on('pageerror', e => console.log('[pageerror]', e.message));
     await page.goto(BASE);
     await page.waitForSelector('#send_textarea', { timeout: 90000 });
@@ -20,6 +21,8 @@ try {
     await page.waitForTimeout(1500);
 
     await page.waitForSelector('input[name="worldscrawl_mode"]', { state: 'attached', timeout: 60000 });
+    check('Enable in new chats is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.enableNewChats === false && !document.getElementById('worldscrawl_enable_new').checked));
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enable_new'); b.checked = true; b.dispatchEvent(new Event('change')); }); // the rest of the run uses WorldScrawl chats
     const toolNames = () => page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
     check('tools off by default', !(await toolNames()).includes('ws_move'));
     check('no tool nudge by default', await page.evaluate(() => !SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value));
@@ -661,7 +664,7 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world Test World'));
     await page.waitForTimeout(1500);
     const rb = await M(m => ({ w: m.chatWorld(), ch: m.chatChanges().length }));
-    check('save world: chat rebased onto the new world, earlier changes baked in', rb.w?.id === 'test-world' && rb.w.rebase && rb.w.at === rebaseAt && rb.ch === 0, JSON.stringify(rb));
+    check('save world: chat rebased onto the new world, earlier changes baked in', rb.w?.id === 'test-world' && rb.w.name === 'Test World' && rb.w.rebase && rb.w.at === rebaseAt + 1 && rb.ch === 0 && (await lastMes()) === '[Engine: world saved as "Test World". This chat now uses it.]', JSON.stringify(rb));
     const rendered = await (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent('riverton:streets/square') + '?world=test-world')).json();
     check('save world: rendered world has the changes, chat keeps working on it', !rendered.exits.some(e => e.direction === 'east') && !(await wsExits()).includes('east (') && (await stored()) === 'riverton:streets/square');
     check('save world: pristine by default (no knowledge file)', (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds.find(w => w.id === 'test-world')?.has_knowledge === false);
@@ -692,6 +695,114 @@ try {
     check('new chat on a knowledge world: seeded on message 0 with start at the saved location', seeded.worldscrawl_world?.id === 'know-world' && seeded.worldscrawl_world.seed?.doors?.length >= 1 && seeded.worldscrawl_location === 'riverton:drowned_rat/common_room', JSON.stringify(seeded).slice(0, 300));
     await go('Temple Catacombs');
     check('seeded knowledge: fast travel through seeded places and seeded revealed door', (await stored()) === 'riverton:temple/catacombs', String(await stored()));
+    // Enabled toggle: off = no prompts, no footers, no intent/server calls, no stamps; on = rebuilt from stamps.
+    const prompts = () => page.evaluate(() => { const p = SillyTavern.getContext().extensionPrompts ?? {}; return ['worldscrawl_facts', 'worldscrawl_arrival_reminder', 'worldscrawl_nudge'].map(k => p[k]?.value ?? ''); });
+    const footers = () => page.evaluate(() => document.querySelectorAll('#chat .worldscrawl_exits').length);
+    const locBefore = await stored();
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enabled'); b.checked = false; b.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(1000);
+    const pOff = await prompts();
+    check('toggle off: all injections cleared, footers removed', pOff.every(v => !v) && (await footers()) === 0 && await page.evaluate(() => SillyTavern.getContext().chatMetadata.worldscrawl_enabled === false), JSON.stringify(pOff));
+    const nReqOff = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    apiCalls.length = 0;
+    await queue([{ content: 'You stay put, the engine sleeps.' }]);
+    await send('I go out to the village square', 1);
+    const offReqs = (await (await fetch(`${FAKE}/__requests`)).json()).slice(nReqOff);
+    const lastUser = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return [...ch].reverse().find(m => m.is_user)?.extra ?? {}; });
+    check('toggle off: move-like message ignored (no intent question, no server call, no stamp, no world state)', offReqs.length === 1 && !JSON.stringify(offReqs).includes('World state') && !JSON.stringify(offReqs).includes('classify')
+        && apiCalls.length === 0 && !lastUser.worldscrawl_location && !lastUser.worldscrawl_move && (await stored()) === locBefore && (await footers()) === 0, JSON.stringify([offReqs.length, apiCalls, lastUser]));
+    check('toggle off: slash command says so', (await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe)) === 'WorldScrawl is turned off.');
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enabled'); b.checked = true; b.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(2000);
+    const pOn = await prompts();
+    check('toggle on: world state re-injected and footers back, location from earlier stamps', pOn[0].includes('[World state from the game engine') && (await footers()) > 0 && (await stored()) === locBefore
+        && (await wsExits()).startsWith('Exits:'), JSON.stringify(pOn).slice(0, 200));
+    // A chat started while off has no stamps; nothing is stamped while off, even on chat load; turning on stamps the greeting.
+    const toggle = on => page.evaluate(v => { const b = document.getElementById('worldscrawl_enabled'); b.checked = v; b.dispatchEvent(new Event('change')); }, on);
+    await toggle(false); await page.waitForTimeout(500);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.splice(1);
+        for (const x of [c.chat[0], ...(c.chat[0].swipe_info ?? [])]) if (x?.extra) { delete x.extra.worldscrawl_location; delete x.extra.worldscrawl_world; }
+        c.chat.push({ name: 'User', is_user: true, mes: 'hello while off', extra: {} }); await c.saveChat(); await c.eventSource.emit(c.eventTypes.CHAT_CHANGED); });
+    await page.waitForTimeout(1500);
+    check('off: chat load stamps nothing', await page.evaluate(() => { const e = SillyTavern.getContext().chat[0].extra ?? {}; return !e.worldscrawl_location && !e.worldscrawl_world; }));
+    await toggle(true); await page.waitForTimeout(2000);
+    check('on in a chat started while off: world + start stamped on the greeting', await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const e = ch[0].extra ?? {};
+        return e.worldscrawl_world?.id === 'riverton' && e.worldscrawl_location === 'riverton:drowned_rat/common_room' && !ch[1].extra?.worldscrawl_location; }));
+    // Per chat: switching between an on chat and an off chat (metadata), defaults for old and new chats, /ws-on and /ws-off.
+    const sw = async (md, strip = false) => { await page.evaluate(async ([md, strip]) => { const c = SillyTavern.getContext();
+        if (md === undefined) delete c.chatMetadata.worldscrawl_enabled; else c.chatMetadata.worldscrawl_enabled = md;
+        if (strip) { c.chat.splice(1); for (const x of [c.chat[0], ...(c.chat[0].swipe_info ?? [])]) if (x?.extra) for (const k of Object.keys(x.extra)) if (k.startsWith('worldscrawl')) delete x.extra[k]; }
+        await c.eventSource.emit(c.eventTypes.CHAT_CHANGED); }, [md, strip]); await page.waitForTimeout(1500); };
+    const st = () => page.evaluate(() => [document.getElementById('worldscrawl_enabled').checked, !!SillyTavern.getContext().extensionPrompts?.worldscrawl_facts?.value, document.querySelectorAll('#chat .worldscrawl_exits').length > 0]);
+    await sw(false);
+    check('switch to an off chat: unchecked, no world state, no footers', JSON.stringify(await st()) === '[false,false,false]', JSON.stringify(await st()));
+    const wand = () => page.evaluate(() => document.querySelector('#extensionsMenu #worldscrawl_wand span')?.textContent);
+    check('wand menu entry follows an off chat', (await wand()) === 'Enable WorldScrawl for this chat', String(await wand()));
+    await page.evaluate(() => document.getElementById('worldscrawl_wand').click()); await page.waitForTimeout(1500);
+    check('wand menu entry turns the chat on', (await wand()) === 'Disable WorldScrawl for this chat' && (await M(m => m.isOn())) === true && (await st())[0] === true);
+    await sw(true);
+    check('switch to an on chat: checked, world state and footers back, no reload', JSON.stringify(await st()) === '[true,true,true]', JSON.stringify(await st()));
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enable_new'); b.checked = false; b.dispatchEvent(new Event('change')); });
+    await sw(undefined);
+    check('old chat with stamps and no saved value defaults on', (await M(m => m.isOn())) === true && (await st())[0] === true);
+    await sw(undefined, true);
+    check('new chat (no stamps) follows the global default: off', (await M(m => m.isOn())) === false && JSON.stringify(await st()) === '[false,false,false]' && await page.evaluate(() => !SillyTavern.getContext().chat[0].extra?.worldscrawl_location));
+    check('/ws-on works while off', (await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-on')).pipe)) === 'WorldScrawl is on in this chat.' && (await M(m => m.isOn())) === true);
+    await page.waitForTimeout(1500);
+    check('/ws-on stamped the fresh chat', await page.evaluate(() => SillyTavern.getContext().chat[0].extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
+    check('wand text follows /ws-on', (await wand()) === 'Disable WorldScrawl for this chat');
+    check('/ws-off', (await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-off')).pipe)) === 'WorldScrawl is off in this chat.' && (await M(m => m.isOn())) === false && (await wand()) === 'Enable WorldScrawl for this chat');
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enable_new'); b.checked = true; b.dispatchEvent(new Event('change')); });
+    await sw(undefined, true);
+    check('new chat follows the global default: on', (await M(m => m.isOn())) === true && (await st())[0] === true && await page.evaluate(() => SillyTavern.getContext().chat[0].extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
+    // Readable world names: blank save = exactly the placeholder; typed name clash refused; slug clash gets -2.
+    const worldsNow = async () => (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds;
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_save_switch'); b.checked = false; document.getElementById('worldscrawl_save_name').value = ''; });
+    const ph = await page.evaluate(() => document.getElementById('worldscrawl_save_name').placeholder);
+    check('save placeholder is the readable default name', /^Riverton - .+ - [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/.test(ph), ph);
+    await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
+    const autoW = (await worldsNow()).find(w => w.name === ph);
+    check('blank save uses exactly the placeholder, readable slug', !!autoW && /^riverton-[a-z0-9-]+-[a-z]{3}-\d{1,2}$/.test(autoW.id) && (await lastMes()) === `[Engine: world saved as "${ph}".]`, JSON.stringify(autoW));
+    check('world picker shows display names', await page.evaluate(n => [...document.querySelectorAll('#worldscrawl_world option')].some(o => o.textContent === n), ph));
+    const nBefore = (await worldsNow()).length;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false test world'));
+    await page.waitForTimeout(1500);
+    check('typed name matching an existing display name is refused', (await worldsNow()).length === nBefore);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false Test-World'));
+    await page.waitForTimeout(1500);
+    check('only the folder slug clashes: -2 added, name kept as typed', (await worldsNow()).some(w => w.id === 'test-world-2' && w.name === 'Test-World'));
+    // Knarfy's sequence: blank save (switch on) -> dig both ways tunnel <-> common room -> save "My Riverton" -> pick it for
+    // new chats -> start a real new chat: the passage must be there.
+    await page.evaluate(() => { document.getElementById('worldscrawl_save_switch').checked = true; document.getElementById('worldscrawl_save_name').value = ''; });
+    await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
+    const w1 = await M(m => m.chatWorld());
+    check('repro: blank save with switch on rebases the chat', w1?.rebase && /^riverton-/.test(w1.id), JSON.stringify(w1));
+    const pushLoc = a => page.evaluate(async a => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'at ' + a, extra: { worldscrawl_location: a, worldscrawl_intent_checked: true } }); await c.saveChat(); }, a);
+    await pushLoc('riverton:secret_tunnel/tunnel');
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig passage riverton:drowned_rat/common_room')); await page.waitForTimeout(1000);
+    await pushLoc('riverton:drowned_rat/common_room');
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig passage riverton:secret_tunnel/tunnel')); await page.waitForTimeout(1000);
+    check('repro: both digs recorded after the rebase', JSON.stringify(await M(m => m.chatChanges().map(c => c.from + '>' + c.to))) === JSON.stringify(['riverton:secret_tunnel/tunnel>riverton:drowned_rat/common_room', 'riverton:drowned_rat/common_room>riverton:secret_tunnel/tunnel']), JSON.stringify(await M(m => m.chatChanges())));
+    await page.evaluate(() => { document.getElementById('worldscrawl_save_name').value = 'My Riverton'; });
+    await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
+    const mr = (await worldsNow()).find(w => w.name === 'My Riverton');
+    const room = async a => (await (await fetch(`http://127.0.0.1:5199/location/${encodeURIComponent(a)}?world=${mr?.id}`)).json()).exits.map(e => e.direction + '>' + e.to);
+    check('repro: saved world files have both dug exits', !!mr && (await room('riverton:secret_tunnel/tunnel')).includes('passage>riverton:drowned_rat/common_room') && (await room('riverton:drowned_rat/common_room')).includes('passage>riverton:secret_tunnel/tunnel'), JSON.stringify(mr));
+    await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, mr?.id);
+    check('repro: picker selected the saved world', await page.evaluate(id => SillyTavern.getContext().extensionSettings.worldscrawl.world === id, mr?.id));
+    apiUrls.length = 0;
+    await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+    await page.waitForTimeout(4000);
+    const nc = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return { n: ch.length, w: ch[0]?.extra?.worldscrawl_world, loc: ch[0]?.extra?.worldscrawl_location }; });
+    check('repro: new chat stamped with the picked world', nc.w?.id === mr?.id && nc.loc === 'riverton:drowned_rat/common_room', JSON.stringify(nc));
+    check('repro: new chat requests use that world', apiUrls.some(u => u.includes(`world=${mr?.id}`)), JSON.stringify(apiUrls.slice(0, 8)));
+    check('repro: cache keys include the world id', await page.evaluate(async id => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return m.cacheKeys().every(k => k.includes('|')) && m.cacheKeys().some(k => k.startsWith(id + '|')); }, mr?.id));
+    check('repro: no request without a world once a chat is open', !apiUrls.filter(u => !u.includes('/worlds')).some(u => !u.includes('world=')), JSON.stringify(apiUrls.filter(u => !u.includes('world=')).slice(0, 4)));
+    check('save dialog order: name, discoveries toggle + help, button, switch', await page.evaluate(() => { const ids = [...document.querySelectorAll('#worldscrawl_save_name, #worldscrawl_save_knowledge, #worldscrawl_save, #worldscrawl_save_switch')].map(e => e.id);
+        return JSON.stringify(ids) === JSON.stringify(['worldscrawl_save_name', 'worldscrawl_save_knowledge', 'worldscrawl_save', 'worldscrawl_save_switch']) && document.getElementById('worldscrawl_save_knowledge').parentElement.textContent.includes("Include this chat's discoveries"); }));
+    const ncEx = await wsExits();
+    check('repro: dug passage shown in the new chat', ncEx.includes('passage'), ncEx);
+    await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = ''; s.dispatchEvent(new Event('change')); });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();

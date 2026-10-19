@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import tempfile
+from datetime import datetime
 from collections import OrderedDict
 import logging
 import os
@@ -34,6 +35,12 @@ def map_version(root: Path) -> str:
     return h.hexdigest()[:12]
 
 
+def slugify(text: str) -> str:
+    """Readable folder id from a name: "Riverton - Desirae - Oct 19" -> "riverton-desirae-oct-19"."""
+    s = re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:48].strip("-")
+    return s or "world"
+
+
 def valid_world_id(wid: str) -> bool:
     return isinstance(wid, str) and len(wid) <= 64 and bool(WORLD_ID.match(wid))
 
@@ -56,8 +63,10 @@ class DoorsRequest(BaseModel):
 
 class RenderRequest(BaseModel):
     base: str | None = None  # world to copy (default world if omitted)
-    id: str  # new world id (folder name): letters, digits, dashes
-    name: str | None = None
+    id: str | None = None  # exact folder id (letters, digits, dashes); refused if taken. Usually omitted:
+    id_hint: str | None = None  # folder id is made from this (or the name) as a readable slug, with -2, -3... if taken
+    name: str | None = None  # display name, stored exactly as typed in world.json
+    auto: bool = False  # the name was generated (not typed): a clash gets " (2)" instead of being refused
     changes: list = []
     # "with knowledge" saves: what the chat knew, written to knowledge.json (region files stay clean). None = pristine.
     knowledge: dict | None = None
@@ -194,20 +203,38 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
         if root_dir is None:
             raise HTTPException(400, detail="Saving worlds needs a worlds folder (not a single WORLDSCRAWL_WORLD_DIR).")
         base = get_world(req.base)
-        if not valid_world_id(req.id):
-            raise HTTPException(400, detail=f"Invalid world id {req.id!r} (letters, digits and dashes only).")
-        target = root_dir / req.id
+        names = {lw.name.strip().lower() for lw in worlds.values()}
+        name = (req.name or "").strip()
+        if not name or req.auto:  # generated name ("<base> - <Mon D, h:mm AM>" if none was sent), made unique
+            auto = name or f"{base.name} - {datetime.now().strftime('%b %d, %I:%M %p').replace(' 0', ' ')}"
+            name, n = auto, 1
+            while name.lower() in names:
+                n += 1
+                name = f"{auto} ({n})"
+        elif name.lower() in names:
+            raise HTTPException(409, detail=f"A world named {name!r} already exists. Pick another name.")
         taken = {w.lower() for w in worlds} | {d.name.lower() for d in root_dir.iterdir()}
-        if req.id.lower() in taken or target.exists():  # never write into an existing folder (case-insensitive, for Windows)
-            raise HTTPException(409, detail=f"World {req.id!r} already exists. Saving never replaces a world; pick another name.")
+        if req.id is not None:
+            if not valid_world_id(req.id):
+                raise HTTPException(400, detail=f"Invalid world id {req.id!r} (letters, digits and dashes only).")
+            if req.id.lower() in taken:  # never write into an existing folder (case-insensitive, for Windows)
+                raise HTTPException(409, detail=f"World {req.id!r} already exists. Saving never replaces a world; pick another name.")
+            wid = req.id
+        else:
+            stem = slugify(req.id_hint or name)
+            wid, n = stem, 1
+            while wid.lower() in taken:
+                n += 1
+                wid = f"{stem}-{n}"
+        target = root_dir / wid
         try:
             wj, raw = apply_changes(*base.raw, req.changes)
-            wj["name"] = (req.name or "").strip() or req.id
+            wj["name"] = name
             new_world = build_world(wj, raw)  # validate before writing anything
             know = clean_knowledge(req.knowledge, new_world) if req.knowledge is not None else None
         except WorldError as e:
             raise HTTPException(400, detail={"error": str(e)})
-        tmp = Path(tempfile.mkdtemp(prefix=f".{req.id}-", dir=root_dir))
+        tmp = Path(tempfile.mkdtemp(prefix=f".{wid}-", dir=root_dir))
         try:
             (tmp / "regions").mkdir()
             (tmp / "world.json").write_text(json.dumps(wj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -216,14 +243,14 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
             if know is not None:
                 (tmp / "knowledge.json").write_text(json.dumps(know, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             if target.exists():
-                raise HTTPException(409, detail=f"World {req.id!r} already exists.")
+                raise HTTPException(409, detail=f"World {wid!r} already exists.")
             tmp.rename(target)
         finally:
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
-        worlds[req.id] = LoadedWorld(req.id, target)
-        log.info("render world %s -> %s (%d changes)", base.id, req.id, len(req.changes))
-        return worlds[req.id].info()
+        worlds[wid] = LoadedWorld(wid, target)
+        log.info("render world %s -> %s (%d changes)", base.id, wid, len(req.changes))
+        return worlds[wid].info()
 
     @app.get("/start")
     def start(world: str | None = None):

@@ -118,3 +118,22 @@ def test_render_never_touches_existing_folder(client, wd):
     assert any(e.direction == "up" for e in load_world(wd / "riverton").get(TAVERN).exits)
     (wd / "stray").mkdir()
     assert client.post("/worlds/render", json={"id": "stray"}).status_code == 409
+
+
+def test_display_names_and_slugs(client, wd):
+    r = client.post("/worlds/render", json={"name": "My Riverton!"}).json()
+    assert r["id"] == "my-riverton" and r["name"] == "My Riverton!"
+    assert '"name": "My Riverton!"' in (wd / "my-riverton" / "world.json").read_text()
+    assert client.post("/worlds/render", json={"name": "  my riverton!  "}).status_code == 409  # same display name
+    r2 = client.post("/worlds/render", json={"name": "My Riverton?"}).json()  # different name, same slug
+    assert r2["id"] == "my-riverton-2" and r2["name"] == "My Riverton?"
+    assert client.post("/worlds/render", json={"name": "Riverton"}).status_code == 409  # the default world's name
+
+
+def test_auto_names(client):
+    a = client.post("/worlds/render", json={"name": "Riverton - Desirae - Oct 19, 4:14 PM", "auto": True, "id_hint": "riverton-desirae-oct-19"}).json()
+    b = client.post("/worlds/render", json={"name": "Riverton - Desirae - Oct 19, 4:14 PM", "auto": True, "id_hint": "riverton-desirae-oct-19"}).json()
+    assert a["id"] == "riverton-desirae-oct-19" and a["name"] == "Riverton - Desirae - Oct 19, 4:14 PM"
+    assert b["id"] == "riverton-desirae-oct-19-2" and b["name"] == "Riverton - Desirae - Oct 19, 4:14 PM (2)"
+    c = client.post("/worlds/render", json={}).json()  # nothing sent: "<base> - <date>"
+    assert c["name"].startswith("Riverton - ") and c["id"].startswith("riverton-")
