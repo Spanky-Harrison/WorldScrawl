@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.world import WorldError, load_world
 
-ROOT = Path(__file__).resolve().parent.parent / "world"
+ROOT = Path(__file__).resolve().parent.parent / "worlds" / "riverton"
 TAVERN = "riverton:drowned_rat/common_room"
 SQUARE = "riverton:streets/square"
 

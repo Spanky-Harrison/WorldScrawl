@@ -1,4 +1,4 @@
-"""Loads and validates the static world map (world/world.json + world/regions/*.json).
+"""Loads and validates the static world map (worlds/<id>/world.json + worlds/<id>/regions/*.json).
 
 Region file layout:
   {name, notes?, start: "sub/loc",
@@ -215,7 +215,8 @@ def resolve_address(ref: str, region: str, sub: str) -> str:
     return f"{region}:{sub}/{ref}"
 
 
-def load_world(root: str | Path) -> World:
+def read_world_raw(root: str | Path) -> tuple[dict, dict[str, dict]]:
+    """The hand-written files as plain JSON: (world.json, {region_id: region file})."""
     root = Path(root)
     world_file = root / "world.json"
     if not world_file.is_file():
@@ -223,12 +224,21 @@ def load_world(root: str | Path) -> World:
     world_json = _load_json(world_file)
     if not isinstance(world_json, dict):
         raise WorldError("world.json: must be a JSON object")
-    start_region = _require_str(world_json, "start_region", "world.json")
-
     region_dir = root / "regions"
     files = sorted(region_dir.glob("*.json")) if region_dir.is_dir() else []
     if not files:
         raise WorldError(f"no region files found in {region_dir}")
+    return world_json, {p.stem: _load_json(p) for p in files}
+
+
+def load_world(root: str | Path) -> World:
+    return build_world(*read_world_raw(root))
+
+
+def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
+    """Validate and build a World from plain JSON (as read from a world folder, possibly with changes applied)."""
+    start_region = _require_str(world_json, "start_region", "world.json")
+    files = sorted(raw_regions)
 
     regions: dict[str, Region] = {}
     subregions: dict[str, Subregion] = {}
@@ -236,12 +246,11 @@ def load_world(root: str | Path) -> World:
     locations: dict[str, Location] = {}
     raw_exits: list[tuple[str, str, str, Exit]] = []
 
-    for path in files:
-        fname = path.name
-        data = _load_json(path)
+    for rid in files:
+        fname = f"{rid}.json"
+        data = raw_regions[rid]
         if not isinstance(data, dict):
             raise WorldError(f"{fname}: must be a JSON object")
-        rid = path.stem
         _check_slug(rid, f"{fname}: region id (file name)")
         if "id" in data and data["id"] != rid:
             raise WorldError(f"{fname}: region id {data['id']!r} must match the file name ({rid!r})")
