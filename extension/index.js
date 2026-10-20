@@ -154,18 +154,21 @@ export function chatChanges(chat = ctx().chat ?? []) {
     const base = chatWorld(chat);
     const from = base?.rebase ? base.index : -1;
     const out = [];
-    chat.forEach((m, i) => { const c = m?.extra?.[CHANGE_KEY]; if (c && i > from) out.push(c); });
+    chat.forEach((m, i) => { const c = m?.extra?.[CHANGE_KEY]; if (c && i > from) out.push(...(Array.isArray(c) ? c : [c])); });
     return out;
 }
 /** A room with this chat's changes applied: exits dug from it added, removed exits dropped. */
 async function applyChanges(loc) {
-    const changes = chatChanges().filter(c => c.from === loc?.address);
+    // A two-way dig is two one-way exits; the far side's is the return exit.
+    const changes = chatChanges().flatMap(c => c.type !== 'dig' ? [c]
+        : [{ type: 'add_exit', from: c.from, direction: c.direction, to: c.to, description: c.description },
+           { type: 'add_exit', from: c.to, direction: c.return_direction, to: c.from, description: c.return_description }]).filter(c => c.from === loc?.address);
     if (!loc || !changes.length) return loc;
     let exits = [...loc.exits];
     for (const c of changes) {
         if (c.type === 'remove_exit') exits = exits.filter(e => e.direction.toLowerCase() !== String(c.direction).toLowerCase());
         else if (c.type === 'add_exit') {
-            const t = await fetchRaw(c.to);
+            const t = await fetchRaw(c.to) ?? await newRoom(c.to);
             if (!t) { console.warn(`[WorldScrawl] dug exit ${c.direction} from ${c.from}: ${c.to} is not in this world; skipped`); continue; }
             if (exits.some(e => e.direction.toLowerCase() === String(c.direction).toLowerCase())) continue;
             const same = t.subregion?.id === loc.subregion?.id && t.region?.id === loc.region?.id;
@@ -785,7 +788,9 @@ async function goTarget(t) {
     }
 }
 
-export const STAY = 'stay', ELSEWHERE = 'elsewhere', UNCLEAR = 'unclear';
+export const STAY = 'stay', ELSEWHERE = 'elsewhere', UNCLEAR = 'unclear', OPEN = 'new opening';
+/** Second guard on the 'new opening' choice: the message must use a breaking-through word. */
+export const BREAK_RE = /\b(smash\w*|break\w*|broke|broken|burst\w*|bash\w*|blast\w*|dig|digs|digging|dug|tunnel\w*|hole|holes|carv\w*|hack\w* through|cut\w* through|kick\w* (?:in|down|through)|knock\w* (?:down|through)|breach\w*|shatter\w*)\b/i;
 
 /** Strip reasoning blocks, keep the last non-empty line, then exact-match against the options. */
 export function cleanAnswer(answer) {
@@ -795,6 +800,81 @@ export function cleanAnswer(answer) {
 }
 export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(answer), [...options, STAY, ELSEWHERE, UNCLEAR]);
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
+
+// ---- Narrative digging: "I smash a hole in the wall". Small sequential questions, each validated and retried alone.
+const DIG_SYS = 'You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.';
+export const DIG_TRIES = 2;
+export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
+async function askValid(label, prompt, validate) {
+    for (let i = 0; i < DIG_TRIES; i++) {
+        const a = await ctx().generateRaw({ prompt, systemPrompt: DIG_SYS, responseLength: 60 });
+        const v = validate(trimAnswer(cleanAnswer(a)));
+        console.log(`[WorldScrawl] dig ${label} (try ${i + 1}): ${JSON.stringify(String(a).slice(0, 80))} -> ${v == null ? 'invalid' : JSON.stringify(v)}`);
+        if (v != null) return v;
+    }
+    return null;
+}
+/** Rooms near `loc` over the map (any exit, hidden too; name/area/first sentence only), nearest first. */
+async function nearbyRooms(loc) {
+    const r = await api('/nearby', { method: 'POST', body: JSON.stringify({ from: loc.address, depth: 3, limit: 12, changes: chatChanges() }) });
+    return r.ok ? r.body.rooms : [];
+}
+export const NEW_PLACE = 'somewhere new';
+export function digDestPrompt(loc, said, rooms) {
+    return `${whoMoves()} is in ${displayName(loc)}. ${loc.description ?? ''}\n${said}\n\n`
+        + `The player is breaking a new opening. Places nearby:\n`
+        + rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') + `\n${rooms.length + 1}. ${NEW_PLACE}: a new space nobody has seen yet\n\n`
+        + `Where does this opening most likely lead? Reply with just the number.`;
+}
+export function digDirPrompt(loc, said, destLabel, used) {
+    return `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe player has made a new opening from here to ${destLabel}.\n`
+        + `What is the opening called from this side? Use one of: ${COMPASS.join(', ')}, or a short new word (1-2 words) such as hole, crack, window, breach.\n`
+        + `Already used here (do not use): ${used.join(', ') || 'none'}.\nReply with just the word.`;
+}
+export const digNamePrompt = (loc, said) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.`;
+export const digDescPrompt = (loc, said, name) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe opening leads to a new room called ${name}. Describe it in one short sentence. Reply with just the sentence.`;
+/** The 'new opening' intent: ask destination, direction, (new room) name and description; stamp the change on the player's message. */
+async function narrativeDig(msg, loc) {
+    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
+    const rooms = await nearbyRooms(loc);
+    const n = await askValid('destination', digDestPrompt(loc, said, rooms), a => {
+        const m = a.match(/^(\d+)\b/); const i = m ? Number(m[1]) : (sameName(a, NEW_PLACE) ? rooms.length + 1 : rooms.findIndex(r => sameName(a, r.display_name) || sameName(a, r.name)) + 1);
+        return i >= 1 && i <= rooms.length + 1 ? i : null;
+    });
+    if (n == null) return fail('no destination');
+    const target = n <= rooms.length ? await fetchLocationCached(rooms[n - 1].address) : null;
+    if (n <= rooms.length && !target) return fail('destination unknown');
+    const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
+    const direction = await askValid('direction', digDirPrompt(loc, said, target ? roomLabel(target) : 'a new space', used), a => {
+        const d = a.toLowerCase().replace(/^the\s+/, '').replace(/\s+/g, ' ');
+        if (!/^[a-z][a-z'-]*( [a-z][a-z'-]*)?$/.test(d) || d.length > 20 || hasExit(loc, d)) return null;
+        if (target && hasExit(target, returnName(d))) return null;
+        return d;
+    });
+    if (direction == null) return fail('no direction');
+    let dest = { address: target?.address };
+    if (!target) {
+        const name = await askValid('name', digNamePrompt(loc, said), a => {
+            const t = a.replace(/\s+/g, ' ');
+            const w = t.split(' ').length;
+            return /^[A-Za-z][A-Za-z' -]*$/.test(t) && w <= 4 && t.length <= 40 && !sameName(t, loc.name) ? t.replace(/\b[a-z]/g, c => c.toUpperCase()) : null;
+        });
+        if (name == null) return fail('no name');
+        const description = await askValid('description', digDescPrompt(loc, said, name), a => {
+            const t = a.replace(/\s+/g, ' ').trim();
+            return t.length >= 10 && t.length <= 200 ? (/[.!?]$/.test(t) ? t : t + '.') : null;
+        });
+        if (description == null) return fail('no description');
+        dest = { name, description };
+    }
+    const r = await buildDig(loc, direction, dest, { description: 'A freshly broken opening.', returnDescription: 'A freshly broken opening.' });
+    if (!r.ok) return fail(r.error);
+    msg.extra[CHANGE_KEY] = r.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
+    msg.extra.worldscrawl_dig = { direction: r.direction, back: r.back, to: r.to, to_name: r.label };
+    return { kind: 'dig', loc };
+}
+export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
 const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
 
@@ -811,7 +891,7 @@ async function parseIntent(msg) {
     const dirs = loc.exits.map(e => e.direction);
     const places = await discoveredTargets(loc);
     const prev = previousAddress(loc.address);
-    const options = [...dirs, ...places.map(p => p.label), STAY, ELSEWHERE, UNCLEAR];
+    const options = [...dirs, ...places.map(p => p.label), OPEN, STAY, ELSEWHERE, UNCLEAR];
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
@@ -822,13 +902,19 @@ async function parseIntent(msg) {
         + `${said}\n\nAnswer with one option:\n`
         + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
         + places.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
+        + `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n`
         + `- ${STAY}: the player is not trying to travel anywhere\n`
         + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
         + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`
         + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
     const cands = await travelCandidates(loc);
-    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label)]);
+    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), OPEN]);
+    if (choice === OPEN) {
+        if (BREAK_RE.test(msg.mes ?? '')) return await narrativeDig(msg, loc);
+        console.log('[WorldScrawl] model picked a new opening, but the message has no breaking-through words -> stay');
+        return { kind: STAY, loc };
+    }
     const ans = trimAnswer(cleanAnswer(answer));
     const insideAns = !dirs.includes(choice) && hereAreas(loc).find(a => sameName(a.name, choice ?? ans));
     if (insideAns) return { kind: 'already', loc, name: insideAns.name };
@@ -979,7 +1065,7 @@ export function arrivalReminder(loc, move) {
     return `[Engine: this turn ends in ${where}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in ${where}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]`;
 }
 
-export function factsText(loc, move, toolsOn) {
+export function factsText(loc, move, toolsOn, extra = {}) {
     const who = whoMoves();
     const lines = [
         '[World state from the game engine. This is authoritative.]',
@@ -993,6 +1079,8 @@ export function factsText(loc, move, toolsOn) {
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
+    else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
+    else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
@@ -1008,7 +1096,8 @@ async function applyFacts() {
         const loc = await currentLocation();
         const ui = lastUserIndex(c.chat ?? []);
         const move = ui >= 0 ? c.chat[ui].extra?.[MOVE_KEY] : null;
-        text = factsText(loc, move, toolsOn());
+        const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
+        text = factsText(loc, move, toolsOn(), { dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed });
         reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
@@ -1035,6 +1124,7 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
                 renderAllExits();
                 return;
             }
+            if (r.kind === 'dig_failed') toastr.warning(`WorldScrawl: ${DIG_FAILED_NOTICE}`);
             renderAllExits();
         }
         await applyFacts();
@@ -1050,19 +1140,65 @@ async function addChangeMessage(text, change) {
 }
 /** "Village Square" for streets-like places, otherwise "Room (Building)". */
 const roomLabel = l => (l.subregion?.label_rooms ? l.name : displayName(l));
-/** /ws-dig <direction> <known place>: open a new exit from the current room. */
-export async function digAction(arg) {
+const OPPOSITE = { north: 'south', south: 'north', east: 'west', west: 'east', northeast: 'southwest', southwest: 'northeast', northwest: 'southeast', southeast: 'northwest', up: 'down', down: 'up', in: 'out', out: 'in', inside: 'outside', outside: 'inside' };
+/** Return exit name for a dug exit: the opposite for compass/up/down/in/out, otherwise "back". */
+export const returnName = d => OPPOSITE[String(d).toLowerCase()] ?? 'back';
+const hasExit = (loc, d) => !!loc?.exits?.some(e => e.direction.toLowerCase() === String(d).toLowerCase());
+/** Unique id for a new room in the subregion of `near`: "<name_slug>_<time>". */
+const newRoomAddress = (near, name) => `${near.address.split('/')[0]}/${(slug(name).replace(/-/g, '_') || 'room').slice(0, 30).replace(/_+$/, '')}_${Date.now().toString(36)}`; // ids: lowercase, digits, single underscores
+/**
+ * Build a dig (and new room) from validated parts. Returns {ok, change, text} or {ok:false, error}.
+ * dest: {address} of a room, or {name, description} for a new room. Never touches the chat.
+ */
+export async function buildDig(here, direction, dest, { returnDirection = null, oneway = false, description = '', returnDescription = '' } = {}) {
+    direction = String(direction ?? '').trim();
+    if (!direction || direction.length > 30) return { ok: false, error: 'An exit needs a short name.' };
+    if (hasExit(here, direction)) return { ok: false, error: `There is already an exit ${direction} here.` };
+    const back = String(returnDirection ?? returnName(direction)).trim();
+    const changes = [];
+    let to, label;
+    if (dest.address) {
+        if (dest.address === here.address) return { ok: false, error: 'A passage must lead somewhere else.' };
+        const t = await fetchLocationCached(dest.address);
+        if (!t) return { ok: false, error: 'No such place.' };
+        if (!oneway && hasExit(t, back)) return { ok: false, error: `${roomLabel(t)} already has an exit ${back}.` };
+        to = t.address; label = roomLabel(t);
+    } else {
+        const name = String(dest.name ?? '').trim(), desc = String(dest.description ?? '').trim();
+        if (!name || name.length > 40 || !desc || desc.length > 300) return { ok: false, error: 'A new room needs a short name and description.' };
+        to = newRoomAddress(here, name); label = name;
+        changes.push({ type: 'add_room', address: to, name, description: desc, from: here.address });
+    }
+    const d = description ? { description } : {};
+    changes.push(oneway ? { type: 'add_exit', from: here.address, direction, to, ...d }
+        : { type: 'dig', from: here.address, direction, to, ...d, return_direction: back, ...(returnDescription ? { return_description: returnDescription } : {}) });
+    const text = `[Engine: a passage ${direction} to ${label} was opened${oneway ? '' : ` (back: ${back})`}.]`;
+    return { ok: true, change: changes.length === 1 ? changes[0] : changes, text, to, label, direction, back: oneway ? null : back };
+}
+/**
+ * /ws-dig <dir>[/<returndir>] <known place> | /ws-dig <dir>[/<returndir>] new <name>[: description]
+ * Two-way by default (oneway=true for one-way). Undo by deleting the system message.
+ */
+export async function digAction(arg, { oneway = false } = {}) {
     const m = String(arg ?? '').trim().match(/^(\S+)\s+(.+)$/);
-    if (!m) { toastr.warning('Usage: /ws-dig <direction> <known place>'); return ''; }
-    const [, direction, placeText] = m;
+    const usage = 'Usage: /ws-dig <dir>[/<returndir>] <known place>  or  /ws-dig <dir> new <name>[: description]';
+    if (!m) { toastr.warning(usage); return ''; }
+    const [direction, returnDirection = null] = m[1].split('/');
+    const placeText = m[2].trim();
     const here = await currentLocation();
-    if (here.exits.some(e => e.direction.toLowerCase() === direction.toLowerCase())) { toastr.warning(`There is already an exit ${direction} here.`); return ''; }
-    const known = await discoveredPlaces();
-    const list = [...known.values()].map(l => ({ address: l.address, name: l.name, label: l.display_name }));
-    const found = known.has(placeText) ? [{ address: placeText, label: known.get(placeText).display_name }] : matchCandidates(placeText, list);
-    if (found.length !== 1 || found[0].address === here.address) { toastr.warning(found.length > 1 ? `Which one? ${found.map(x => x.label).join(', ')}` : `Not a known place: ${placeText}`); return ''; }
-    const t = await fetchRaw(found[0].address);
-    await addChangeMessage(`[Engine: a passage ${direction} to ${t ? roomLabel(t) : found[0].label} was opened.]`, { type: 'add_exit', from: here.address, direction, to: found[0].address });
+    let dest;
+    const nm = placeText.match(/^new\s+([^:]+?)\s*(?::\s*(.+))?$/i);
+    if (nm) dest = { name: nm[1], description: nm[2] ?? `A newly opened space off ${roomLabel(here)}.` };
+    else {
+        const known = await discoveredPlaces();
+        const list = [...known.values()].map(l => ({ address: l.address, name: l.name, label: l.display_name }));
+        const found = known.has(placeText) ? [{ address: placeText, label: known.get(placeText).display_name }] : matchCandidates(placeText, list);
+        if (found.length !== 1) { toastr.warning(found.length > 1 ? `Which one? ${found.map(x => x.label).join(', ')}` : `Not a known place: ${placeText}`); return ''; }
+        dest = { address: found[0].address };
+    }
+    const r = await buildDig(here, direction, dest, { returnDirection, oneway });
+    if (!r.ok) { toastr.warning(r.error); return ''; }
+    await addChangeMessage(r.text, r.change);
     return '';
 }
 /** /ws-removeexit <direction>: remove an exit from the current room only. */
@@ -1206,9 +1342,10 @@ function registerSlashCommands() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ws-dig', callback: whenOn((_a, v) => digAction(String(v ?? ''))),
-        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'direction and known place, e.g. north Village Square', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-        helpString: 'WorldScrawl: open a new exit from the current room to a known place (delete the system message to undo).',
+        name: 'ws-dig', callback: whenOn((a, v) => digAction(String(v ?? ''), { oneway: String(a?.oneway ?? 'false') === 'true' })),
+        namedArgumentList: [SlashCommandNamedArgument.fromProps({ name: 'oneway', description: 'only the exit from here, no way back (default false)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'false' })],
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'dir[/returndir] and a known place, or "new <name>[: description]", e.g. north Village Square, hole/back new Dusty Cellar', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: open a new two-way passage from the current room to a known place or a new room (return name: the opposite direction, else "back"; oneway=true for one-way). Delete the system message to undo.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-removeexit', callback: whenOn((_a, v) => removeExitAction(String(v ?? ''))),
@@ -1262,7 +1399,16 @@ function warmRooms(addresses) {
     return batch;
 }
 
-function fetchLocationCached(address) { return fetchRaw(address).then(applyReveals).then(applyChanges); }
+function fetchLocationCached(address) { return fetchRaw(address).then(l => l ?? newRoom(address)).then(applyReveals).then(applyChanges); }
+/** A room this chat created (add_room change), built locally: the server only knows it per request (with changes). */
+async function newRoom(address) {
+    const ch = address && chatChanges().find(c => c.type === 'add_room' && c.address === address);
+    if (!ch) return null;
+    const near = ch.from ? await fetchRaw(ch.from) : null;
+    const sub = near?.subregion ?? {};
+    return { address, name: ch.name, display_name: placeLabel(ch.name, sub.name), description: ch.description, exits: [],
+        region: near?.region ?? {}, subregion: sub, effective_notes: near?.effective_notes ?? {}, new_room: true };
+}
 function fetchRaw(address) {
     const w = activeWorld || defaultWorldId || '';
     const key = ck(address, w);

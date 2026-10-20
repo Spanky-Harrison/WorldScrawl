@@ -57,6 +57,13 @@ class TravelRequest(BaseModel):
     changes: list = []
 
 
+class NearbyRequest(BaseModel):
+    from_: str = Field(alias="from")
+    depth: int = Field(3, ge=1, le=6)
+    limit: int = Field(12, ge=1, le=30)
+    changes: list = []
+
+
 class DoorsRequest(BaseModel):
     doors: list[str]
 
@@ -66,8 +73,8 @@ class RenderRequest(BaseModel):
     id: str | None = None  # exact folder id (letters, digits, dashes); refused if taken. Usually omitted:
     id_hint: str | None = None  # folder id is made from this (or the name) as a readable slug, with -2, -3... if taken
     name: str | None = None  # display name, stored exactly as typed in world.json
-    auto: bool = False
-    overwrite: bool = False  # needed to save over a living world other than the base (the chat's current world)  # the name was generated (not typed): a clash gets " (2)" instead of being refused
+    auto: bool = False  # the name was generated (not typed): a clash gets " (2)" instead of being refused
+    overwrite: bool = False  # needed to save over a living world other than the base (the chat's current world)
     changes: list = []
     # "with knowledge" saves: what the chat knew, written to knowledge.json (region files stay clean). None = pristine.
     knowledge: dict | None = None
@@ -370,6 +377,32 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
             "error": f"There is no exit {req.direction!r} from {loc.name}.",
             "valid_directions": valid,
         })
+
+    @app.post("/nearby")
+    def nearby(req: NearbyRequest, world: str | None = None):
+        """Rooms within `depth` steps over the map (nearest first, capped), for "where would a new opening lead?".
+        Physical adjacency only: every exit counts, hidden ones too, but only name, area and the first sentence of
+        each room's description are returned (never directions or which door leads where)."""
+        w = world_for(world, req.changes)
+        start = find(w, req.from_)
+        dist, frontier = {start.address: 0}, [start]
+        for d in range(1, req.depth + 1):
+            nxt = []
+            for loc in frontier:
+                for e in loc.exits:
+                    if e.to not in dist and w.get(e.to) is not None:
+                        dist[e.to] = d
+                        nxt.append(w.get(e.to))
+            frontier = nxt
+        out = []
+        for a, d in sorted(dist.items(), key=lambda x: x[1]):
+            if d == 0:
+                continue
+            loc = w.get(a)
+            first = re.split(r"(?<=[.!?])\s", loc.description.strip(), maxsplit=1)[0][:160]
+            out.append({"address": a, "name": loc.name, "area": w.sub_of(loc).name, "display_name": w.place_label(loc.name, w.sub_of(loc).name),
+                        "summary": first, "steps": d})
+        return {"rooms": out[:req.limit]}
 
     @app.post("/doors")
     def doors(req: DoorsRequest, world: str | None = None):
