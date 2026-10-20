@@ -1014,6 +1014,29 @@ try {
     check('doors: trapdoor still open from the cellar side', (await stored()) === 'riverton:drowned_rat/cellar' && (await openDoors()) === 'courtyard|trapdoor', await openDoors());
     await go('trapdoor', 'in');
     check('doors: trapdoor shut after leaving both rooms', (await openDoors()) === '', await openDoors());
+    // ---- /ws-known: been there vs seen, readable names, no hidden destinations.
+    const kn2 = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-known')).pipe);
+    check('/ws-known lists been-there and seen places by name', /^Been there: .*Common Room.*\. Seen: /.test(kn2) && !/riverton:/.test(kn2), kn2);
+    check('/ws-known never names a hidden destination', !/Cellar/.test(kn2.split('Seen:')[1] ?? '') || kn2.split('Been there:')[1].split('Seen:')[0].includes('Cellar'), kn2);
+    // ---- [ws-start] greeting button.
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat[0].mes = 'Welcome, traveler. [ws-start]'; if (c.chat[0].swipes) c.chat[0].swipes[c.chat[0].swipe_id ?? 0] = c.chat[0].mes; await c.saveChat(); await c.reloadCurrentChat(); });
+    await page.waitForTimeout(3000);
+    const g0 = await page.evaluate(() => ({ btn: document.querySelectorAll('#chat .mes[mesid="0"] .worldscrawl_start_button').length, txt: document.querySelector('#chat .mes[mesid="0"] .mes_text').textContent, mes: SillyTavern.getContext().chat[0].mes }));
+    check('[ws-start] renders a Start your adventure button, marker hidden, stored text untouched', g0.btn === 1 && !g0.txt.includes('[ws-start]') && g0.txt.includes('Start your adventure') && g0.mes === 'Welcome, traveler. [ws-start]', JSON.stringify(g0));
+    const rS = (await reqsNow()).length;
+    await queue([{ content: 'stay' }, { content: 'You look around the tavern.' }, { content: 'You look around the tavern.' }]);
+    await page.click('#chat .worldscrawl_start_button');
+    for (let i = 0; i < 40 && (await page.evaluate(() => SillyTavern.getContext().chat.length)) < 3; i++) await page.waitForTimeout(500);
+    await page.waitForFunction(() => !jQuery('#mes_stop').is(':visible'), null, { timeout: 30000 }); await page.waitForTimeout(2000);
+    expected = (await reqsNow()).length;
+    const stS = await page.evaluate(() => { const c = SillyTavern.getContext(); return { u: c.chat[1]?.is_user && c.chat[1].mes, loc: c.chat.some((m, i) => i > 0 && m.extra?.worldscrawl_location), btn: document.querySelectorAll('#chat .worldscrawl_start_button').length, mes0: c.chat[0].mes }; });
+    check('start button sends "I look around" through the normal path', stS.u === "I look around" && (await reqsNow()).length > rS, JSON.stringify(stS));
+    check('start button gone once the chat has more than the greeting', stS.btn === 0 && stS.mes0 === 'Welcome, traveler. [ws-start]', JSON.stringify(stS));
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.splice(1); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, 1); });
+    await page.waitForTimeout(1000);
+    check('start button comes back after deleting down to the greeting', await page.locator('#chat .worldscrawl_start_button').count() === 1);
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
