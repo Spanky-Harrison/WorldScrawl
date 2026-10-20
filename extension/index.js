@@ -1202,7 +1202,7 @@ const doorWord = d => (isDirWord(d) ? `door (${d})` : d);
 /** One line per thing visible from here: open exits (glimpse of the room beyond) and window views. */
 export function glimpseLines(loc, open = new Map()) {
     const out = [];
-    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`${isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${e.to_display_name ?? e.to_name}: ${e.to_summary}`);
+    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`${isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${e.to_label ?? e.to_display_name ?? e.to_name}: ${e.to_summary}`);
     for (const v of loc.views ?? []) out.push(`Visible from here (no way through): ${v.display_name}: ${v.summary}`);
     return out;
 }
