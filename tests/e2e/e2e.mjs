@@ -302,7 +302,7 @@ try {
     await send('go to the temple', 1);
     lm = await lastMsg();
     const q = JSON.stringify((await lastReq()).messages);
-    check('new chat: temple not offered', q.includes('Which option: out, up, back, new opening, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
+    check('new chat: temple not offered', q.includes('Which option: out, up, back, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
     check('new chat: temple refused', lm.sys && /not aware of such a place/.test(lm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
 
     // Known place but no allowed route: visit the temple, return to the tavern, then hide the square's
@@ -624,6 +624,8 @@ try {
     const lenB = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await typedTo('I go down the stair', 'grate');
     check('typed: naming the door itself still goes through it', (await stored()) === 'riverton:temple/catacombs', String(await stored()));
+    await typedTo('I go into the tunnel', 'tunnel');
+    check('typed: "I go into the tunnel" moves normally, no new opening offered', (await stored()) === 'riverton:secret_tunnel/tunnel' && !JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-2)).includes('new opening'), String(await stored()));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, n); }, lenB);
     // Stood in the catacombs (location stamp) without passing the door: fast travel refuses the unrevealed exit.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'x', extra: { worldscrawl_location: 'riverton:temple/catacombs', worldscrawl_intent_checked: true } },
@@ -871,9 +873,18 @@ try {
     const lastU = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; for (let i = ch.length - 1; i >= 0; i--) if (ch[i].is_user) return { i, extra: ch[i].extra ?? {} }; return null; });
     const reqsNow = async () => (await fetch(`${FAKE}/__requests`)).json();
     const promptOf = r => JSON.stringify(r.messages ?? r);
+    const bre = await M(m => ['I smash out the window', 'I eat breakfast', 'I go into the tunnel', 'there is a hole here', 'I punch through the wall', 'I make a hole in the floor', 'I kick down the door', 'the smashing pumpkins'].map(t => m.BREAK_RE.test(t)));
+    check('break-word check: whole words and phrases only', JSON.stringify(bre) === '[true,false,false,false,true,true,true,true]', JSON.stringify(bre));
+    // Breakfast: no breaking word, so no "new opening" option; a stray "new opening" answer goes the normal way (yes/no follow-up), never a dig.
+    await queue([{ content: 'new opening' }, { content: 'no' }, { content: 'You eat.' }]);
+    const rB = (await reqsNow()).length;
+    await send('I eat breakfast', 3);
+    const bq = (await reqsNow()).slice(rB);
+    const luB = await lastU();
+    check('breakfast: no new opening offered, stray answer handled normally', !promptOf(bq[0]).includes('new opening') && promptOf(bq[1]).includes('Answer yes or no') && !luB.extra.worldscrawl_change && !luB.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(bq[1]).slice(-200));
     // Guard: the model says "new opening" but the player only hits the wall -> no change.
-    await queue([{ content: 'new opening' }, { content: 'You punch the wall.' }]);
-    await send('I punch the wall angrily', 2);
+    await queue([{ content: 'new opening' }, { content: 'no' }, { content: 'You punch the wall.' }]);
+    await send('I punch the wall angrily', 3);
     let lu = await lastU();
     check('dig narrative: hitting a wall is not a breakthrough (no change, no follow-up questions)', !lu.extra.worldscrawl_change && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', JSON.stringify(lu.extra));
     const r0 = (await reqsNow()).length;

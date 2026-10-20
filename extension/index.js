@@ -790,7 +790,7 @@ async function goTarget(t) {
 
 export const STAY = 'stay', ELSEWHERE = 'elsewhere', UNCLEAR = 'unclear', OPEN = 'new opening';
 /** Second guard on the 'new opening' choice: the message must use a breaking-through word. */
-export const BREAK_RE = /\b(smash\w*|break\w*|broke|broken|burst\w*|bash\w*|blast\w*|dig|digs|digging|dug|tunnel\w*|hole|holes|carv\w*|hack\w* through|cut\w* through|kick\w* (?:in|down|through)|knock\w* (?:down|through)|breach\w*|shatter\w*)\b/i;
+export const BREAK_RE = /\b(?:smash|smashes|smashed|smashing|break|breaks|breaking|broke|burst|bursts|bursting|bash|bashes|bashed|bashing|blast|blasts|blasted|blasting|shatter|shatters|shattered|shattering|breach|breaches|breached|breaching|dig|digs|dug|digging|carve|carves|carved|carving|(?:hack|hacks|hacked|hacking|cut|cuts|cutting|punch|punches|punched|punching) through|(?:kick|kicks|kicked|kicking) (?:in|down|through)|(?:knock|knocks|knocked|knocking) (?:down|through)|(?:tear|tears|tore|tearing) (?:down|through)|(?:make|makes|made|making|open|opens|opened|opening) a hole)\b/i;
 
 /** Strip reasoning blocks, keep the last non-empty line, then exact-match against the options. */
 export function cleanAnswer(answer) {
@@ -891,7 +891,8 @@ async function parseIntent(msg) {
     const dirs = loc.exits.map(e => e.direction);
     const places = await discoveredTargets(loc);
     const prev = previousAddress(loc.address);
-    const options = [...dirs, ...places.map(p => p.label), OPEN, STAY, ELSEWHERE, UNCLEAR];
+    const canOpen = BREAK_RE.test(msg.mes ?? ''); // the 'new opening' choice is only offered when the player uses a breaking-through word
+    const options = [...dirs, ...places.map(p => p.label), ...(canOpen ? [OPEN] : []), STAY, ELSEWHERE, UNCLEAR];
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
@@ -902,19 +903,16 @@ async function parseIntent(msg) {
         + `${said}\n\nAnswer with one option:\n`
         + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
         + places.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
-        + `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n`
+        + (canOpen ? `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n` : '')
         + `- ${STAY}: the player is not trying to travel anywhere\n`
         + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
         + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`
         + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
     const cands = await travelCandidates(loc);
-    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), OPEN]);
-    if (choice === OPEN) {
-        if (BREAK_RE.test(msg.mes ?? '')) return await narrativeDig(msg, loc);
-        console.log('[WorldScrawl] model picked a new opening, but the message has no breaking-through words -> stay');
-        return { kind: STAY, loc };
-    }
+    // Without the word check passing, "new opening" is not an option: such an answer falls through to the normal handling.
+    let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), ...(canOpen ? [OPEN] : [])]);
+    if (choice === OPEN) return await narrativeDig(msg, loc);
     const ans = trimAnswer(cleanAnswer(answer));
     const insideAns = !dirs.includes(choice) && hereAreas(loc).find(a => sameName(a.name, choice ?? ans));
     if (insideAns) return { kind: 'already', loc, name: insideAns.name };
