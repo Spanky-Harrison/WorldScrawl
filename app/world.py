@@ -104,6 +104,7 @@ class World:
     regions: dict[str, Region]
     subregions: dict[str, Subregion]  # "region:sub" -> Subregion
     locations: dict[str, Location]
+    doors: dict = field(default_factory=dict)  # door id -> {"rooms": [a, b], "stays_open": bool} (derived at load)
 
     def get(self, address: str) -> Location | None:
         return self.locations.get(address)
@@ -122,12 +123,19 @@ class World:
         """"Name (Subregion)", or just the name when the subregion has the same name (same rule as the extension)."""
         return f"{name} ({sub_name})" if sub_name and sub_name != name else name
 
-    def stays_open(self, e: Exit, src: Location) -> bool:
-        """Most specific wins: exit, then the room's subregion, then its region; default false."""
-        for v in (e.stays_open, self.sub_of(src).stays_open, self.regions[src.region].stays_open):
+    def inherited_stays_open(self, loc: Location) -> bool:
+        """A room's own setting: its subregion's stays_open, else its region's; default false."""
+        for v in (self.sub_of(loc).stays_open, self.regions[loc.region].stays_open):
             if v is not None:
                 return v
         return False
+
+    def stays_open(self, e: Exit, src: Location) -> bool:
+        """Per door (the same from both sides): an explicit exit-level stays_open on either side wins (if they
+        conflict, false wins); otherwise the door stays open only if both rooms' inherited settings are true."""
+        if e.door and e.door in self.doors:
+            return self.doors[e.door]["stays_open"]
+        return e.stays_open if e.stays_open is not None else self.inherited_stays_open(src)
 
     @staticmethod
     def summary(loc: Location) -> str:
@@ -142,6 +150,7 @@ class World:
         region, sub = self.regions[loc.region], self.sub_of(loc)
         return {
             "address": loc.address,
+            "room_token": room_token(loc.address),
             "region": {"id": region.id, "name": region.name, "notes": region.notes, "entrance": region.entrance},
             "subregion": {"id": sub.id, "name": sub.name, "notes": sub.notes, "entrance": sub.entrance,
                           "entrance_name": self.locations[sub.entrance].name, "label_rooms": sub.label_rooms},
@@ -190,7 +199,7 @@ class World:
         client never has to fetch a neighbouring room just to name it. Hidden/obscured exits reveal nothing
         about the destination: only the direction, description and flags."""
         out = {"direction": e.direction, **({"description": e.description} if e.description else {}), **e.flags,
-               **({"door": e.door} if e.door else {}), "view": e.effective_view,
+               **({"door": e.door, "door_rooms": [room_token(a) for a in self.doors[e.door]["rooms"]]} if e.door and e.door in self.doors else {}), "view": e.effective_view,
                **({"stays_open": self.stays_open(e, src)} if src is not None else {})}
         if not self.reveals_destination(e):
             return out
@@ -210,6 +219,12 @@ class World:
             "to_region": {"id": treg.id, "name": treg.name, "entrance": treg.entrance},
             **out,
         }
+
+
+def room_token(address: str) -> str:
+    """Opaque id of a room: lets the client tell "is the party in one of this door's rooms?" without being told
+    where an obscured door leads."""
+    return "room_" + hashlib.sha1(f"room|{address}".encode()).hexdigest()[:12]
 
 
 def _require_str(obj: dict, key: str, where: str, optional: bool = False):
@@ -390,4 +405,13 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
             elif back.door is None:
                 back.door = e.door
 
-    return World(start=f"{start_region}:{region_starts[start_region]}", regions=regions, subregions=subregions, locations=locations)
+    w = World(start=f"{start_region}:{region_starts[start_region]}", regions=regions, subregions=subregions, locations=locations)
+    for loc in locations.values():
+        for e in loc.exits:
+            if not e.door or e.door in w.doors:
+                continue
+            back = next((b for b in locations[e.to].exits if b.to == loc.address and b.door == e.door), None)
+            explicit = [x.stays_open for x in (e, back) if x is not None and x.stays_open is not None]
+            stays = all(explicit) if explicit else (w.inherited_stays_open(loc) and w.inherited_stays_open(locations[e.to]))
+            w.doors[e.door] = {"rooms": sorted({loc.address, e.to}), "stays_open": stays}
+    return w

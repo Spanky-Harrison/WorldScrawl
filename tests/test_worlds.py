@@ -310,3 +310,41 @@ def test_door_and_view_link_changes(client, wd):
     d = json.loads(raw)
     assert d["subregions"]["drowned_rat"]["locations"]["upstairs"]["views"] == [SQUARE]
     assert "stays_open" not in raw and '"view"' not in raw  # door changes never written; no defaults added
+
+
+def test_stays_open_per_door_across_a_boundary(wd):
+    """Crypt (temple, stays_open) <-> bandit tunnel: the same answer from both sides."""
+    CAT, TUN = "riverton:temple/catacombs", "riverton:secret_tunnel/tunnel"
+
+    def world(temple=None, tunnel=None, ex_cat=None, ex_tun=None):
+        def setup(d):
+            for sid, v in (("temple", temple), ("secret_tunnel", tunnel)):
+                d["subregions"][sid].pop("stays_open", None)
+                if v is not None:
+                    d["subregions"][sid]["stays_open"] = v
+            for sid, loc, dr, v in (("temple", "catacombs", "tunnel", ex_cat), ("secret_tunnel", "tunnel", "catacombs", ex_tun)):
+                e = _exit(d, sid, loc, dr)
+                e["view"] = "closed"
+                e.pop("stays_open", None)
+                if v is not None:
+                    e["stays_open"] = v
+        _edit(wd, setup)
+        w = load_world(wd / "riverton")
+        a = next(e for e in w.get(CAT).exits if e.direction == "tunnel")
+        b = next(e for e in w.get(TUN).exits if e.direction == "catacombs")
+        assert a.door == b.door and sorted(w.doors[a.door]["rooms"]) == sorted([CAT, TUN])
+        return w.stays_open(a, w.get(CAT)), w.stays_open(b, w.get(TUN))
+
+    assert world(temple=True) == (False, False)  # only one side inherits true
+    assert world(temple=True, tunnel=True) == (True, True)  # both inherit true
+    assert world(temple=True, tunnel=True, ex_tun=False) == (False, False)  # explicit exit on either side wins
+    assert world(ex_cat=True) == (True, True)  # explicit beats inherited false
+    assert world(ex_cat=True, ex_tun=False) == (False, False)  # conflict: false wins
+
+
+def test_door_rooms_are_opaque(client):
+    yard = client.get("/location/riverton:drowned_rat/courtyard").json()
+    trap = next(e for e in yard["exits"] if e["direction"] == "trapdoor")
+    cellar = client.get("/location/riverton:drowned_rat/cellar").json()
+    assert "to" not in trap and "drowned_rat/cellar" not in str(trap) and "to_name" not in trap
+    assert sorted(trap["door_rooms"]) == sorted([yard["room_token"], cellar["room_token"]])

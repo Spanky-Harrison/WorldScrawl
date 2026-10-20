@@ -1005,6 +1005,15 @@ try {
     await send('I listen at the tavern door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Looking in, you can see'), promptOf(lq[3]).slice(-500));
+    // Obscured trapdoor: both rooms recorded (opaque tokens), so it stays open in the cellar and shuts once both are left.
+    await go('in', 'back');
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open trapdoor')); await page.waitForTimeout(1000);
+    const trapCh = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra.worldscrawl_change; });
+    check('doors: opening an obscured door records both rooms as opaque tokens', trapCh?.rooms?.length === 2 && trapCh.rooms.every(r => r.startsWith('room_')) && !JSON.stringify(trapCh).includes('cellar'), JSON.stringify(trapCh));
+    await go('trapdoor');
+    check('doors: trapdoor still open from the cellar side', (await stored()) === 'riverton:drowned_rat/cellar' && (await openDoors()) === 'courtyard|trapdoor', await openDoors());
+    await go('trapdoor', 'in');
+    check('doors: trapdoor shut after leaving both rooms', (await openDoors()) === '', await openDoors());
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
