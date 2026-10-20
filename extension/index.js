@@ -944,7 +944,8 @@ export function lookTargetPrompt(loc, said, exits) {
     return `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhat is the player looking at or listening to?\n`
         + exits.map((e, i) => `${i + 1}. ${exitTargetLabel(e)}`).join('\n') + `${exits.length ? '\n' : ''}${exits.length + 1}. ${NO_EXIT}\n\nReply with just the number.`;
 }
-export const listenPrompt = (said, e) => `${said}\n\nThe ${e.direction} door is closed. Is the player only listening at it (not looking through, peeking or opening it)? Reply yes or no.`;
+export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
+export const closedDoorPrompt = (said, e) => `${said}\n\nThe ${e.direction} door is closed. What does the player do with it?\n1. only listens at it\n2. peeks through it (a crack, keyhole or gap) without opening it\n3. opens it\n4. just looks at the closed door\n\nReply with just the number.`;
 export function viewPickPrompt(loc, said, rooms) {
     return `${whoMoves()} is in ${displayName(loc)}. ${loc.description ?? ''}\n${said}\n\nThe player looks out of a window or opening. Places nearby:\n`
         + rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') + `\n\nWhich place can they most likely see? Reply with just the number.`;
@@ -962,13 +963,17 @@ async function narrativeLook(msg, loc) {
         const e = exits[n - 1];
         let v = viewOf(e), opened = false;
         if (v === 'closed') {
-            const listen = await askValid('listen', listenPrompt(said, e), a => parseYesNo(a));
-            if (listen === 'yes') v = 'listen';
-            else { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
+            const k = await askValid('closed door', closedDoorPrompt(said, e), pickNumber(4));
+            const act = DOOR_LOOK[(k ?? 4) - 1]; // unreadable: just looking (never opens a door by accident)
+            if (act === 'listen') v = 'listen';
+            else if (act === 'open') { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
+            else if (act === 'peek') { msg.extra.worldscrawl_peek = { type: 'peek', door: e.direction, from: loc.address }; v = 'peek'; } // no effect on door state (for a later stealth mechanic)
+            else v = 'shut';
         }
-        const t = v === 'open' && revealsDestination(e) && e.to ? await fetchLocationCached(e.to) : null;
+        const t = (v === 'open' || v === 'peek') && revealsDestination(e) && e.to ? await fetchLocationCached(e.to) : null;
         look = v === 'listen' ? { kind: 'listen', via: e.direction }
-            : t ? { kind: 'see', via: e.direction, to: t.address, name: displayName(t), description: t.description, opened }
+            : v === 'shut' ? { kind: 'closed', via: e.direction }
+            : t ? { kind: 'see', via: e.direction, to: t.address, name: displayName(t), description: t.description, opened, ...(v === 'peek' ? { peek: true } : {}) }
             : { kind: 'nothing', via: e.direction, opened };
     } else {
         let view = (loc.views ?? [])[0]; // hand-written views first, then an earlier view link: the same answer every time
@@ -1209,10 +1214,14 @@ export function glimpseLines(loc, open = new Map()) {
 export function lookText(who, here, look) {
     const how = look.window ? 'out' : look.via ? (isDirWord(look.via) ? look.via : `through the ${look.via}`) : 'around';
     const first = look.opened ? `${who} opens the ${doorWord(look.via)} first. ` : '';
+    if (look.kind === 'see' && look.peek) return `What just happened: ${who} peeks through the closed ${doorWord(look.via)} without opening it and glimpses ${look.name}: ${look.description} The door stays closed. ${who} is still at ${here}. Describe only the glimpse.`;
     if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'closed') return `What just happened: ${who} looks at the ${doorWord(look.via)}. The door is closed; nothing beyond it can be seen. ${who} stays at ${here}.`;
     if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
+export const EXITS_HINT = 'In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the "you can see" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.';
+export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
 export function factsText(loc, move, toolsOn, extra = {}) {
     const who = whoMoves();
     const lines = [
@@ -1233,7 +1242,9 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
+    else if (extra.lookAround) lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
+    if ((move && move.to === loc.address) || (extra.lookAround && !move)) lines.push(EXITS_HINT);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
         : `You only narrate. The game engine controls movement: never move ${who} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.`);
@@ -1249,7 +1260,7 @@ async function applyFacts() {
         const ui = lastUserIndex(c.chat ?? []);
         const move = ui >= 0 ? c.chat[ui].extra?.[MOVE_KEY] : null;
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
-        text = factsText(loc, move, toolsOn(), { dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, door: um.worldscrawl_door, open: doorStates() });
+        text = factsText(loc, move, toolsOn(), { dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
         reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
@@ -1257,8 +1268,15 @@ async function applyFacts() {
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
 }
 
+/** The model never sees the [ws-start] marker (the prompt chat holds its own entries: replace them, the stored greeting stays). */
+export function stripStartMarker(arr) {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((m, i) => { if (typeof m?.mes === 'string' && m.mes.includes(START_MARKER)) arr[i] = { ...m, mes: m.mes.split(START_MARKER).join('').replace(/[ \t]+\n/g, '\n').trim() }; });
+}
+
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
+    stripStartMarker(_chat);
     if (type === 'quiet' || type === 'impersonate' || !isOn()) return;
     try {
         const c = ctx();
@@ -1707,7 +1725,7 @@ export const START_MARKER = '[ws-start]';
 function renderStartButton() {
     const el = document.querySelector('#chat .mes[mesid="0"] .mes_text');
     if (!el) return;
-    const active = (ctx().chat?.length ?? 0) <= 1;
+    const active = isOn() && (ctx().chat?.length ?? 0) <= 1;
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const nodes = []; for (let n; (n = walker.nextNode());) if (n.nodeValue.includes(START_MARKER)) nodes.push(n);
     for (const n of nodes) {
