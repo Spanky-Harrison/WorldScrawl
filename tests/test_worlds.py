@@ -215,3 +215,37 @@ def test_open_folder(client, wd):
     assert client.post("/open-folder?world=nope").status_code == 404
     assert client.post("/open-folder", params={"path": "/etc"}).json()["opened"] == str(wd.resolve())  # no path parameter exists
     assert len(opened) == 3
+
+
+def test_two_way_dig_and_new_room(client, wd):
+    hole = "riverton:drowned_rat/hole_1"
+    ch = [{"type": "add_room", "address": hole, "name": "Dusty Cellar", "description": "A cramped, dusty space.", "from": TAVERN},
+          {"type": "dig", "from": TAVERN, "direction": "hole", "to": hole, "description": "A ragged hole in the wall.",
+           "return_direction": "back"}]
+    r = client.post("/move", json={"from": TAVERN, "direction": "hole", "changes": ch}).json()
+    assert r["address"] == hole and r["name"] == "Dusty Cellar" and [e["direction"] for e in r["exits"]] == ["back"]
+    assert client.post("/move", json={"from": hole, "direction": "back", "changes": ch}).json()["address"] == TAVERN
+    assert client.post("/worlds/render", json={"id": "holey", "changes": ch}).status_code == 200
+    w = load_world(wd / "holey")
+    assert w.get(hole).name == "Dusty Cellar" and any(e.direction == "hole" and e.to == hole for e in w.get(TAVERN).exits)
+    # two-way dig into existing rooms; refused if either side already has that exit name
+    ok = [{"type": "dig", "from": SQUARE, "direction": "crack", "to": YARD, "return_direction": "crack"}]
+    assert client.post("/move", json={"from": YARD, "direction": "crack", "changes": ok}).json()["address"] == SQUARE
+    for bad in ([{"type": "dig", "from": TAVERN, "direction": "up", "to": YARD, "return_direction": "x"}],
+                [{"type": "dig", "from": SQUARE, "direction": "x", "to": TAVERN, "return_direction": "up"}],
+                [{"type": "dig", "from": SQUARE, "direction": "x", "to": SQUARE, "return_direction": "y"}],
+                [ch[0], ch[0]],
+                [{"type": "add_room", "address": "riverton:nowhere/x", "name": "A", "description": "B"}],
+                [{"type": "add_room", "address": "riverton:drowned_rat/../x", "name": "A", "description": "B"}],
+                [{"type": "add_room", "address": hole, "name": "A" * 61, "description": "B"}]):
+        assert client.post("/move", json={"from": TAVERN, "direction": "out", "changes": bad}).status_code == 400, bad
+
+
+def test_nearby_rooms(client):
+    up = "riverton:drowned_rat/upstairs"
+    rooms = client.post("/nearby", json={"from": up}).json()["rooms"]
+    assert rooms[0]["address"] == TAVERN and rooms[0]["steps"] == 1
+    assert any(r["address"] == SQUARE and r["steps"] == 2 for r in rooms)
+    assert len(rooms) <= 12 and all(set(r) == {"address", "name", "area", "display_name", "summary", "steps"} for r in rooms)
+    assert all(r["steps"] <= 3 for r in rooms) and up not in [r["address"] for r in rooms]
+    assert len(client.post("/nearby", json={"from": up, "limit": 2}).json()["rooms"]) == 2

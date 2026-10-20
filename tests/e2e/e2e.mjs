@@ -302,7 +302,7 @@ try {
     await send('go to the temple', 1);
     lm = await lastMsg();
     const q = JSON.stringify((await lastReq()).messages);
-    check('new chat: temple not offered', q.includes('Which option: out, up, back, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
+    check('new chat: temple not offered', q.includes('Which option: out, up, back, new opening, stay, elsewhere, unclear?') && !q.includes('Temple of the Tides'), q.slice(-160));
     check('new chat: temple refused', lm.sys && /not aware of such a place/.test(lm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
 
     // Known place but no allowed route: visit the temple, return to the tavern, then hide the square's
@@ -651,7 +651,7 @@ try {
     check('worlds: list has riverton as default', wl.default === 'riverton' && wl.worlds.some(w => w.id === 'riverton' && w.map_version), JSON.stringify(wl));
     check('worlds: path traversal rejected', (await fetch('http://127.0.0.1:5199/start?world=..%2Fx')).status === 400 && (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '../evil' }) })).status === 400);
     check('chat world stamped on the first message', await page.evaluate(() => { const w = SillyTavern.getContext().chat[0].extra?.worldscrawl_world; return w?.id === 'riverton' && w.version?.length === 12; }));
-    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig shortcut Village Square'));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true shortcut Village Square'));
     await page.waitForTimeout(1000);
     check('dig: system message with the change', (await lastMes()) === '[Engine: a passage shortcut to Village Square was opened.]' && await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; return m.is_system && m.extra.worldscrawl_change?.type === 'add_exit'; }), await lastMes());
     check('dig: new exit listed', (await wsExits()).includes('shortcut (Village Square)'), String(await wsExits()));
@@ -794,9 +794,9 @@ try {
     check('repro: blank save with switch on rebases the chat', w1?.rebase && /^riverton-/.test(w1.id), JSON.stringify(w1));
     const pushLoc = a => page.evaluate(async a => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'at ' + a, extra: { worldscrawl_location: a, worldscrawl_intent_checked: true } }); await c.saveChat(); }, a);
     await pushLoc('riverton:secret_tunnel/tunnel');
-    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig passage riverton:drowned_rat/common_room')); await page.waitForTimeout(1000);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true passage riverton:drowned_rat/common_room')); await page.waitForTimeout(1000);
     await pushLoc('riverton:drowned_rat/common_room');
-    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig passage riverton:secret_tunnel/tunnel')); await page.waitForTimeout(1000);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true passage riverton:secret_tunnel/tunnel')); await page.waitForTimeout(1000);
     check('repro: both digs recorded after the rebase', JSON.stringify(await M(m => m.chatChanges().map(c => c.from + '>' + c.to))) === JSON.stringify(['riverton:secret_tunnel/tunnel>riverton:drowned_rat/common_room', 'riverton:drowned_rat/common_room>riverton:secret_tunnel/tunnel']), JSON.stringify(await M(m => m.chatChanges())));
     await page.evaluate(() => { document.getElementById('worldscrawl_save_name').value = 'My Riverton'; });
     await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
@@ -819,7 +819,7 @@ try {
     check('repro: dug passage shown in the new chat', ncEx.includes('passage'), ncEx);
     await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = ''; s.dispatchEvent(new Event('change')); });
     // Living saves: the save box offers the current living world's name; a blank save goes over it, always rebasing here.
-    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig hatch riverton:streets/square')); await page.waitForTimeout(1000);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true hatch riverton:streets/square')); await page.waitForTimeout(1000);
     await page.evaluate(() => { document.getElementById('worldscrawl_save_switch').checked = false; const i = document.getElementById('worldscrawl_save_name'); i.value = ''; });
     await page.evaluate(() => document.querySelector('.worldscrawl_settings .inline-drawer-toggle').click()); await page.waitForTimeout(800);
     const ph2 = await page.evaluate(() => document.getElementById('worldscrawl_save_name').placeholder);
@@ -861,6 +861,74 @@ try {
     const of = apiUrls.filter(u => u.includes('/open-folder'));
     check('open folder buttons call the server with no path (root, then a world id)', of.length === 2 && !of[0].includes('world=') && /world=riverton$/.test(of[1]), JSON.stringify(of));
     check('open-folder refuses a path-like id', (await fetch('http://127.0.0.1:5199/open-folder?world=..%2F..', { method: 'POST' })).status === 400);
+    // ---- Narrative digging: "I smash out the window" -> new two-way exit, small validated questions, stamped on the player's message.
+    await sw(true, true);
+    await go('up');
+    check('dig narrative: setup upstairs in the Drowned Rat', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
+    const near = (await (await fetch('http://127.0.0.1:5199/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
+    const sqN = near.findIndex(r => r.address === 'riverton:streets/square') + 1;
+    check('nearby: rooms within 3 steps, nearest first, capped, Village Square included', sqN > 0 && near.length <= 12 && near[0].steps === 1 && near.every((r, i) => !i || near[i - 1].steps <= r.steps) && near.every(r => r.name && r.area && r.summary && !('exits' in r)), JSON.stringify(near.map(r => r.display_name)));
+    const lastU = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; for (let i = ch.length - 1; i >= 0; i--) if (ch[i].is_user) return { i, extra: ch[i].extra ?? {} }; return null; });
+    const reqsNow = async () => (await fetch(`${FAKE}/__requests`)).json();
+    const promptOf = r => JSON.stringify(r.messages ?? r);
+    // Guard: the model says "new opening" but the player only hits the wall -> no change.
+    await queue([{ content: 'new opening' }, { content: 'You punch the wall.' }]);
+    await send('I punch the wall angrily', 2);
+    let lu = await lastU();
+    check('dig narrative: hitting a wall is not a breakthrough (no change, no follow-up questions)', !lu.extra.worldscrawl_change && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', JSON.stringify(lu.extra));
+    const r0 = (await reqsNow()).length;
+    // Window -> Village Square; the first direction answer is taken ("down") and only that question is asked again.
+    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'down' }, { content: 'Window' }, { content: 'Glass rains onto the square.' }]);
+    await send('I smash out the window', 5);
+    lu = await lastU();
+    const rq = (await reqsNow()).slice(r0);
+    const ch1 = lu.extra.worldscrawl_change;
+    check('dig narrative: intent prompt offers the new opening choice', promptOf(rq[0]).includes('new opening: the player clearly breaks through'), promptOf(rq[0]).slice(0, 300));
+    check('dig narrative: destination question is a numbered list of nearby places + somewhere new', promptOf(rq[1]).includes('Where does this opening most likely lead? Reply with just the number.') && promptOf(rq[1]).includes(`${sqN}. Village Square`) && promptOf(rq[1]).includes(`${near.length + 1}. somewhere new`), promptOf(rq[1]).slice(0, 600));
+    check('dig narrative: invalid direction retried alone', promptOf(rq[2]).includes('What is the opening called from this side?') && promptOf(rq[3]).includes('What is the opening called from this side?') && rq.length === 5, String(rq.length));
+    check('dig narrative: two-way change stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
+    check('dig narrative: party stays, new exit listed', (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('window (Village Square'), await wsExits());
+    check('dig narrative: narration told about the breakthrough', promptOf(rq[4]).includes('broke through, making a new opening (window)'), promptOf(rq[4]).slice(-800));
+    const back1 = await (await fetch('http://127.0.0.1:5199/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
+    check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
+    // Swipe the reply: the change stays (it lives on the player's message, like a move).
+    await queue([{ content: 'Another take on the glass.' }]); expected += 1;
+    await page.evaluate(() => jQuery('#chat .last_mes .swipe_right').trigger('click')); await waitReqs();
+    const sw1 = await lastU();
+    check('dig narrative: swiping the reply keeps the change', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await wsExits()).includes('window (Village Square'), await wsExits());
+    // Delete the player's message: the change is gone.
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    check('dig narrative: deleting the message undoes it', !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
+    // Somewhere new: name + description questions, new room in this building, walkable both ways.
+    await queue([{ content: 'new opening' }, { content: String(near.length + 1) }, { content: 'the hole' }, { content: 'dusty crawl space' }, { content: 'A cramped crawlspace full of cobwebs' }, { content: 'You climb down.' }]);
+    await send('I bash a hole through the floorboards', 6);
+    lu = await lastU();
+    const ch2 = lu.extra.worldscrawl_change;
+    check('dig narrative: new room change (add_room + dig) in the current subregion', Array.isArray(ch2) && ch2[0].type === 'add_room' && ch2[0].address.startsWith('riverton:drowned_rat/dusty_crawl_space_') && ch2[0].name === 'Dusty Crawl Space' && ch2[0].description === 'A cramped crawlspace full of cobwebs.' && ch2[1].type === 'dig' && ch2[1].direction === 'hole' && ch2[1].return_direction === 'back', JSON.stringify(ch2));
+    check('dig narrative: new room exit listed', (await wsExits()).includes('hole (Dusty Crawl Space)'), await wsExits());
+    await go('hole');
+    check('dig narrative: walk into the new room; its way back listed', (await stored()) === ch2?.[0]?.address && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
+    await go('back');
+    // Failure: unreadable destination twice -> no change, a notice, narration says nothing gave way.
+    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'the moon' }, { content: 'You strain.' }]);
+    await send('I smash the wall with my fist until it breaks', 4);
+    lu = await lastU();
+    check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way'), JSON.stringify(lu.extra));
+    // /ws-dig: two-way by default with dir/returndir, refused when either side has that name, new room, one-way.
+    const dig = async t => { await page.evaluate(t => SillyTavern.getContext().executeSlashCommandsWithOptions(t), t); await page.waitForTimeout(1000); };
+    const nBefore2 = await M(m => m.chatChanges().length);
+    await dig('/ws-dig down Village Square');
+    check('/ws-dig refused: exit name already here', (await M(m => m.chatChanges().length)) === nBefore2);
+    await dig('/ws-dig crack/gap Village Square');
+    check('/ws-dig two-way with dir/returndir', (await lastMes()) === '[Engine: a passage crack to Village Square was opened (back: gap).]', await lastMes());
+    await dig('/ws-dig crevice/gap Village Square');
+    check('/ws-dig refused: return name already on the far side', (await M(m => m.chatChanges().length)) === nBefore2 + 1);
+    await dig('/ws-dig north Common Room');
+    check('/ws-dig compass return name is the opposite', (await M(m => m.chatChanges().at(-1)?.return_direction)) === 'south');
+    await dig('/ws-dig nook new Little Nook: A tiny nook.');
+    check('/ws-dig new room', (await wsExits()).includes('nook (Little Nook)') && (await lastMes()) === '[Engine: a passage nook to Little Nook was opened (back: back).]', await wsExits());
+    await dig('/ws-dig oneway=true chute Village Square');
+    check('/ws-dig oneway=true', (await M(m => m.chatChanges().at(-1)?.type)) === 'add_exit' && (await lastMes()) === '[Engine: a passage chute to Village Square was opened.]', await lastMes());
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
     await browser.close();
