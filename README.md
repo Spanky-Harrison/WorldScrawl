@@ -202,3 +202,9 @@ By default the model never touches the map:
 - Rooms are offered to the model as "Name (Building)", e.g. "Common Room (The Gilded Goose)". Building and region names work too ("go to the Drowned Rat"): you arrive at the building's entrance, or at a room of that building you've already been in if it's nearer (e.g. the Drowned Rat's stable, through the stable gate on Market Lane). The Drowned Rat now has a common room, upstairs rooms, a courtyard, kitchens and a stable.
 - If the model answers "elsewhere" or "unclear", the extension checks your words against known places itself (case-insensitive, word-level: "upstairs" matches "Upstairs Rooms"). One match: you go there. Several: "Which one do you mean?" with buttons. Already inside the named building/region: "You're already in X." None: "You're not aware of such a place."
 - Locations are cached in memory (cleared on page reload or when the server URL changes), so each place is fetched from the server once.
+
+## For card authors: "Start your adventure"
+
+Put `[ws-start]` anywhere in a character's greeting (or alternate greetings). WorldScrawl shows a **Start your adventure** button there instead of the marker; clicking it sends "I look around" as your first message, so the model only runs when you choose to start. The greeting's stored text isn't changed, and the button disappears once the chat has more than the greeting.
+
+`/ws-known` lists the places this chat knows, in two groups: "Been there" and "Seen" (places spotted through exits or windows but never visited). It never names hidden-exit destinations.

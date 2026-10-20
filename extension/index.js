@@ -1528,6 +1528,21 @@ function registerSlashCommands() {
         callback: whenOn(async () => { try { const t = exitsText(await currentLocation()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
         helpString: 'WorldScrawl: show the exits from the current location.',
     }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-known',
+        callback: whenOn(async () => { try { const t = await knownText(); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
+        helpString: 'WorldScrawl: list the places this chat knows: where you have been, and places seen but not visited.',
+    }));
+}
+
+/** Read-only summary of this chat's knowledge (hidden-exit destinations never included: discoveredPlaces filters them). */
+export async function knownText() {
+    const stood = new Set(await stoodInAddresses());
+    const known = await discoveredPlaces();
+    const name = p => p.display_name || p.name || p.address;
+    const been = [...known.values()].filter(p => stood.has(p.address)).map(name);
+    const seen = [...known.values()].filter(p => !stood.has(p.address)).map(name);
+    return `Been there: ${been.join(', ') || 'nowhere yet'}. Seen: ${seen.join(', ') || 'nothing else'}.`;
 }
 
 // ---- Exits footer: display-only (DOM), never written into message.mes, so the model never sees it.
@@ -1687,7 +1702,43 @@ async function renderNotices() {
     }
 }
 
+// ---- "Start your adventure": a [ws-start] marker in the greeting becomes a button (display only; message text untouched).
+export const START_MARKER = '[ws-start]';
+function renderStartButton() {
+    const el = document.querySelector('#chat .mes[mesid="0"] .mes_text');
+    if (!el) return;
+    const active = (ctx().chat?.length ?? 0) <= 1;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = []; for (let n; (n = walker.nextNode());) if (n.nodeValue.includes(START_MARKER)) nodes.push(n);
+    for (const n of nodes) {
+        const parts = n.nodeValue.split(START_MARKER);
+        const frag = document.createDocumentFragment();
+        parts.forEach((t, i) => {
+            if (i) { const b = document.createElement('span'); b.className = 'worldscrawl_start'; frag.appendChild(b); }
+            if (t) frag.append(t);
+        });
+        n.replaceWith(frag);
+    }
+    for (const b of el.querySelectorAll('.worldscrawl_start')) {
+        b.textContent = '';
+        if (!active) { b.style.display = 'none'; continue; }
+        b.style.display = '';
+        const btn = makeButton('Start your adventure', 'Send "I look around"', startAdventure);
+        btn.classList.add('worldscrawl_start_button', 'menu_button');
+        btn.style.cssText = 'cursor:pointer;display:inline-block;padding:4px 10px;';
+        b.appendChild(btn);
+    }
+}
+function startAdventure() {
+    if ((ctx().chat?.length ?? 0) > 1) return renderStartButton();
+    const ta = document.getElementById('send_textarea');
+    ta.value = 'I look around';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('send_but')?.click();
+}
+
 async function renderAllExits() {
+    renderStartButton();
     if (!isOn()) { // off: strip footers and notice buttons, no server calls
         document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
         for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
@@ -1821,6 +1872,9 @@ function addSettingsPanel() {
     eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     for (const ev of ['MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MORE_MESSAGES_LOADED']) {
         if (eventTypes[ev]) eventSource.on(eventTypes[ev], () => setTimeout(renderAllExits, 0));
+    }
+    for (const ev of ['MESSAGE_SENT', 'MESSAGE_RECEIVED', 'CHAT_CHANGED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED']) {
+        if (eventTypes[ev]) eventSource.on(eventTypes[ev], () => setTimeout(renderStartButton, 0));
     }
     addSettingsPanel();
     addWandItem();
