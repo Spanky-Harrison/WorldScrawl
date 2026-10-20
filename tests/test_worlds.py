@@ -249,3 +249,64 @@ def test_nearby_rooms(client):
     assert len(rooms) <= 12 and all(set(r) == {"address", "name", "area", "display_name", "summary", "steps"} for r in rooms)
     assert all(r["steps"] <= 3 for r in rooms) and up not in [r["address"] for r in rooms]
     assert len(client.post("/nearby", json={"from": up, "limit": 2}).json()["rooms"]) == 2
+
+
+def _edit(wd, fn):
+    import json
+    p = wd / "riverton" / "regions" / "riverton.json"
+    d = json.loads(p.read_text())
+    fn(d)
+    p.write_text(json.dumps(d))
+
+
+def _exit(d, sub, loc, direction):
+    return next(e for e in d["subregions"][sub]["locations"][loc]["exits"] if e["direction"] == direction)
+
+
+def test_view_defaults_and_validation(client, wd):
+    tav = client.get(f"/location/{TAVERN}").json()
+    out = next(e for e in tav["exits"] if e["direction"] == "out")
+    assert out["view"] == "open" and out["stays_open"] is False and out["to_summary"]
+    assert tav["views"] == []
+    nave = client.get("/location/riverton:temple/nave").json()
+    grate = next(e for e in nave["exits"] if e["direction"] == "grate")
+    assert grate["view"] == "closed" and "to" not in grate and "to_summary" not in grate  # nothing about the destination
+    _edit(wd, lambda d: _exit(d, "drowned_rat", "common_room", "out").update(view="ajar"))
+    from app.world import WorldError
+    with pytest.raises(WorldError, match='"view" must be one of'):
+        load_world(wd / "riverton")
+
+
+def test_stays_open_precedence_and_views(wd):
+    def setup(d):
+        d["stays_open"] = True
+        d["subregions"]["drowned_rat"]["stays_open"] = False
+        _exit(d, "drowned_rat", "common_room", "out").update(view="closed")
+        _exit(d, "streets", "square", "east").update(view="closed", stays_open=False)
+        _exit(d, "temple", "nave", "south").update(view="closed")
+        d["subregions"]["drowned_rat"]["locations"]["upstairs"]["views"] = ["streets/square"]
+    _edit(wd, setup)
+    c = TestClient(create_app(worlds_dir=wd))
+    ex = lambda a, dr: next(e for e in c.get(f"/location/{a}").json()["exits"] if e["direction"] == dr)
+    assert ex(TAVERN, "out")["stays_open"] is False  # subregion beats region
+    assert ex("riverton:temple/nave", "south")["stays_open"] is True  # region
+    assert ex(SQUARE, "east")["stays_open"] is False  # exit beats region
+    assert ex(TAVERN, "out")["view"] == "closed" and ex(TAVERN, "out")["door"] == ex(SQUARE, "in")["door"]  # paired
+    up = c.get("/location/riverton:drowned_rat/upstairs").json()
+    assert [v["address"] for v in up["views"]] == [SQUARE] and up["views"][0]["name"] == "Village Square"
+
+
+def test_door_and_view_link_changes(client, wd):
+    up = "riverton:drowned_rat/upstairs"
+    ch = [{"type": "open_door", "from": TAVERN, "direction": "out", "stays_open": False},
+          {"type": "close_door", "from": TAVERN, "direction": "out"},
+          {"type": "view_link", "from": up, "to": SQUARE}]
+    assert client.post("/move", json={"from": TAVERN, "direction": "up", "changes": ch}).json()["views"][0]["address"] == SQUARE
+    assert client.post("/move", json={"from": TAVERN, "direction": "up", "changes": [{"type": "open_door", "from": TAVERN, "direction": "nope"}]}).status_code == 400
+    assert client.post("/move", json={"from": TAVERN, "direction": "up", "changes": [{"type": "view_link", "from": up, "to": up}]}).status_code == 400
+    assert client.post("/worlds/render", json={"id": "viewy", "changes": ch}).status_code == 200
+    import json
+    raw = (wd / "viewy" / "regions" / "riverton.json").read_text()
+    d = json.loads(raw)
+    assert d["subregions"]["drowned_rat"]["locations"]["upstairs"]["views"] == [SQUARE]
+    assert "stays_open" not in raw and '"view"' not in raw  # door changes never written; no defaults added

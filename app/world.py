@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SLUG = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
+VIEWS = ("open", "closed", "none")  # optional exit "view": what can be seen through it (default: closed if hidden/obscured, else open)
 EXIT_FLAGS = ("hidden", "obscured")  # optional booleans on an exit (today both mean "obscured"; see README)
 log = logging.getLogger("uvicorn.error")
 
@@ -50,11 +51,17 @@ class Exit:
     to: str  # full address region:sub/loc after loading
     description: str | None = None
     flags: dict = field(default_factory=dict)
-    door: str | None = None  # opaque id shared by a flagged exit and its return exit (derived at load)
+    door: str | None = None  # opaque id shared by a flagged/closed exit and its return exit (derived at load)
+    view: str | None = None  # as written ("open" | "closed" | "none"), None = default
+    stays_open: bool | None = None  # as written; None = follow the subregion / region (default false)
 
     @property
     def flagged(self) -> bool:
         return bool(self.flags.get("hidden") or self.flags.get("obscured"))
+
+    @property
+    def effective_view(self) -> str:
+        return self.view or ("closed" if self.flagged else "open")
 
 
 @dataclass
@@ -63,6 +70,7 @@ class Region:
     name: str
     notes: str | None
     entrance: str = ""  # full address of the way in (default: the region's start room)
+    stays_open: bool | None = None  # opened doors here stay open (default: they shut themselves)
 
 
 @dataclass
@@ -73,6 +81,7 @@ class Subregion:
     inherit_notes: bool = True
     entrance: str = ""  # full address of the entrance room (default: first room)
     label_rooms: bool = False  # streets/outdoor groups: exits into it name the room, not the group
+    stays_open: bool | None = None
 
 
 @dataclass
@@ -86,6 +95,7 @@ class Location:
     exits: list[Exit] = field(default_factory=list)
     inherit_region_notes: bool | None = None  # None = follow the subregion
     inherit_subregion_notes: bool | None = None  # None = included
+    views: list[str] = field(default_factory=list)  # hand-written "views": rooms visible from here with no exit (windows)
 
 
 @dataclass
@@ -112,6 +122,22 @@ class World:
         """"Name (Subregion)", or just the name when the subregion has the same name (same rule as the extension)."""
         return f"{name} ({sub_name})" if sub_name and sub_name != name else name
 
+    def stays_open(self, e: Exit, src: Location) -> bool:
+        """Most specific wins: exit, then the room's subregion, then its region; default false."""
+        for v in (e.stays_open, self.sub_of(src).stays_open, self.regions[src.region].stays_open):
+            if v is not None:
+                return v
+        return False
+
+    @staticmethod
+    def summary(loc: Location) -> str:
+        """First sentence of a room's description (glimpses, view lists, nearby rooms)."""
+        return re.split(r"(?<=[.!?])\s", loc.description.strip(), maxsplit=1)[0][:160]
+
+    def view_dict(self, address: str) -> dict:
+        t = self.locations[address]
+        return {"address": address, "name": t.name, "display_name": self.place_label(t.name, self.sub_of(t).name), "summary": self.summary(t)}
+
     def to_dict(self, loc: Location) -> dict:
         region, sub = self.regions[loc.region], self.sub_of(loc)
         return {
@@ -124,6 +150,7 @@ class World:
             "description": loc.description,
             "effective_notes": self.effective_notes(loc),
             "exits": [self._exit_dict(e, loc) for e in loc.exits],
+            "views": [self.view_dict(a) for a in loc.views],
         }
 
     @staticmethod
@@ -163,7 +190,8 @@ class World:
         client never has to fetch a neighbouring room just to name it. Hidden/obscured exits reveal nothing
         about the destination: only the direction, description and flags."""
         out = {"direction": e.direction, **({"description": e.description} if e.description else {}), **e.flags,
-               **({"door": e.door} if e.door else {})}
+               **({"door": e.door} if e.door else {}), "view": e.effective_view,
+               **({"stays_open": self.stays_open(e, src)} if src is not None else {})}
         if not self.reveals_destination(e):
             return out
         return self.destination_dict(e, src, out)
@@ -176,6 +204,7 @@ class World:
             "to": e.to,
             "to_name": target.name,
             "to_display_name": self.place_label(target.name, tsub.name),
+            "to_summary": self.summary(target),
             "to_label": self.exit_label(src, target) if src is not None else target.name,
             "to_subregion": {"id": tsub.id, "name": tsub.name, "entrance": tsub.entrance, "label_rooms": tsub.label_rooms},
             "to_region": {"id": treg.id, "name": treg.name, "entrance": treg.entrance},
@@ -247,6 +276,7 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
     region_starts: dict[str, str] = {}
     locations: dict[str, Location] = {}
     raw_exits: list[tuple[str, str, str, Exit]] = []
+    raw_views: list = []
 
     for rid in files:
         fname = f"{rid}.json"
@@ -256,7 +286,8 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
         _check_slug(rid, f"{fname}: region id (file name)")
         if "id" in data and data["id"] != rid:
             raise WorldError(f"{fname}: region id {data['id']!r} must match the file name ({rid!r})")
-        regions[rid] = Region(rid, _require_str(data, "name", fname), _require_str(data, "notes", fname, optional=True))
+        regions[rid] = Region(rid, _require_str(data, "name", fname), _require_str(data, "notes", fname, optional=True),
+                              stays_open=_optional_bool(data, "stays_open", fname))
         start = _require_str(data, "start", fname)
         if start.count("/") != 1:
             raise WorldError(f"{fname}: \"start\" must look like \"subregion/location\", got {start!r}")
@@ -283,7 +314,8 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
             subregions[f"{rid}:{sid}"] = Subregion(sid, _require_str(sub, "name", swhere),
                                                    _require_str(sub, "notes", swhere, optional=True),
                                                    True if inherit is None else inherit, f"{rid}:{sid}/{entrance}",
-                                                   bool(_optional_bool(sub, "label_rooms", swhere)))
+                                                   bool(_optional_bool(sub, "label_rooms", swhere)),
+                                                   _optional_bool(sub, "stays_open", swhere))
             for lid, loc in locs.items():
                 where = f"{fname}: location {sid}/{lid}"
                 _check_slug(lid, f"{fname}: location id")
@@ -306,10 +338,18 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
                         v = _optional_bool(ex, flag, ewhere)
                         if v is not None:
                             flags[flag] = v
+                    view = ex.get("view")
+                    if view is not None and view not in VIEWS:
+                        raise WorldError(f"{ewhere}: \"view\" must be one of {', '.join(VIEWS)}")
                     e = Exit(direction, _require_str(ex, "to", ewhere).strip(),
-                             _require_str(ex, "description", ewhere, optional=True), flags)
+                             _require_str(ex, "description", ewhere, optional=True), flags,
+                             view=view, stays_open=_optional_bool(ex, "stays_open", ewhere))
                     exits.append(e)
                     raw_exits.append((ewhere, rid, sid, e))
+                views = loc.get("views", [])
+                if not isinstance(views, list) or not all(isinstance(v, str) and v.strip() for v in views):
+                    raise WorldError(f"{where}: \"views\" must be a list of room addresses")
+                raw_views.append((where, rid, sid, f"{rid}:{sid}/{lid}", views))
                 address = f"{rid}:{sid}/{lid}"
                 locations[address] = Location(
                     address, rid, sid, lid, _require_str(loc, "name", where), _require_str(loc, "description", where), exits,
@@ -320,6 +360,13 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
         if target not in locations:
             raise WorldError(f"{where}: exit target {e.to!r} does not exist (looked for {target!r})")
         e.to = target
+    for where, rid, sid, address, views in raw_views:
+        for v in views:
+            target = resolve_address(v.strip(), rid, sid)
+            if target not in locations:
+                raise WorldError(f"{where}: view {v!r} does not exist (looked for {target!r})")
+            if target not in locations[address].views:
+                locations[address].views.append(target)
 
     for rid, start in region_starts.items():
         if f"{rid}:{start}" not in locations:
@@ -333,7 +380,7 @@ def build_world(world_json: dict, raw_regions: dict[str, dict]) -> World:
     # through either side reveals both. A flagged exit with no way back is allowed (one-way doors) but warned about.
     for loc in locations.values():
         for e in loc.exits:
-            if not e.flagged or e.door:
+            if not (e.flagged or e.effective_view == "closed") or e.door:
                 continue
             back = next((b for b in locations[e.to].exits if b.to == loc.address), None)
             ends = sorted([f"{loc.address}|{e.direction.lower()}"] + ([f"{e.to}|{back.direction.lower()}"] if back else []))

@@ -6,6 +6,9 @@ A change is a dict with a "type". Known types:
   {"type": "dig", "from": A, "direction": "north", "to": B, "description"?: str,
    "return_direction": "south", "return_description"?: str}   two-way: exits A->B and B->A (neither may exist yet)
   {"type": "add_room", "address": "region:sub/new_id", "name": str, "description": str, "from"?: A}
+  {"type": "open_door" | "close_door", "from": A, "direction": "out", ...}   door state: replayed by the client;
+      checked here (the exit must exist) but never written into a saved world
+  {"type": "view_link", "from": A, "to": B}   what A's window (no exit) looks out on; saved into A's "views"
       a new room in an existing subregion (no exits of its own; dig to/from it). "from" is informational.
 The extension stamps changes on chat messages; the server applies them per request (/move, /travel) and when
 rendering a new world folder. Anything else is rejected, so new types must be added here deliberately.
@@ -17,7 +20,7 @@ import re
 
 from .world import WorldError
 
-CHANGE_TYPES = ("add_exit", "remove_exit", "dig", "add_room")
+CHANGE_TYPES = ("add_exit", "remove_exit", "dig", "add_room", "open_door", "close_door", "view_link")
 MAX_NAME, MAX_DIRECTION, MAX_DESCRIPTION = 60, 30, 400
 
 
@@ -81,7 +84,21 @@ def apply_changes(world_json: dict, raw: dict[str, dict], changes: list) -> tupl
                 _room(raw, frm, where).setdefault("exits", []).append(
                     {"direction": d, "to": to, **({"description": desc.strip()} if isinstance(desc, str) and desc.strip() else {})})
             continue
+        if ch["type"] == "view_link":
+            room, to = _room(raw, _text(ch, "from", where), where), _text(ch, "to", where)
+            _room(raw, to, where)
+            if to == ch["from"]:
+                raise WorldError(f"{where}: a room can't look out on itself")
+            # stored as a full address (resolve_address keeps "region:sub/loc" as is)
+            if to not in room.setdefault("views", []):
+                room["views"].append(to)
+            continue
         room = _room(raw, _text(ch, "from", where), where)
+        if ch["type"] in ("open_door", "close_door"):
+            d = _text(ch, "direction", where)
+            if not any(str(e.get("direction", "")).lower() == d.lower() for e in room.get("exits", [])):
+                raise WorldError(f"{where}: {ch['from']} has no exit {d!r}")
+            continue
         direction = _text(ch, "direction", where)
         exits = room.setdefault("exits", [])
         same = [e for e in exits if str(e.get("direction", "")).lower() == direction.lower()]
