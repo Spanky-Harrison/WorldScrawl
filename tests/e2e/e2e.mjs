@@ -980,10 +980,21 @@ try {
     check('doors: chat on the test world', (await M(m => m.effectiveWorld())) === 'doorsworld' && (await stored()) === 'riverton:drowned_rat/common_room', String(await M(m => m.effectiveWorld())));
     const openDoors = () => M(m => [...m.doorStates().values()].map(c => `${c.from.split('/')[1]}|${c.direction}`).sort().join(','));
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '1' }, { content: 'no' }, { content: 'You peek outside.' }]);
-    await send('I peek through the front door', 4);
+    await queue([{ content: 'look' }, { content: '1' }, { content: '2' }, { content: 'You peek outside.' }]);
+    await send('I peek through the keyhole of the front door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('doors: peeking a closed door opens it (stamped) and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && promptOf(lq[2]).includes('Is the player only listening at it') && promptOf(lq[3]).includes('opens the door (out) first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Looking out, you can see Village Square: '), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
+    check('doors: closed-door question offers listen / peek / open / just looking', ['1. only listens', '2. peeks through it', '3. opens it', '4. just looks at the closed door'].every(x => promptOf(lq[2]).includes(x)), promptOf(lq[2]).slice(-400));
+    check('doors: peek shows the room beyond but leaves the door shut, stamps a peek record', lk.extra.worldscrawl_look?.kind === 'see' && lk.extra.worldscrawl_look.peek === true && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_peek?.type === 'peek' && lk.extra.worldscrawl_peek.door === 'out' && lk.extra.worldscrawl_peek.from === 'riverton:drowned_rat/common_room' && (await openDoors()) === '' && promptOf(lq[3]).includes('peeks through the closed door (out) without opening it') && promptOf(lq[3]).includes('The door stays closed'), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-400));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'look' }, { content: '1' }, { content: '4' }, { content: 'A sturdy door.' }]);
+    await send('I look at the front door', 4);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('doors: just looking at a closed door: "the door is closed", nothing opened or peeked', lk.extra.worldscrawl_look?.kind === 'closed' && !lk.extra.worldscrawl_change && !lk.extra.worldscrawl_peek && (await openDoors()) === '' && promptOf(lq[3]).includes('The door is closed; nothing beyond it can be seen') && !promptOf(lq[3]).includes('sees Village Square'), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-400));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'look' }, { content: '1' }, { content: '3' }, { content: 'You open it and look outside.' }]);
+    await send('I open the front door and look outside', 4);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('doors: opening a closed door to look stamps open_door and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && !lk.extra.worldscrawl_peek && promptOf(lq[3]).includes('opens the door (out) first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Looking out, you can see Village Square: '), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
     check('glimpse wording: direction words vs nouns', JSON.stringify(await M(m => m.glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }))) === JSON.stringify(['Looking up, you can see Attic: Dusty.', 'Through the gate, you can see Yard: Muddy.']));
     check('doors: open door listed', (await openDoors()) === 'common_room|out', await openDoors());
     await go('out');
@@ -1001,7 +1012,7 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-close north')); await page.waitForTimeout(1000);
     check('doors: explicit close from the other side', (await openDoors()) === '', await openDoors());
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '1' }, { content: 'yes' }, { content: 'Muffled voices.' }]);
+    await queue([{ content: 'look' }, { content: '1' }, { content: '1' }, { content: 'Muffled voices.' }]);
     await send('I listen at the tavern door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Looking in, you can see'), promptOf(lq[3]).slice(-500));
@@ -1018,6 +1029,14 @@ try {
     const kn2 = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-known')).pipe);
     check('/ws-known lists been-there and seen places by name', /^Been there: .*Common Room.*\. Seen: /.test(kn2) && !/riverton:/.test(kn2), kn2);
     check('/ws-known never names a hidden destination', !/Cellar/.test(kn2.split('Seen:')[1] ?? '') || kn2.split('Been there:')[1].split('Seen:')[0].includes('Cellar'), kn2);
+    // ---- Exits hint only on arrival / look-around; obscured exits stay label-only.
+    const exH = await M(m => { const loc = { name: 'Hall', description: 'A hall.', exits: [{ direction: 'north', view: 'open', to: 'r:a', to_name: 'Yard', to_summary: 'Muddy.' }, { direction: 'trapdoor', obscured: true, to: 'r:b', to_name: 'Vault', to_summary: 'Gold.' }] };
+        return { arrive: m.factsText({ ...loc, address: 'r:h' }, { direction: 'south', from_name: 'X', to_name: 'Hall', to: 'r:h' }, false), around: m.factsText(loc, null, false, { lookAround: true }), plain: m.factsText(loc, null, false), re: ['I look around', 'she glances about the room', 'I survey the surroundings', 'I look at the door'].map(x => m.LOOK_AROUND_RE.test(x)) }; });
+    check('narration: exits hint on arrival and on look-around only', exH.arrive.includes('mention every exit') && exH.around.includes('mention every exit') && exH.around.includes('looks around') && !exH.plain.includes('mention every exit'), JSON.stringify(exH).slice(0, 600));
+    check('narration: obscured exit label-only, no guessing invited', !exH.arrive.includes('Vault') && exH.arrive.includes('do not hint or guess where it leads') && exH.arrive.includes('you can see Yard'), exH.arrive);
+    check('look-around phrase detection', JSON.stringify(exH.re) === '[true,true,true,false]', JSON.stringify(exH.re));
+    const sm = await M(m => { const a = [{ mes: 'Hi. [ws-start]' }, { mes: 'x' }]; const orig = a[0]; m.stripStartMarker(a); return { p: a[0].mes, o: orig.mes }; });
+    check('[ws-start] marker stripped from the prompt copy, stored text kept', sm.p === 'Hi.' && sm.o === 'Hi. [ws-start]', JSON.stringify(sm));
     // ---- [ws-start] greeting button.
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
     await page.waitForTimeout(3000);
@@ -1037,6 +1056,10 @@ try {
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.splice(1); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, 1); });
     await page.waitForTimeout(1000);
     check('start button comes back after deleting down to the greeting', await page.locator('#chat .worldscrawl_start_button').count() === 1);
+    const sentMarker = (await reqsNow()).some(r => JSON.stringify(r.messages ?? r.prompt ?? '').includes('[ws-start]'));
+    check('model never saw the [ws-start] marker', !sentMarker);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-off')); await page.waitForTimeout(1000);
+    check('no start button when WorldScrawl is off in the chat', await page.locator('#chat .worldscrawl_start_button').count() === 0 && await page.evaluate(() => SillyTavern.getContext().chat[0].mes === 'Welcome, traveler. [ws-start]'));
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
