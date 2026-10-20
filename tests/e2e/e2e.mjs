@@ -889,36 +889,42 @@ try {
     check('dig narrative: hitting a wall is not a breakthrough (no change, no follow-up questions)', !lu.extra.worldscrawl_change && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', JSON.stringify(lu.extra));
     const r0 = (await reqsNow()).length;
     // Window -> Village Square; the first direction answer is taken ("down") and only that question is asked again.
-    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'down' }, { content: 'Window' }, { content: 'Glass rains onto the square.' }]);
-    await send('I smash out the window', 5);
+    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'down' }, { content: 'Window' }, { content: 'yes' }, { content: 'You land in the square in a shower of glass.' }]);
+    await send('I run down the hall and leap through the window, breaking through the glass', 6);
     lu = await lastU();
     const rq = (await reqsNow()).slice(r0);
     const ch1 = lu.extra.worldscrawl_change;
     check('dig narrative: intent prompt offers the new opening choice', promptOf(rq[0]).includes('new opening: the player clearly breaks through'), promptOf(rq[0]).slice(0, 300));
     check('dig narrative: destination question is a numbered list of nearby places + somewhere new', promptOf(rq[1]).includes('Where does this opening most likely lead? Reply with just the number.') && promptOf(rq[1]).includes(`${sqN}. Village Square`) && promptOf(rq[1]).includes(`${near.length + 1}. somewhere new`), promptOf(rq[1]).slice(0, 600));
-    check('dig narrative: invalid direction retried alone', promptOf(rq[2]).includes('What is the opening called from this side?') && promptOf(rq[3]).includes('What is the opening called from this side?') && rq.length === 5, String(rq.length));
+    check('dig narrative: invalid direction retried alone', promptOf(rq[2]).includes('What is the opening called from this side?') && promptOf(rq[3]).includes('What is the opening called from this side?') && rq.length === 6, String(rq.length));
+    check('dig narrative: go-through question asked', promptOf(rq[4]).includes('Does ') && promptOf(rq[4]).includes(' go through the new opening right now? Reply yes or no.'), promptOf(rq[4]).slice(-300));
     check('dig narrative: two-way change stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
-    check('dig narrative: party stays, new exit listed', (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('window (Village Square'), await wsExits());
-    check('dig narrative: narration told about the breakthrough', promptOf(rq[4]).includes('broke through, making a new opening (window)'), promptOf(rq[4]).slice(-800));
+    check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (Upstairs Rooms'), await wsExits());
+    check('dig narrative: narration told about breaking through and arriving', promptOf(rq[5]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[5]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[5]).slice(-800));
     const back1 = await (await fetch('http://127.0.0.1:5199/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
     check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
     // Swipe the reply: the change stays (it lives on the player's message, like a move).
     await queue([{ content: 'Another take on the glass.' }]); expected += 1;
     await page.evaluate(() => jQuery('#chat .last_mes .swipe_right').trigger('click')); await waitReqs();
     const sw1 = await lastU();
-    check('dig narrative: swiping the reply keeps the change', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await wsExits()).includes('window (Village Square'), await wsExits());
+    check('dig narrative: swiping the reply keeps the change and the move', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await stored()) === 'riverton:streets/square' && (await wsExits()).includes('back (Upstairs Rooms'), await wsExits());
     // Delete the player's message: the change is gone.
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
-    check('dig narrative: deleting the message undoes it', !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
+    check('dig narrative: deleting the message undoes the dig and the move', (await stored()) === 'riverton:drowned_rat/upstairs' && !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
+    // "...and peer through": the go-through answer is no -> dig only, the party stays.
+    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'hole' }, { content: 'no' }, { content: 'You peer through.' }]);
+    await send('I smash a hole in the wall and peer through', 5);
+    lu = await lastU();
+    check('dig narrative: "peer through" -> dig, no move', lu.extra.worldscrawl_change?.direction === 'hole' && !lu.extra.worldscrawl_move && (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('hole (Village Square') && promptOf(await lastReq()).includes('broke through, making a new opening (hole) from here'), await wsExits());
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     // Somewhere new: name + description questions, new room in this building, walkable both ways.
-    await queue([{ content: 'new opening' }, { content: String(near.length + 1) }, { content: 'the hole' }, { content: 'dusty crawl space' }, { content: 'A cramped crawlspace full of cobwebs' }, { content: 'You climb down.' }]);
-    await send('I bash a hole through the floorboards', 6);
+    await queue([{ content: 'new opening' }, { content: String(near.length + 1) }, { content: 'the hole' }, { content: 'dusty crawl space' }, { content: 'A cramped crawlspace full of cobwebs' }, { content: 'maybe' }, { content: 'hmm' }, { content: 'You climb down.' }]);
+    await send('I bash a hole through the floorboards', 8);
     lu = await lastU();
     const ch2 = lu.extra.worldscrawl_change;
     check('dig narrative: new room change (add_room + dig) in the current subregion', Array.isArray(ch2) && ch2[0].type === 'add_room' && ch2[0].address.startsWith('riverton:drowned_rat/dusty_crawl_space_') && ch2[0].name === 'Dusty Crawl Space' && ch2[0].description === 'A cramped crawlspace full of cobwebs.' && ch2[1].type === 'dig' && ch2[1].direction === 'hole' && ch2[1].return_direction === 'back', JSON.stringify(ch2));
-    check('dig narrative: new room exit listed', (await wsExits()).includes('hole (Dusty Crawl Space)'), await wsExits());
-    await go('hole');
-    check('dig narrative: walk into the new room; its way back listed', (await stored()) === ch2?.[0]?.address && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
+    check('dig narrative: unreadable go-through answers -> default yes, party ends in the new room; narration gets its description', (await stored()) === ch2?.[0]?.address && promptOf(await lastReq()).includes('This location: A cramped crawlspace full of cobwebs.'), String(await stored()));
+    check('dig narrative: in the new room; its way back listed', (await stored()) === ch2?.[0]?.address && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
     await go('back');
     // Failure: unreadable destination twice -> no change, a notice, narration says nothing gave way.
     await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'the moon' }, { content: 'You strain.' }]);

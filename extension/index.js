@@ -872,8 +872,15 @@ async function narrativeDig(msg, loc) {
     if (!r.ok) return fail(r.error);
     msg.extra[CHANGE_KEY] = r.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
     msg.extra.worldscrawl_dig = { direction: r.direction, back: r.back, to: r.to, to_name: r.label };
-    return { kind: 'dig', loc };
+    // Go through right away? Yes, or unreadable after retries -> move (default); no -> dig only.
+    const through = await askValid('go through', digThroughPrompt(said), a => parseYesNo(a));
+    if (through === 'no') return { kind: 'dig', loc };
+    const res = await engineMove(r.direction); // the change is already on this message, so /move gets it via chatChanges()
+    if (!res.ok) { console.warn(`[WorldScrawl] dig: moving through ${r.direction} failed: ${res.error}`); return { kind: 'dig', loc }; }
+    stamp(msg, res.to, res.move); // dig first, then location = destination (both roll back with this message)
+    return { kind: 'move', loc: res.to };
 }
+export const digThroughPrompt = said => `${said}\n\nThe player has just made a new opening. Does ${whoMoves()} go through the new opening right now? Reply yes or no.`;
 export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
 const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
@@ -1075,7 +1082,8 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
-    if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
+    if (extra.dig && move && move.to === loc.address) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from ${move.from_name}, and went straight through it.${arr ? ` ${who} ${arr.text}.` : ''} Narrate breaking through and arriving in ${arr?.where ?? move.to_name}.`);
+    else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
