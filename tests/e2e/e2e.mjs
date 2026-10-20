@@ -983,7 +983,8 @@ try {
     await queue([{ content: 'look' }, { content: '1' }, { content: 'no' }, { content: 'You peek outside.' }]);
     await send('I peek through the front door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('doors: peeking a closed door opens it (stamped) and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && promptOf(lq[2]).includes('Is the player only listening at it') && promptOf(lq[3]).includes('opens the out first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Through the out you can see Village Square'), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
+    check('doors: peeking a closed door opens it (stamped) and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && promptOf(lq[2]).includes('Is the player only listening at it') && promptOf(lq[3]).includes('opens the door (out) first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Looking out, you can see Village Square: '), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
+    check('glimpse wording: direction words vs nouns', JSON.stringify(await M(m => m.glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }))) === JSON.stringify(['Looking up, you can see Attic: Dusty.', 'Through the gate, you can see Yard: Muddy.']));
     check('doors: open door listed', (await openDoors()) === 'common_room|out', await openDoors());
     await go('out');
     check('doors: still open while in one of its rooms', (await openDoors()) === 'common_room|out', await openDoors());
@@ -1003,7 +1004,16 @@ try {
     await queue([{ content: 'look' }, { content: '1' }, { content: 'yes' }, { content: 'Muffled voices.' }]);
     await send('I listen at the tavern door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Through the in you can see'), promptOf(lq[3]).slice(-500));
+    check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Looking in, you can see'), promptOf(lq[3]).slice(-500));
+    // Obscured trapdoor: both rooms recorded (opaque tokens), so it stays open in the cellar and shuts once both are left.
+    await go('in', 'back');
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open trapdoor')); await page.waitForTimeout(1000);
+    const trapCh = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra.worldscrawl_change; });
+    check('doors: opening an obscured door records both rooms as opaque tokens', trapCh?.rooms?.length === 2 && trapCh.rooms.every(r => r.startsWith('room_')) && !JSON.stringify(trapCh).includes('cellar'), JSON.stringify(trapCh));
+    await go('trapdoor');
+    check('doors: trapdoor still open from the cellar side', (await stored()) === 'riverton:drowned_rat/cellar' && (await openDoors()) === 'courtyard|trapdoor', await openDoors());
+    await go('trapdoor', 'in');
+    check('doors: trapdoor shut after leaving both rooms', (await openDoors()) === '', await openDoors());
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {

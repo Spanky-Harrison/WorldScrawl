@@ -199,13 +199,17 @@ export function doorStates(chat = ctx().chat ?? []) {
         }
         const ex = m?.extra ?? {};
         for (const p of [...(ex[MOVE_KEY]?.via ?? []), ex[LOC_KEY]].filter(Boolean))
-            for (const [d, c] of open) if (!c.stays_open && p !== c.from && p !== c.to) open.delete(d);
+            for (const [d, c] of open) { const rs = c.rooms ?? [c.from, c.to]; if (!c.stays_open && !rs.includes(roomToken(p)) && !rs.includes(p)) open.delete(d); }
     }
     return open;
 }
 /** What can be seen through an exit now: an opened door counts as "open". */
 export const viewOf = (e, open = doorStates()) => (e?.view === 'closed' && e.door && open.has(e.door) ? 'open' : e?.view ?? 'open');
-export const doorChange = (type, here, e) => ({ type, from: here.address, direction: e.direction, door: e.door, ...(revealsDestination(e) && e.to ? { to: e.to } : {}), ...(type === 'open_door' ? { stays_open: !!e.stays_open } : {}) });
+// rooms: opaque tokens of both sides of the door (from the server, even behind an obscured door, without saying
+// where it leads); used only for the auto-close replay, never in a prompt.
+const roomTokens = new Map(); // address -> room_token, filled as rooms are fetched
+export const roomToken = a => roomTokens.get(a) ?? a;
+export const doorChange = (type, here, e) => ({ type, from: here.address, direction: e.direction, door: e.door, rooms: e.door_rooms ?? [roomToken(here.address), ...(revealsDestination(e) && e.to ? [roomToken(e.to)] : [])], ...(type === 'open_door' ? { stays_open: !!e.stays_open } : {}) });
 /** Closed doors here that can be opened / opened doors here that can be closed. */
 export function doorCandidates(here, open = doorStates()) {
     const vis = here.exits.filter(e => e.door && (!e.hidden || revealsDestination(e)));
@@ -1192,18 +1196,21 @@ export function arrivalReminder(loc, move) {
     return `[Engine: this turn ends in ${where}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in ${where}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]`;
 }
 
+/** "out", "up", "north"...: a direction, not a thing you can look through. */
+export const isDirWord = d => PLAIN_DIRECTIONS.has(String(d ?? '').toLowerCase());
+const doorWord = d => (isDirWord(d) ? `door (${d})` : d);
 /** One line per thing visible from here: open exits (glimpse of the room beyond) and window views. */
 export function glimpseLines(loc, open = new Map()) {
     const out = [];
-    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`Through the ${e.direction} you can see ${e.to_display_name ?? e.to_name}: ${e.to_summary}`);
+    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`${isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${e.to_label ?? e.to_display_name ?? e.to_name}: ${e.to_summary}`);
     for (const v of loc.views ?? []) out.push(`Visible from here (no way through): ${v.display_name}: ${v.summary}`);
     return out;
 }
 export function lookText(who, here, look) {
-    const how = look.window ? 'out' : look.via ? `through the ${look.via}` : 'around';
-    const first = look.opened ? `${who} opens the ${look.via} first. ` : '';
+    const how = look.window ? 'out' : look.via ? (isDirWord(look.via) ? look.via : `through the ${look.via}`) : 'around';
+    const first = look.opened ? `${who} opens the ${doorWord(look.via)} first. ` : '';
     if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
-    if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${look.via}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
+    if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
 export function factsText(loc, move, toolsOn, extra = {}) {
@@ -1223,7 +1230,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else if (extra.look) lines.push(lookText(who, displayName(loc), extra.look));
-    else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${extra.door.direction} door. ${who} stays at ${displayName(loc)}.`);
+    else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
@@ -1529,7 +1536,7 @@ const exitsCache = new Map(); // "world|address" -> Promise<location|null> (neve
 const ck = (a, w = activeWorld || defaultWorldId || '') => `${w}|${a ?? '(start)'}`;
 
 /** /move returns the full new location: remember it so the next lookup needs no request. */
-function primeCache(loc, w) { const k = ck(loc?.address, w); if (loc?.address && !exitsCache.has(k)) exitsCache.set(k, Promise.resolve(loc)); }
+function primeCache(loc, w) { if (loc?.room_token) roomTokens.set(loc.address, loc.room_token); const k = ck(loc?.address, w); if (loc?.address && !exitsCache.has(k)) exitsCache.set(k, Promise.resolve(loc)); }
 
 /**
  * Make sure these rooms (and the start room) are remembered, fetching all missing ones in ONE request
@@ -1543,13 +1550,13 @@ function warmRooms(addresses) {
     const batch = (async () => {
         try { const r = await api(`/rooms?addresses=${encodeURIComponent(missing.join(','))}`); return r.ok ? r.body : null; } catch { return null; }
     })();
-    const remember = (key, p) => { exitsCache.set(key, p); p.then(v => { if (!v && exitsCache.get(key) === p) exitsCache.delete(key); }); };
+    const remember = (key, p) => { exitsCache.set(key, p); p.then(v => { if (v?.room_token) roomTokens.set(v.address, v.room_token); if (!v && exitsCache.get(key) === p) exitsCache.delete(key); }); };
     for (const a of missing) remember(ck(a, w), batch.then(b => b?.rooms?.find(x => x.address === a) ?? null));
     if (needStart) remember(ck(null, w), batch.then(b => { if (b?.start) primeCache(b.start, w); return b?.start ?? null; }));
     return batch;
 }
 
-function fetchLocationCached(address) { return fetchRaw(address).then(l => l ?? newRoom(address)).then(applyReveals).then(applyChanges); }
+function fetchLocationCached(address) { return fetchRaw(address).then(l => { if (l?.room_token) roomTokens.set(l.address, l.room_token); return l ?? newRoom(address); }).then(applyReveals).then(applyChanges); }
 /** A room this chat created (add_room change), built locally: the server only knows it per request (with changes). */
 async function newRoom(address) {
     const ch = address && chatChanges().find(c => c.type === 'add_room' && c.address === address);
@@ -1570,7 +1577,7 @@ function fetchRaw(address) {
                 return r.ok ? r.body : null;
             } catch { return null; }
         })();
-        p.then(v => { if (!v) exitsCache.delete(key); }); // don't cache failures (server down)
+        p.then(v => { if (v?.room_token) roomTokens.set(v.address, v.room_token); if (!v) exitsCache.delete(key); }); // don't cache failures (server down)
         exitsCache.set(key, p);
     }
     return exitsCache.get(key);
