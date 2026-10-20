@@ -899,7 +899,7 @@ try {
     check('dig narrative: invalid direction retried alone', promptOf(rq[2]).includes('What is the opening called from this side?') && promptOf(rq[3]).includes('What is the opening called from this side?') && rq.length === 6, String(rq.length));
     check('dig narrative: stay-on-this-side question asked', promptOf(rq[4]).includes('Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.'), promptOf(rq[4]).slice(-300));
     check('dig narrative: two-way change stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
-    check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (Upstairs Rooms'), await wsExits());
+    check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
     check('dig narrative: narration told about breaking through and arriving', promptOf(rq[5]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[5]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[5]).slice(-800));
     const back1 = await (await fetch('http://127.0.0.1:5199/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
     check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
@@ -907,7 +907,7 @@ try {
     await queue([{ content: 'Another take on the glass.' }]); expected += 1;
     await page.evaluate(() => jQuery('#chat .last_mes .swipe_right').trigger('click')); await waitReqs();
     const sw1 = await lastU();
-    check('dig narrative: swiping the reply keeps the change and the move', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await stored()) === 'riverton:streets/square' && (await wsExits()).includes('back (Upstairs Rooms'), await wsExits());
+    check('dig narrative: swiping the reply keeps the change and the move', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await stored()) === 'riverton:streets/square' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
     // Delete the player's message: the change is gone.
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     check('dig narrative: deleting the message undoes the dig and the move', (await stored()) === 'riverton:drowned_rat/upstairs' && !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
