@@ -56,7 +56,10 @@ def test_render_copy_identical_new_id(client, wd):
 def test_render_refuses_overwrite(client, wd):
     before = (wd / "riverton" / "regions" / "riverton.json").read_bytes()
     assert client.post("/worlds/render", json={"id": "w2"}).status_code == 200
-    assert client.post("/worlds/render", json={"id": "w2"}).json()["overwritten"] is True  # saves are living
+    r = client.post("/worlds/render", json={"id": "w2"})  # another living world: needs overwrite=true
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "needs_overwrite" and "overwrite=true" in r.json()["detail"]["message"]
+    assert client.post("/worlds/render", json={"id": "w2", "overwrite": True}).json()["overwritten"] is True
+    assert client.post("/worlds/render", json={"base": "w2", "id": "w2"}).json()["overwritten"] is True  # its own world: no flag needed
     assert client.post("/worlds/render", json={"id": "riverton"}).status_code == 409
     assert client.post("/worlds/render", json={"id": "riverton", "overwrite": True}).status_code == 409
     assert client.post("/worlds/render", json={"id": "Riverton"}).status_code == 409
@@ -123,7 +126,8 @@ def test_display_names_and_slugs(client, wd):
     r = client.post("/worlds/render", json={"name": "My Riverton!"}).json()
     assert r["id"] == "my-riverton" and r["name"] == "My Riverton!"
     assert '"name": "My Riverton!"' in (wd / "my-riverton" / "world.json").read_text()
-    again = client.post("/worlds/render", json={"name": "  my riverton!  "}).json()  # same display name: living -> saved over
+    assert client.post("/worlds/render", json={"name": "  my riverton!  "}).json()["detail"]["error"] == "needs_overwrite"
+    again = client.post("/worlds/render", json={"name": "  my riverton!  ", "overwrite": True}).json()  # same display name, living -> saved over
     assert again["overwritten"] is True and again["id"] == "my-riverton" and again["name"] == "My Riverton!"
     r2 = client.post("/worlds/render", json={"name": "My Riverton?"}).json()  # different name, same slug
     assert r2["id"] == "my-riverton-2" and r2["name"] == "My Riverton?"
@@ -154,6 +158,7 @@ def test_riverton_is_protected(client, wd):
     before = (wd / "riverton" / "regions" / "riverton.json").read_bytes()
     for body in [{"name": "Riverton"}, {"name": " riverton "}, {"id": "riverton"}, {"id": "Riverton", "name": "Other"}]:
         assert client.post("/worlds/render", json=body).status_code == 409, body
+        assert client.post("/worlds/render", json={**body, "overwrite": True}).status_code == 409, body  # protected even with the flag
     assert (wd / "riverton" / "regions" / "riverton.json").read_bytes() == before and not (wd / ".backups").exists()
 
 

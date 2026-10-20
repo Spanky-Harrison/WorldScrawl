@@ -66,7 +66,8 @@ class RenderRequest(BaseModel):
     id: str | None = None  # exact folder id (letters, digits, dashes); refused if taken. Usually omitted:
     id_hint: str | None = None  # folder id is made from this (or the name) as a readable slug, with -2, -3... if taken
     name: str | None = None  # display name, stored exactly as typed in world.json
-    auto: bool = False  # the name was generated (not typed): a clash gets " (2)" instead of being refused
+    auto: bool = False
+    overwrite: bool = False  # needed to save over a living world other than the base (the chat's current world)  # the name was generated (not typed): a clash gets " (2)" instead of being refused
     changes: list = []
     # "with knowledge" saves: what the chat knew, written to knowledge.json (region files stay clean). None = pristine.
     knowledge: dict | None = None
@@ -266,6 +267,9 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
             if not over.living:
                 raise HTTPException(409, detail=f"A world named {name!r} already exists and is protected (not a living save). Pick another name.")
         taken = {w.lower() for w in worlds} | {d.name.lower() for d in root_dir.iterdir()}
+        if over is not None and over.id != base.id and not req.overwrite:
+            raise HTTPException(409, detail={"error": "needs_overwrite", "world": over.id, "name": over.name,
+                                             "message": f"A world named {over.name!r} already exists. Add overwrite=true to save over it."})
         if over is not None:
             wid, name = over.id, over.name
         elif req.id is not None:
@@ -273,6 +277,9 @@ def create_app(world_dir: str | Path | None = None, worlds_dir: str | Path | Non
                 raise HTTPException(400, detail=f"Invalid world id {req.id!r} (letters, digits and dashes only).")
             existing = next((lw for lw in worlds.values() if lw.id.lower() == req.id.lower()), None)
             if existing is not None and existing.living:
+                if existing.id != base.id and not req.overwrite:
+                    raise HTTPException(409, detail={"error": "needs_overwrite", "world": existing.id, "name": existing.name,
+                                                     "message": f"World {existing.id!r} already exists. Add overwrite=true to save over it."})
                 over, wid, name = existing, existing.id, existing.name
             elif req.id.lower() in taken:  # never write into a protected or unknown existing folder
                 raise HTTPException(409, detail=f"World {req.id!r} already exists and is protected (not a living save). Pick another name.")
