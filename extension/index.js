@@ -1192,18 +1192,21 @@ export function arrivalReminder(loc, move) {
     return `[Engine: this turn ends in ${where}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in ${where}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]`;
 }
 
+/** "out", "up", "north"...: a direction, not a thing you can look through. */
+export const isDirWord = d => PLAIN_DIRECTIONS.has(String(d ?? '').toLowerCase());
+const doorWord = d => (isDirWord(d) ? `door (${d})` : d);
 /** One line per thing visible from here: open exits (glimpse of the room beyond) and window views. */
 export function glimpseLines(loc, open = new Map()) {
     const out = [];
-    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`Through the ${e.direction} you can see ${e.to_display_name ?? e.to_name}: ${e.to_summary}`);
+    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`${isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${e.to_display_name ?? e.to_name}: ${e.to_summary}`);
     for (const v of loc.views ?? []) out.push(`Visible from here (no way through): ${v.display_name}: ${v.summary}`);
     return out;
 }
 export function lookText(who, here, look) {
-    const how = look.window ? 'out' : look.via ? `through the ${look.via}` : 'around';
-    const first = look.opened ? `${who} opens the ${look.via} first. ` : '';
+    const how = look.window ? 'out' : look.via ? (isDirWord(look.via) ? look.via : `through the ${look.via}`) : 'around';
+    const first = look.opened ? `${who} opens the ${doorWord(look.via)} first. ` : '';
     if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
-    if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${look.via}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
+    if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
 export function factsText(loc, move, toolsOn, extra = {}) {
@@ -1223,7 +1226,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else if (extra.look) lines.push(lookText(who, displayName(loc), extra.look));
-    else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${extra.door.direction} door. ${who} stays at ${displayName(loc)}.`);
+    else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
