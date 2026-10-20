@@ -1100,7 +1100,10 @@ function refreshSaveName() {
  * Render this chat (its world + its changes) into a new world folder. With switchChat, stamp a rebase on the
  * latest message: from then on the chat is built on the new world and only changes stamped after it are replayed.
  */
-export async function saveWorld(name, switchChat = true, withKnowledge = false) {
+// Overridable for tests.
+export const hooks = { confirm: async text => { const c = ctx(); return !!c.callGenericPopup && await c.callGenericPopup(text, c.POPUP_TYPE.CONFIRM) === c.POPUP_RESULT.AFFIRMATIVE; } };
+
+export async function saveWorld(name, switchChat = true, withKnowledge = false, { overwrite = false, confirm = false } = {}) {
     syncWorld();
     if (!worldNames.size) rememberWorlds((await api('/worlds').catch(() => null))?.body);
     name = String(name ?? '').trim();
@@ -1114,8 +1117,19 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false) 
         const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
         knowledge = { location: here.address, stood, seen, doors: [...await syncDoors()] };
     }
-    const r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ base: activeWorld || null, name, auto, ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) }) });
-    if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
+    const body = { base: activeWorld || null, name, auto, ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) };
+    let r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ ...body, overwrite }) });
+    if (!r.ok && r.body?.detail?.error === 'needs_overwrite') {
+        // Name of ANOTHER living world: the panel asks; /ws-save-world needs overwrite=true.
+        const other = r.body.detail.name;
+        const yes = confirm && await hooks.confirm(`Save over the world "${other}"? Its current version is kept as the one backup.`);
+        if (!yes) {
+            const e = confirm ? 'Not saved.' : `A world named "${other}" already exists. Add overwrite=true to save over it.`;
+            (confirm ? toastr.info : toastr.warning)(e); return { ok: false, error: e };
+        }
+        r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ ...body, overwrite: true }) });
+    }
+    if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.message ?? r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
     worldNames.set(r.body.id, r.body.name); worldLiving.set(r.body.id, !!r.body.living);
     // Saved over the world this chat is on: always rebase here, or changes since the last switch would be replayed twice.
     const overSelf = !!r.body.overwritten && r.body.id === cur;
@@ -1207,10 +1221,11 @@ function registerSlashCommands() {
             let name = String(v ?? '');
             const flag = /(^|\s)--knowledge(\s|$)/.test(name);
             name = name.replace(/(^|\s)--knowledge(?=\s|$)/g, ' ').trim();
-            const r = await saveWorld(name, String(args?.switch ?? 'true') !== 'false', flag || String(args?.knowledge ?? 'false') === 'true');
+            const r = await saveWorld(name, String(args?.switch ?? 'true') !== 'false', flag || String(args?.knowledge ?? 'false') === 'true', { overwrite: String(args?.overwrite ?? 'false') === 'true' });
             return r.ok ? r.world.id : '';
         }),
-        namedArgumentList: [SlashCommandNamedArgument.fromProps({ name: 'knowledge', description: 'also save what this chat knows (places, revealed doors, location) for new chats; default false (pristine)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'false' }),SlashCommandNamedArgument.fromProps({ name: 'switch', description: 'move this chat onto the new world (default true)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'true' })],
+        namedArgumentList: [SlashCommandNamedArgument.fromProps({ name: 'overwrite', description: 'save over another existing living world with this name (default false)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'false' }),
+            SlashCommandNamedArgument.fromProps({ name: 'knowledge', description: 'also save what this chat knows (places, revealed doors, location) for new chats; default false (pristine)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'false' }),SlashCommandNamedArgument.fromProps({ name: 'switch', description: 'move this chat onto the new world (default true)', typeList: [ARGUMENT_TYPE.BOOLEAN], defaultValue: 'true' })],
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'world name', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: save this chat\'s world (with its dug/removed exits) as a new world; switch=false keeps the chat on its current world; --knowledge (or knowledge=true) also saves what this chat knows.',
     }));
@@ -1482,7 +1497,7 @@ function addSettingsPanel() {
     document.getElementById('worldscrawl_open_folder').addEventListener('click', () => openWorldFolder(''));
     document.getElementById('worldscrawl_open_world').addEventListener('click', () => openWorldFolder(sel.value || defaultWorldId || ''));
     document.querySelector('.worldscrawl_settings .inline-drawer-toggle')?.addEventListener('click', () => { refreshSaveName(); fillWorlds(); });
-    document.getElementById('worldscrawl_save').addEventListener('click', () => saveWorld(document.getElementById('worldscrawl_save_name').value.trim() || document.getElementById('worldscrawl_save_name').placeholder, document.getElementById('worldscrawl_save_switch').checked, document.getElementById('worldscrawl_save_knowledge').checked).then(fillWorlds));
+    document.getElementById('worldscrawl_save').addEventListener('click', () => saveWorld(document.getElementById('worldscrawl_save_name').value.trim() || document.getElementById('worldscrawl_save_name').placeholder, document.getElementById('worldscrawl_save_switch').checked, document.getElementById('worldscrawl_save_knowledge').checked, { confirm: true }).then(fillWorlds));
     fillWorlds();
     const nudge = document.getElementById('worldscrawl_nudge');
     nudge.value = settings().nudge;

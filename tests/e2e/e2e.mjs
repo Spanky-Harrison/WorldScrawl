@@ -767,7 +767,22 @@ try {
     const nBefore = (await worldsNow()).length;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false test world'));
     await page.waitForTimeout(1500);
-    check('typed name matching an existing living save saves over it (no new world)', (await worldsNow()).length === nBefore);
+    const tw0 = (await worldsNow()).find(w => w.name.toLowerCase() === 'test world');
+    const res1 = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return m.saveWorld('test world', false, false); });
+    check('/ws-save-world over another living world refused without overwrite=true', res1.ok === false && /Add overwrite=true/.test(res1.error) && (await worldsNow()).length === nBefore, JSON.stringify(res1));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false overwrite=true test world'));
+    await page.waitForTimeout(1500);
+    check('typed name matching an existing living save + overwrite=true saves over it (no new world)', (await worldsNow()).length === nBefore && !!tw0);
+    // Panel Save asks in a popup instead (stubbed): No -> not saved; Yes -> saved over.
+    for (const [ans, label] of [[0, 'declined popup: not saved'], [1, 'confirmed popup: saved over']]) {
+        const res = await page.evaluate(async a => {
+            const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const orig = m.hooks.confirm; let asked = null;
+            m.hooks.confirm = async t => { asked = t; return !!a; };
+            try { const r = await m.saveWorld('test world', false, false, { confirm: true }); return { ok: r.ok, asked }; }
+            finally { m.hooks.confirm = orig; }
+        }, ans);
+        check('panel Save over another living world: ' + label, /Save over the world/.test(res.asked || '') && res.ok === !!ans && (await worldsNow()).length === nBefore, JSON.stringify(res));
+    }
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false Test-World'));
     await page.waitForTimeout(1500);
     check('only the folder slug clashes: -2 added, name kept as typed', (await worldsNow()).some(w => w.id === 'test-world-2' && w.name === 'Test-World'));
