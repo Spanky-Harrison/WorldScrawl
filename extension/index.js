@@ -6,7 +6,7 @@
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: 'http://127.0.0.1:5100', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -44,7 +44,15 @@ export function settings() {
     return all[MODULE];
 }
 
-const baseUrl = () => String(settings().serverUrl || DEFAULTS.serverUrl).replace(/\/+$/, '');
+/** The map server: SillyTavern's own WorldScrawl plugin route, unless the settings name another server. */
+export const PLUGIN_URL = '/api/plugins/worldscrawl';
+const LEGACY_URL = /^https?:\/\/(127\.0\.0\.1|localhost):5100\/*$/; // the old Python server's default: now the plugin
+const baseUrl = () => { const u = String(settings().serverUrl || '').trim(); return !u || LEGACY_URL.test(u) ? PLUGIN_URL : u.replace(/\/+$/, ''); };
+/** SillyTavern's CSRF token, for requests to its own plugin routes (same origin only). */
+const csrfHeaders = () => { if (/^https?:/.test(baseUrl())) return {}; const t = ctx().getRequestHeaders?.()?.['X-CSRF-Token']; return t ? { 'X-CSRF-Token': t } : {}; };
+const NOT_RUNNING = () => baseUrl() === PLUGIN_URL
+    ? 'Is the WorldScrawl server plugin installed in SillyTavern/plugins/worldscrawl, with enableServerPlugins: true in config.yaml? Restart SillyTavern after changing either.'
+    : 'Is it running?';
 
 let mapVersion = null;
 /** Every server reply carries the map version; when it changes (map files edited, server restarted) drop remembered rooms. */
@@ -232,13 +240,13 @@ async function api(path, options = {}) {
     let res;
     try {
         // JSON content type only when sending a body: on a GET it would force a CORS preflight (an extra OPTIONS request).
-        const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers ?? {}) };
+        const headers = { ...csrfHeaders(), ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers ?? {}) };
         const sep = path.includes('?') ? '&' : '?';
         const wid = activeWorld || defaultWorldId; // always name the world once it's known
         const scoped = !path.startsWith('/worlds') && !path.startsWith('/open-folder') && !/[?&]world=/.test(path) && wid ? `${path}${sep}world=${encodeURIComponent(wid)}` : path;
         res = await fetch(baseUrl() + scoped, { ...options, headers });
     } catch (e) {
-        throw new Error(`WorldScrawl server not reachable at ${baseUrl()} (${e.message}). Is it running?`);
+        throw new Error(`WorldScrawl server not reachable at ${baseUrl()} (${e.message}). ${NOT_RUNNING()}`);
     }
     if (!path.startsWith('/worlds')) noteMapVersion(res.headers.get('X-WorldScrawl-Map-Version'));
     const body = await res.json().catch(() => ({}));
@@ -269,7 +277,7 @@ async function currentLocation() {
         else if (r?.status === 404) return missingRoomFallback(stored);
     }
     const start = await fetchLocationCached(null);
-    if (!start) throw new Error(`WorldScrawl server not reachable at ${baseUrl()}, or /start failed. Is it running?`);
+    if (!start) throw new Error(`WorldScrawl server not reachable at ${baseUrl()}, or /start failed. ${NOT_RUNNING()}`);
     return start;
 }
 
@@ -1781,7 +1789,7 @@ async function testConnection() {
     try {
         const r = await api('/health');
         const tools = ctx().isToolCallingSupported() ? 'function calling is ON' : 'function calling is OFF or not supported by the current API/model';
-        status.textContent = r.ok ? `Connected: ${r.body.locations} locations, start ${r.body.start}. Current: ${getStoredLocation() ?? '(start)'}. ${tools}.` : `Server error ${r.status}`;
+        status.textContent = r.ok ? `Connected: ${r.body.locations} locations, start ${r.body.start}. Current: ${getStoredLocation() ?? '(start)'}. ${tools}.` : r.status === 404 && baseUrl() === PLUGIN_URL ? `Not found (404). ${NOT_RUNNING()}` : `Server error ${r.status}${r.body?.detail && typeof r.body.detail === 'string' ? `: ${r.body.detail}` : ''}`;
     } catch (e) {
         status.textContent = e.message;
     }
@@ -1816,8 +1824,8 @@ function addSettingsPanel() {
     <div class="inline-drawer-content">
       <label class="checkbox_label"><input id="worldscrawl_enabled" type="checkbox"> <b>Enabled in this chat</b></label>
       <label class="checkbox_label"><input id="worldscrawl_enable_new" type="checkbox"> Enable in new chats</label>
-      <label for="worldscrawl_url">Server URL</label>
-      <input id="worldscrawl_url" class="text_pole" type="text">
+      <label for="worldscrawl_url">Map server URL (leave empty to use the WorldScrawl plugin built into SillyTavern)</label>
+      <input id="worldscrawl_url" class="text_pole" type="text" placeholder="(SillyTavern plugin)">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
       <small id="worldscrawl_status"></small>
       <label for="worldscrawl_who">Who moves (used in move messages and notes to the model; macros like {{user}} work)</label>
@@ -1851,6 +1859,7 @@ function addSettingsPanel() {
     enNew.checked = !!settings().enableNewChats;
     enNew.addEventListener('change', () => { settings().enableNewChats = enNew.checked; ctx().saveSettingsDebounced(); applyChatState(); });
     const input = document.getElementById('worldscrawl_url');
+    if (LEGACY_URL.test(settings().serverUrl || '')) settings().serverUrl = ''; // old Python default: the plugin now
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
     const who = document.getElementById('worldscrawl_who');

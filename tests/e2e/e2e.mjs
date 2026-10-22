@@ -12,7 +12,19 @@ try {
     const apiCalls = [];
     const apiUrls = [];
     const typedGets = []; // GETs to the map server that carry a Content-Type (would force a CORS preflight)
-    page.on('request', r => { const u = r.url(); if (!u.includes(':5199/')) return; apiCalls.push(decodeURIComponent(new URL(u).pathname)); apiUrls.push(u); if (r.method() === 'GET' && r.headers()['content-type']) typedGets.push(u); });
+    const API = '/api/plugins/worldscrawl';
+    // The test's own direct calls to the map server (stFetch) are not the extension's and are not recorded.
+    page.on('request', r => { const u = r.url(); if (!u.includes(API + '/') || r.headers()['x-e2e-direct']) return; apiCalls.push(decodeURIComponent(new URL(u).pathname.slice(API.length))); apiUrls.push(u); if (r.method() === 'GET' && r.headers()['content-type']) typedGets.push(u); });
+    /** Call the map server plugin the way the extension does: same origin, with SillyTavern's CSRF token. */
+    const stFetch = async (path, opts = {}) => {
+        const r = await page.evaluate(async ([url, o]) => {
+            const h = { ...SillyTavern.getContext().getRequestHeaders(), ...(o.headers ?? {}), 'X-E2E-Direct': '1' };
+            if (!o.body) delete h['Content-Type'];
+            const res = await fetch(url, { ...o, headers: h });
+            return { status: res.status, ok: res.ok, text: await res.text() };
+        }, [API + path, opts]);
+        return { ...r, json: async () => JSON.parse(r.text) };
+    };
     page.on('pageerror', e => console.log('[pageerror]', e.message));
     await page.goto(BASE);
     await page.waitForSelector('#send_textarea', { timeout: 90000 });
@@ -65,7 +77,7 @@ try {
     check('tool instructions injected', await page.evaluate(() => /call ws_look/.test(SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value ?? '')));
 
     // Point the extension at the test server and connect ST to the fake model with function calling on.
-    await page.evaluate(() => { const c = SillyTavern.getContext(); c.extensionSettings.worldscrawl.serverUrl = 'http://127.0.0.1:5199'; });
+    await page.evaluate(() => { const c = SillyTavern.getContext(); c.extensionSettings.worldscrawl.serverUrl = ''; });
     await page.evaluate(async () => {
         const $ = window.jQuery;
         $('#main_api').val('openai').trigger('change');
@@ -311,7 +323,7 @@ try {
     for (const d of ['out', 'north', 'south', 'in']) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
     check('new chat: back in tavern after visiting temple', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     // rooms reach the extension through /location or the /rooms batch: patch the square in both
-    const squareStub = u => u.href.includes('/location/riverton%3Astreets%2Fsquare') || u.href.includes(':5199/rooms');
+    const squareStub = u => u.href.includes('/location/riverton%3Astreets%2Fsquare') || u.href.includes(API + '/rooms');
     const hideNorth = room => (room?.address === 'riverton:streets/square' ? { ...room, exits: room.exits.map(e => e.direction === 'north' ? { direction: 'north', hidden: true } : e) } : room);
     await page.route(squareStub, async route => {
         const r = await route.fetch(); const b = await r.json();
@@ -386,7 +398,7 @@ try {
         m.exitsText({ exits: [{ direction: 'down', to_name: 'The Gilded Goose', to_subregion: { name: 'The Gilded Goose' } }] }),
         m.exitsText({ exits: [{ direction: 'left', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Drowned Rat' } }, { direction: 'right', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Gilded Goose' } }] })]; });
     const bl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
-        const get = async a => (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent(a))).json();
+        const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
         return [m.exitsText(await get('riverton:streets/market_lane')), m.exitsText(await get('riverton:drowned_rat/courtyard')), m.exitsText({ exits: [{ direction: 'crack', hidden: true }] })]; });
     check('exit labels: building on entrance, building + room otherwise, room within the building, hidden = label only',
         bl[0] === "Exits: east (Village Square), inn (The Gilded Goose), store (Marlow's General Store), smithy (Brask's Smithy), gate (The Drowned Rat, Stable)"
@@ -395,7 +407,7 @@ try {
         return [m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
             m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })]; });
     const mv2 = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
-        const get = async a => (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent(a))).json();
+        const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
         const note = async (from, dir) => { const l = await get(from); const e = l.exits.find(x => x.direction === dir); return m.moveNote('User', { direction: dir, to_name: e.to_name }, e); };
         return [await note('riverton:drowned_rat/courtyard', 'stable'), await note('riverton:streets/market_lane', 'gate'), await note('riverton:streets/market_lane', 'inn'),
             await note('riverton:drowned_rat/stable', 'gate'), await note('riverton:drowned_rat/common_room', 'out')]; });
@@ -485,7 +497,7 @@ try {
     await go('gate', 'store', 'The Drowned Rat');
     check('after visiting the stable: building -> stable', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
     // Building by name from further away (Goose upstairs: stable 3 steps, common room 4; the store: 2 vs 3).
-    const stableDesc = await page.evaluate(async () => (await (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent('riverton:drowned_rat/stable'))).json()).description);
+    const stableDesc = await page.evaluate(async () => (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent('riverton:drowned_rat/stable'))).json()).description);
     const typedTo = async (text, answer) => { await queue([{ content: answer }, { content: 'You walk.' }]); await send(text, 2); };
     await go('gate', 'inn', 'up');
     await typedTo('go to the Drowned Rat', 'The Drowned Rat');
@@ -649,9 +661,9 @@ try {
     check('typed: model picks the grate for a named known place beyond it -> still the Secret Tunnel', (await stored()) === 'riverton:secret_tunnel/tunnel', String(await stored()));
     // Worlds: list, chat world stamp, dig/remove changes on system messages, save + rebase, delete-back revert, missing room.
     const M = fn => page.evaluate(async src => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return (0, eval)(src)(m); }, fn.toString());
-    const wl = await (await fetch('http://127.0.0.1:5199/worlds')).json();
+    const wl = await (await stFetch('/worlds')).json();
     check('worlds: list has riverton as default', wl.default === 'riverton' && wl.worlds.some(w => w.id === 'riverton' && w.map_version), JSON.stringify(wl));
-    check('worlds: path traversal rejected', (await fetch('http://127.0.0.1:5199/start?world=..%2Fx')).status === 400 && (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '../evil' }) })).status === 400);
+    check('worlds: path traversal rejected', (await stFetch('/start?world=..%2Fx')).status === 400 && (await stFetch('/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '../evil' }) })).status === 400);
     check('chat world stamped on the first message', await page.evaluate(() => { const w = SillyTavern.getContext().chat[0].extra?.worldscrawl_world; return w?.id === 'riverton' && w.version?.length === 12; }));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true shortcut Village Square'));
     await page.waitForTimeout(1000);
@@ -667,10 +679,10 @@ try {
     await page.waitForTimeout(1500);
     const rb = await M(m => ({ w: m.chatWorld(), ch: m.chatChanges().length }));
     check('save world: chat rebased onto the new world, earlier changes baked in', rb.w?.id === 'test-world' && rb.w.name === 'Test World' && rb.w.rebase && rb.w.at === rebaseAt + 1 && rb.ch === 0 && (await lastMes()) === '[Engine: world saved as "Test World". This chat now uses it.]', JSON.stringify(rb));
-    const rendered = await (await fetch('http://127.0.0.1:5199/location/' + encodeURIComponent('riverton:streets/square') + '?world=test-world')).json();
+    const rendered = await (await stFetch('/location/' + encodeURIComponent('riverton:streets/square') + '?world=test-world')).json();
     check('save world: rendered world has the changes, chat keeps working on it', !rendered.exits.some(e => e.direction === 'east') && !(await wsExits()).includes('east (') && (await stored()) === 'riverton:streets/square');
-    check('save world: pristine by default (no knowledge file)', (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds.find(w => w.id === 'test-world')?.has_knowledge === false);
-    check('save world: refuses to overwrite', (await fetch('http://127.0.0.1:5199/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'riverton' }) })).status === 409);
+    check('save world: pristine by default (no knowledge file)', (await (await stFetch('/worlds')).json()).worlds.find(w => w.id === 'test-world')?.has_knowledge === false);
+    check('save world: refuses to overwrite', (await stFetch('/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'riverton' }) })).status === 409);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-removeexit south'));
     await page.waitForTimeout(1000);
     check('after rebase only later changes are replayed', JSON.stringify(await M(m => m.chatChanges().map(c => c.type + ':' + c.direction))) === '["remove_exit:south"]' && !(await wsExits()).includes('south ('));
@@ -688,7 +700,7 @@ try {
     // Save "with knowledge", then a new chat on that world starts from the saved knowledge (seed + later stamps).
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-save-world switch=false Know World --knowledge'));
     await page.waitForTimeout(1500);
-    const kn = (await (await fetch('http://127.0.0.1:5199/worlds/know-world/knowledge')).json()).knowledge;
+    const kn = (await (await stFetch('/worlds/know-world/knowledge')).json()).knowledge;
     check('save with knowledge: knowledge.json has location, places and revealed doors', kn && kn.location === 'riverton:drowned_rat/common_room' && kn.stood.includes('riverton:temple/catacombs') && kn.doors.length >= 1 && (await M(m => m.chatWorld()?.id)) === 'riverton', JSON.stringify(kn));
     await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const c = SillyTavern.getContext();
         c.chat.splice(1); for (const x of [c.chat[0], ...(c.chat[0].swipe_info ?? [])]) if (x?.extra) { delete x.extra.worldscrawl_location; delete x.extra.worldscrawl_world; }
@@ -758,7 +770,7 @@ try {
     await sw(undefined, true);
     check('new chat follows the global default: on', (await M(m => m.isOn())) === true && (await st())[0] === true && await page.evaluate(() => SillyTavern.getContext().chat[0].extra?.worldscrawl_location === 'riverton:drowned_rat/common_room'));
     // Readable world names: blank save = exactly the placeholder; typed name clash refused; slug clash gets -2.
-    const worldsNow = async () => (await (await fetch('http://127.0.0.1:5199/worlds')).json()).worlds;
+    const worldsNow = async () => (await (await stFetch('/worlds')).json()).worlds;
     await page.evaluate(() => { const b = document.getElementById('worldscrawl_save_switch'); b.checked = false; document.getElementById('worldscrawl_save_name').value = ''; });
     const ph = await page.evaluate(() => document.getElementById('worldscrawl_save_name').placeholder);
     check('save placeholder is the readable default name', /^Riverton - .+ - [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/.test(ph), ph);
@@ -803,7 +815,7 @@ try {
     await page.evaluate(() => { document.getElementById('worldscrawl_save_name').value = 'My Riverton'; });
     await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
     const mr = (await worldsNow()).find(w => w.name === 'My Riverton');
-    const room = async a => (await (await fetch(`http://127.0.0.1:5199/location/${encodeURIComponent(a)}?world=${mr?.id}`)).json()).exits.map(e => e.direction + '>' + e.to);
+    const room = async a => (await (await stFetch(`/location/${encodeURIComponent(a)}?world=${mr?.id}`)).json()).exits.map(e => e.direction + '>' + e.to);
     check('repro: saved world files have both dug exits', !!mr && (await room('riverton:secret_tunnel/tunnel')).includes('passage>riverton:drowned_rat/common_room') && (await room('riverton:drowned_rat/common_room')).includes('passage>riverton:secret_tunnel/tunnel'), JSON.stringify(mr));
     await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, mr?.id);
     check('repro: picker selected the saved world', await page.evaluate(id => SillyTavern.getContext().extensionSettings.worldscrawl.world === id, mr?.id));
@@ -862,12 +874,12 @@ try {
     await page.evaluate(() => document.getElementById('worldscrawl_open_world').click()); await page.waitForTimeout(800);
     const of = apiUrls.filter(u => u.includes('/open-folder'));
     check('open folder buttons call the server with no path (root, then a world id)', of.length === 2 && !of[0].includes('world=') && /world=riverton$/.test(of[1]), JSON.stringify(of));
-    check('open-folder refuses a path-like id', (await fetch('http://127.0.0.1:5199/open-folder?world=..%2F..', { method: 'POST' })).status === 400);
+    check('open-folder refuses a path-like id', (await stFetch('/open-folder?world=..%2F..', { method: 'POST' })).status === 400);
     // ---- Narrative digging: "I smash out the window" -> new two-way exit, small validated questions, stamped on the player's message.
     await sw(true, true);
     await go('up');
     check('dig narrative: setup upstairs in the Drowned Rat', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
-    const near = (await (await fetch('http://127.0.0.1:5199/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
+    const near = (await (await stFetch('/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
     const sqN = near.findIndex(r => r.address === 'riverton:streets/square') + 1;
     check('nearby: rooms within 3 steps, nearest first, capped, Village Square included', sqN > 0 && near.length <= 12 && near[0].steps === 1 && near.every((r, i) => !i || near[i - 1].steps <= r.steps) && near.every(r => r.name && r.area && r.summary && !('exits' in r)), JSON.stringify(near.map(r => r.display_name)));
     const changesOfE = u => { const c = u.extra.worldscrawl_change; return Array.isArray(c) ? c : c ? [c] : []; };
@@ -902,7 +914,7 @@ try {
     check('dig narrative: two-way change stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
     check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
     check('dig narrative: narration told about breaking through and arriving', promptOf(rq[5]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[5]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[5]).slice(-800));
-    const back1 = await (await fetch('http://127.0.0.1:5199/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
+    const back1 = await (await stFetch('/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
     check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
     // Swipe the reply: the change stays (it lives on the player's message, like a move).
     await queue([{ content: 'Another take on the glass.' }]); expected += 1;
@@ -950,7 +962,7 @@ try {
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
     await sw(true, true);
     await go('up');
-    const nearUp = (await (await fetch('http://127.0.0.1:5199/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
+    const nearUp = (await (await stFetch('/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
     const sqU = nearUp.findIndex(r => r.address === 'riverton:streets/square') + 1;
     let rL = (await reqsNow()).length;
     await queue([{ content: 'look' }, { content: '2' }, { content: String(sqU) }, { content: 'Below, the square bustles.' }]);
@@ -974,7 +986,7 @@ try {
     Object.assign(exD('temple', 'nave', 'south'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'east'), { view: 'closed', stays_open: false });
     fsD.writeFileSync(rp, JSON.stringify(rj, null, 2));
     fsD.writeFileSync('/tmp/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false }));
-    await (await fetch('http://127.0.0.1:5199/worlds')).json(); // rescan
+    await (await stFetch('/worlds')).json(); // rescan
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = 'doorsworld'; });
     await sw(true, true);
     check('doors: chat on the test world', (await M(m => m.effectiveWorld())) === 'doorsworld' && (await stored()) === 'riverton:drowned_rat/common_room', String(await M(m => m.effectiveWorld())));

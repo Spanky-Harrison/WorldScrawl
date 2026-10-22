@@ -1,0 +1,7 @@
+{
+    "name": "worldscrawl-plugin",
+    "private": true,
+    "description": "WorldScrawl map server as a SillyTavern server plugin",
+    "type": "module",
+    "main": "index.mjs"
+}
