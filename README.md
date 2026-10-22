@@ -1,6 +1,6 @@
 # WorldScrawl
 
-A persistent, static world map for SillyTavern roleplay. A small FastAPI server holds the map as JSON files, and a SillyTavern extension gives the model two tools:
+A persistent, static world map for SillyTavern roleplay. A SillyTavern server plugin holds the map as JSON files, and a SillyTavern extension gives the model two tools:
 
 - `ws_look`: the current location's name, description and exits.
 - `ws_move(direction)`: go through an exit; returns the new location, or an error listing the valid directions.
@@ -10,12 +10,13 @@ This is version 0.1: static map only. Nothing is generated or created at runtime
 ## Layout
 
 ```
-app/world.py        loads + validates the world files
-app/main.py         FastAPI server (stateless)
+plugin/             the SillyTavern server plugin (the map server, stateless; no npm packages needed)
+plugin/world.mjs    loads + validates the world files
+plugin/server.mjs   the routes, served at /api/plugins/worldscrawl/
 worlds/riverton/world.json    { "start_region": "riverton" }
 worlds/riverton/regions/      one JSON file per region
 extension/          the SillyTavern extension (manifest.json, index.js)
-tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
+tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTavern test
 ```
 
 ## World files
@@ -69,41 +70,57 @@ tests/              pytest tests; tests/e2e/ is a headless SillyTavern test
 - Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
   - Subregion `"inherit_notes": false` drops the region notes for all its rooms.
   - A location's `inherit_region_notes` / `inherit_subregion_notes` override that when present (true/false). Missing = follow the subregion.
-- Ids are lowercase slugs (`old_mill`). No duplicate keys anywhere, no duplicate directions in one location. The server refuses to start and says what's wrong otherwise.
+- Ids are lowercase slugs (`old_mill`). No duplicate keys anywhere, no duplicate directions in one location. Otherwise the map server answers every request with an error saying what's wrong (in the SillyTavern console too); fix the file and restart SillyTavern.
 
 ## Setup on Windows (PowerShell)
 
-Assuming the repo is cloned to `C:\WorldScrawl` (change the paths if not):
+The map server is a SillyTavern **server plugin**: it runs inside SillyTavern, so there's nothing else to start. These steps assume the repo is cloned to `C:\WorldScrawl-v2` and SillyTavern is at `C:\sillyTavern\SillyTavern-Launcher\SillyTavern` (change the paths if not).
 
 ```powershell
 cd C:\
-git clone https://github.com/Spanky-Harrison/WorldScrawl.git
-cd C:\WorldScrawl
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 5100
+git clone https://github.com/Spanky-Harrison/WorldScrawl.git WorldScrawl-v2
 ```
 
-If `Activate.ps1` is blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once. Next time you only need:
+SillyTavern needs Node 18 or newer (it already has it if SillyTavern runs).
+
+### 1. Allow server plugins
+
+Open `C:\sillyTavern\SillyTavern-Launcher\SillyTavern\config.yaml` in Notepad, find the line `enableServerPlugins: false` and change it to:
+
+```yaml
+enableServerPlugins: true
+```
+
+Save the file.
+
+### 2. Install the plugin and the extension
+
+Both are junctions (links), so `git pull` updates them. In PowerShell:
 
 ```powershell
-cd C:\WorldScrawl
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --host 127.0.0.1 --port 5100
+New-Item -ItemType Junction -Path "C:\sillyTavern\SillyTavern-Launcher\SillyTavern\plugins\worldscrawl" -Target "C:\WorldScrawl-v2\plugin"
+New-Item -ItemType Junction -Path "C:\sillyTavern\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\WorldScrawl" -Target "C:\WorldScrawl-v2\extension"
 ```
 
-Check it at http://127.0.0.1:5100/start. Interactive API docs are at http://127.0.0.1:5100/docs.
+(The same from a `cmd` prompt: `mklink /J "C:\sillyTavern\SillyTavern-Launcher\SillyTavern\plugins\worldscrawl" "C:\WorldScrawl-v2\plugin"`.) If you already linked the extension before, skip the second line. The plugin folder must be named `worldscrawl`.
 
-### Install the extension
+### 3. Restart SillyTavern
 
-Link the `extension` folder into SillyTavern's extensions folder (a junction, so `git pull` updates it):
+Close the SillyTavern window and start it again. Its console should show `[WorldScrawl] serving 1 world(s) from C:\WorldScrawl-v2\worlds`. Then reload the page (Ctrl+F5). Under Extensions you'll see a **WorldScrawl** panel; **Test connection** should say "Connected".
 
-```powershell
-New-Item -ItemType Junction -Path "C:\sillyTavern\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\WorldScrawl" -Target "C:\WorldScrawl\extension"
+**After every `git pull` that changes the plugin, restart SillyTavern** (server code is only loaded at startup). Extension-only changes just need Ctrl+F5. Map files you edit by hand are picked up without a restart when the worlds list is refreshed (open the WorldScrawl panel).
+
+### Worlds folder
+
+By default the plugin uses the `worlds` folder next to it in the repo (`C:\WorldScrawl-v2\worlds`, also through the junction), so worlds you've already saved keep working. To use another folder, either set the `WORLDSCRAWL_WORLDS_DIR` environment variable before starting SillyTavern, or create `C:\WorldScrawl-v2\plugin\config.json`:
+
+```json
+{ "worldsDir": "D:\\My Worlds" }
 ```
 
-Then reload SillyTavern (Ctrl+F5). Under Extensions you'll see a **WorldScrawl** panel with the server URL (default `http://127.0.0.1:5100`) and a **Test connection** button.
+(a relative path is relative to the plugin folder; see `plugin/config.example.json`). Restart SillyTavern after changing it. Set `WORLDSCRAWL_NO_OPEN=1` to stop **Open worlds folder** from opening Explorer.
+
+The extension talks to the plugin at `/api/plugins/worldscrawl` on SillyTavern itself. The **Map server URL** field is only for pointing it at some other server; leave it empty. (An old `http://127.0.0.1:5100` value from the Python server is treated as empty.) The Python server is gone: you no longer need `.venv`, `pip` or `uvicorn`, and the old `.venv` folder can be deleted.
 
 ### Turn on function calling in SillyTavern
 
@@ -156,7 +173,7 @@ Every folder in `worlds/` with a `world.json` is a world; its id is the folder n
 - World names: the name is stored exactly as typed in the world's `world.json` (`"name"`) and shown everywhere (picker, toasts, the "[Engine: world saved as "..."]" message, the world-switch toast). The folder id is a readable slug made from it ("My Riverton!" → `my-riverton`). A typed name equal to an existing world's name (ignoring case and surrounding spaces) saves over it if that world is living and is refused otherwise; if only the folder slug is taken, `-2`, `-3`... is added. Leaving the name blank saves under exactly the name shown in the Save box placeholder: "<base world> - <character> - <Mon D, h:mm AM>" (refreshed when the panel opens, the chat changes and after each save; `/ws-save-world` with no name uses the same default). Generated names never get refused: a clash adds " (2)" to the name and `-2` to the folder (`riverton-desirae-oct-19-2`).
 - `POST /worlds/render {base?, name?, auto?, id_hint?, id?, changes: [...], knowledge?: {location, stood, seen, doors}}` writes a full new world folder (`id` = exact folder id, refused if taken; normally omitted so the server picks the slug): the base world's files with `changes` applied, in the normal hand-written format (no derived data). It's loaded right away. It never replaces anything: an id that already exists (any world folder, including riverton; compared case-insensitively) is refused with 409. With `knowledge` it also writes `knowledge.json` next to the region files (entries that don't exist in the new world are dropped).
 - `POST /move` and `POST /travel` accept `changes` (this chat's world changes), applied for that request only.
-- Change types (`app/changes.py`; anything else is rejected): `{type: "add_exit", from, direction, to, description?}`, `{type: "remove_exit", from, direction}`.
+- Change types (`plugin/changes.mjs`; anything else is rejected): `{type: "add_exit", from, direction, to, description?}`, `{type: "remove_exit", from, direction}`.
 
 **Per-chat world state** lives in message stamps (the server never stores gameplay state):
 - A new chat stamps its world (`{id, version}`) on the greeting, taken from the "World for new chats" setting (default: the server's default world). Chats with no world stamp use the default world. If the server's map version differs from the chat's, a warning (and one toast) is shown, but nothing is blocked.
@@ -178,8 +195,7 @@ Every folder in `worlds/` with a `world.json` is a world; its id is the folder n
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest
+node --test tests/node/
 ST_SRC=/path/to/SillyTavern tests/e2e/run.sh   # headless: real ST 1.19 + fake model + Chrome (needs playwright-core)
 ```
 
