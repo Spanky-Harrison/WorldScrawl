@@ -13,17 +13,17 @@
           "name": "Common Room",
           "description": "A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.",
           "exits": [
-            { "direction": "out", "to": "streets/square", "description": "The front door opens onto the village square." },
+            { "direction": "out", "to": "streets/square", "description": "The front door opens onto the village square.", "view": "closed" },
             { "direction": "up", "to": "upstairs", "description": "A creaking staircase." },
-            { "direction": "back", "to": "courtyard", "description": "A back door to the courtyard." }
+            { "direction": "back", "to": "courtyard", "description": "A back door to the courtyard.", "view": "closed" }
           ]
         },
         "courtyard": {
           "name": "Courtyard",
           "description": "A cobbled courtyard behind the tavern, stacked with ale barrels and firewood. Steam and the smell of stew drift from the kitchen door; the stable stands across the yard.",
           "exits": [
-            { "direction": "in", "to": "common_room", "description": "The back door into the common room." },
-            { "direction": "kitchen", "to": "kitchens", "description": "The kitchen door." },
+            { "direction": "in", "to": "common_room", "description": "The back door into the common room.", "view": "closed" },
+            { "direction": "kitchen", "to": "kitchens", "description": "The kitchen door.", "view": "closed" },
             { "direction": "stable", "to": "stable", "description": "Across the yard to the stable." },
             { "direction": "trapdoor", "to": "cellar", "obscured": true, "description": "A heavy cellar door set into the flagstones, its iron ring worn smooth." }
           ]
@@ -40,7 +40,7 @@
           "name": "Kitchens",
           "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
-            { "direction": "out", "to": "courtyard", "description": "Back out to the courtyard." }
+            { "direction": "out", "to": "courtyard", "description": "Back out to the courtyard.", "view": "closed" }
           ]
         },
         "stable": {
@@ -70,7 +70,7 @@
           "name": "Common Room",
           "description": "A bright common room with whitewashed walls, brass lamps and round tables set with linen. A painted goose with a gilt crown hangs over the bar, and a carpeted stair leads up.",
           "exits": [
-            { "direction": "out", "to": "streets/market_lane", "description": "The door opens onto Market Lane." },
+            { "direction": "out", "to": "streets/market_lane", "description": "The door opens onto Market Lane.", "view": "closed" },
             { "direction": "up", "to": "upstairs", "description": "A carpeted staircase." }
           ]
         },
@@ -119,7 +119,7 @@
           "name": "Village Square",
           "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river, the temple hill, Market Lane and the open country.",
           "exits": [
-            { "direction": "in", "to": "drowned_rat/common_room", "description": "The Drowned Rat's swinging sign hangs over the door." },
+            { "direction": "in", "to": "drowned_rat/common_room", "description": "The Drowned Rat's swinging sign hangs over the door.", "view": "closed" },
             { "direction": "south", "to": "docks/piers", "description": "A muddy lane slopes down to the river." },
             { "direction": "north", "to": "temple/nave", "description": "Steps climb the hill to the temple." },
             { "direction": "east", "to": "east_road/road" },
@@ -131,7 +131,7 @@
           "description": "A narrow lane of timber-framed shops. The Gilded Goose's gilt sign gleams on one side, Marlow's bell jangles on the other, and the clang of Brask's forge echoes from the end.",
           "exits": [
             { "direction": "east", "to": "square" },
-            { "direction": "inn", "to": "gilded_goose/common_room", "description": "The Gilded Goose." },
+            { "direction": "inn", "to": "gilded_goose/common_room", "description": "The Gilded Goose.", "view": "closed" },
             { "direction": "store", "to": "general_store/shop", "description": "Marlow's General Store." },
             { "direction": "smithy", "to": "smithy/forge", "description": "Brask's Smithy." },
             { "direction": "gate", "to": "drowned_rat/stable", "description": "The Drowned Rat's stable gate." }
