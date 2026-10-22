@@ -266,7 +266,8 @@ def _exit(d, sub, loc, direction):
 def test_view_defaults_and_validation(client, wd):
     tav = client.get(f"/location/{TAVERN}").json()
     out = next(e for e in tav["exits"] if e["direction"] == "out")
-    assert out["view"] == "open" and out["stays_open"] is False and out["to_summary"]
+    assert out["view"] == "closed" and out["stays_open"] is False and out["to_summary"]  # a plain closed door still names where it goes
+    assert next(e for e in tav["exits"] if e["direction"] == "up")["view"] == "open"
     assert tav["views"] == []
     nave = client.get("/location/riverton:temple/nave").json()
     grate = next(e for e in nave["exits"] if e["direction"] == "grate")
@@ -309,7 +310,7 @@ def test_door_and_view_link_changes(client, wd):
     raw = (wd / "viewy" / "regions" / "riverton.json").read_text()
     d = json.loads(raw)
     assert d["subregions"]["drowned_rat"]["locations"]["upstairs"]["views"] == [SQUARE]
-    assert "stays_open" not in raw and '"view"' not in raw  # door changes never written; no defaults added
+    assert "stays_open" not in raw and raw.count('"view"') == (RIVERTON / "regions" / "riverton.json").read_text().count('"view"')  # door changes never written; no defaults added
 
 
 def test_stays_open_per_door_across_a_boundary(wd):

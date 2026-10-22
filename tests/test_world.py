@@ -393,7 +393,9 @@ def test_doors_paired_with_return_exit():
     assert door(COURTYARD, "trapdoor") == door(CELLAR, "trapdoor")
     assert door(NAVE, "grate") == door(CATA, "up")
     assert door(CELLAR, "narrow door") == door(TUNNEL, "narrow door")
-    assert door(CATA, "tunnel") is None and door(COURTYARD, "in") is None
+    assert door(CATA, "tunnel") is None and door(TAVERN, "up") is None
+    assert door(COURTYARD, "in") == door(TAVERN, "back") is not None  # plain closed doors pair too
+    assert door(TAVERN, "out") == door(SQUARE, "in") is not None
     assert len({door(COURTYARD, "trapdoor"), door(NAVE, "grate"), door(CELLAR, "narrow door")}) == 3
     # the normal return side still names where it goes
     up = _exit(TestClient(create_app(ROOT)).get(f"/location/{CATA}").json(), "up")
@@ -432,3 +434,12 @@ def test_cellar_trapdoor_obscured_both_sides():
     e = _exit(c.get(f"/location/{CELLAR}").json(), "trapdoor")
     assert e["obscured"] is True and "to" not in e
     assert c.post("/move", json={"from": CELLAR, "direction": "trapdoor"}).json()["address"] == COURTYARD
+
+
+def test_staircases_are_open_never_doors():
+    w = load_world(ROOT)
+    up = next(e for e in w.get(TAVERN).exits if e.direction == "up")
+    down = next(e for e in w.get("riverton:drowned_rat/upstairs").exits if e.direction == "down")
+    assert up.view is None and not up.flagged and up.effective_view == "open" and up.door is None
+    assert down.effective_view == "open" and down.door is None
+    assert next(e for e in w.get(TAVERN).exits if e.direction == "out").effective_view == "closed"

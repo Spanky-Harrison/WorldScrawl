@@ -1743,7 +1743,7 @@ function renderStartButton() {
         b.style.display = '';
         const btn = makeButton('Start your adventure', 'Send "I look around"', startAdventure);
         btn.classList.add('worldscrawl_start_button', 'menu_button');
-        btn.style.cssText = 'cursor:pointer;display:inline-block;padding:4px 10px;';
+        btn.style.cssText = 'cursor:pointer;display:inline-block;width:auto;white-space:nowrap;padding:4px 10px;';
         b.appendChild(btn);
     }
 }
