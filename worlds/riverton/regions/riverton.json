@@ -33,7 +33,7 @@
           "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
           "exits": [
             { "direction": "trapdoor", "to": "courtyard", "obscured": true, "description": "Wooden steps up to a heavy trapdoor." },
-            { "direction": "narrow door", "to": "secret_tunnel/tunnel", "hidden": true, "description": "A narrow door half-hidden behind the casks." }
+            { "direction": "narrow door", "to": "secret_tunnel/tunnel", "hidden": true, "description": "A narrow door half-hidden behind the casks.", "view": "closed" }
           ]
         },
         "kitchens": {
@@ -48,7 +48,7 @@
           "description": "A straw-strewn stable with a few stalls, a water trough and a tired old mule. A wooden gate opens onto Market Lane.",
           "exits": [
             { "direction": "yard", "to": "courtyard", "description": "Out into the courtyard." },
-            { "direction": "gate", "to": "streets/market_lane", "description": "The stable gate onto Market Lane." }
+            { "direction": "gate", "to": "streets/market_lane", "description": "The stable gate onto Market Lane.", "view": "closed" }
           ]
         },
         "upstairs": {
@@ -91,7 +91,7 @@
           "name": "Marlow's General Store",
           "description": "Shelves crammed with rope, lamp oil, sacks of flour, fishing tackle and dusty oddments. A brass bell hangs over the door and Marlow's counter is buried in ledgers.",
           "exits": [
-            { "direction": "out", "to": "streets/market_lane" }
+            { "direction": "out", "to": "streets/market_lane", "description": "The shop door, under the brass bell, opens onto Market Lane.", "view": "closed" }
           ]
         }
       }
@@ -104,7 +104,7 @@
           "name": "Brask's Smithy",
           "description": "A soot-black workshop around a roaring forge. Hammers ring on the anvil, tools hang from every beam, and a water barrel hisses whenever hot iron is quenched.",
           "exits": [
-            { "direction": "out", "to": "streets/market_lane" }
+            { "direction": "out", "to": "streets/market_lane", "description": "The open front of the forge looks onto Market Lane." }
           ]
         }
       }
@@ -121,7 +121,7 @@
           "exits": [
             { "direction": "in", "to": "drowned_rat/common_room", "description": "The Drowned Rat's swinging sign hangs over the door.", "view": "closed" },
             { "direction": "south", "to": "docks/piers", "description": "A muddy lane slopes down to the river." },
-            { "direction": "north", "to": "temple/nave", "description": "Steps climb the hill to the temple." },
+            { "direction": "north", "to": "temple/nave", "description": "Steps climb the hill to the temple.", "view": "closed" },
             { "direction": "east", "to": "east_road/road" },
             { "direction": "west", "to": "market_lane", "description": "A narrow lane of shops." }
           ]
@@ -132,9 +132,9 @@
           "exits": [
             { "direction": "east", "to": "square" },
             { "direction": "inn", "to": "gilded_goose/common_room", "description": "The Gilded Goose.", "view": "closed" },
-            { "direction": "store", "to": "general_store/shop", "description": "Marlow's General Store." },
-            { "direction": "smithy", "to": "smithy/forge", "description": "Brask's Smithy." },
-            { "direction": "gate", "to": "drowned_rat/stable", "description": "The Drowned Rat's stable gate." }
+            { "direction": "store", "to": "general_store/shop", "description": "The door of Marlow's General Store.", "view": "closed" },
+            { "direction": "smithy", "to": "smithy/forge", "description": "Brask's Smithy, its forge open to the lane." },
+            { "direction": "gate", "to": "drowned_rat/stable", "description": "The Drowned Rat's stable gate.", "view": "closed" }
           ]
         }
       }
@@ -161,15 +161,15 @@
           "name": "Temple of the Tides",
           "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
           "exits": [
-            { "direction": "south", "to": "streets/square", "description": "The steps lead back down to the square." },
-            { "direction": "grate", "to": "catacombs", "obscured": true, "description": "A stone stair behind an iron grate beside the altar." }
+            { "direction": "south", "to": "streets/square", "description": "The steps lead back down to the square.", "view": "closed" },
+            { "direction": "grate", "to": "catacombs", "obscured": true, "description": "A stone stair behind an iron grate beside the altar.", "view": "closed" }
           ]
         },
         "catacombs": {
           "name": "Temple Catacombs",
           "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
           "exits": [
-            { "direction": "up", "to": "nave", "description": "The stone stair up to the temple." },
+            { "direction": "up", "to": "nave", "description": "The stone stair up to the temple.", "view": "closed" },
             { "direction": "tunnel", "to": "secret_tunnel/tunnel", "description": "A low, rough-cut passage leading away into the dark." }
           ]
         }
@@ -184,7 +184,7 @@
           "name": "Secret Tunnel",
           "description": "A cramped, dripping tunnel shored up with rotting timbers. It slopes gently uphill, and the floor is scuffed by boots that came this way not so long ago.",
           "exits": [
-            { "direction": "narrow door", "to": "drowned_rat/cellar", "hidden": true, "description": "A narrow door in the tunnel wall." },
+            { "direction": "narrow door", "to": "drowned_rat/cellar", "hidden": true, "description": "A narrow door in the tunnel wall.", "view": "closed" },
             { "direction": "catacombs", "to": "temple/catacombs", "description": "The tunnel climbs toward old stonework." }
           ]
         }
