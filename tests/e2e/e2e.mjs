@@ -7,7 +7,7 @@ const queue = q => fetch(`${FAKE}/__queue`, { method: 'POST', body: JSON.stringi
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'], headless: true });
 try {
-    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
     page.on('console', m => { if (m.type() === 'error' || /WorldScrawl/.test(m.text())) console.log('[console]', m.type(), m.text().slice(0, 300)); });
     const apiCalls = [];
     const apiUrls = [];
@@ -1086,6 +1086,33 @@ try {
     check('model never saw the [ws-start] marker', !sentMarker);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-off')); await page.waitForTimeout(1000);
     check('no start button when WorldScrawl is off in the chat', await page.locator('#chat .worldscrawl_start_button').count() === 0 && await page.evaluate(() => SillyTavern.getContext().chat[0].mes === 'Welcome, traveler. [ws-start]'));
+    // ---- The WorldScrawl window (plugin/ui/): served by the plugin, follows the chat over BroadcastChannel.
+    const ui = await page.context().newPage(); await ui.setViewportSize({ width: 1200, height: 800 });
+    ui.on('pageerror', e => console.log('[ui pageerror]', e.message));
+    const uiRes = await ui.goto(BASE + 'api/plugins/worldscrawl/ui/');
+    check('map window page is served', uiRes.status() === 200 && /WorldScrawl/.test(await ui.title()), String(uiRes.status()));
+    await ui.waitForTimeout(2500);
+    check('map window: friendly message when the chat has WorldScrawl off', /Open a chat with WorldScrawl on/.test(await ui.locator('#windows').innerText()));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-on'));
+    try { await ui.waitForSelector('.node.here', { timeout: 15000 }); } catch {}
+    const m1 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, ids: [...document.querySelectorAll('.node')].map(n => n.dataset.id), side: document.querySelector('.side')?.innerText ?? '', btn: document.querySelector('[data-window="map"]')?.className }));
+    check('map window receives the broadcast and highlights the current room', m1.here === 'riverton:drowned_rat/common_room' && /Common Room/.test(m1.side) && /active/.test(m1.btn), JSON.stringify(m1).slice(0, 400));
+    check('map window shows no hidden place', !m1.ids.some(i => /cellar|tunnel|catacomb/.test(i)), JSON.stringify(m1.ids));
+    const themed = await ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
+    const stTheme = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
+    check('map window uses SillyTavern theme colours', !!themed && themed === stTheme, `${themed} vs ${stTheme}`);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go up'));
+    try { await ui.waitForFunction(() => document.querySelector('.node.here')?.dataset.id !== 'riverton:drowned_rat/common_room', null, { timeout: 15000 }); } catch {}
+    const m2 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, stood: [...document.querySelectorAll('.node.stood')].map(n => n.dataset.id) }));
+    check('map window follows a move live', m2.here && m2.here !== 'riverton:drowned_rat/common_room' && m2.stood.includes('riverton:drowned_rat/common_room'), JSON.stringify(m2));
+    await ui.screenshot({ path: '/tmp/ws-e2e-map.png' });
+    await ui.close();
+    const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-map'));
+    const pop = await popup; if (pop) await pop.waitForURL(/worldscrawl\/ui\//, { timeout: 10000 }).catch(() => {});
+    check('/ws-map opens the map window', !!pop && /\/api\/plugins\/worldscrawl\/ui\/$/.test(pop.url()), pop?.url());
+    await pop?.close();
+    check('settings panel has an Open map window button', await page.locator('#worldscrawl_open_map').count() === 1);
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {

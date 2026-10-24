@@ -1,4 +1,5 @@
-// SillyTavern server plugin: serves the WorldScrawl map API at /api/plugins/worldscrawl/.
+// SillyTavern server plugin: serves the WorldScrawl map API at /api/plugins/worldscrawl/
+// and the WorldScrawl window (map) at /api/plugins/worldscrawl/ui/.
 // Install: link or copy this folder to SillyTavern/plugins/worldscrawl and set enableServerPlugins: true in config.yaml.
 // Worlds folder: WORLDSCRAWL_WORLDS_DIR, else "worldsDir" in plugin/config.json (relative to this folder),
 // else the repo's worlds/ folder next to this one.
@@ -7,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from './server.mjs';
 import { log } from './world.mjs';
+import { uiFile } from './ui.mjs';
 
 const here = (() => { const d = path.dirname(fileURLToPath(import.meta.url)); try { return fs.realpathSync(d); } catch { return d; } })();
 
@@ -32,6 +34,14 @@ export function worldsDir(env = process.env, dir = here) {
 /** Express adapter: hand every request under the mount point to the framework-free handler. */
 export function mount(router, server) {
     router.use((req, res) => {
+        const ui = req.method === 'GET' || req.method === 'HEAD' ? uiFile(req.path ?? req.url) : null;
+        if (ui) { // the WorldScrawl window (plugin/ui/)
+            if (ui.redirect) return res.redirect(ui.redirect);
+            if (ui.status) return res.status(ui.status).type('text/plain').send('Not found');
+            res.setHeader('Content-Type', ui.type);
+            res.setHeader('Cache-Control', 'no-cache');
+            return res.send(fs.readFileSync(ui.file));
+        }
         const body = req.is('application/json') ? req.body : undefined;
         const r = server.handle(req.method, req.url, body);
         for (const [k, v] of Object.entries(r.headers)) res.setHeader(k, v);

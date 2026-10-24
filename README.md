@@ -13,6 +13,7 @@ This is version 0.1: static map only. Nothing is generated or created at runtime
 plugin/             the SillyTavern server plugin (the map server, stateless; no npm packages needed)
 plugin/world.mjs    loads + validates the world files
 plugin/server.mjs   the routes, served at /api/plugins/worldscrawl/
+plugin/ui/          the WorldScrawl window (map), served at /api/plugins/worldscrawl/ui/ (plain HTML/JS/CSS, no build step)
 worlds/riverton/world.json    { "start_region": "riverton" }
 worlds/riverton/regions/      one JSON file per region
 extension/          the SillyTavern extension (manifest.json, index.js)
@@ -151,6 +152,38 @@ is at most one `/rooms` batch.
 - `GET /health` returns counts, the start address and the map version.
 - Every reply has an `X-WorldScrawl-Map-Version` header (a hash of the map files at load). When it changes, the extension forgets the rooms it remembered.
 - The server log has one line per move and per trip (from, direction/steps, result).
+
+## The WorldScrawl window (map)
+
+A second window, served by the plugin, that shows the map of the chat you're playing.
+
+**Open it** with **Open map window** in the WorldScrawl settings panel, with `/ws-map`, or by going to
+`http://127.0.0.1:8000/api/plugins/worldscrawl/ui/` (use your own SillyTavern address and port) in another tab.
+It has to be on the same address as SillyTavern, in the same browser. Keep the SillyTavern tab open: that tab
+tells the window what's happening.
+
+- **Top bar** like SillyTavern's. For now it has one window, **Map**; more (world browser, editor, character)
+  come later. Open windows fill the space below the bar. They sit side by side in a wide (landscape) window and
+  stack in a tall (portrait) one.
+- **Colours** follow your current SillyTavern theme. They update when the chat does. If SillyTavern isn't
+  connected yet, the window reads the theme from your saved settings, and falls back to a dark theme.
+- **Live.** Every time the chat changes (a move, a door, a dig, a swipe or delete, a different chat), the
+  extension sends the chat's world, location, the places stood in and seen, the revealed and open doors, and
+  the chat's changes on a browser `BroadcastChannel('worldscrawl')`. The window asks for that when it opens.
+  If no WorldScrawl chat is open, it says so.
+- **Play-mode map: only what this chat has discovered.** It shows rooms you've stood in (solid), places you've
+  only seen (dashed outline, no exits of their own), and the chat's dug exits. An exit whose destination you
+  haven't found (a hidden or obscured door you haven't been through) is a small "?" stub with just its label.
+  It never shows where the exit leads. Closed doors are dashed lines. Your room has a highlighted border, and the
+  map centres on it whenever you move. Colours group rooms by building or area.
+- **Layout.** Rooms are placed on a grid by exit direction (north is up, east is right, up/down are diagonal).
+  A room with a `pos` (`{"x": 0, "y": 0}`) in its file keeps that position.
+- **Controls.** Drag to pan, use the wheel or a two-finger pinch to zoom, and click a room to see its name,
+  description and exits in the side panel. **Centre** jumps back to where you are.
+
+The window only reads. It never changes the chat or the world files. Room data comes through the normal
+`/rooms` and `/doors` endpoints, so it follows the same rules as the extension. Plugin files changed, so
+**restart SillyTavern** after updating to get the window.
 
 ## On/off per chat
 
