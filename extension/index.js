@@ -1527,6 +1527,7 @@ function registerSlashCommands() {
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction, e.g. north', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: move through an exit or to a known place, then the model narrates the arrival.',
     }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -1774,6 +1775,7 @@ function startAdventure() {
 }
 
 async function renderAllExits() {
+    broadcastMapState();
     renderStartButton();
     if (!isOn()) { // off: strip footers and notice buttons, no server calls
         document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
@@ -1791,6 +1793,52 @@ async function renderAllExits() {
     document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
     if (!settings().showExits) return;
     document.querySelectorAll('#chat .mes[mesid]').forEach(el => renderExits(el.getAttribute('mesid')));
+}
+
+// ---- The WorldScrawl window (plugin/ui/, served by the plugin). Same origin, so it hears this tab over a
+// BroadcastChannel: every state change is posted, and a window that opens asks with 'hello'.
+export const MAP_URL = `${PLUGIN_URL}/ui/`;
+const THEME_VARS = ['--SmartThemeBodyColor', '--SmartThemeEmColor', '--SmartThemeUnderlineColor', '--SmartThemeQuoteColor', '--SmartThemeBlurTintColor',
+    '--SmartThemeChatTintColor', '--SmartThemeUserMesBlurTintColor', '--SmartThemeBotMesBlurTintColor', '--SmartThemeShadowColor', '--SmartThemeBorderColor', '--mainFontFamily'];
+export function themeVars(el = document.documentElement) {
+    const cs = getComputedStyle(el), out = {};
+    for (const k of THEME_VARS) { const v = cs.getPropertyValue(k).trim(); if (v) out[k] = v; }
+    const bg = getComputedStyle(document.body).backgroundColor;
+    if (bg && bg !== 'rgba(0, 0, 0, 0)') out['--ws-bg'] = bg;
+    if (out['--mainFontFamily']) out['--ws-font'] = out['--mainFontFamily'];
+    return out;
+}
+let mapChannel = null;
+/** The state the map window shows: this chat's world, where the party is, what it knows, open doors and changes. */
+export async function mapState() {
+    const c = ctx();
+    const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars() };
+    if (!isOn() || !base.chatId) return { ...base, on: false };
+    syncWorld();
+    const stood = [...await stoodInAddresses()];
+    const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
+    const here = await currentLocation();
+    return { ...base, on: true, world: activeWorld || defaultWorldId || '', worldName: worldName(activeWorld), map_version: mapVersion,
+        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], changes: chatChanges() };
+}
+let broadcastTimer = null;
+export function broadcastMapState() {
+    if (typeof BroadcastChannel === 'undefined') return;
+    clearTimeout(broadcastTimer);
+    broadcastTimer = setTimeout(async () => {
+        try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
+    }, 150);
+}
+function openMapChannel() {
+    const ch = new BroadcastChannel('worldscrawl');
+    ch.addEventListener('message', ev => { if (ev.data?.type === 'hello') broadcastMapState(); });
+    return ch;
+}
+export function openMapWindow() {
+    const w = window.open(MAP_URL, 'worldscrawl_map');
+    if (!w) toastr.warning(`Your browser blocked the pop-up. Open ${location.origin}${MAP_URL} in a new tab.`);
+    setTimeout(broadcastMapState, 1000);
+    return MAP_URL;
 }
 
 async function testConnection() {
@@ -1834,6 +1882,7 @@ function addSettingsPanel() {
     <div class="inline-drawer-content">
       <label class="checkbox_label"><input id="worldscrawl_enabled" type="checkbox"> <b>Enabled in this chat</b></label>
       <label class="checkbox_label"><input id="worldscrawl_enable_new" type="checkbox"> Enable in new chats</label>
+      <div class="flex-container"><div id="worldscrawl_open_map" class="menu_button" title="Opens the WorldScrawl window in a new tab; it follows this chat live">Open map window</div></div>
       <label for="worldscrawl_url">Map server URL (leave empty to use the WorldScrawl plugin built into SillyTavern)</label>
       <input id="worldscrawl_url" class="text_pole" type="text" placeholder="(SillyTavern plugin)">
       <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
@@ -1882,6 +1931,7 @@ function addSettingsPanel() {
         r.checked = r.value === settings().moveMode;
         r.addEventListener('change', () => { if (!r.checked) return; settings().moveMode = r.value; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });
     });
+    document.getElementById('worldscrawl_open_map').addEventListener('click', () => openMapWindow());
     document.getElementById('worldscrawl_test').addEventListener('click', () => { testConnection(); fillWorlds(); });
     const sel = document.getElementById('worldscrawl_world');
     sel.addEventListener('change', () => { settings().world = sel.value; ctx().saveSettingsDebounced(); });
@@ -1915,6 +1965,7 @@ function addSettingsPanel() {
     }
     addSettingsPanel();
     addWandItem();
+    try { mapChannel = openMapChannel(); } catch {}
     applyNudge();
     console.log('[WorldScrawl] loaded');
 })();

@@ -1,0 +1,58 @@
+/* Colours follow SillyTavern's SmartTheme variables; these are the dark defaults until the theme arrives. */
+:root {
+  --SmartThemeBodyColor: rgb(220, 220, 210);
+  --SmartThemeEmColor: rgb(145, 145, 145);
+  --SmartThemeQuoteColor: rgb(225, 138, 36);
+  --SmartThemeBlurTintColor: rgba(23, 23, 23, 0.9);
+  --SmartThemeChatTintColor: rgba(23, 23, 23, 0.9);
+  --SmartThemeBorderColor: rgba(0, 0, 0, 0.5);
+  --SmartThemeShadowColor: rgba(0, 0, 0, 0.5);
+  --ws-bg: rgb(36, 36, 37);
+  --ws-font: "Noto Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--ws-bg); color: var(--SmartThemeBodyColor); font-family: var(--ws-font); display: flex; flex-direction: column; overflow: hidden; }
+#topbar { display: flex; align-items: center; gap: 10px; padding: 4px 10px; min-height: 40px;
+  background: var(--SmartThemeBlurTintColor); border-bottom: 1px solid var(--SmartThemeBorderColor); box-shadow: 0 2px 6px var(--SmartThemeShadowColor); }
+.brand { font-weight: bold; }
+#windowButtons { display: flex; gap: 4px; }
+.topbutton { cursor: pointer; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); background: transparent; color: inherit; font: inherit; opacity: .7; }
+.topbutton:hover { opacity: 1; }
+.topbutton.active { opacity: 1; color: var(--SmartThemeQuoteColor); border-color: var(--SmartThemeQuoteColor); }
+.status { margin-left: auto; font-size: .85em; color: var(--SmartThemeEmColor); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Open windows fill the space below the top bar: side by side in landscape, stacked in portrait. */
+#windows { flex: 1; display: flex; flex-direction: row; gap: 6px; padding: 6px; min-height: 0; }
+@media (orientation: portrait) { #windows { flex-direction: column; } }
+.wswindow { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--SmartThemeBlurTintColor);
+  border: 1px solid var(--SmartThemeBorderColor); border-radius: 10px; overflow: hidden; }
+.wswindow > h2 { margin: 0; padding: 4px 10px; font-size: 1em; border-bottom: 1px solid var(--SmartThemeBorderColor); }
+.wsbody { flex: 1; min-height: 0; display: flex; flex-direction: row; }
+@media (orientation: portrait) { .wsbody { flex-direction: column; } }
+.empty { margin: auto; padding: 20px; text-align: center; color: var(--SmartThemeEmColor); }
+/* Map */
+.mapview { flex: 1; min-width: 0; min-height: 0; position: relative; touch-action: none; cursor: grab; }
+.mapview.dragging { cursor: grabbing; }
+.mapview svg { width: 100%; height: 100%; display: block; }
+.node rect { stroke-width: 2; }
+.node.stood rect { fill-opacity: .35; }
+.node.seen rect { fill-opacity: .08; stroke-dasharray: 5 3; }
+.node.stub rect { fill: none; stroke: var(--SmartThemeEmColor); stroke-dasharray: 2 3; }
+.node.here rect { stroke: var(--SmartThemeQuoteColor); stroke-width: 4; }
+.node.selected rect { filter: drop-shadow(0 0 6px var(--SmartThemeQuoteColor)); }
+.node text { fill: var(--SmartThemeBodyColor); font-size: 13px; pointer-events: none; }
+.node.seen text, .node.stub text { fill: var(--SmartThemeEmColor); font-style: italic; }
+.node { cursor: pointer; }
+.edge line { stroke: var(--SmartThemeEmColor); stroke-width: 2; }
+.edge.closed line { stroke-dasharray: 7 5; }
+.edge text { fill: var(--SmartThemeEmColor); font-size: 11px; paint-order: stroke; stroke: var(--ws-bg); stroke-width: 3px; }
+.side { width: 300px; max-width: 45%; overflow: auto; padding: 10px; border-left: 1px solid var(--SmartThemeBorderColor); }
+@media (orientation: portrait) { .side { width: auto; max-width: none; max-height: 40%; border-left: 0; border-top: 1px solid var(--SmartThemeBorderColor); } }
+.side h3 { margin: 0 0 4px; color: var(--SmartThemeQuoteColor); }
+.side .area { color: var(--SmartThemeEmColor); font-size: .9em; margin-bottom: 8px; }
+.side ul { padding-left: 18px; }
+.side .muted { color: var(--SmartThemeEmColor); font-style: italic; }
+.legend { position: absolute; left: 8px; bottom: 8px; font-size: 12px; background: var(--SmartThemeBlurTintColor); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; padding: 4px 8px; max-width: 60%; }
+.legend span { display: inline-block; margin-right: 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.mapbuttons { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
