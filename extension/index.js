@@ -948,9 +948,15 @@ export const DOOR_OPEN_RE = /\b(?:open|opens|opened|opening|unlatch\w*|unbar\w*)
 export const DOOR_CLOSE_RE = /\b(?:close|closes|closed|closing|shut|shuts|shutting|slam|slams|slammed|slamming)\b/i;
 export const NO_EXIT = 'out a window or opening with no exit';
 const exitTargetLabel = e => `the ${e.direction} exit${revealsDestination(e) ? ` (to ${destLabel(e)})` : ''}`;
-export function lookTargetPrompt(loc, said, exits) {
+export const AROUND = 'around here in general, nothing specific';
+export const WINDOW_WORD_RE = /\b(?:windows?|shutters?|outside|outdoors|openings?|balcon(?:y|ies)|portholes?|skylights?)\b/i;
+/** Offer the window option only when the player mentions one, or the room already has a view. */
+export const offerWindow = (loc, text) => WINDOW_WORD_RE.test(String(text ?? '')) || (loc.views ?? []).length > 0;
+/** Options: 1 = around, then the exits, then (maybe) the window, last. */
+export function lookTargetPrompt(loc, said, exits, withWindow = true) {
+    const opts = [AROUND, ...exits.map(exitTargetLabel), ...(withWindow ? [NO_EXIT] : [])];
     return `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhat is the player looking at or listening to?\n`
-        + exits.map((e, i) => `${i + 1}. ${exitTargetLabel(e)}`).join('\n') + `${exits.length ? '\n' : ''}${exits.length + 1}. ${NO_EXIT}\n\nReply with just the number.`;
+        + opts.map((o, i) => `${i + 1}. ${o}`).join('\n') + '\n\nReply with just the number.';
 }
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
 export const closedDoorPrompt = (said, e) => `${said}\n\nThe ${e.direction} door is closed. What does the player do with it?\n1. only listens at it\n2. peeks through it (a crack, keyhole or gap) without opening it\n3. opens it\n4. just looks at the closed door\n\nReply with just the number.`;
@@ -963,12 +969,16 @@ const pickNumber = n => a => { const m = String(a).match(/^(\d+)\b/); const i = 
 async function narrativeLook(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exits = loc.exits.filter(e => !e.hidden || revealsDestination(e)); // an unrevealed hidden exit is never named
-    const n = await askValid('look target', lookTargetPrompt(loc, said, exits), pickNumber(exits.length + 1));
     const stampChange = c => { msg.extra[CHANGE_KEY] = [...changesOf(msg), c]; };
     let look;
-    if (n == null) look = { kind: 'nothing' };
-    else if (n <= exits.length) {
-        const e = exits[n - 1];
+    if (LOOK_AROUND_RE.test(String(msg.mes ?? ''))) look = { kind: 'around' }; // 'I look around': no question, no view link
+    const win = !look && offerWindow(loc, msg.mes);
+    const n = look ? null : await askValid('look target', lookTargetPrompt(loc, said, exits, win), pickNumber(exits.length + 1 + (win ? 1 : 0)));
+    if (look) { /* around */ }
+    else if (n == null) look = { kind: 'nothing' };
+    else if (n === 1) look = { kind: 'around' };
+    else if (n <= exits.length + 1) {
+        const e = exits[n - 2];
         let v = viewOf(e), opened = false;
         if (v === 'closed') {
             const k = await askValid('closed door', closedDoorPrompt(said, e), pickNumber(4));
@@ -1246,13 +1256,13 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (extra.dig && move && move.to === loc.address) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from ${move.from_name}, and went straight through it.${arr ? ` ${who} ${arr.text}.` : ''} Narrate breaking through and arriving in ${arr?.where ?? move.to_name}.`);
     else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
-    else if (extra.look) lines.push(lookText(who, displayName(loc), extra.look));
+    else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, displayName(loc), extra.look));
     else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
-    else if (extra.lookAround) lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
+    else if (extra.lookAround || extra.look?.kind === 'around') lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
     else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
-    if ((move && move.to === loc.address) || (extra.lookAround && !move)) lines.push(EXITS_HINT);
+    if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(EXITS_HINT);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
         : `You only narrate. The game engine controls movement: never move ${who} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.`);
