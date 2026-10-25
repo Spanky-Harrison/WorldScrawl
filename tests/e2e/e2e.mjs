@@ -976,6 +976,19 @@ try {
     await send('I glance out the window again', 3);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look: second look reuses the view link (no question, no new stamp)', lq.length === 3 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.to === 'riverton:streets/square', JSON.stringify(lk.extra));
+    // Look-only message: no move options, so "out" in "I look out the door" can't move the party (model answers "out" anyway).
+    await go('down');
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'out' }, { content: 'You eye the door.' }]);
+    await send('I look out the door', 2);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('look out the door: no move options offered, party stays', !promptOf(lq[0]).includes('the player goes through the') && !promptOf(lq[0]).includes('- elsewhere:') && (await stored()) === 'riverton:drowned_rat/common_room' && !lk.extra.worldscrawl_move, promptOf(lq[0]).slice(-700));
+    check('stay-put narration: still in the room, no leaving/arriving', promptOf(lq.at(-1)).includes('User has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving'), promptOf(lq.at(-1)).slice(-700));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'out' }, { content: 'You step out.' }]);
+    await send('I go out', 2);
+    lq = (await reqsNow()).slice(rL);
+    check('I go out: move options offered and the party moves', promptOf(lq[0]).includes('- out: the player goes through the') && (await stored()) === 'riverton:streets/square', String(await stored()));
     // ---- Doors, in a test world: front door closed (Drowned Rat doors shut themselves), temple stays open (region), square east door: exit override.
     const fsD = await import('node:fs');
     fsD.cpSync('/tmp/ws-worlds/riverton', '/tmp/ws-worlds/doorsworld', { recursive: true });
