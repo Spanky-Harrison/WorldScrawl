@@ -263,7 +263,7 @@ By default the model never touches the map:
 
 ### Place names in typed travel
 
-- Rooms are offered to the model as "Name (Building)", e.g. "Common Room (The Gilded Goose)". Building and region names work too ("go to the Drowned Rat"): you arrive at the building's entrance, or at a room of that building you've already been in if it's nearer (e.g. the Drowned Rat's stable, through the stable gate on Market Lane). The Drowned Rat now has a common room, upstairs rooms, a courtyard, kitchens and a stable.
+- Rooms are offered to the model as "Name (Building)", e.g. "Common Room (The Gilded Goose)". Building and region names work too ("go to the Drowned Rat"): you arrive at the building's entrance, or at a room of that building you've already been in if it's nearer (e.g. the Drowned Rat's stable, through the stable gate on Market Lane). The Drowned Rat now has a common room, upstairs rooms, a courtyard, kitchens and a stable. East Road now leads on (about two hours' walk) to a second town, **Larkspur** (`regions/larkspur.json`): a hillside spa and wool town with the Larkspur Baths, Wren's Apothecary, Hollin Dyeworks, Sable's Bindery and the Larkspur Playhouse.
 - If the model answers "elsewhere" or "unclear", the extension checks your words against known places itself (case-insensitive, word-level: "upstairs" matches "Upstairs Rooms"). One match: you go there. Several: "Which one do you mean?" with buttons. Already inside the named building/region: "You're already in X." None: "You're not aware of such a place."
 - Locations are cached in memory (cleared on page reload or when the server URL changes), so each place is fetched from the server once.
 
