@@ -237,7 +237,7 @@ function createMapWindow(win) {
 function onState(st) {
     state = st;
     if (st.theme) applyTheme(st.theme);
-    setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}` : 'No WorldScrawl chat');
+    setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
 channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); });

@@ -1,5 +1,11 @@
 {
   "name": "Riverton",
   "start_region": "riverton",
-  "living": false
+  "living": false,
+  "start_date": {
+    "year": 1247,
+    "month": "April",
+    "day": 12,
+    "time": "08:00"
+  }
 }

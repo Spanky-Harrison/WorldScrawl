@@ -79,10 +79,34 @@ const worldNames = new Map(); // id -> display name (from GET /worlds and saves)
 const worldLiving = new Map(); // id -> true for living saves (can be saved over)
 const listedWorlds = new Set(); // ids in the latest GET /worlds (the server rescans its folder on each list)
 const missingWorlds = new Set(); // world ids the server says no longer exist
+const worldTimes = new Map(); // id -> {calendar, start_date} (from GET /worlds and saves)
 const rememberWorlds = body => {
     if (body?.default) defaultWorldId = body.default;
-    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); } }
+    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date }); } }
 };
+
+// ---- Game clock. Only travel takes time: each move stamps its seconds on its message (move.seconds), so swipes keep
+// them and deleting the message undoes them. Clock = the chat world's start_date + the seconds stamped after the latest
+// rebase (a save bakes everything before it into the saved world's start_date).
+let calendarLib = null;
+/** calendar.mjs, served by the plugin (also used by the map window); null until loaded or if unavailable. */
+export async function loadCalendar() {
+    if (calendarLib) return calendarLib;
+    try { calendarLib = await import(`${baseUrl()}/ui/calendar.mjs`); } catch (e) { console.warn('[WorldScrawl] calendar unavailable:', e.message); }
+    return calendarLib;
+}
+/** Seconds of travel stamped on this chat's messages since its world's start_date. */
+export function chatElapsed(chat = ctx().chat ?? []) {
+    const base = chatWorld(chat);
+    const from = base?.rebase ? base.index : -1;
+    return calendarLib ? calendarLib.sumTravel(chat, from) : 0;
+}
+/** The chat's current game date ({weekday, part, time, ...} from calendar.mjs dateAt), or null if unknown. */
+export function gameDate(chat = ctx().chat ?? []) {
+    const t = worldTimes.get(activeWorld || defaultWorldId);
+    if (!calendarLib || !t) return null;
+    try { return calendarLib.dateAt(chatElapsed(chat), t.start_date, t.calendar); } catch (e) { console.warn('[WorldScrawl] clock:', e.message); return null; }
+}
 /**
  * The world requests actually go to. Normally the chat's stamped world; if that world's folder is gone, the world it
  * was saved from (the switch stamp's "from", if that still exists), else the default. Stamps are never changed.
@@ -420,7 +444,7 @@ async function engineMove(direction) {
         return { ok: false, error: d.error ?? `Move failed (${r.status})`, valid: d.valid_directions ?? from.exits.map(e => e.direction) };
     }
     primeCache(r.body);
-    return { ok: true, to: r.body, move: { direction: exit?.direction ?? direction, prev_name: from.name, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body) } };
+    return { ok: true, to: r.body, move: { seconds: r.body.travel_seconds ?? 0, direction: exit?.direction ?? direction, prev_name: from.name, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body) } };
 }
 
 /** Normalize the model's answer and accept it only if it is exactly one of the options. */
@@ -678,7 +702,7 @@ async function engineTravel(target, prefix = null) {
     const single = r.body.path.length === 1 ? steps[0].direction : null;
     const lastDir = steps[r.body.path.length - 1]?.direction ?? null;
     const prevName = (r.body.path.length > 1 ? r.body.path[r.body.path.length - 2] : from).name;
-    return { ok: true, to: at, move: { direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, steps: steps.slice(0, r.body.path.length).map(st => st.direction), last_direction: lastDir, prev_name: prevName,
+    return { ok: true, to: at, move: { seconds: r.body.travel_seconds ?? 0, direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, steps: steps.slice(0, r.body.path.length).map(st => st.direction), last_direction: lastDir, prev_name: prevName,
         ...(r.body.stopped ? { stopped: r.body.reason ?? 'stopped' } : {}) } };
 }
 
@@ -1256,6 +1280,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         (loc.effective_notes?.region || loc.effective_notes?.subregion) ? 'If this location\'s own description contradicts the broader notes above, the location description wins.' : '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
         ...glimpseLines(loc, extra.open),
+        extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     if (extra.dig && move && move.to === loc.address) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from ${move.from_name}, and went straight through it.${arr ? ` ${who} ${arr.text}.` : ''} Narrate breaking through and arriving in ${arr?.where ?? move.to_name}.`);
@@ -1284,7 +1309,9 @@ async function applyFacts() {
         const ui = lastUserIndex(c.chat ?? []);
         const move = ui >= 0 ? c.chat[ui].extra?.[MOVE_KEY] : null;
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
-        text = factsText(loc, move, toolsOn(), { dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
+        await loadCalendar();
+        const d = gameDate();
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
         reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
@@ -1441,13 +1468,14 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false, 
     if (!name) name = worldLiving.get(cur) ? worldName(cur) : defaultWorldName(); // same rule as the placeholder
     const auto = !worldLiving.get(cur) && (name === defaultWorldName() || (name === document.getElementById('worldscrawl_save_name')?.placeholder && placeholderAuto));
     let knowledge = null;
+    if (!(await loadCalendar())) { const e = 'Not saved: the game clock (calendar.mjs) could not be loaded.'; toastr.error(e); return { ok: false, error: e }; }
     if (withKnowledge) { // what this chat knows, for new chats on the saved world (written to knowledge.json)
         const here = await currentLocation();
         const stood = [...await stoodInAddresses()];
         const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
         knowledge = { location: here.address, stood, seen, doors: [...await syncDoors()] };
     }
-    const body = { base: activeWorld || null, name, auto, ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) };
+    const body = { base: activeWorld || null, name, auto, elapsed: chatElapsed(), ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) };
     let r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ ...body, overwrite }) });
     if (!r.ok && r.body?.detail?.error === 'needs_overwrite') {
         // Name of ANOTHER living world: the panel asks; /ws-save-world needs overwrite=true.
@@ -1461,6 +1489,7 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false, 
     }
     if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.message ?? r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
     worldNames.set(r.body.id, r.body.name); worldLiving.set(r.body.id, !!r.body.living);
+    if (r.body.start_date) worldTimes.set(r.body.id, { calendar: r.body.calendar, start_date: r.body.start_date });
     // Saved over the world this chat is on: always rebase here, or changes since the last switch would be replayed twice.
     const overSelf = !!r.body.overwritten && r.body.id === cur;
     if (overSelf) switchChat = true;
@@ -1677,6 +1706,7 @@ async function renderExits(id) {
     const isLast = id === lastReal;
     if (!isLast || !loc.exits?.length) div.textContent = exitsText(loc);
     else appendExitButtons(div, loc);
+    if (isLast) { await loadCalendar(); const d = gameDate(ch.slice(0, id + 1)); if (d) { const t = document.createElement('div'); t.className = 'worldscrawl_clock'; t.textContent = calendarLib.shortDate(d); div.appendChild(t); } }
     (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
 }
 
@@ -1825,6 +1855,7 @@ export async function mapState() {
     const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
     const here = await currentLocation();
     return { ...base, on: true, world: activeWorld || defaultWorldId || '', worldName: worldName(activeWorld), map_version: mapVersion,
+        clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
         location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], changes: chatChanges() };
 }
 let broadcastTimer = null;

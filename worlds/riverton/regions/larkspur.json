@@ -13,8 +13,8 @@
           "description": "A dusty road climbing out of the sheep pastures toward Larkspur's honey-coloured roofs. A stone bridge crosses a beck, and a signpost points west: Riverton, two hours on foot.",
           "inherit_region_notes": true,
           "exits": [
-            { "direction": "west", "to": "riverton:east_road/road", "description": "The long road back to Riverton, about two hours' walk through farmland." },
-            { "direction": "east", "to": "green/green", "description": "Up the hill into Larkspur." }
+            { "direction": "west", "to": "riverton:east_road/road", "travel_time": "2h", "description": "The long road back to Riverton, about two hours' walk through farmland." },
+            { "direction": "east", "to": "green/green", "travel_time": "5m", "description": "Up the hill into Larkspur." }
           ]
         }
       }
@@ -29,28 +29,28 @@
           "name": "Larkspur Green",
           "description": "A sloping village green around a steaming spring-fed fountain. A maypole stands at the top, washing lines of brightly dyed wool flap overhead, and streets climb toward the baths and wind down toward the dyeworks.",
           "exits": [
-            { "direction": "west", "to": "west_road/road", "description": "Down the hill to the West Road and, two hours on, Riverton." },
-            { "direction": "up", "to": "bath_steps", "description": "Worn stone steps climb toward the bathhouse." },
-            { "direction": "down", "to": "weavers_row", "description": "A steep cobbled street winds down past the dyeworks." },
-            { "direction": "playhouse", "to": "playhouse/foyer", "description": "The painted doors of the Larkspur Playhouse.", "view": "closed" }
+            { "direction": "west", "to": "west_road/road", "travel_time": "5m", "description": "Down the hill to the West Road and, two hours on, Riverton." },
+            { "direction": "up", "to": "bath_steps", "travel_time": "3m", "description": "Worn stone steps climb toward the bathhouse." },
+            { "direction": "down", "to": "weavers_row", "travel_time": "3m", "description": "A steep cobbled street winds down past the dyeworks." },
+            { "direction": "playhouse", "to": "playhouse/foyer", "travel_time": "1m", "description": "The painted doors of the Larkspur Playhouse.", "view": "closed" }
           ]
         },
         "bath_steps": {
           "name": "Bathhouse Steps",
           "description": "A terrace of worn stone steps, slick with mineral steam. The columned front of the Larkspur Baths rises at the top, and a small herb shop with a green door sits halfway up.",
           "exits": [
-            { "direction": "down", "to": "green", "description": "Down the steps to the green." },
-            { "direction": "baths", "to": "baths/hall", "description": "The bronze-studded doors of the Larkspur Baths.", "view": "closed" },
-            { "direction": "herb shop", "to": "apothecary/shop", "description": "The green door of Wren's Apothecary.", "view": "closed" }
+            { "direction": "down", "to": "green", "travel_time": "3m", "description": "Down the steps to the green." },
+            { "direction": "baths", "to": "baths/hall", "travel_time": "1m", "description": "The bronze-studded doors of the Larkspur Baths.", "view": "closed" },
+            { "direction": "herb shop", "to": "apothecary/shop", "travel_time": "1m", "description": "The green door of Wren's Apothecary.", "view": "closed" }
           ]
         },
         "weavers_row": {
           "name": "Weavers Row",
           "description": "A steep street of narrow houses with looms clacking behind open shutters. The gutters run blue, red and yellow from the dyeworks at the bottom, and a bookbinder's bow window glows with lamplight.",
           "exits": [
-            { "direction": "up", "to": "green", "description": "Up the hill to the green." },
-            { "direction": "dyeworks", "to": "dyeworks/yard", "description": "The wide gate of the dyeworks yard." },
-            { "direction": "bindery", "to": "bindery/shop", "description": "The bookbinder's door, under a swinging sign shaped like an open book.", "view": "closed" }
+            { "direction": "up", "to": "green", "travel_time": "3m", "description": "Up the hill to the green." },
+            { "direction": "dyeworks", "to": "dyeworks/yard", "travel_time": "1m", "description": "The wide gate of the dyeworks yard." },
+            { "direction": "bindery", "to": "bindery/shop", "travel_time": "1m", "description": "The bookbinder's door, under a swinging sign shaped like an open book.", "view": "closed" }
           ]
         }
       }
@@ -64,32 +64,32 @@
           "name": "Entrance Hall",
           "description": "A cool marble hall with a mosaic of leaping fish on the floor. Folded towels are stacked on shelves, and a pretty attendant takes coins at a desk beside a curtained archway.",
           "exits": [
-            { "direction": "out", "to": "green/bath_steps", "description": "The bronze-studded doors onto the Bathhouse Steps.", "view": "closed" },
-            { "direction": "in", "to": "pool", "description": "Through the curtained archway to the baths." }
+            { "direction": "out", "to": "green/bath_steps", "travel_time": "1m", "description": "The bronze-studded doors onto the Bathhouse Steps.", "view": "closed" },
+            { "direction": "in", "to": "pool", "travel_time": "30s", "description": "Through the curtained archway to the baths." }
           ]
         },
         "pool": {
           "name": "Great Pool",
           "description": "A vaulted hall around a wide, steaming green pool fed by a spring that bubbles up from the rock. Light falls through a glass dome, and stone benches line the edges.",
           "exits": [
-            { "direction": "out", "to": "hall", "description": "The curtained archway back to the entrance hall." },
-            { "direction": "steam room", "to": "steam_room", "description": "A heavy oak door, beaded with moisture.", "view": "closed" },
-            { "direction": "service door", "to": "boiler", "description": "A plain door marked for staff only.", "view": "closed" }
+            { "direction": "out", "to": "hall", "travel_time": "30s", "description": "The curtained archway back to the entrance hall." },
+            { "direction": "steam room", "to": "steam_room", "travel_time": "30s", "description": "A heavy oak door, beaded with moisture.", "view": "closed" },
+            { "direction": "service door", "to": "boiler", "travel_time": "30s", "description": "A plain door marked for staff only.", "view": "closed" }
           ]
         },
         "steam_room": {
           "name": "Steam Room",
           "description": "A small, dim, tiled room so thick with herb-scented steam that faces blur at arm's length. Water hisses on hot stones in a copper brazier.",
           "exits": [
-            { "direction": "out", "to": "pool", "description": "The heavy oak door back to the Great Pool.", "view": "closed" }
+            { "direction": "out", "to": "pool", "travel_time": "30s", "description": "The heavy oak door back to the Great Pool.", "view": "closed" }
           ]
         },
         "boiler": {
           "name": "Boiler Room",
           "description": "A hot, cramped room of pipes, valves and a great copper tank that groans as spring water is pumped through it. Coal dust and steam hang in the air.",
           "exits": [
-            { "direction": "service door", "to": "pool", "description": "The staff door back to the Great Pool.", "view": "closed" },
-            { "direction": "loose grate", "to": "playhouse/under_stage", "hidden": true, "description": "A rusted grate low in the wall, where warm air whistles through from somewhere beyond." }
+            { "direction": "service door", "to": "pool", "travel_time": "30s", "description": "The staff door back to the Great Pool.", "view": "closed" },
+            { "direction": "loose grate", "to": "playhouse/under_stage", "travel_time": "5m", "hidden": true, "description": "A rusted grate low in the wall, where warm air whistles through from somewhere beyond." }
           ]
         }
       }
@@ -102,15 +102,15 @@
           "name": "Wren's Apothecary",
           "description": "A narrow shop crowded with labelled jars, bundles of lavender and a brass scale on the counter. The air is sweet and bitter at once, and a ladder leads up through a hatch.",
           "exits": [
-            { "direction": "out", "to": "green/bath_steps", "description": "The green door onto the Bathhouse Steps.", "view": "closed" },
-            { "direction": "up", "to": "loft", "description": "A ladder up through a hatch." }
+            { "direction": "out", "to": "green/bath_steps", "travel_time": "1m", "description": "The green door onto the Bathhouse Steps.", "view": "closed" },
+            { "direction": "up", "to": "loft", "travel_time": "30s", "description": "A ladder up through a hatch." }
           ]
         },
         "loft": {
           "name": "Drying Loft",
           "description": "A low attic under the roof beams, hung with drying herbs and flowers. A small window looks out over the steaming roofs of the baths.",
           "exits": [
-            { "direction": "down", "to": "shop", "description": "The ladder back down to the shop." }
+            { "direction": "down", "to": "shop", "travel_time": "30s", "description": "The ladder back down to the shop." }
           ]
         }
       }
@@ -123,15 +123,15 @@
           "name": "Dyeworks Yard",
           "description": "A busy yard of steaming vats in blue, crimson and saffron. Skeins of wool hang from poles, the ground is stained every colour, and the air stinks of woad and boiling madder root.",
           "exits": [
-            { "direction": "out", "to": "green/weavers_row", "description": "The wide gate onto Weavers Row." },
-            { "direction": "storehouse", "to": "storehouse", "description": "A barn door into the storehouse.", "view": "closed" }
+            { "direction": "out", "to": "green/weavers_row", "travel_time": "1m", "description": "The wide gate onto Weavers Row." },
+            { "direction": "storehouse", "to": "storehouse", "travel_time": "30s", "description": "A barn door into the storehouse.", "view": "closed" }
           ]
         },
         "storehouse": {
           "name": "Storehouse",
           "description": "A dim barn piled high with bales of raw wool, sacks of dried roots and barrels of alum. Finished bolts of dyed cloth are stacked in neat, bright towers.",
           "exits": [
-            { "direction": "out", "to": "yard", "description": "The barn door back to the yard.", "view": "closed" }
+            { "direction": "out", "to": "yard", "travel_time": "30s", "description": "The barn door back to the yard.", "view": "closed" }
           ]
         }
       }
@@ -144,7 +144,7 @@
           "name": "Sable's Bindery",
           "description": "A quiet shop smelling of leather and glue, with presses, racks of paper and a writing desk in the bow window. Shelves of bound books line every wall.",
           "exits": [
-            { "direction": "out", "to": "green/weavers_row", "description": "The door onto Weavers Row.", "view": "closed" }
+            { "direction": "out", "to": "green/weavers_row", "travel_time": "1m", "description": "The door onto Weavers Row.", "view": "closed" }
           ]
         }
       }
@@ -158,32 +158,32 @@
           "name": "Foyer",
           "description": "A small foyer papered with playbills, with a ticket window, faded red curtains and a painted ceiling of cherubs. Doors lead through to the auditorium.",
           "exits": [
-            { "direction": "out", "to": "green/green", "description": "The painted doors onto Larkspur Green.", "view": "closed" },
-            { "direction": "in", "to": "auditorium", "description": "Through to the auditorium." }
+            { "direction": "out", "to": "green/green", "travel_time": "1m", "description": "The painted doors onto Larkspur Green.", "view": "closed" },
+            { "direction": "in", "to": "auditorium", "travel_time": "30s", "description": "Through to the auditorium." }
           ]
         },
         "auditorium": {
           "name": "Auditorium",
           "description": "Rows of worn benches face a raised stage framed in gilt plaster. Painted backdrops of castles and forests hang above, and candles in tin footlights line the stage edge.",
           "exits": [
-            { "direction": "out", "to": "foyer", "description": "Back to the foyer." },
-            { "direction": "backstage", "to": "dressing_rooms", "description": "A narrow door beside the stage.", "view": "closed" },
-            { "direction": "stage trapdoor", "to": "under_stage", "obscured": true, "description": "A trapdoor in the stage boards, used for ghosts and demons." }
+            { "direction": "out", "to": "foyer", "travel_time": "30s", "description": "Back to the foyer." },
+            { "direction": "backstage", "to": "dressing_rooms", "travel_time": "30s", "description": "A narrow door beside the stage.", "view": "closed" },
+            { "direction": "stage trapdoor", "to": "under_stage", "travel_time": "30s", "obscured": true, "description": "A trapdoor in the stage boards, used for ghosts and demons." }
           ]
         },
         "dressing_rooms": {
           "name": "Dressing Rooms",
           "description": "A cramped warren of mirrors, costume racks and pots of greasepaint, littered with wigs, fans and love letters.",
           "exits": [
-            { "direction": "stage", "to": "auditorium", "description": "The narrow door back to the stage.", "view": "closed" }
+            { "direction": "stage", "to": "auditorium", "travel_time": "30s", "description": "The narrow door back to the stage.", "view": "closed" }
           ]
         },
         "under_stage": {
           "name": "Under the Stage",
           "description": "A low, dusty space beneath the stage boards, full of old props, ropes and pulleys. Warm air drifts from somewhere in the dark.",
           "exits": [
-            { "direction": "stage trapdoor", "to": "auditorium", "obscured": true, "description": "A ladder up to the trapdoor in the stage." },
-            { "direction": "loose grate", "to": "baths/boiler", "hidden": true, "description": "A rusted grate behind a stack of painted flats, warm and smelling of steam." }
+            { "direction": "stage trapdoor", "to": "auditorium", "travel_time": "30s", "obscured": true, "description": "A ladder up to the trapdoor in the stage." },
+            { "direction": "loose grate", "to": "baths/boiler", "travel_time": "5m", "hidden": true, "description": "A rusted grate behind a stack of painted flats, warm and smelling of steam." }
           ]
         }
       }

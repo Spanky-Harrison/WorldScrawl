@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
+import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
@@ -71,7 +72,13 @@ class LoadedWorld {
     }
     info() {
         return { id: this.id, name: this.name, start_region: this.world.start.split(':')[0], start: this.world.start,
-            map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living };
+            map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living, ...this.time() };
+    }
+    /** The world's calendar (default Gregorian) and start_date (missing fields filled in). */
+    time() {
+        const calendar = this.raw[0].calendar ?? GREGORIAN;
+        const s = checkStart(this.raw[0].start_date, checkCalendar(calendar));
+        return { calendar, start_date: advanceStart({ year: s.year, month: calendar.months[s.mi].name, day: s.day, time: '00:00' }, s.secs, calendar) };
     }
 }
 
@@ -185,6 +192,11 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         const e = loc.exits.find(x => x.direction.toLowerCase() === wanted);
         return e ? world.get(e.to) : null;
     };
+    const stepSeconds = (world, loc, direction) => {
+        const wanted = strip(direction).toLowerCase();
+        const e = loc.exits.find(x => x.direction.toLowerCase() === wanted);
+        return e ? world.travel_seconds(e, loc) : 0;
+    };
     const find = (world, address) => {
         const loc = world.get(address);
         if (loc === null) throw new HttpError(404, `Unknown location ${repr(address)}. Addresses look like 'region:subregion/location'.`);
@@ -233,7 +245,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const from = field(body, 'from', 'str'), direction = field(body, 'direction', 'str'), changes = field(body, 'changes', 'list', []);
             const w = world_for(q('world'), changes);
             const loc = find(w, from), to = step(w, loc, direction);
-            if (to !== null) { log.info(`move ${loc.address} -${strip(direction)}-> ${to.address}`); return w.to_dict(to); }
+            if (to !== null) { log.info(`move ${loc.address} -${strip(direction)}-> ${to.address}`); return { ...w.to_dict(to), travel_seconds: stepSeconds(w, loc, direction) }; }
             log.info(`move ${loc.address} -${strip(direction)}-> refused (no such exit)`);
             throw new HttpError(400, { error: `There is no exit ${repr(direction)} from ${loc.name}.`, valid_directions: loc.exits.map(e => e.direction) });
         },
@@ -263,15 +275,16 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const from = field(body, 'from', 'str'), steps = field(body, 'steps', 'strs'), changes = field(body, 'changes', 'list', []);
             const w = world_for(q('world'), changes);
             let at = find(w, from), stopped = false, reason = null, error = null;
-            const pathOut = [];
+            const pathOut = [], stepTimes = [];
             for (const direction of steps) {
                 const nxt = step(w, at, direction);
                 if (nxt === null) { stopped = true; reason = 'blocked'; error = `There is no exit ${repr(direction)} from ${at.name}.`; break; }
+                stepTimes.push(stepSeconds(w, at, direction));
                 at = nxt;
                 pathOut.push(w.to_dict(at));
             }
             log.info(`travel ${from} steps=${repr(steps)} -> ${at.address} (${pathOut.length}/${steps.length} steps${stopped ? `, stopped: ${reason}` : ''})`);
-            return { location: w.to_dict(at), path: pathOut, steps_completed: pathOut.length, steps_requested: steps.length, stopped, reason, ...(error ? { error } : {}) };
+            return { location: w.to_dict(at), path: pathOut, steps_completed: pathOut.length, steps_requested: steps.length, step_seconds: stepTimes, travel_seconds: stepTimes.reduce((a, b) => a + b, 0), stopped, reason, ...(error ? { error } : {}) };
         },
         'POST /worlds/render': ({ body }) => render(needBody(body)),
     };
@@ -281,6 +294,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             base: field(body, 'base', 'str?', null), id: field(body, 'id', 'str?', null), id_hint: field(body, 'id_hint', 'str?', null),
             name: field(body, 'name', 'str?', null), auto: field(body, 'auto', 'bool', false), overwrite: field(body, 'overwrite', 'bool', false),
             changes: field(body, 'changes', 'list', []), knowledge: field(body, 'knowledge', 'dict?', null),
+            elapsed: field(body, 'elapsed', [0, Number.MAX_SAFE_INTEGER], 0), // game seconds since the base world's start_date
         };
         if (rootDir === null) throw new HttpError(400, 'Saving worlds needs a worlds folder (not a single WORLDSCRAWL_WORLD_DIR).');
         const base = get_world(req.base);
@@ -325,6 +339,9 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             [wj, raw] = apply_changes(...base.raw, req.changes);
             wj.name = name;
             wj.living = true; // saves are living: they can be saved over later
+            // Bake the clock in the same write as the changes: the saved world starts when this chat's clock is now.
+            const { calendar, start_date } = base.time();
+            wj.start_date = advanceStart(start_date, req.elapsed, calendar);
             const newWorld = build_world(wj, raw); // validate before writing anything
             know = req.knowledge !== null ? clean_knowledge(req.knowledge, newWorld) : null;
         } catch (e) {

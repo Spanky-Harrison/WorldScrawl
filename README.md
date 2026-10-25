@@ -274,3 +274,24 @@ Put `[ws-start]` anywhere in a character's greeting (or alternate greetings). Wo
 `/ws-known` lists the places this chat knows, in two groups: "Been there" and "Seen" (places spotted through exits or windows but never visited). It never names hidden-exit destinations.
 
 **Looking at closed doors.** When you look at a closed door, the engine asks which of four things you did: listen (only faint sounds), peek (you glimpse the room beyond, but the door stays shut and the peek is recorded on the message as `worldscrawl_peek`), open (the door opens), or just look (you're told the door is closed). The narrator is told to mention every exit only when you arrive somewhere or explicitly look around. Exits whose destination is obscured are named only by their label.
+
+## Game time
+
+Only travel takes time. Each exit can have `"travel_time"`: `"2h"`, `"90m"`, `"1h30m"`, `"45s"`. Without one, a step inside one subregion (a building's rooms, along one street) takes 1 minute, into another subregion 3 minutes, into another region 10 minutes. Every move stamps its seconds on its chat message (`worldscrawl_move.seconds`; a multi-step trip stamps the sum of its steps), so swipes keep it and deleting the message undoes it. The clock is the world's `start_date` plus those seconds; saving a world writes the current clock as the saved world's `start_date` in the same write. The date, weekday and time of day go to the narrator, the footer under the latest reply, and the map window's top bar.
+
+`world.json`:
+
+```json
+"start_date": { "year": 1247, "month": "April", "day": 12, "time": "08:00" },
+"calendar": {
+  "hours_per_day": 24,
+  "days_of_week": ["Moonday", "Tideday", "Fireday"],
+  "months": [
+    { "name": "Thaw", "days": 30 },
+    { "name": "Frost", "days": 28, "leap_every": 4, "leap_days": 1 },
+    { "name": "Midwinter", "days": 1 }
+  ]
+}
+```
+
+`calendar` is optional (default: Gregorian, February gets a 29th every 4th year, weekdays match real dates 1900-2100). The week is as long as `days_of_week`; a year is all its months added up; hours, minutes and seconds are always 60/60. `leap_every`/`leap_days` (default 1) are per month. Optional `first_weekday` picks which day name year 1 starts on (index, default 0). Time of day: night, dawn, morning, afternoon, evening, scaled to `hours_per_day` (on 24 hours: dawn 5-7, morning 7-12, afternoon 12-17, evening 17-21).
