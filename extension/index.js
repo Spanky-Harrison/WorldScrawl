@@ -3,6 +3,7 @@
 // and narrates. Optional, off by default: the old ws_look/ws_move tools.
 // The party's location is stored on chat messages (message.extra.worldscrawl_location) so that
 // deleting or swiping messages rolls the location back with them.
+import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine } from './words.mjs';
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -943,7 +944,7 @@ async function narrativeDig(msg, loc) {
 export const digStayPrompt = said => `${said}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.`;
 // ---- Looking and doors (the party never moves).
 export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door';
-export const LOOK_RE = /\b(?:look|looks|looked|looking|peer|peers|peered|peering|peek|peeks|peeked|peeking|gaze|gazes|gazed|gazing|glance|glances|glanced|glancing|listen|listens|listened|listening|watch|watches|watched|watching|see|sees|saw|seeing)\b/i;
+export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 export const DOOR_OPEN_RE = /\b(?:open|opens|opened|opening|unlatch\w*|unbar\w*)\b/i;
 export const DOOR_CLOSE_RE = /\b(?:close|closes|closed|closing|shut|shuts|shutting|slam|slams|slammed|slamming)\b/i;
 export const NO_EXIT = 'out a window or opening with no exit';
@@ -1043,7 +1044,10 @@ async function parseIntent(msg) {
     const doors = doorCandidates(loc);
     const canOpenDoor = DOOR_OPEN_RE.test(msg.mes ?? '') && doors.toOpen.length > 0, canCloseDoor = DOOR_CLOSE_RE.test(msg.mes ?? '') && doors.toClose.length > 0;
     const extras = [...(canOpen ? [OPEN] : []), ...(canLook ? [LOOK] : []), ...(canOpenDoor ? [OPEN_DOOR] : []), ...(canCloseDoor ? [CLOSE_DOOR] : [])];
-    const options = [...dirs, ...places.map(p => p.label), ...extras, STAY, ELSEWHERE, UNCLEAR];
+    // Only looking ("I look out the door"): no move options, so a word like "out" can't pick the "out" exit.
+    const onlyLook = canLook && lookOnly(msg.mes);
+    const moveDirs = onlyLook ? [] : dirs, movePlaces = onlyLook ? [] : places;
+    const options = [...moveDirs, ...movePlaces.map(p => p.label), ...extras, STAY, ...(onlyLook ? [] : [ELSEWHERE, UNCLEAR])];
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
@@ -1052,15 +1056,15 @@ async function parseIntent(msg) {
     });
     const prompt = `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
         + `${said}\n\nAnswer with one option:\n`
-        + dirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
-        + places.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
+        + moveDirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
+        + movePlaces.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
         + (canOpen ? `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n` : '')
         + (canLook ? `- ${LOOK}: the player looks, peers, peeks or listens at something from here, without going anywhere\n` : '')
         + (canOpenDoor ? `- ${OPEN_DOOR}: the player opens a closed door here, without going through it\n` : '')
         + (canCloseDoor ? `- ${CLOSE_DOOR}: the player closes an open door here\n` : '')
         + `- ${STAY}: the player is not trying to travel anywhere\n`
-        + `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
-        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`
+        + (onlyLook ? '\n' : `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
+        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`)
         + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
     const cands = await travelCandidates(loc);
@@ -1069,6 +1073,7 @@ async function parseIntent(msg) {
     if (choice === OPEN) return await narrativeDig(msg, loc);
     if (choice === LOOK) return await narrativeLook(msg, loc);
     if (choice === OPEN_DOOR || choice === CLOSE_DOOR) return await narrativeDoor(msg, loc, choice === OPEN_DOOR ? doors.toOpen : doors.toClose, choice === OPEN_DOOR ? 'open_door' : 'close_door');
+    if (onlyLook) { console.log(`[WorldScrawl] look-only message, answer ${JSON.stringify(String(answer).slice(0, 40))} -> stay`); return { kind: 'stay', loc }; }
     const ans = trimAnswer(cleanAnswer(answer));
     const insideAns = !dirs.includes(choice) && hereAreas(loc).find(a => sameName(a.name, choice ?? ans));
     if (insideAns) return { kind: 'already', loc, name: insideAns.name };
@@ -1261,7 +1266,8 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
-    else lines.push(`${who} has NOT moved this turn and is still at ${displayName(loc)}. Do not narrate travel to any other place.`);
+    else lines.push(stayPutLine(who, displayName(loc)));
+    if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
     if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(EXITS_HINT);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
