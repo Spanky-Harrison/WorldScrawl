@@ -1088,7 +1088,7 @@ try {
     check('no start button when WorldScrawl is off in the chat', await page.locator('#chat .worldscrawl_start_button').count() === 0 && await page.evaluate(() => SillyTavern.getContext().chat[0].mes === 'Welcome, traveler. [ws-start]'));
     // ---- The WorldScrawl window (plugin/ui/): served by the plugin, follows the chat over BroadcastChannel.
     const ui = await page.context().newPage(); await ui.setViewportSize({ width: 1200, height: 800 });
-    ui.on('pageerror', e => console.log('[ui pageerror]', e.message));
+    const uiErrors = []; ui.on('pageerror', e => { uiErrors.push(e.message); console.log('[ui pageerror]', e.message); });
     const uiRes = await ui.goto(BASE + 'api/plugins/worldscrawl/ui/');
     check('map window page is served', uiRes.status() === 200 && /WorldScrawl/.test(await ui.title()), String(uiRes.status()));
     await ui.waitForTimeout(2500);
@@ -1106,6 +1106,26 @@ try {
     const m2 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, stood: [...document.querySelectorAll('.node.stood')].map(n => n.dataset.id) }));
     check('map window follows a move live', m2.here && m2.here !== 'riverton:drowned_rat/common_room' && m2.stood.includes('riverton:drowned_rat/common_room'), JSON.stringify(m2));
     await ui.screenshot({ path: '/tmp/ws-e2e-map.png' });
+    // Layers: opens on the current room's subregion; breadcrumb goes up; double-click drills down.
+    const nodeIds = () => ui.evaluate(() => [...document.querySelectorAll('.node')].map(n => n.dataset.id));
+    const crumbText = () => ui.evaluate(() => [...document.querySelectorAll('#breadcrumb .crumb')].map(c => c.textContent));
+    check('map opens on the current room\'s area, with a breadcrumb', JSON.stringify(await crumbText()) === JSON.stringify(['World', 'Riverton', 'The Drowned Rat']), JSON.stringify(await crumbText()));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
+    const rIds = await nodeIds();
+    const rHere = await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id);
+    check('region layer: one node per discovered area, current area highlighted, nothing undiscovered', rIds.includes('sub:riverton:drowned_rat') && rIds.includes('sub:riverton:streets') && rHere === 'sub:riverton:drowned_rat'
+        && !rIds.some(i => /temple|docks|secret|smithy|general_store|gilded/.test(i)) && rIds.every(i => i.startsWith('sub:riverton:')), JSON.stringify(rIds));
+    await ui.screenshot({ path: '/tmp/ws-e2e-map-region.png' });
+    await ui.click('#breadcrumb .crumb[data-level="world"]'); await ui.waitForTimeout(300);
+    check('world layer: one node per region', JSON.stringify(await nodeIds()) === '["region:riverton"]', JSON.stringify(await nodeIds()));
+    await ui.dblclick('.node[data-id="region:riverton"]'); await ui.waitForTimeout(300);
+    await ui.dblclick('.node[data-id="sub:riverton:drowned_rat"]'); await ui.waitForTimeout(300);
+    const dIds = await nodeIds();
+    check('double-click drills down to the rooms', dIds.includes('riverton:drowned_rat/upstairs') && (await crumbText()).length === 3, JSON.stringify(dIds));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
+    await ui.click('.mapbuttons .topbutton'); await ui.waitForTimeout(300);
+    check('Centre goes back to the current room\'s layer', (await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id)) === m2.here);
+    check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-map'));

@@ -2,7 +2,7 @@
   "name": "Riverton",
   "notes": "Riverton is a small river-trading village on a slow brown river. Folk are plain-spoken and wary of strangers until coin changes hands. Barges and fishing boats bring most of the news, and the smell of river mud is never far away.",
   "start": "drowned_rat/common_room",
-  "entrance": "streets/square",
+  "entrance": "streets",
   "subregions": {
     "drowned_rat": {
       "name": "The Drowned Rat",

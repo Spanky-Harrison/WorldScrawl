@@ -35,7 +35,7 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
   "name": "Riverton",
   "notes": "Flavor that applies to the whole region (optional).",
   "start": "drowned_rat/common_room",
-  "entrance": "streets/square",
+  "entrance": "streets",
   "subregions": {
     "drowned_rat": {
       "name": "The Drowned Rat",
@@ -59,7 +59,7 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
 }
 ```
 
-- `entrance` (optional): the room you arrive in when travelling to a building/area by name (subregion: a room id, default its first room) or to a region by name (region: `sub/loc`, default the region's start). Checked when the server starts.
+- `entrance` (optional): the room you arrive in when travelling to a building/area by name (subregion: a room id, default its first room) or to a region by name (region: a subregion id, meaning that subregion's own entrance, e.g. `"streets"`, or a room as `sub/loc`; default the region's start). Riverton uses `"streets"`. Checked when the server starts.
 - Full address: `region:subregion/location` (`riverton:drowned_rat/common_room`).
 - Exit `to`: `loc` = same subregion, `sub/loc` = same region, `region:sub/loc` = another region. Every target must exist.
 - Optional exit flags `obscured` / `hidden` (true/false). `obscured` = you can see the door but not what's behind it: it is listed by its label only ("trapdoor", "grate") until the party has walked through that door, from either side. `hidden` is reserved for true secret doors (not listed at all until found, which needs per-chat state); **for now `hidden` behaves exactly like `obscured`**.
@@ -176,10 +176,25 @@ tells the window what's happening.
   haven't found (a hidden or obscured door you haven't been through) is a small "?" stub with just its label.
   It never shows where the exit leads. Closed doors are dashed lines. Your room has a highlighted border, and the
   map centres on it whenever you move. Colours group rooms by building or area.
-- **Layout.** Rooms are placed on a grid by exit direction (north is up, east is right, up/down are diagonal).
-  A room with a `pos` (`{"x": 0, "y": 0}`) in its file keeps that position.
+- **Layers.** The map has three levels. **World** shows one node per region, joined where regions connect.
+  **Region** shows one node per area (subregion: a building, a street, ...), joined if any exit links them.
+  **Area** shows that area's own rooms, plus small "→" nodes for the areas right outside it. The map opens on
+  the area you're in and follows you when you move. The **breadcrumb** in the top bar (World › Riverton › The
+  Drowned Rat) goes back up. **Double-click** an area node, or click it and press **Open …** in the side panel,
+  to go down. The discovery rules apply at every level: only areas and regions you've found are shown, hidden
+  exits don't link anything until revealed, and places you've only seen don't give away where their exits go.
+- **Layout.** Organic and branching. Linked places pull together. Compass exits (north, east, up, ...) only nudge
+  the direction; other exits (in, back, window, ...) don't. It is worked out from the data, so it works for any
+  world, and it's the same every time for the same map. It starts from the layer's entrance, using the same
+  `entrance` as travel: in an area, its entrance room (default its first room); in a region, the area holding the
+  region's entrance (default its start); in the world, the start region. If that isn't discovered yet, it starts
+  from the most connected place (lowest id on a tie). It branches out from there. The positions of each layer are remembered in the browser, so rooms don't jump
+  around when new ones appear. A room with a `pos` (`{"x": 0, "y": 0}`, in link lengths) is pinned there.
 - **Controls.** Drag to pan, use the wheel or a two-finger pinch to zoom, and click a room to see its name,
-  description and exits in the side panel. **Centre** jumps back to where you are.
+  description and exits in the side panel. **Centre** jumps back to where you are (and its area).
+
+Optional world-file hint, ignored by the game itself: `"pos": {"x": 2, "y": -1}` on a location (numbers; anything
+else is an error).
 
 The window only reads. It never changes the chat or the world files. Room data comes through the normal
 `/rooms` and `/doors` endpoints, so it follows the same rules as the extension. Plugin files changed, so
