@@ -1,10 +1,11 @@
 // Loads and validates the static world map (worlds/<id>/world.json + worlds/<id>/regions/*.json).
 //
 // Region file layout:
-//   {name, notes?, start: "sub/loc",
+//   {name, notes?, start: "sub/loc", entrance?: "sub" | "sub/loc",
 //    subregions: {sub_id: {name, notes?, inherit_notes?: bool (default true),
 //                          locations: {loc_id: {name, description, inherit_region_notes?: bool,
 //                                               inherit_subregion_notes?: bool, exits: [...]}}}}}
+// Map-only hint (optional): pos?: {x, y} on a location.
 // Full address: "region:sub/loc". Exit "to": "loc" (same subregion), "sub/loc" (same region) or "region:sub/loc".
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -187,6 +188,7 @@ export class World {
             region: { id: region.id, name: region.name, notes: region.notes, entrance: region.entrance },
             subregion: { id: sub.id, name: sub.name, notes: sub.notes, entrance: sub.entrance,
                 entrance_name: this.locations.get(sub.entrance).name, label_rooms: sub.label_rooms },
+            ...(loc.pos ? { pos: { ...loc.pos } } : {}),
             name: loc.name,
             display_name: World.place_label(loc.name, sub.name),
             description: loc.description,
@@ -258,6 +260,14 @@ function optionalBool(obj, key, where) {
     return obj[key];
 }
 
+/** Optional map position {x, y} (numbers; only used to pin a room on the map). */
+function optionalPos(obj, where) {
+    if (!has(obj, 'pos')) return null;
+    const p = obj.pos;
+    if (!isObj(p) || !Number.isFinite(p.x) || !Number.isFinite(p.y)) throw new WorldError(`${where}: "pos" must look like {"x": 0, "y": 0}`);
+    return { x: p.x, y: p.y };
+}
+
 function checkSlug(value, where) {
     if (!SLUG.test(value)) throw new WorldError(`${where}: ${repr(value)} is not a valid id (use lowercase letters, digits and single underscores, e.g. "old_mill")`);
 }
@@ -317,7 +327,8 @@ export function build_world(worldJson, rawRegions) {
         if (count(start, '/') !== 1) throw new WorldError(`${fname}: "start" must look like "subregion/location", got ${repr(start)}`);
         regionStarts.set(rid, start);
         const regionEntrance = requireStr(data, 'entrance', fname, true);
-        if (regionEntrance !== null && count(regionEntrance, '/') !== 1) throw new WorldError(`${fname}: "entrance" must look like "subregion/location", got ${repr(regionEntrance)}`);
+        // "sub/loc" (a room) or just "sub" (that subregion's own entrance, resolved once the subregions are read).
+        if (regionEntrance !== null && regionEntrance !== '' && count(regionEntrance, '/') > 1) throw new WorldError(`${fname}: "entrance" must be a subregion id or "subregion/location", got ${repr(regionEntrance)}`);
         region.entrance = `${rid}:${regionEntrance || start}`;
         const subs = data.subregions;
         if (!isObj(subs) || !Object.keys(subs).length) throw new WorldError(`${fname}: "subregions" must be a non-empty object keyed by subregion id`);
@@ -367,7 +378,7 @@ export function build_world(worldJson, rawRegions) {
                 locations.set(address, {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), exits,
                     inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
-                    views: [],
+                    views: [], pos: optionalPos(loc, where),
                 });
             }
         }
@@ -388,7 +399,12 @@ export function build_world(worldJson, rawRegions) {
     }
     for (const [rid, start] of regionStarts) {
         if (!locations.has(`${rid}:${start}`)) throw new WorldError(`${rid}.json: start location ${repr(start)} does not exist in region ${repr(rid)}`);
-        const ent = regions.get(rid).entrance;
+        let ent = regions.get(rid).entrance;
+        if (!ent.includes('/')) { // just a subregion id: that subregion's entrance
+            const sub = subregions.get(ent);
+            if (!sub) throw new WorldError(`${rid}.json: entrance ${repr(ent.split(':').slice(1).join(':'))} is not a subregion of region ${repr(rid)} (use a subregion id or "subregion/location")`);
+            ent = regions.get(rid).entrance = sub.entrance;
+        }
         if (!locations.has(ent)) throw new WorldError(`${rid}.json: entrance ${repr(ent.split(':').slice(1).join(':'))} does not exist in region ${repr(rid)}`);
     }
     if (!regions.has(startRegion)) throw new WorldError(`world.json: start_region ${repr(startRegion)} has no matching file in regions/`);

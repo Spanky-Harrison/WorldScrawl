@@ -56,3 +56,12 @@ body { background: var(--ws-bg); color: var(--SmartThemeBodyColor); font-family:
 .legend span { display: inline-block; margin-right: 10px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .mapbuttons { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
+#breadcrumb { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+#breadcrumb .crumb { cursor: pointer; background: transparent; border: 0; color: var(--SmartThemeEmColor); font: inherit; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+#breadcrumb .crumb:hover { color: var(--SmartThemeBodyColor); }
+#breadcrumb .crumb.active { color: var(--SmartThemeQuoteColor); }
+#breadcrumb .sep { color: var(--SmartThemeEmColor); opacity: .6; }
+.node.outside rect { fill-opacity: .05; stroke-dasharray: 2 3; }
+.node.outside text { fill: var(--SmartThemeEmColor); }
+.node.area.stood rect { fill-opacity: .45; }
+.side .open { margin: 6px 0; }

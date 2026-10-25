@@ -1,6 +1,6 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
-import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges } from './mapdata.mjs';
+import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
 const channel = new BroadcastChannel('worldscrawl');
@@ -56,6 +56,7 @@ function buildTopBar() {
 // ---- Room data, fetched in batches through the plugin API and remembered per world + map version.
 const roomCache = new Map(); // world -> Map(address -> room)
 const revealCache = new Map(); // world -> Map(door -> [reveal])
+const worldStart = new Map(); // world -> start address (the world layer's layout root)
 async function fetchRooms(world, addresses) {
     if (!roomCache.has(world)) roomCache.set(world, new Map());
     const cache = roomCache.get(world), missing = [...new Set(addresses)].filter(a => a && !cache.has(a));
@@ -64,6 +65,7 @@ async function fetchRooms(world, addresses) {
         const r = await fetch(`${API}/rooms?addresses=${encodeURIComponent(part.join(','))}${world ? `&world=${encodeURIComponent(world)}` : ''}`);
         if (!r.ok) throw new Error(`map server answered ${r.status}`);
         const b = await r.json();
+        if (b.start) worldStart.set(world, b.start.address ?? b.start);
         for (const room of b.rooms ?? []) cache.set(room.address, room);
         for (const a of b.unknown ?? []) cache.set(a, null);
     }
@@ -97,23 +99,30 @@ export async function knownRooms(st) {
     return out;
 }
 
-// ---- Map window.
-const CELL_W = 200, CELL_H = 120, NODE_W = 160, NODE_H = 46;
+// ---- Map window: three layers (world -> region -> subregion), breadcrumb in the top bar.
+const NODE_W = 160, NODE_H = 46;
+const savedLayout = key => { try { return JSON.parse(localStorage.getItem(`worldscrawl_layout:${key}`) ?? 'null'); } catch { return null; } };
+const saveLayout = (key, pos) => { try { localStorage.setItem(`worldscrawl_layout:${key}`, JSON.stringify(Object.fromEntries(pos))); } catch {} };
 function createMapWindow(win) {
     const body = $('div', { class: 'wsbody' }), view = $('div', { class: 'mapview' }), side = $('aside', { class: 'side' });
     win.append(body); body.append(view, side);
     const svg = S('svg'), world = S('g');
     svg.append(world);
     const legend = $('div', { class: 'legend' });
-    const centre = $('button', { class: 'topbutton', title: 'Centre on where you are', onclick: () => centreOn(current?.here, true) }, 'Centre');
+    const centre = $('button', { class: 'topbutton', title: 'Centre on where you are', onclick: () => { if (current) { setLayer(layerOf(current.full, current.here)); } } }, 'Centre');
     view.append(svg, legend, $('div', { class: 'mapbuttons' }, centre));
-    let tf = { x: 0, y: 0, k: 1 }, current = null, selected = null, lastHere = null, lastKey = null;
+    let tf = { x: 0, y: 0, k: 1 }, current = null, selected = null, lastHere = null, lastKey = null, layer = null;
+    const crumbs = document.getElementById('breadcrumb');
     const apply = () => world.setAttribute('transform', `translate(${tf.x},${tf.y}) scale(${tf.k})`);
     function centreOn(id) {
         const p = current?.pos.get(id);
         if (!p) return;
         const r = view.getBoundingClientRect();
-        tf.x = r.width / 2 - (p.x * CELL_W) * tf.k; tf.y = r.height / 2 - (p.y * CELL_H) * tf.k; apply();
+        tf.x = r.width / 2 - p.x * tf.k; tf.y = r.height / 2 - p.y * tf.k; apply();
+    }
+    function setLayer(l) {
+        layer = l; selected = null;
+        if (current) { render(current.full, current.here, current.world); centreOn(current.graph.nodes.find(n => n.here)?.id ?? current.graph.nodes[0]?.id); }
     }
     // Pan (drag), zoom (wheel, pinch).
     const pointers = new Map(); let pinch = null, moved = false;
@@ -143,6 +152,12 @@ function createMapWindow(win) {
         const n = current?.graph.nodes.find(x => x.id === id);
         if (!n) { side.append($('p', { class: 'muted' }, 'Click a room to see its details.')); return; }
         if (n.kind === 'stub') { side.append($('h3', {}, n.name), $('p', { class: 'muted' }, "You haven't found out where this leads yet.")); return; }
+        if (n.layer) { // an area (subregion or region), inside this layer or just outside it
+            side.append($('h3', {}, n.name), $('div', { class: 'area' }, (n.level === 'region' ? 'Region' : 'Area') + (n.here ? ' · you are here' : n.kind === 'outside' ? ' · next to this map' : n.kind === 'seen' ? ' · seen, not visited' : '')));
+            if (n.rooms?.length) side.append($('p', {}, `${n.rooms.length} known place${n.rooms.length === 1 ? '' : 's'}.`));
+            side.append($('button', { class: 'topbutton open', onclick: () => setLayer(n.layer) }, `Open ${n.name}`), $('p', { class: 'muted' }, 'Double-click an area to open it.'));
+            return;
+        }
         side.append($('h3', {}, n.name), $('div', { class: 'area' }, [n.subregion.name, n.region].filter(Boolean).join(' · ') + (n.here ? ' · you are here' : n.kind === 'seen' ? ' · seen, not visited' : '')));
         if (n.description) side.append($('p', {}, n.description));
         const exits = current.graph.edges.flatMap(e => [e.from === id ? e : null, e.back?.from === id ? e.back : null].filter(Boolean));
@@ -158,46 +173,58 @@ function createMapWindow(win) {
         } else side.append($('p', { class: 'muted' }, "You haven't been here yet."));
     }
 
-    function draw(graph, here) {
-        const pos = layoutGraph(graph, here);
-        current = { graph, pos, here };
+    function render(full, here, worldId) {
+        if (!layer) layer = layerOf(full, here);
+        const graph = layerGraph(full, layer), key = `${worldId ?? ''}|${layerKey(layer)}`;
+        const pos = layoutGraph(graph, { prev: savedLayout(key) });
+        saveLayout(key, pos);
+        current = { graph, pos, here, full, world: worldId };
+        crumbs.replaceChildren(...breadcrumb(full, layer).flatMap((c, i, all) => [i ? $('span', { class: 'sep' }, '›') : '',
+            $('button', { class: `crumb${i === all.length - 1 ? ' active' : ''}`, 'data-level': c.layer.level, onclick: () => setLayer(c.layer) }, c.label)]));
         world.replaceChildren();
-        const at = id => { const p = pos.get(id); return { x: p.x * CELL_W, y: p.y * CELL_H }; };
+        const at = id => pos.get(id);
         const subs = new Map();
         for (const e of graph.edges) {
             const a = at(e.from), b = at(e.to), g = S('g', { class: `edge${e.closed || e.back?.closed ? ' closed' : ''}` });
+            if (!a || !b) continue;
             g.append(S('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
-            const label = (t, f) => { const el = S('text', { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f - 4, 'text-anchor': 'middle' }); el.textContent = t; g.append(el); };
+            const label = (t, f) => { if (!t) return; const el = S('text', { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f - 4, 'text-anchor': 'middle' }); el.textContent = t; g.append(el); };
             label(e.direction, 0.3); if (e.back) label(e.back.direction, 0.7);
             world.append(g);
         }
         for (const n of graph.nodes) {
-            const p = at(n.id), hue = hueFor(n.subregion.id), w = n.kind === 'stub' ? 110 : NODE_W, h = n.kind === 'stub' ? 30 : NODE_H;
-            if (n.subregion.id) subs.set(n.subregion.id, { name: n.subregion.name, hue });
-            const g = S('g', { class: `node ${n.kind}${n.here ? ' here' : ''}`, 'data-id': n.id, transform: `translate(${p.x},${p.y})` });
-            g.append(S('rect', { x: -w / 2, y: -h / 2, width: w, height: h, rx: 8, ...(n.kind !== 'stub' ? { fill: `hsl(${hue} 55% 45%)`, stroke: `hsl(${hue} 60% 60%)` } : {}) }));
-            const t = S('text', { 'text-anchor': 'middle', y: n.kind === 'stub' || !n.subregion.name ? 5 : -2 });
-            t.textContent = n.kind === 'stub' ? `${n.name} ?` : n.name.length > 22 ? `${n.name.slice(0, 21)}…` : n.name;
+            const p = at(n.id), small = n.kind === 'stub' || n.kind === 'outside', hue = hueFor(n.subregion.id);
+            const w = small ? 130 : NODE_W, h = small ? 30 : NODE_H;
+            if (n.subregion.id && n.kind !== 'outside') subs.set(n.subregion.id, { name: n.subregion.name, hue });
+            const g = S('g', { class: `node ${n.kind}${n.here ? ' here' : ''}${n.layer ? ' area' : ''}`, 'data-id': n.id, transform: `translate(${p.x},${p.y})` });
+            g.append(S('rect', { x: -w / 2, y: -h / 2, width: w, height: h, rx: n.layer ? 16 : 8, ...(n.kind !== 'stub' ? { fill: `hsl(${hue} 55% 45%)`, stroke: `hsl(${hue} 60% 60%)` } : {}) }));
+            const sub2 = n.layer && n.kind !== 'outside' ? `${n.rooms.length} place${n.rooms.length === 1 ? '' : 's'}` : n.kind !== 'stub' && n.kind !== 'outside' ? n.subregion.name : '';
+            const t = S('text', { 'text-anchor': 'middle', y: small || !sub2 ? 5 : -2 });
+            const label = n.kind === 'stub' ? `${n.name} ?` : n.kind === 'outside' ? `→ ${n.name}` : n.name;
+            t.textContent = label.length > 22 ? `${label.slice(0, 21)}…` : label;
             g.append(t);
-            if (n.kind !== 'stub' && n.subregion.name) { const s = S('text', { 'text-anchor': 'middle', y: 15, style: 'font-size:10px;opacity:.7' }); s.textContent = n.subregion.name.slice(0, 26); g.append(s); }
-            const title = S('title'); title.textContent = n.kind === 'stood' ? `${n.name} (been here)` : n.kind === 'seen' ? `${n.name} (seen, not visited)` : `${n.name}: unexplored`; g.append(title);
+            if (sub2) { const s2 = S('text', { 'text-anchor': 'middle', y: 15, style: 'font-size:10px;opacity:.7' }); s2.textContent = sub2.slice(0, 26); g.append(s2); }
+            const title = S('title'); title.textContent = n.kind === 'stood' ? `${n.name} (been here)` : n.kind === 'seen' ? `${n.name} (seen, not visited)` : n.kind === 'outside' ? `${n.name} (double-click to open)` : `${n.name}: unexplored`; g.append(title);
             g.addEventListener('click', () => { if (!moved) showSide(n.id); });
+            if (n.layer) g.addEventListener('dblclick', ev => { ev.stopPropagation(); setLayer(n.layer); });
             world.append(g);
         }
         legend.replaceChildren(...[...subs.values()].map(s => $('span', {}, $('i', { style: `background:hsl(${s.hue} 55% 45%)` }), s.name)),
             $('span', {}, '▭ been · ⋯ seen · ┄ closed door'));
-        showSide(graph.nodes.some(n => n.id === selected) ? selected : here);
+        const hereNode = graph.nodes.find(n => n.here)?.id;
+        showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
 
     async function update(st) {
-        if (!st || !st.on) { world.replaceChildren(); legend.replaceChildren(); current = null; side.replaceChildren($('p', { class: 'empty' }, NO_CHAT)); lastHere = null; return; }
+        if (!st || !st.on) { world.replaceChildren(); legend.replaceChildren(); crumbs.replaceChildren(); current = null; layer = null; side.replaceChildren($('p', { class: 'empty' }, NO_CHAT)); lastHere = null; return; }
         let rooms;
         try { rooms = await knownRooms(st); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the map: ${e.message}`)); return; }
         if (st !== state) return; // a newer state arrived meanwhile
-        const graph = buildGraph(st, rooms);
-        draw(graph, st.location);
-        const key = `${st.chatId}|${st.location}`;
-        if (key !== lastKey) { centreOn(st.location); lastKey = key; } // auto-centre when the location (or chat) changes
+        const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms);
+        const key = `${st.chatId}|${st.location}`, moved_ = key !== lastKey;
+        if (moved_) layer = layerOf(graph, st.location); // follow the party: open the layer with the current room
+        render(graph, st.location, st.world);
+        if (moved_) { centreOn(current.graph.nodes.find(n => n.here)?.id); lastKey = key; } // auto-centre when the location (or chat) changes
         lastHere = st.location;
     }
     const fn = st => update(st);
