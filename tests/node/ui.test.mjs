@@ -130,3 +130,19 @@ test('ui files have no external dependencies', () => {
         for (const m of s.matchAll(/from '([^']+)'/g)) assert.ok(m[1].startsWith('./'), `${f} imports only local files`);
     }
 });
+
+test('an unrevealed hidden exit is absent from the map (not even a stub); it appears once revealed; obscured stays a stub', () => {
+    const cellar = { address: 'w:a/cellar', name: 'Cellar', subregion: { id: 'a', name: 'A' }, description: 'Damp.', exits: [
+        { direction: 'up', to: 'w:a/hall', to_name: 'Hall', to_subregion: { id: 'a', name: 'A' } },
+        { direction: 'narrow door', hidden: true, door: 'd1', description: 'A narrow door.' },
+        { direction: 'grate', obscured: true, door: 'd2' }] };
+    const st = { location: cellar.address, stood: [cellar.address], seen: [], doors_open: [] };
+    const g = buildGraph(st, new Map([[cellar.address, knownRoom(cellar)]]));
+    assert.ok(!g.edges.some(e => /narrow door/i.test(e.direction)), 'hidden exit leaked');
+    assert.ok(!g.nodes.some(n => /narrow door/i.test(n.id + n.name)), 'hidden stub leaked');
+    assert.ok(g.nodes.some(n => n.id === 'stub:w:a/cellar|grate'), 'obscured exit stays a label-only stub');
+    const reveals = [{ from: cellar.address, direction: 'narrow door', to: 'w:b/tunnel', to_name: 'Tunnel', to_subregion: { id: 'b', name: 'B' } }];
+    const g2 = buildGraph(st, new Map([[cellar.address, knownRoom(cellar, { reveals })]]));
+    assert.ok(g2.edges.some(e => e.direction === 'narrow door' && e.to === 'w:b/tunnel'));
+    assert.ok(g2.nodes.some(n => n.id === 'w:b/tunnel' && n.kind === 'seen'));
+});

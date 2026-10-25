@@ -71,7 +71,7 @@ export function buildGraph(state, rooms) {
     for (const a of stood) {
         const r = rooms.get(a);
         if (!r) continue;
-        for (const e of r.exits ?? []) {
+        for (const e of (r.exits ?? []).filter(e => !e.hidden || e.revealed)) { // an unrevealed hidden exit is a secret: not even a stub
             const closed = isClosed(e, open);
             if (revealsDestination(e) && e.to) {
                 addSeen(e.to, e.to_name, e.to_subregion, '');
