@@ -10,6 +10,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { checkCalendar, checkStart, defaultTravel, parseDuration } from './ui/calendar.mjs';
 
 export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 export const VIEWS = ['open', 'closed', 'none']; // optional exit "view" (default: closed if hidden/obscured, else open)
@@ -144,6 +145,7 @@ export class Exit {
         this.direction = direction; this.to = to; this.description = description; this.flags = flags;
         this.door = null; // opaque id shared by a flagged/closed exit and its return exit (derived at load)
         this.view = view; this.stays_open = stays_open;
+        this.travel_time = null; // seconds from "travel_time" in the region file, or null = default (calendar.mjs defaultTravel)
     }
     get flagged() { return Boolean(this.flags.hidden || this.flags.obscured); }
     get effective_view() { return this.view || (this.flagged ? 'closed' : 'open'); }
@@ -159,6 +161,8 @@ export class World {
         this.doors = new Map(); // door id -> {rooms: [a, b], stays_open}
     }
     get(address) { return this.locations.get(address) ?? null; }
+    /** Seconds a step through exit e (from room src) takes: its travel_time, else the default for where it leads. */
+    travel_seconds(e, src) { return e.travel_time ?? defaultTravel(src?.address ?? '', e.to); }
     sub_of(loc) { return this.subregions.get(`${loc.region}:${loc.subregion}`); }
     effective_notes(loc) {
         const region = this.regions.get(loc.region), sub = this.sub_of(loc);
@@ -222,7 +226,7 @@ export class World {
             direction: e.direction, ...(e.description ? { description: e.description } : {}), ...e.flags,
             ...(e.door && this.doors.has(e.door) ? { door: e.door, door_rooms: this.doors.get(e.door).rooms.map(room_token) } : {}),
             view: e.effective_view,
-            ...(src !== null ? { stays_open: this.stays_open(e, src) } : {}),
+            ...(src !== null ? { stays_open: this.stays_open(e, src), travel_seconds: this.travel_seconds(e, src) } : {}),
         };
         if (!World.reveals_destination(e)) return out;
         return this.destination_dict(e, src, out);
@@ -310,6 +314,7 @@ export const load_world = root => build_world(...read_world_raw(root));
 export function build_world(worldJson, rawRegions) {
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
+    try { checkStart(worldJson.start_date, checkCalendar(worldJson.calendar, 'world.json: calendar'), 'world.json: start_date'); } catch (err) { throw new WorldError(err.message); }
     const files = Object.keys(rawRegions).sort();
     const regions = new Map(), subregions = new Map(), regionStarts = new Map(), locations = new Map();
     const rawExits = [], rawViews = [];
@@ -368,6 +373,9 @@ export function build_world(worldJson, rawRegions) {
                     if (view !== null && !VIEWS.includes(view)) throw new WorldError(`${ewhere}: "view" must be one of ${VIEWS.join(', ')}`);
                     const e = new Exit(direction, strip(requireStr(ex, 'to', ewhere)), requireStr(ex, 'description', ewhere, true), flags,
                         view, optionalBool(ex, 'stays_open', ewhere));
+                    if (has(ex, 'travel_time')) {
+                        try { e.travel_time = parseDuration(ex.travel_time); } catch (err) { throw new WorldError(`${ewhere}: ${err.message}`); }
+                    }
                     exits.push(e);
                     rawExits.push([ewhere, rid, sid, e]);
                 });
