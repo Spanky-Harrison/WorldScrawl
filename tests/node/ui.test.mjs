@@ -296,3 +296,27 @@ test('region entrance may be just a subregion id (its own entrance); sub/loc sti
     // Riverton: "streets" resolves to the same square as before
     assert.equal(client(ROOT).get(`/location/${TAVERN}`).json().region.entrance, 'riverton:streets/square');
 });
+
+test('Riverton world: East Road leads to Larkspur and back; the world map shows both regions once discovered', () => {
+    const c = client(ROOT);
+    const road = c.get('/location/riverton:east_road/road').json();
+    const east = road.exits.find(e => e.direction === 'east');
+    assert.equal(east.to, 'larkspur:west_road/road'); assert.equal(east.to_region.id, 'larkspur'); assert.match(east.description, /two hours/);
+    const west = c.get('/location/larkspur:west_road/road').json();
+    assert.equal(west.exits.find(e => e.direction === 'west').to, 'riverton:east_road/road');
+    assert.equal(west.region.entrance, 'larkspur:green/green'); // cascading entrance: "green" -> the green's own entrance
+    const lark = c.get('/location/larkspur:green/green').json();
+    assert.ok(lark.exits.length >= 4 && lark.exits.some(e => e.view === 'closed'));
+    // the hidden grate between the baths and the playhouse stays secret
+    const boiler = c.get('/location/larkspur:baths/boiler').json().exits.find(e => e.direction === 'loose grate');
+    assert.ok(boiler.hidden && !boiler.to);
+    const before = ['riverton:streets/square', 'riverton:east_road/road'];
+    const g1 = buildGraph({ location: before[1], stood: before, seen: [], doors_open: [] }, rooms(c, [...before, 'larkspur:west_road/road']));
+    assert.deepEqual(ids(layerGraph(g1, { level: 'world' })), ['region:larkspur', 'region:riverton']); // seen across the road
+    const after = [...before, 'larkspur:west_road/road', 'larkspur:green/green'];
+    const g2 = buildGraph({ location: after[3], stood: after, seen: [], doors_open: [] }, rooms(c, after));
+    const w = layerGraph(g2, { level: 'world' });
+    assert.deepEqual(ids(w), ['region:larkspur', 'region:riverton']); assert.ok(linked(w, 'region:larkspur', 'region:riverton'));
+    assert.equal(w.nodes.find(n => n.id === 'region:larkspur').here, true);
+    assert.deepEqual(breadcrumb(g2, layerOf(g2, after[3])).map(x => x.label), ['World', 'Larkspur', 'Larkspur Streets']);
+});

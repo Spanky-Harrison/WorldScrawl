@@ -196,10 +196,11 @@
       "locations": {
         "road": {
           "name": "East Road",
-          "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton.",
+          "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton; beneath it, carved letters read \"Larkspur, two hours\" with an arrow pointing east.",
           "inherit_region_notes": true,
           "exits": [
-            { "direction": "west", "to": "streets/square", "description": "Back into the village square." }
+            { "direction": "west", "to": "streets/square", "description": "Back into the village square." },
+            { "direction": "east", "to": "larkspur:west_road/road", "description": "The road runs on east through farmland toward Larkspur, about two hours' walk." }
           ]
         }
       }
