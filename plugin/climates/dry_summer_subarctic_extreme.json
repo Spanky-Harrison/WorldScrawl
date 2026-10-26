@@ -1,0 +1,94 @@
+{
+  "name": "Mediterranean-influenced subarctic (severe winter)",
+  "koppen": "Dsd",
+  "daylight": {
+    "summer": 19,
+    "winter": 5
+  },
+  "seasons": {
+    "spring": {
+      "high": 2,
+      "low": -12,
+      "humidity": 60,
+      "sky": {
+        "clear": 50,
+        "cloudy": 22,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 3,
+        "rain": 6,
+        "heavy_rain": 2,
+        "storm": 2
+      },
+      "windiness": 1,
+      "months": [
+        "March",
+        "April",
+        "May"
+      ]
+    },
+    "summer": {
+      "high": 17,
+      "low": 4,
+      "humidity": 55,
+      "sky": {
+        "clear": 50,
+        "cloudy": 22,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 3,
+        "rain": 6,
+        "heavy_rain": 2,
+        "storm": 2
+      },
+      "windiness": 0.9,
+      "months": [
+        "June",
+        "July",
+        "August"
+      ]
+    },
+    "autumn": {
+      "high": 1,
+      "low": -12,
+      "humidity": 65,
+      "sky": {
+        "clear": 50,
+        "cloudy": 22,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 3,
+        "rain": 6,
+        "heavy_rain": 2,
+        "storm": 2
+      },
+      "windiness": 1,
+      "months": [
+        "September",
+        "October",
+        "November"
+      ]
+    },
+    "winter": {
+      "high": -30,
+      "low": -40,
+      "humidity": 72,
+      "sky": {
+        "clear": 25,
+        "cloudy": 20,
+        "overcast": 30,
+        "fog": 10,
+        "drizzle": 3,
+        "rain": 8,
+        "heavy_rain": 3,
+        "storm": 1
+      },
+      "windiness": 0.8,
+      "months": [
+        "December",
+        "January",
+        "February"
+      ]
+    }
+  }
+}

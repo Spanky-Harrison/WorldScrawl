@@ -78,7 +78,7 @@ class LoadedWorld {
     time() {
         const calendar = this.raw[0].calendar ?? GREGORIAN;
         const s = checkStart(this.raw[0].start_date, checkCalendar(calendar));
-        return { calendar, start_date: advanceStart({ year: s.year, month: calendar.months[s.mi].name, day: s.day, time: '00:00' }, s.secs, calendar) };
+        return { calendar, start_date: advanceStart({ year: s.year, month: calendar.months[s.mi].name, day: s.day, time: '00:00' }, s.secs, calendar), weather: this.world.weather };
     }
 }
 
@@ -342,6 +342,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             // Bake the clock in the same write as the changes: the saved world starts when this chat's clock is now.
             const { calendar, start_date } = base.time();
             wj.start_date = advanceStart(start_date, req.elapsed, calendar);
+            wj.weather_seed = base.world.weather.seed; // a renamed save keeps the same skies
             const newWorld = build_world(wj, raw); // validate before writing anything
             know = req.knowledge !== null ? clean_knowledge(req.knowledge, newWorld) : null;
         } catch (e) {

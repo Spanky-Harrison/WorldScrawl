@@ -1,0 +1,6 @@
+{
+  "calm": { "label": "", "mph": 2, "hours": 1.0, "change": 1.0, "dry": 0 },
+  "breezy": { "label": "breezy", "mph": 10, "hours": 0.85, "change": 1.3, "dry": 0.01 },
+  "windy": { "label": "windy", "mph": 20, "hours": 0.65, "change": 1.8, "dry": 0.025 },
+  "gale": { "label": "gale-force winds", "mph": 38, "hours": 0.5, "change": 2.5, "dry": 0.04 }
+}

@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { checkCalendar, checkStart, defaultTravel, parseDuration } from './ui/calendar.mjs';
+import { buildWeather, checkPlace } from './weather-config.mjs';
 
 export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 export const VIEWS = ['open', 'closed', 'none']; // optional exit "view" (default: closed if hidden/obscured, else open)
@@ -179,6 +180,16 @@ export class World {
         if (e.door && this.doors.has(e.door)) return this.doors.get(e.door).stays_open;
         return e.stays_open !== null ? e.stays_open : this.inherited_stays_open(src);
     }
+    /** Weather fields for a room: exposure etc. cascade location > subregion > region; temp_offset adds up (°C). */
+    place_weather(loc) {
+        const chain = [loc.place ?? {}, this.sub_of(loc).place ?? {}, this.regions.get(loc.region).place ?? {}];
+        // A level that sets its own exposure starts fresh: heat settings above it (an inn's indoor_temp) do not leak into its cellar.
+        const top = chain.findIndex(p => p.exposure !== undefined), own = top < 0 ? chain : chain.slice(0, top + 1);
+        const first = (k, list = own) => list.find(p => p[k] !== undefined)?.[k];
+        return { weather_region: this.regions.get(loc.region).weather_region, exposure: first('exposure') ?? 'outdoor',
+            indoor_temp: first('indoor_temp') ?? null, insulation: first('insulation') ?? 'normal', fixed_weather: first('fixed_weather') ?? null,
+            temp_offset: chain.reduce((a, p) => a + (p.temp_offset ?? 0), 0) };
+    }
     static summary(loc) { return pslice(strip(loc.description).split(/(?<=[.!?])\s/u)[0], 160); }
     view_dict(address) {
         const t = this.locations.get(address);
@@ -199,6 +210,7 @@ export class World {
             effective_notes: this.effective_notes(loc),
             exits: loc.exits.map(e => this._exit_dict(e, loc)),
             views: loc.views.map(a => this.view_dict(a)),
+            weather: this.place_weather(loc),
         };
     }
     static reveals_destination(e) { return !(e.flags.hidden || e.flags.obscured); }
@@ -314,7 +326,14 @@ export const load_world = root => build_world(...read_world_raw(root));
 export function build_world(worldJson, rawRegions) {
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
-    try { checkStart(worldJson.start_date, checkCalendar(worldJson.calendar, 'world.json: calendar'), 'world.json: start_date'); } catch (err) { throw new WorldError(err.message); }
+    let weather;
+    try {
+        const cal = checkCalendar(worldJson.calendar, 'world.json: calendar');
+        checkStart(worldJson.start_date, cal, 'world.json: start_date');
+        weather = buildWeather(worldJson, rawRegions, cal);
+    } catch (err) { throw new WorldError(err.message); }
+    const place = (o, where) => checkPlace(o, where, weather.unit, m => { throw new WorldError(m); });
+    let anyExposure = false;
     const files = Object.keys(rawRegions).sort();
     const regions = new Map(), subregions = new Map(), regionStarts = new Map(), locations = new Map();
     const rawExits = [], rawViews = [];
@@ -326,7 +345,8 @@ export function build_world(worldJson, rawRegions) {
         checkSlug(rid, `${fname}: region id (file name)`);
         if (has(data, 'id') && data.id !== rid) throw new WorldError(`${fname}: region id ${repr(data.id)} must match the file name (${repr(rid)})`);
         const region = { id: rid, name: requireStr(data, 'name', fname), notes: requireStr(data, 'notes', fname, true), entrance: '',
-            stays_open: optionalBool(data, 'stays_open', fname) };
+            stays_open: optionalBool(data, 'stays_open', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
+        if (region.place.exposure) anyExposure = true;
         regions.set(rid, region);
         const start = requireStr(data, 'start', fname);
         if (count(start, '/') !== 1) throw new WorldError(`${fname}: "start" must look like "subregion/location", got ${repr(start)}`);
@@ -350,7 +370,9 @@ export function build_world(worldJson, rawRegions) {
                 id: sid, name: requireStr(sub, 'name', swhere), notes: requireStr(sub, 'notes', swhere, true),
                 inherit_notes: inherit === null ? true : inherit, entrance: `${rid}:${sid}/${entrance}`,
                 label_rooms: Boolean(optionalBool(sub, 'label_rooms', swhere)), stays_open: optionalBool(sub, 'stays_open', swhere),
+                place: place(sub, swhere),
             });
+            if (subregions.get(`${rid}:${sid}`).place.exposure) anyExposure = true;
             for (const [lid, loc] of Object.entries(locs)) {
                 const where = `${fname}: location ${sid}/${lid}`;
                 checkSlug(lid, `${fname}: location id`);
@@ -386,8 +408,9 @@ export function build_world(worldJson, rawRegions) {
                 locations.set(address, {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), exits,
                     inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
-                    views: [], pos: optionalPos(loc, where),
+                    views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
+                if (locations.get(address).place.exposure) anyExposure = true;
             }
         }
     }
@@ -430,6 +453,8 @@ export function build_world(worldJson, rawRegions) {
     }
 
     const w = new World(`${startRegion}:${regionStarts.get(startRegion)}`, regions, subregions, locations);
+    w.weather = weather.config;
+    if (!anyExposure) log.warning('world: no region, subregion or room sets "exposure", so every room is outdoor (it will rain indoors)');
     for (const loc of locations.values()) {
         for (const e of loc.exits) {
             if (!e.door || w.doors.has(e.door)) continue;

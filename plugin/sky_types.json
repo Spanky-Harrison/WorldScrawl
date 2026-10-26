@@ -1,0 +1,18 @@
+{
+  "clear": { "label": "Clear", "label_night": "Clear night", "cloud": 0, "precip": 0, "temp": 0, "humidity": -10, "hours": [6, 24],
+    "wind": { "calm": 4, "breezy": 4, "windy": 1.5, "gale": 0.2 }, "next": { "clear": 0.6, "cloudy": 1.4, "overcast": 0.5, "fog": 0.8, "drizzle": 0.2, "rain": 0.3, "heavy_rain": 0.2, "storm": 0.5 } },
+  "cloudy": { "label": "Partly cloudy", "cloud": 0.45, "precip": 0, "temp": 0, "humidity": 0, "hours": [4, 24],
+    "wind": { "calm": 3, "breezy": 4, "windy": 2, "gale": 0.3 }, "next": { "clear": 1.3, "cloudy": 0.5, "overcast": 1.3, "fog": 0.5, "drizzle": 0.6, "rain": 0.7, "heavy_rain": 0.4, "storm": 0.8 } },
+  "overcast": { "label": "Overcast", "cloud": 0.9, "precip": 0, "temp": -0.5, "humidity": 8, "hours": [4, 24],
+    "wind": { "calm": 3, "breezy": 4, "windy": 2, "gale": 0.4 }, "next": { "clear": 0.5, "cloudy": 1.3, "overcast": 0.5, "fog": 0.8, "drizzle": 1.4, "rain": 1.5, "heavy_rain": 0.6, "storm": 0.5 } },
+  "fog": { "label": "Foggy", "cloud": 1, "precip": 0, "temp": -0.5, "humidity": 18, "hours": [2, 8], "morning": 3,
+    "wind": { "calm": 8, "breezy": 1, "windy": 0, "gale": 0 }, "next": { "clear": 1.5, "cloudy": 1.3, "overcast": 1.2, "fog": 0.3, "drizzle": 0.8, "rain": 0.3, "heavy_rain": 0.1, "storm": 0.1 } },
+  "drizzle": { "label": "Drizzle", "label_sleet": "Light sleet", "label_snow": "Light snow", "cloud": 1, "precip": 0.3, "temp": -1, "humidity": 15, "hours": [2, 12],
+    "wind": { "calm": 4, "breezy": 3, "windy": 1, "gale": 0.1 }, "next": { "clear": 0.3, "cloudy": 1, "overcast": 1.6, "fog": 0.8, "drizzle": 0.5, "rain": 1.2, "heavy_rain": 0.3, "storm": 0.2 } },
+  "rain": { "label": "Rain", "label_sleet": "Sleet", "label_snow": "Snow", "cloud": 1, "precip": 1, "temp": -2, "humidity": 22, "hours": [2, 12],
+    "wind": { "calm": 2, "breezy": 4, "windy": 2.5, "gale": 0.4 }, "next": { "clear": 0.3, "cloudy": 1, "overcast": 1.8, "fog": 0.6, "drizzle": 1.2, "rain": 0.5, "heavy_rain": 1, "storm": 0.6 } },
+  "heavy_rain": { "label": "Heavy rain", "label_sleet": "Heavy sleet", "label_snow": "Heavy snow", "cloud": 1, "precip": 2.5, "temp": -3, "humidity": 28, "hours": [2, 8],
+    "wind": { "calm": 1, "breezy": 3, "windy": 3, "gale": 1 }, "next": { "clear": 0.2, "cloudy": 0.8, "overcast": 1.6, "fog": 0.4, "drizzle": 1.2, "rain": 1.8, "heavy_rain": 0.4, "storm": 0.8 } },
+  "storm": { "label": "Thunderstorm", "label_sleet": "Sleet storm", "label_snow": "Blizzard", "cloud": 1, "precip": 3, "temp": -4, "humidity": 25, "hours": [1, 6],
+    "wind": { "calm": 0, "breezy": 1, "windy": 4, "gale": 3 }, "next": { "clear": 0.6, "cloudy": 1.3, "overcast": 1.5, "fog": 0.3, "drizzle": 0.8, "rain": 1.5, "heavy_rain": 0.8, "storm": 0.3 } }
+}

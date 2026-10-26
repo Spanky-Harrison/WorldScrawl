@@ -82,7 +82,7 @@ const missingWorlds = new Set(); // world ids the server says no longer exist
 const worldTimes = new Map(); // id -> {calendar, start_date} (from GET /worlds and saves)
 const rememberWorlds = body => {
     if (body?.default) defaultWorldId = body.default;
-    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date }); } }
+    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); } }
 };
 
 // ---- Game clock. Only travel takes time: each move stamps its seconds on its message (move.seconds), so swipes keep
@@ -93,7 +93,15 @@ let calendarLib = null;
 export async function loadCalendar() {
     if (calendarLib) return calendarLib;
     try { calendarLib = await import(`${baseUrl()}/ui/calendar.mjs`); } catch (e) { console.warn('[WorldScrawl] calendar unavailable:', e.message); }
+    if (calendarLib && !weatherLib) { try { weatherLib = await import(`${baseUrl()}/ui/weather.mjs`); } catch (e) { console.warn('[WorldScrawl] weather unavailable:', e.message); } }
     return calendarLib;
+}
+let weatherLib = null;
+/** Weather where `loc` is at the chat's current game time ({line, short, ...} from weather.mjs placeWeather), or null. */
+export function placeWeatherNow(loc, chat = ctx().chat ?? []) {
+    const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(chat);
+    if (!weatherLib || !t?.weather || !loc?.weather || !d) return null;
+    try { return weatherLib.placeWeather(t.weather, loc.weather, weatherLib.absSeconds(d, t.calendar), t.calendar); } catch (e) { console.warn('[WorldScrawl] weather:', e.message); return null; }
 }
 /** Seconds of travel stamped on this chat's messages since its world's start_date. */
 export function chatElapsed(chat = ctx().chat ?? []) {
@@ -1281,6 +1289,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
         ...glimpseLines(loc, extra.open),
         extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
+        extra.weather ? `${extra.weather} Let the weather and temperature show in the narration where it fits; do not change them.` : '',
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     if (extra.dig && move && move.to === loc.address) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from ${move.from_name}, and went straight through it.${arr ? ` ${who} ${arr.text}.` : ''} Narrate breaking through and arriving in ${arr?.where ?? move.to_name}.`);
@@ -1311,7 +1320,7 @@ async function applyFacts() {
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
         await loadCalendar();
         const d = gameDate();
-        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
         reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
@@ -1489,7 +1498,7 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false, 
     }
     if (!r.ok) { const e = typeof r.body?.detail === 'string' ? r.body.detail : r.body?.detail?.message ?? r.body?.detail?.error ?? `Save failed (${r.status})`; toastr.error(e); return { ok: false, error: e }; }
     worldNames.set(r.body.id, r.body.name); worldLiving.set(r.body.id, !!r.body.living);
-    if (r.body.start_date) worldTimes.set(r.body.id, { calendar: r.body.calendar, start_date: r.body.start_date });
+    if (r.body.start_date) worldTimes.set(r.body.id, { calendar: r.body.calendar, start_date: r.body.start_date, weather: r.body.weather });
     // Saved over the world this chat is on: always rebase here, or changes since the last switch would be replayed twice.
     const overSelf = !!r.body.overwritten && r.body.id === cur;
     if (overSelf) switchChat = true;
@@ -1706,7 +1715,7 @@ async function renderExits(id) {
     const isLast = id === lastReal;
     if (!isLast || !loc.exits?.length) div.textContent = exitsText(loc);
     else appendExitButtons(div, loc);
-    if (isLast) { await loadCalendar(); const d = gameDate(ch.slice(0, id + 1)); if (d) { const t = document.createElement('div'); t.className = 'worldscrawl_clock'; t.textContent = calendarLib.shortDate(d); div.appendChild(t); } }
+    if (isLast) { await loadCalendar(); const d = gameDate(ch.slice(0, id + 1)); if (d) { const t = document.createElement('div'); t.className = 'worldscrawl_clock'; const wx = placeWeatherNow(loc, ch.slice(0, id + 1)); t.textContent = calendarLib.shortDate(d) + (wx?.short ? ` · ${wx.short}` : ''); div.appendChild(t); } }
     (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
 }
 
@@ -1856,6 +1865,7 @@ export async function mapState() {
     const here = await currentLocation();
     return { ...base, on: true, world: activeWorld || defaultWorldId || '', worldName: worldName(activeWorld), map_version: mapVersion,
         clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
+        weather: here ? placeWeatherNow(here)?.short ?? '' : '',
         location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], changes: chatChanges() };
 }
 let broadcastTimer = null;

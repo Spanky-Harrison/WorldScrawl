@@ -295,3 +295,123 @@ Only travel takes time. Each exit can have `"travel_time"`: `"2h"`, `"90m"`, `"1
 ```
 
 `calendar` is optional (default: Gregorian, February gets a 29th every 4th year, weekdays match real dates 1900-2100). The week is as long as `days_of_week`; a year is all its months added up; hours, minutes and seconds are always 60/60. `leap_every`/`leap_days` (default 1) are per month. Optional `first_weekday` picks which day name year 1 starts on (index, default 0). Time of day: night, dawn, morning, afternoon, evening, scaled to `hours_per_day` (on 24 hours: dawn 5-7, morning 7-12, afternoon 12-17, evening 17-21).
+
+## Weather
+
+Weather is worked out from the world's seed, the place's weather region and the game time, so it is the same every time you look, survives swipes and deleted messages, and moves on with the clock. The narrator gets one line (sky, wind, temperature and feels-like, humidity, what is underfoot, season), and a short version shows in the footer and the map window's top bar. Behind it: weather comes in stretches (a storm for a few hours, clear for most of a day) chained by odds that suit each sky and season, wind shortens stretches and makes change more likely, seasons blend into each other, temperature follows the day and the sky and drifts from day to day, rain turns to sleet and snow in the cold, the ground stays wet, snowy or icy for a while afterwards, and day length follows the season. You only set a few fields.
+
+### `world.json`
+
+```json
+"temperature_unit": "F",
+"weather_seed": "riverton",
+"weather_regions": { "riverside": { "climate": "temperate" } }
+```
+
+- `temperature_unit`: `"F"` (default) or `"C"`. Every temperature you write in the world (and that the narrator sees) uses it.
+- `weather_seed`: optional; defaults to the world's name. Saving a world writes it, so a copy keeps the same weather.
+- `weather_regions`: optional named weather areas that several regions share. Takes the same `climate`, `seasons`, `daylight_adjust` and `temp_offset` as a region; when a region joins one, the weather region's settings win.
+- `climates`: optional custom climates by id (see below).
+
+### Region (`regions/*.json`, top level)
+
+```json
+"weather_region": "riverside",
+"climate": "oceanic",
+"seasons": { "winter": ["December", "January", "February"], "spring": ["March", "April", "May"], "summer": ["June", "July", "August"], "autumn": ["September", "October", "November"] },
+"daylight_adjust": 0.5,
+"temp_offset": -3
+```
+
+- `weather_region`: share weather with other regions. Without it, the region has its own weather.
+- `climate`: a preset id (table below), a Köppen code (`"Cfb"`), `"temperate"` (= `humid_continental_warm_summer`, the default) or one of the world's `climates`.
+- `seasons`: optional; which months belong to which season of the climate. Every month needs exactly one season and a season's months must be in a row (wrapping round the year is fine). Presets come with Gregorian months; on a custom calendar without `seasons`, the year is split evenly.
+- `daylight_adjust`: hours added to the longest day and taken from the shortest (higher latitude feel).
+- `temp_offset`: degrees warmer (or colder, negative) than the weather region; adds up through region, subregion and location (a hill, a cold valley, a hot forge yard).
+
+### Exposure (region, subregion or location)
+
+The nearest level that sets one wins: location > subregion > region. Default `outdoor`.
+
+```json
+"exposure": "sheltered", "indoor_temp": 72, "insulation": "cozy"
+```
+
+- `outdoor`: full weather.
+- `sheltered`: the narrator gets the weather outside plus the temperature inside. `indoor_temp` is what the fire/heating aims for (`null` = no heating); `insulation` how much of the gap it closes: `drafty` 30%, `normal` 60% (default), `cozy` 85%. A level that sets its own `exposure` does not inherit heat settings from above it (a cellar under a warm inn).
+- `enclosed`: no weather at all, steady temperature (the climate's yearly average, or `indoor_temp`): cellars, caves, tunnels.
+- `fixed`: always the same: `"fixed_weather": { "condition": "Eternal twilight", "temp": 59 }` (magic places, other planes).
+
+The narrator line for each looks like:
+
+```
+Weather: Light rain, windy, 48°F (feels like 42°F), cool, 88% humidity. Underfoot: wet. Mid spring.
+Weather (outside): Clear night, calm, 9°F, freezing, 70% humidity. Underfoot: snow on the ground. Mid winter. Inside, sheltered from the wind and rain: 62°F, cool.
+Temperature here: 45°F, cold and still; no weather reaches this place.
+```
+
+### Custom climates
+
+Add to `world.json` `climates` and use the id as a `climate`. Temperatures are in the world's `temperature_unit`. Preset files (`plugin/climates/*.json`) have the same shape in °C, without comments.
+
+```jsonc
+"climates": {
+  "ashlands": {
+    "name": "Ashlands",
+    "daylight": { "summer": 14, "winter": 10 },      // hours of daylight on the longest and shortest day
+    "seasons": {                                      // any names, any number
+      "smoulder": {
+        "months": ["April", "May", "June", "July", "August", "September"], // optional default months (a region's "seasons" overrides)
+        "high": 95, "low": 70,                        // average afternoon high and pre-dawn low
+        "humidity": 30,                               // average %
+        "sky": { "clear": 5, "cloudy": 2, "storm": 1 }, // relative odds: clear, cloudy, overcast, fog, drizzle, rain, heavy_rain, storm
+        "windiness": 1.5                              // 1 = normal; higher = windier
+      },
+      "ashfall": {
+        "months": ["October", "November", "December", "January", "February", "March"],
+        "high": 60, "low": 40, "humidity": 50,
+        "sky": { "overcast": 4, "fog": 2, "drizzle": 1 }
+      }
+    }
+  }
+}
+```
+
+### Climate presets
+
+Real-world Köppen climates. Use the id or the code.
+
+| id | Köppen | What it is like | Real places |
+|---|---|---|---|
+| `cold_desert` | BWk | Dry all year; hot summers, freezing winters | Ulaanbaatar outskirts; Leh, India; Gobi Desert |
+| `cold_steppe` | BSk | Semi-arid grassland; warm summers, cold snowy winters | Denver; Madrid plateau; Almaty |
+| `dry_summer_continental_hot` | Dsa | Hot dry summers, cold snowy winters | Hakkâri, Turkey; Cambridge, Idaho |
+| `dry_summer_continental_warm` | Dsb | Warm dry summers, snowy winters | Kayseri, Turkey; Flagstaff area; Tabriz |
+| `dry_summer_subarctic` | Dsc | Short dry summers, long snowy winters | Upper Wasatch valleys; Kamchatka interior |
+| `dry_summer_subarctic_extreme` | Dsd | Brief dry summer, brutally cold winter | Upper Kolyma, Siberia (rare) |
+| `hot_desert` | BWh | Scorching days, cool nights, almost no rain | Cairo; Phoenix; Riyadh |
+| `hot_steppe` | BSh | Semi-arid and hot; a short rainy season | Niamey, Niger; Monterrey, Mexico; Alice Springs |
+| `humid_continental_hot_summer` | Dfa | Hot summers, cold snowy winters, rain all year | Chicago; Kyiv lowlands; Toronto-Windsor |
+| `humid_continental_warm_summer` | Dfb | Warm summers, cold snowy winters (the "temperate" default) | Moscow; Montréal; Oslo |
+| `humid_subtropical` | Cfa | Hot humid summers, mild winters, rain all year | Atlanta; Shanghai; Buenos Aires |
+| `ice_cap` | EF | Permanently frozen | Antarctica interior; central Greenland |
+| `mediterranean_cold_summer` | Csc | Cool dry summers, cold wet winters; rare highland pockets | Balmaceda, Chile; high Sierra Nevada valleys |
+| `mediterranean_hot_summer` | Csa | Hot dry summers, mild wet winters | Rome; Athens; Los Angeles |
+| `mediterranean_warm_summer` | Csb | Warm dry summers, mild wet winters, coastal fog | San Francisco; Porto; Cape Town |
+| `monsoon_continental_hot` | Dwa | Hot wet summers, cold dry winters | Seoul; Beijing; Harbin outskirts |
+| `monsoon_continental_warm` | Dwb | Warm wet summers, very cold dry winters | Vladivostok; Pyongyang uplands |
+| `monsoon_subarctic` | Dwc | Short wet summers, long bitter dry winters | Chita, Russia; Mohe, China |
+| `monsoon_subarctic_extreme` | Dwd | Short summer, the coldest dry winters on Earth | Oymyakon; Verkhoyansk |
+| `monsoon_subtropical_hot_summer` | Cwa | Hot rainy summers, mild dry winters | Hong Kong; Delhi; Guangzhou |
+| `oceanic` | Cfb | Mild and damp all year; cool summers, gentle winters | London; Paris; Seattle |
+| `subarctic` | Dfc | Short mild summers, long hard winters | Anchorage; Fairbanks; Yakutsk outskirts |
+| `subarctic_extreme` | Dfd | Short summers, extreme winters, deep frost | Yakutsk; Oymyakon region |
+| `subpolar_oceanic` | Cfc | Cool, windy and wet; short cool summers | Reykjavík; Tórshavn, Faroe Islands; Ushuaia |
+| `subtropical_highland` | Cwb | Spring-like all year at altitude; wet summers | Mexico City; Bogotá; Nairobi |
+| `subtropical_highland_cold_summer` | Cwc | Cool high-altitude climate with a summer wet season | El Alto, Bolivia; Cusco highlands |
+| `tropical_monsoon` | Am | Hot all year; a short dry spell, then torrential monsoon rains | Miami; Chittagong, Bangladesh; Conakry, Guinea |
+| `tropical_rainforest` | Af | Hot and humid all year, rain almost every day | Singapore; Manaus, Brazil; Kisangani, DR Congo |
+| `tropical_savanna` | Aw | Hot all year; wet summer, long dry winter | Darwin, Australia; Bangkok; Kinshasa |
+| `tropical_savanna_dry_summer` | As | Hot all year; the rains come in winter instead | Chennai, India; Mombasa, Kenya; Fortaleza, Brazil |
+| `tundra` | ET | Cold all year; a brief cool thaw | Nuuk; Barrow (Utqiaġvik); Svalbard |
+

@@ -2,6 +2,9 @@
   "name": "Riverton",
   "start_region": "riverton",
   "living": false,
+  "weather_regions": {
+    "riverside": { "climate": "temperate" }
+  },
   "start_date": {
     "year": 1247,
     "month": "April",

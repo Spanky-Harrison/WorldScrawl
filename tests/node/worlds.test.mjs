@@ -46,7 +46,7 @@ test('render copy identical new id', () => {
     assert.deepEqual(ids(client), new Set(['riverton', 'my-copy']));
     assert.equal(client.get(`/location/${SQUARE}?world=my-copy`).status_code, 200);
     const text = read(P(wd, 'my-copy', 'regions', 'riverton.json'));
-    assert.ok(!text.includes('to_label') && !text.includes('door_') && read(P(wd, 'my-copy', 'world.json')).includes('"name": "My Copy"'));
+    assert.ok(!text.includes('to_label') && !/(?<!in)door_/.test(text) && read(P(wd, 'my-copy', 'world.json')).includes('"name": "My Copy"'));
 });
 
 test('render refuses overwrite', () => {

@@ -1,0 +1,58 @@
+{
+  "name": "Tropical rainforest",
+  "koppen": "Af",
+  "daylight": {
+    "summer": 12.5,
+    "winter": 11.5
+  },
+  "seasons": {
+    "wet": {
+      "high": 31,
+      "low": 23,
+      "humidity": 85,
+      "sky": {
+        "clear": 15,
+        "cloudy": 25,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 5,
+        "rain": 15,
+        "heavy_rain": 12,
+        "storm": 15
+      },
+      "windiness": 0.8,
+      "months": [
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April"
+      ]
+    },
+    "dry": {
+      "high": 31,
+      "low": 23,
+      "humidity": 80,
+      "sky": {
+        "clear": 18,
+        "cloudy": 20,
+        "overcast": 20,
+        "fog": 6,
+        "drizzle": 10,
+        "rain": 16,
+        "heavy_rain": 6,
+        "storm": 4
+      },
+      "windiness": 0.8,
+      "months": [
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October"
+      ]
+    }
+  }
+}

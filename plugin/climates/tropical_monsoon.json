@@ -1,0 +1,58 @@
+{
+  "name": "Tropical monsoon",
+  "koppen": "Am",
+  "daylight": {
+    "summer": 12.8,
+    "winter": 11.2
+  },
+  "seasons": {
+    "wet": {
+      "high": 30,
+      "low": 24,
+      "humidity": 88,
+      "sky": {
+        "clear": 15,
+        "cloudy": 25,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 5,
+        "rain": 15,
+        "heavy_rain": 12,
+        "storm": 15
+      },
+      "windiness": 1.1,
+      "months": [
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October"
+      ]
+    },
+    "dry": {
+      "high": 32,
+      "low": 22,
+      "humidity": 65,
+      "sky": {
+        "clear": 50,
+        "cloudy": 22,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 3,
+        "rain": 6,
+        "heavy_rain": 2,
+        "storm": 2
+      },
+      "windiness": 0.9,
+      "months": [
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April"
+      ]
+    }
+  }
+}

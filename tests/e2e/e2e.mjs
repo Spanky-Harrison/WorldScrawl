@@ -998,7 +998,7 @@ try {
     Object.assign(exD('drowned_rat', 'common_room', 'out'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'in'), { view: 'closed' });
     Object.assign(exD('temple', 'nave', 'south'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'east'), { view: 'closed', stays_open: false });
     fsD.writeFileSync(rp, JSON.stringify(rj, null, 2));
-    fsD.writeFileSync('/tmp/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false }));
+    fsD.writeFileSync('/tmp/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false, weather_regions: { riverside: { climate: 'temperate' } } }));
     await (await stFetch('/worlds')).json(); // rescan
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = 'doorsworld'; });
     await sw(true, true);
