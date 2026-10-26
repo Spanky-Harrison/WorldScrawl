@@ -1,11 +1,15 @@
 {
   "name": "Larkspur",
+  "weather_region": "riverside",
+  "temp_offset": -3,
+  "exposure": "outdoor",
   "notes": "Larkspur is a hillside market town about two hours' walk east of Riverton, built of honey-coloured stone around hot springs. It lives on wool, dye and visitors who come for the baths; its folk are cheerful, fond of gossip and festivals, and quick to overcharge anyone from the river.",
   "start": "green/green",
   "entrance": "green",
   "subregions": {
     "west_road": {
       "name": "West Road",
+      "exposure": "outdoor",
       "notes": "The road between Larkspur and Riverton winds through sheep pasture and over a stone bridge; it's about a two-hour walk.",
       "locations": {
         "road": {
@@ -21,6 +25,7 @@
     },
     "green": {
       "name": "Larkspur Streets",
+      "exposure": "outdoor",
       "entrance": "green",
       "label_rooms": true,
       "notes": "Steep stone streets hung with dyed wool drying on lines, steaming gutters fed by the springs, and the smell of sulphur and lavender.",
@@ -57,6 +62,9 @@
     },
     "baths": {
       "name": "The Larkspur Baths",
+      "exposure": "sheltered",
+      "indoor_temp": 78,
+      "insulation": "cozy",
       "entrance": "hall",
       "notes": "The town's pride: hot mineral baths run by Odessa Vey, a tall, statuesque bath-mistress with dark curls pinned up, a towel over one bare shoulder and a warm, unhurried voice. Her attendants are lithe, cheerful girls in linen shifts.",
       "locations": {
@@ -70,6 +78,7 @@
         },
         "pool": {
           "name": "Great Pool",
+          "indoor_temp": 84,
           "description": "A vaulted hall around a wide, steaming green pool fed by a spring that bubbles up from the rock. Light falls through a glass dome, and stone benches line the edges.",
           "exits": [
             { "direction": "out", "to": "hall", "travel_time": "30s", "description": "The curtained archway back to the entrance hall." },
@@ -79,6 +88,7 @@
         },
         "steam_room": {
           "name": "Steam Room",
+          "indoor_temp": 110,
           "description": "A small, dim, tiled room so thick with herb-scented steam that faces blur at arm's length. Water hisses on hot stones in a copper brazier.",
           "exits": [
             { "direction": "out", "to": "pool", "travel_time": "30s", "description": "The heavy oak door back to the Great Pool.", "view": "closed" }
@@ -86,6 +96,8 @@
         },
         "boiler": {
           "name": "Boiler Room",
+          "exposure": "enclosed",
+          "indoor_temp": 95,
           "description": "A hot, cramped room of pipes, valves and a great copper tank that groans as spring water is pumped through it. Coal dust and steam hang in the air.",
           "exits": [
             { "direction": "service door", "to": "pool", "travel_time": "30s", "description": "The staff door back to the Great Pool.", "view": "closed" },
@@ -96,6 +108,8 @@
     },
     "apothecary": {
       "name": "Wren's Apothecary",
+      "exposure": "sheltered",
+      "indoor_temp": 66,
       "notes": "A herb shop run by Wren, a petite, freckled redhead with ink-stained fingers and a mischievous smile, who sells remedies, perfumes and, to the right people, stronger things.",
       "locations": {
         "shop": {
@@ -108,6 +122,7 @@
         },
         "loft": {
           "name": "Drying Loft",
+          "insulation": "drafty",
           "description": "A low attic under the roof beams, hung with drying herbs and flowers. A small window looks out over the steaming roofs of the baths.",
           "exits": [
             { "direction": "down", "to": "shop", "travel_time": "30s", "description": "The ladder back down to the shop." }
@@ -117,10 +132,13 @@
     },
     "dyeworks": {
       "name": "Hollin Dyeworks",
+      "exposure": "sheltered",
+      "insulation": "drafty",
       "notes": "The dyeworks that colour Larkspur's wool, run by Maren Hollin, a strong, sun-browned woman with blue-stained forearms, a bold laugh and a kerchief over her black hair, with a crew of brawny, good-humoured dye-girls.",
       "locations": {
         "yard": {
           "name": "Dyeworks Yard",
+          "exposure": "outdoor",
           "description": "A busy yard of steaming vats in blue, crimson and saffron. Skeins of wool hang from poles, the ground is stained every colour, and the air stinks of woad and boiling madder root.",
           "exits": [
             { "direction": "out", "to": "green/weavers_row", "travel_time": "1m", "description": "The wide gate onto Weavers Row." },
@@ -138,6 +156,8 @@
     },
     "bindery": {
       "name": "Sable's Bindery",
+      "exposure": "sheltered",
+      "indoor_temp": 66,
       "notes": "A bookbinder and scribe's shop run by Sable, a slim, elegant woman with silver-streaked hair in a long braid, reading spectacles and a dry wit, who also writes letters for those who can't.",
       "locations": {
         "shop": {
@@ -151,6 +171,8 @@
     },
     "playhouse": {
       "name": "The Larkspur Playhouse",
+      "exposure": "sheltered",
+      "indoor_temp": 68,
       "entrance": "foyer",
       "notes": "A small, gaudy playhouse that puts on comedies and festival masques, run by Celandine Rook, a glamorous, full-figured actress-manager with a husky voice and a fondness for scandal. Her troupe of actresses is young, pretty and always short of money.",
       "locations": {
@@ -180,6 +202,7 @@
         },
         "under_stage": {
           "name": "Under the Stage",
+          "exposure": "enclosed",
           "description": "A low, dusty space beneath the stage boards, full of old props, ropes and pulleys. Warm air drifts from somewhere in the dark.",
           "exits": [
             { "direction": "stage trapdoor", "to": "auditorium", "travel_time": "30s", "obscured": true, "description": "A ladder up to the trapdoor in the stage." },

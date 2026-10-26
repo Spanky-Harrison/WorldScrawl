@@ -1,0 +1,94 @@
+{
+  "name": "Cold desert",
+  "koppen": "BWk",
+  "daylight": {
+    "summer": 15,
+    "winter": 9
+  },
+  "seasons": {
+    "spring": {
+      "high": 19,
+      "low": 4,
+      "humidity": 35,
+      "sky": {
+        "clear": 70,
+        "cloudy": 15,
+        "overcast": 4,
+        "fog": 1,
+        "drizzle": 1,
+        "rain": 2,
+        "heavy_rain": 1,
+        "storm": 1
+      },
+      "windiness": 1.3,
+      "months": [
+        "March",
+        "April",
+        "May"
+      ]
+    },
+    "summer": {
+      "high": 32,
+      "low": 15,
+      "humidity": 25,
+      "sky": {
+        "clear": 70,
+        "cloudy": 15,
+        "overcast": 4,
+        "fog": 1,
+        "drizzle": 1,
+        "rain": 2,
+        "heavy_rain": 1,
+        "storm": 1
+      },
+      "windiness": 1.1,
+      "months": [
+        "June",
+        "July",
+        "August"
+      ]
+    },
+    "autumn": {
+      "high": 19,
+      "low": 3,
+      "humidity": 35,
+      "sky": {
+        "clear": 70,
+        "cloudy": 15,
+        "overcast": 4,
+        "fog": 1,
+        "drizzle": 1,
+        "rain": 2,
+        "heavy_rain": 1,
+        "storm": 1
+      },
+      "windiness": 1.2,
+      "months": [
+        "September",
+        "October",
+        "November"
+      ]
+    },
+    "winter": {
+      "high": 3,
+      "low": -10,
+      "humidity": 50,
+      "sky": {
+        "clear": 50,
+        "cloudy": 22,
+        "overcast": 10,
+        "fog": 3,
+        "drizzle": 3,
+        "rain": 6,
+        "heavy_rain": 2,
+        "storm": 2
+      },
+      "windiness": 1.2,
+      "months": [
+        "December",
+        "January",
+        "February"
+      ]
+    }
+  }
+}

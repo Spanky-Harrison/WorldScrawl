@@ -1,0 +1,94 @@
+{
+  "name": "Tundra",
+  "koppen": "ET",
+  "daylight": {
+    "summer": 22,
+    "winter": 2
+  },
+  "seasons": {
+    "spring": {
+      "high": -4,
+      "low": -12,
+      "humidity": 78,
+      "sky": {
+        "clear": 25,
+        "cloudy": 20,
+        "overcast": 30,
+        "fog": 10,
+        "drizzle": 3,
+        "rain": 8,
+        "heavy_rain": 3,
+        "storm": 1
+      },
+      "windiness": 1.4,
+      "months": [
+        "March",
+        "April",
+        "May"
+      ]
+    },
+    "summer": {
+      "high": 8,
+      "low": 2,
+      "humidity": 82,
+      "sky": {
+        "clear": 18,
+        "cloudy": 20,
+        "overcast": 20,
+        "fog": 6,
+        "drizzle": 10,
+        "rain": 16,
+        "heavy_rain": 6,
+        "storm": 4
+      },
+      "windiness": 1.3,
+      "months": [
+        "June",
+        "July",
+        "August"
+      ]
+    },
+    "autumn": {
+      "high": -2,
+      "low": -8,
+      "humidity": 85,
+      "sky": {
+        "clear": 25,
+        "cloudy": 20,
+        "overcast": 30,
+        "fog": 10,
+        "drizzle": 3,
+        "rain": 8,
+        "heavy_rain": 3,
+        "storm": 1
+      },
+      "windiness": 1.4,
+      "months": [
+        "September",
+        "October",
+        "November"
+      ]
+    },
+    "winter": {
+      "high": -18,
+      "low": -27,
+      "humidity": 80,
+      "sky": {
+        "clear": 25,
+        "cloudy": 20,
+        "overcast": 30,
+        "fog": 10,
+        "drizzle": 3,
+        "rain": 8,
+        "heavy_rain": 3,
+        "storm": 1
+      },
+      "windiness": 1.4,
+      "months": [
+        "December",
+        "January",
+        "February"
+      ]
+    }
+  }
+}

@@ -1,11 +1,16 @@
 {
   "name": "Riverton",
+  "weather_region": "riverside",
+  "exposure": "outdoor",
   "notes": "Riverton is a small river-trading village on a slow brown river. Folk are plain-spoken and wary of strangers until coin changes hands. Barges and fishing boats bring most of the news, and the smell of river mud is never far away.",
   "start": "drowned_rat/common_room",
   "entrance": "streets",
   "subregions": {
     "drowned_rat": {
       "name": "The Drowned Rat",
+      "exposure": "sheltered",
+      "indoor_temp": 72,
+      "insulation": "cozy",
       "entrance": "common_room",
       "notes": "Riverton's oldest tavern, run by Hesk, a striking, sharp-tongued widow with copper braids who can silence a brawl with one look. Cheap ale, dice games and dockhands; it gets loud after dark.",
       "locations": {
@@ -20,6 +25,7 @@
         },
         "courtyard": {
           "name": "Courtyard",
+          "exposure": "outdoor",
           "description": "A cobbled courtyard behind the tavern, stacked with ale barrels and firewood. Steam and the smell of stew drift from the kitchen door; the stable stands across the yard.",
           "exits": [
             { "direction": "in", "to": "common_room", "travel_time": "30s", "description": "The back door into the common room.", "view": "closed" },
@@ -30,6 +36,7 @@
         },
         "cellar": {
           "name": "Cellar",
+          "exposure": "enclosed",
           "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
           "exits": [
             { "direction": "trapdoor", "to": "courtyard", "travel_time": "30s", "obscured": true, "description": "Wooden steps up to a heavy trapdoor." },
@@ -38,6 +45,7 @@
         },
         "kitchens": {
           "name": "Kitchens",
+          "indoor_temp": 78,
           "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
             { "direction": "out", "to": "courtyard", "travel_time": "30s", "description": "Back out to the courtyard.", "view": "closed" }
@@ -45,6 +53,8 @@
         },
         "stable": {
           "name": "Stable",
+          "insulation": "drafty",
+          "indoor_temp": null,
           "description": "A straw-strewn stable with a few stalls, a water trough and a tired old mule. A wooden gate opens onto Market Lane.",
           "exits": [
             { "direction": "yard", "to": "courtyard", "travel_time": "30s", "description": "Out into the courtyard." },
@@ -63,6 +73,9 @@
     },
     "gilded_goose": {
       "name": "The Gilded Goose",
+      "exposure": "sheltered",
+      "indoor_temp": 72,
+      "insulation": "cozy",
       "entrance": "common_room",
       "notes": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and its host, Perrin Vale, an elegant, silver-gowned trans woman with a lovely laugh who looks down on the Drowned Rat.",
       "locations": {
@@ -85,6 +98,8 @@
     },
     "general_store": {
       "name": "Marlow's General Store",
+      "exposure": "sheltered",
+      "indoor_temp": 65,
       "notes": "A cluttered shop run by Marlow, a curvy, bespectacled beauty who sells a bit of everything and haggles over every copper with a sweet smile.",
       "locations": {
         "shop": {
@@ -98,6 +113,9 @@
     },
     "smithy": {
       "name": "Brask's Smithy",
+      "exposure": "sheltered",
+      "indoor_temp": 80,
+      "insulation": "drafty",
       "notes": "A hot, noisy forge run by Brask, a tall, broad-shouldered trans woman with soot-streaked arms and a confident grin, and her journeyman Tobin, a slender, pretty young man in his twenties who blushes easily. Horseshoes, boat fittings and the occasional blade.",
       "locations": {
         "forge": {
@@ -111,6 +129,7 @@
     },
     "streets": {
       "name": "Riverton Streets",
+      "exposure": "outdoor",
       "entrance": "square",
       "label_rooms": true,
       "notes": "Cobbled village streets, busy with carts, chickens and gossip by day and nearly empty after dark.",
@@ -141,6 +160,7 @@
     },
     "docks": {
       "name": "River Docks",
+      "exposure": "outdoor",
       "notes": "Fishermen, bargemen and the occasional smuggler. Everyone here knows the river's moods.",
       "locations": {
         "piers": {
@@ -154,6 +174,9 @@
     },
     "temple": {
       "name": "Temple of the Tides",
+      "exposure": "sheltered",
+      "indoor_temp": 60,
+      "insulation": "drafty",
       "notes": "A hushed, holy place tended by Sister Amara, a serene, dark-eyed beauty in sea-green robes. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
       "inherit_notes": false,
       "locations": {
@@ -167,6 +190,7 @@
         },
         "catacombs": {
           "name": "Temple Catacombs",
+          "exposure": "enclosed",
           "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
           "exits": [
             { "direction": "up", "to": "nave", "travel_time": "30s", "description": "The stone stair up to the temple.", "view": "closed" },
@@ -177,6 +201,7 @@
     },
     "secret_tunnel": {
       "name": "Secret Tunnel",
+      "exposure": "enclosed",
       "notes": "A forgotten smugglers' passage under the village. Few living folk know it exists.",
       "inherit_notes": false,
       "locations": {
@@ -192,6 +217,7 @@
     },
     "east_road": {
       "name": "East Road",
+      "exposure": "outdoor",
       "notes": "Open farmland beyond the village. Travellers, drovers and the odd highwayman use the road.",
       "locations": {
         "road": {

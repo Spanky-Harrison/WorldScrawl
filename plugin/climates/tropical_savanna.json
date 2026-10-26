@@ -1,0 +1,58 @@
+{
+  "name": "Tropical savanna (dry winter)",
+  "koppen": "Aw",
+  "daylight": {
+    "summer": 13,
+    "winter": 11
+  },
+  "seasons": {
+    "wet": {
+      "high": 32,
+      "low": 23,
+      "humidity": 78,
+      "sky": {
+        "clear": 30,
+        "cloudy": 25,
+        "overcast": 8,
+        "fog": 2,
+        "drizzle": 3,
+        "rain": 10,
+        "heavy_rain": 6,
+        "storm": 10
+      },
+      "windiness": 1,
+      "months": [
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October"
+      ]
+    },
+    "dry": {
+      "high": 31,
+      "low": 19,
+      "humidity": 50,
+      "sky": {
+        "clear": 70,
+        "cloudy": 15,
+        "overcast": 4,
+        "fog": 1,
+        "drizzle": 1,
+        "rain": 2,
+        "heavy_rain": 1,
+        "storm": 1
+      },
+      "windiness": 1.1,
+      "months": [
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April"
+      ]
+    }
+  }
+}

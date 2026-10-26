@@ -1,0 +1,58 @@
+{
+  "name": "Tropical savanna (dry summer)",
+  "koppen": "As",
+  "daylight": {
+    "summer": 13,
+    "winter": 11
+  },
+  "seasons": {
+    "wet": {
+      "high": 30,
+      "low": 22,
+      "humidity": 78,
+      "sky": {
+        "clear": 30,
+        "cloudy": 25,
+        "overcast": 8,
+        "fog": 2,
+        "drizzle": 3,
+        "rain": 10,
+        "heavy_rain": 6,
+        "storm": 10
+      },
+      "windiness": 1,
+      "months": [
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April"
+      ]
+    },
+    "dry": {
+      "high": 33,
+      "low": 22,
+      "humidity": 55,
+      "sky": {
+        "clear": 70,
+        "cloudy": 15,
+        "overcast": 4,
+        "fog": 1,
+        "drizzle": 1,
+        "rain": 2,
+        "heavy_rain": 1,
+        "storm": 1
+      },
+      "windiness": 1.1,
+      "months": [
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October"
+      ]
+    }
+  }
+}
