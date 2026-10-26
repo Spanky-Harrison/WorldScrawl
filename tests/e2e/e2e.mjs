@@ -1043,6 +1043,8 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open south')); await page.waitForTimeout(1000);
     await go('south', 'west');
     check('doors: temple door stays open (region stays_open, subregion silent)', (await openDoors()) === 'nave|south', await openDoors());
+    { const t = await M(m => m.lookText('Ann', 'East Road', { kind: 'threshold', via: 'east', description: 'The road runs on east and out of sight.', unknown: false, name: 'Larkspur' }));
+      check('long road (sight none, not obscured): look describes the road, may name Larkspur, not describe it', t.includes('The road runs on east and out of sight.') && t.includes('It leads to Larkspur, but that cannot be seen') && t.includes('do not describe what lies at the far end') && !t.includes('nothing can be made out'), t); }
     await go('east');
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open east')); await page.waitForTimeout(1000);
     await go('west');
@@ -1057,6 +1059,11 @@ try {
     check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Looking in, you can see'), promptOf(lq[3]).slice(-500));
     // Obscured trapdoor: both rooms recorded (opaque tokens), so it stays open in the cellar and shuts once both are left.
     await go('in', 'back');
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'look' }, { content: '5' }, { content: '4' }, { content: 'A stair into the dark.' }]);
+    await send('I look at the trapdoor', 4);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('obscured trapdoor: looking at it injects its near-side description and says where it leads is unknown (not revealed, not "nothing")', lq.length === 4 && lk.extra.worldscrawl_look?.kind === 'threshold' && lk.extra.worldscrawl_look.unknown === true && promptOf(lq[3]).includes('heavy cellar door set into the flagstones') && promptOf(lq[3]).includes('Where it leads is not clear and is unknown') && !promptOf(lq[3]).includes('Cellar (') && !promptOf(lq[3]).includes('ale casks') && !promptOf(lq[3]).includes('nothing can be made out') && !lk.extra.worldscrawl_change, JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open trapdoor')); await page.waitForTimeout(1000);
     const trapCh = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra.worldscrawl_change; });
     check('doors: opening an obscured door records both rooms as opaque tokens', trapCh?.rooms?.length === 2 && trapCh.rooms.every(r => r.startsWith('room_')) && !JSON.stringify(trapCh).includes('cellar'), JSON.stringify(trapCh));

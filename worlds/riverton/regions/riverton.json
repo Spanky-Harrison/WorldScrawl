@@ -185,7 +185,7 @@
           "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
           "exits": [
             { "direction": "south", "to": "streets/square", "travel_time": "1m", "description": "The steps lead back down to the square.", "barrier": {} },
-            { "direction": "grate", "to": "catacombs", "travel_time": "30s", "obscured": true, "description": "A stone stair behind an iron grate beside the altar.", "barrier": { "closed_sight": "clear", "closed_sound": "clear" } }
+            { "direction": "grate", "to": "catacombs", "travel_time": "30s", "obscured": true, "description": "An iron grate beside the altar, over a worn stone stair that descends into darkness." }
           ]
         },
         "catacombs": {
@@ -193,7 +193,7 @@
           "exposure": "enclosed",
           "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
           "exits": [
-            { "direction": "up", "to": "nave", "travel_time": "30s", "description": "The stone stair up to the temple, behind the iron grate." },
+            { "direction": "up", "to": "nave", "travel_time": "30s", "description": "The stone stair up to the temple, behind the iron grate.", "barrier": { "closed_sight": "clear", "closed_sound": "clear" } },
             { "direction": "tunnel", "to": "secret_tunnel/tunnel", "travel_time": "10m", "description": "A low, rough-cut passage leading away into the dark.", "traversal": "The passage is low and rough-cut; it is a long, cramped, stooping walk through the wet dark." }
           ]
         }
@@ -226,7 +226,7 @@
           "inherit_region_notes": true,
           "exits": [
             { "type": "open", "direction": "west", "to": "streets/square", "travel_time": "5m", "description": "Back into the village square." },
-            { "type": "open", "direction": "east", "to": "larkspur:west_road/road", "travel_time": "2h", "description": "The road runs on east through farmland toward Larkspur, about two hours' walk." }
+            { "type": "open", "direction": "east", "to": "larkspur:west_road/road", "travel_time": "2h", "sight": "none", "sound": "none", "description": "The road runs on east between hedged farmland, over a low rise and out of sight. Larkspur is about two hours' walk." }
           ]
         }
       }
