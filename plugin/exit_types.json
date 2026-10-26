@@ -1,0 +1,5 @@
+{
+  "_comment": "Exit type presets. Each type sets defaults for an exit's fields; an exit can override any of them. Add a type by adding an entry.",
+  "portal": { "sight": "partial", "sound": "partial" },
+  "open": { "sight": "clear", "sound": "clear" }
+}

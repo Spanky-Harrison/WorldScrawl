@@ -230,38 +230,62 @@ export const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0
 // messages (both sides share the exit's `door` id). Replay rule: an opened door that doesn't stay open
 // (stays_open: exit > subregion > region, default false) counts as closed again once the party is in neither room.
 const changesOf = m => { const c = m?.extra?.[CHANGE_KEY]; return Array.isArray(c) ? c : c ? [c] : []; };
-/** door id -> the open_door change, for doors open at the end of `chat`. */
-export function doorStates(chat = ctx().chat ?? []) {
-    const open = new Map();
+/**
+ * door id -> the last open_door / close_door change still in force at the end of `chat`. A door with no entry is in
+ * its starting state (barrier.starts_open). One that doesn't stay open goes back to its starting state once the
+ * party is in neither room.
+ */
+export function doorOverrides(chat = ctx().chat ?? []) {
+    const st = new Map();
     for (const m of chat) {
-        for (const c of changesOf(m)) {
-            if (c.type === 'open_door' && c.door) open.set(c.door, c);
-            else if (c.type === 'close_door' && c.door) open.delete(c.door);
-        }
+        for (const c of changesOf(m)) if ((c.type === 'open_door' || c.type === 'close_door') && c.door) st.set(c.door, c);
         const ex = m?.extra ?? {};
         for (const p of [...(ex[MOVE_KEY]?.via ?? []), ex[LOC_KEY]].filter(Boolean))
-            for (const [d, c] of open) { const rs = c.rooms ?? [c.from, c.to]; if (!c.stays_open && !rs.includes(roomToken(p)) && !rs.includes(p)) open.delete(d); }
+            for (const [d, c] of st) { const rs = c.rooms ?? [c.from, c.to]; if (!c.stays_open && !rs.includes(roomToken(p)) && !rs.includes(p)) st.delete(d); }
     }
-    return open;
+    return st;
 }
-/** What can be seen through an exit now: an opened door counts as "open". */
-export const viewOf = (e, open = doorStates()) => (e?.view === 'closed' && e.door && open.has(e.door) ? 'open' : e?.view ?? 'open');
+/** door id -> the open_door change, for doors opened (by a change) at the end of `chat`. Pass this or doorOverrides() as `open` below. */
+export const doorStates = (chat = ctx().chat ?? []) => new Map([...doorOverrides(chat)].filter(([, c]) => c.type === 'open_door'));
+/** The exit's barrier (older data: "view": "closed" = an ordinary door), or null. */
+export const barrierOf = e => e?.barrier ?? (e?.view === 'closed' ? { closed_sight: 'none', closed_sound: 'partial', openable: true, starts_open: false, locked: false } : null);
+/** Is nothing blocking this exit right now? */
+export function isOpenNow(e, open = doorOverrides()) {
+    const b = barrierOf(e);
+    if (!b) return true;
+    const c = e.door ? open.get(e.door) : null;
+    if (c) return c.type !== 'close_door';
+    return !!b.starts_open;
+}
+/** How much passes through an exit now: its sight/sound when unblocked, else its barrier's closed_sight/closed_sound. */
+export const sightOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sight ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sight ?? 'none');
+export const soundOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sound ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sound ?? 'partial');
+/** A closed barrier that can't be opened now (rubble, a barricade, or locked). */
+export const isStuck = (e, open = doorOverrides()) => { const b = barrierOf(e); return !!b && !isOpenNow(e, open) && (b.openable === false || !!b.locked); };
+/** What can be seen through an exit now (legacy one word): "closed" (a closed barrier), "none" or "open". */
+export const viewOf = (e, open = doorOverrides()) => (!isOpenNow(e, open) ? 'closed' : sightOf(e, open) === 'none' ? 'none' : 'open');
+const barrierWord = e => (barrierOf(e)?.openable === false ? 'way' : 'door');
 // rooms: opaque tokens of both sides of the door (from the server, even behind an obscured door, without saying
 // where it leads); used only for the auto-close replay, never in a prompt.
 const roomTokens = new Map(); // address -> room_token, filled as rooms are fetched
 export const roomToken = a => roomTokens.get(a) ?? a;
-export const doorChange = (type, here, e) => ({ type, from: here.address, direction: e.direction, door: e.door, rooms: e.door_rooms ?? [roomToken(here.address), ...(revealsDestination(e) && e.to ? [roomToken(e.to)] : [])], ...(type === 'open_door' ? { stays_open: !!e.stays_open } : {}) });
-/** Closed doors here that can be opened / opened doors here that can be closed. */
-export function doorCandidates(here, open = doorStates()) {
-    const vis = here.exits.filter(e => e.door && (!e.hidden || revealsDestination(e)));
-    return { toOpen: vis.filter(e => e.view === 'closed' && !open.has(e.door)), toClose: vis.filter(e => open.has(e.door)) };
+export const doorChange = (type, here, e) => ({ type, from: here.address, direction: e.direction, door: e.door, rooms: e.door_rooms ?? [roomToken(here.address), ...(revealsDestination(e) && e.to ? [roomToken(e.to)] : [])], stays_open: !!(e.barrier?.stays_open ?? e.stays_open) });
+/** Closed doors here that can be opened / open doors here that can be closed / closed ones that won't open (locked, rubble). */
+export function doorCandidates(here, open = doorOverrides()) {
+    const vis = here.exits.filter(e => e.door && barrierOf(e) && (!e.hidden || revealsDestination(e)));
+    const openable = e => barrierOf(e).openable !== false;
+    return { toOpen: vis.filter(e => !isOpenNow(e, open) && !isStuck(e, open)), toClose: vis.filter(e => isOpenNow(e, open) && openable(e)), stuck: vis.filter(e => isStuck(e, open)) };
 }
+const stuckWhy = e => (barrierOf(e).openable === false ? 'is blocked and can\'t be opened' : 'is locked');
 /** /ws-open <dir>, /ws-close <dir> */
 export async function doorAction(kind, arg) {
     const here = await currentLocation();
-    const { toOpen, toClose } = doorCandidates(here);
+    const { toOpen, toClose, stuck } = doorCandidates(here);
     const list = kind === 'open' ? toOpen : toClose;
-    const e = list.find(x => x.direction.toLowerCase() === String(arg ?? '').trim().toLowerCase());
+    const want = String(arg ?? '').trim().toLowerCase();
+    const s = kind === 'open' && stuck.find(x => x.direction.toLowerCase() === want);
+    if (s) { toastr.warning(`The ${s.direction} ${stuckWhy(s)}.`); return ''; }
+    const e = list.find(x => x.direction.toLowerCase() === want);
     if (!e) { toastr.warning(list.length ? `Doors you can ${kind} here: ${list.map(x => x.direction).join(', ')}` : `No door to ${kind} here.`); return ''; }
     await addChangeMessage(`[Engine: the ${e.direction} door ${kind === 'open' ? 'is now open' : 'is now closed'}.]`, doorChange(kind === 'open' ? 'open_door' : 'close_door', here, e));
     return '';
@@ -446,13 +470,14 @@ function stamp(msg, loc, move) {
 async function engineMove(direction) {
     const from = await currentLocation();
     const exit = from.exits.find(e => e.direction.toLowerCase() === String(direction).trim().toLowerCase());
+    if (exit && isStuck(exit)) return { ok: false, error: `The ${exit.direction} ${stuckWhy(exit)}.`, valid: from.exits.filter(e => !isStuck(e)).map(e => e.direction) };
     const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: from.address, direction: String(direction).trim(), changes: chatChanges() }) });
     if (!r.ok) {
         const d = r.body?.detail ?? {};
         return { ok: false, error: d.error ?? `Move failed (${r.status})`, valid: d.valid_directions ?? from.exits.map(e => e.direction) };
     }
     primeCache(r.body);
-    return { ok: true, to: r.body, move: { seconds: r.body.travel_seconds ?? 0, direction: exit?.direction ?? direction, prev_name: from.name, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body) } };
+    return { ok: true, to: r.body, move: { seconds: r.body.travel_seconds ?? 0, direction: exit?.direction ?? direction, prev_name: from.name, from: from.address, from_name: displayName(from), to: r.body.address, to_name: displayName(r.body), ...(r.body.traversal ? { traversal: [r.body.traversal] } : {}) } };
 }
 
 /** Normalize the model's answer and accept it only if it is exactly one of the options. */
@@ -670,7 +695,7 @@ export async function findPath(from, target, getLoc = fetchLocationCached, stood
         if (cur === target) break;
         const loc = await getLoc(cur);
         for (const e of loc?.exits ?? []) {
-            if (prev.has(e.to) || !revealsDestination(e)) continue;
+            if (prev.has(e.to) || !revealsDestination(e) || isStuck(e, new Map())) continue;
             if (e.to !== target && (e.to.split(':')[0] !== region || (stoodIn && !stoodIn.has(e.to)))) continue;
             prev.set(e.to, { from: cur, direction: e.direction });
             queue.push(e.to);
@@ -711,6 +736,7 @@ async function engineTravel(target, prefix = null) {
     const lastDir = steps[r.body.path.length - 1]?.direction ?? null;
     const prevName = (r.body.path.length > 1 ? r.body.path[r.body.path.length - 2] : from).name;
     return { ok: true, to: at, move: { seconds: r.body.travel_seconds ?? 0, direction: single, from: from.address, from_name: displayName(from), to: at.address, to_name: displayName(at), path: names, via, steps: steps.slice(0, r.body.path.length).map(st => st.direction), last_direction: lastDir, prev_name: prevName,
+        ...((r.body.step_traversal ?? []).some(Boolean) ? { traversal: r.body.step_traversal.filter(Boolean) } : {}),
         ...(r.body.stopped ? { stopped: r.body.reason ?? 'stopped' } : {}) } };
 }
 
@@ -1012,19 +1038,24 @@ async function narrativeLook(msg, loc) {
     else if (n === 1) look = { kind: 'around' };
     else if (n <= exits.length + 1) {
         const e = exits[n - 2];
-        let v = viewOf(e), opened = false;
-        if (v === 'closed') {
+        const open = doorOverrides();
+        let v = viewOf(e, open), opened = false, through = false, stuck = false;
+        if (v === 'closed' && sightOf(e, open) !== 'none') { v = 'open'; through = true; } // a closed gate/grate: seen through as it is
+        else if (v === 'closed') {
             const k = await askValid('closed door', closedDoorPrompt(said, e), pickNumber(4));
             const act = DOOR_LOOK[(k ?? 4) - 1]; // unreadable: just looking (never opens a door by accident)
             if (act === 'listen') v = 'listen';
+            else if (act === 'open' && isStuck(e, open)) { v = 'shut'; stuck = true; }
             else if (act === 'open') { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
+            else if (act === 'peek' && barrierOf(e).openable === false) v = 'shut'; // rubble: no crack to peek through
             else if (act === 'peek') { msg.extra.worldscrawl_peek = { type: 'peek', door: e.direction, from: loc.address }; v = 'peek'; } // no effect on door state (for a later stealth mechanic)
             else v = 'shut';
         }
         const t = (v === 'open' || v === 'peek') && revealsDestination(e) && e.to ? await fetchLocationCached(e.to) : null;
-        look = v === 'listen' ? { kind: 'listen', via: e.direction }
-            : v === 'shut' ? { kind: 'closed', via: e.direction }
-            : t ? { kind: 'see', via: e.direction, to: t.address, name: displayName(t), description: t.description, opened, ...(v === 'peek' ? { peek: true } : {}) }
+        const lvl = sightOf(e, opened ? new Map([[e.door, { type: 'open_door' }]]) : open);
+        look = v === 'listen' ? { kind: 'listen', via: e.direction, sound: soundOf(e, open), word: barrierWord(e) }
+            : v === 'shut' ? { kind: 'closed', via: e.direction, word: barrierWord(e), ...(stuck ? { stuck: stuckWhy(e) } : {}) }
+            : t ? { kind: 'see', via: e.direction, to: t.address, name: displayName(t), description: t.description, opened, ...(v === 'peek' ? { peek: true } : { sight: lvl }), ...(through ? { through_closed: true } : {}) }
             : { kind: 'nothing', via: e.direction, opened };
     } else {
         let view = (loc.views ?? [])[0]; // hand-written views first, then an earlier view link: the same answer every time
@@ -1050,6 +1081,7 @@ async function narrativeDoor(msg, loc, list, type) {
         e = k ? list[k - 1] : null;
     }
     if (!e) return { kind: STAY, loc };
+    if (type === 'open_door' && isStuck(e)) { msg.extra.worldscrawl_door = { type: 'stuck', direction: e.direction, why: stuckWhy(e) }; return { kind: 'door', loc }; }
     msg.extra[CHANGE_KEY] = [...changesOf(msg), doorChange(type, loc, e)];
     msg.extra.worldscrawl_door = { type, direction: e.direction };
     return { kind: 'door', loc };
@@ -1074,6 +1106,7 @@ async function parseIntent(msg) {
     const canOpen = BREAK_RE.test(msg.mes ?? ''); // the 'new opening' choice is only offered when the player uses a breaking-through word
     const canLook = LOOK_RE.test(msg.mes ?? '');
     const doors = doorCandidates(loc);
+    doors.toOpen = [...doors.toOpen, ...doors.stuck]; // trying a locked door is still the 'open' intent; it just doesn't give
     const canOpenDoor = DOOR_OPEN_RE.test(msg.mes ?? '') && doors.toOpen.length > 0, canCloseDoor = DOOR_CLOSE_RE.test(msg.mes ?? '') && doors.toClose.length > 0;
     const extras = [...(canOpen ? [OPEN] : []), ...(canLook ? [LOOK] : []), ...(canOpenDoor ? [OPEN_DOOR] : []), ...(canCloseDoor ? [CLOSE_DOOR] : [])];
     // Only looking ("I look out the door"): no move options, so a word like "out" can't pick the "out" exit.
@@ -1262,7 +1295,12 @@ const doorWord = d => (isDirWord(d) ? `door (${d})` : d);
 /** One line per thing visible from here: open exits (glimpse of the room beyond) and window views. */
 export function glimpseLines(loc, open = new Map()) {
     const out = [];
-    for (const e of loc.exits ?? []) if (viewOf(e, open) === 'open' && revealsDestination(e) && e.to_summary) out.push(`${isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${e.to_label ?? e.to_display_name ?? e.to_name}: ${e.to_summary}`);
+    for (const e of loc.exits ?? []) {
+        if (!revealsDestination(e) || !e.to_summary) continue;
+        const sight = sightOf(e, open), sound = soundOf(e, open), closed = !isOpenNow(e, open), name = e.to_label ?? e.to_display_name ?? e.to_name;
+        if (sight !== 'none') out.push(`${closed ? `Through the closed ${e.direction}` : isDirWord(e.direction) ? `Looking ${e.direction}` : `Through the ${e.direction}`}, you can see ${name}: ${e.to_summary}${sight === 'clear' ? ' The view is open and carries well beyond it.' : ''}`);
+        else if (closed && sound === 'clear') out.push(`Sounds from ${name} carry clearly through the closed ${e.direction}, though nothing can be seen through it.`);
+    }
     for (const v of loc.views ?? []) out.push(`Visible from here (no way through): ${v.display_name}: ${v.summary}`);
     return out;
 }
@@ -1270,8 +1308,12 @@ export function lookText(who, here, look) {
     const how = look.window ? 'out' : look.via ? (isDirWord(look.via) ? look.via : `through the ${look.via}`) : 'around';
     const first = look.opened ? `${who} opens the ${doorWord(look.via)} first. ` : '';
     if (look.kind === 'see' && look.peek) return `What just happened: ${who} peeks through the closed ${doorWord(look.via)} without opening it and glimpses ${look.name}: ${look.description} The door stays closed. ${who} is still at ${here}. Describe only the glimpse.`;
-    if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
-    if (look.kind === 'closed') return `What just happened: ${who} looks at the ${doorWord(look.via)}. The door is closed; nothing beyond it can be seen. ${who} stays at ${here}.`;
+    if (look.kind === 'see' && look.through_closed) return `What just happened: ${who} looks through the closed ${look.via} (it can be seen through) and sees ${look.name}: ${look.description} It stays closed. ${who} is still at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description}${look.sight === 'clear' ? ' The view is open and carries far.' : ''} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'closed' && look.stuck) return `What just happened: ${who} tries to open the ${doorWord(look.via)}, but it ${look.stuck}. Nothing beyond it can be seen. ${who} stays at ${here}.`;
+    if (look.kind === 'closed') return `What just happened: ${who} looks at the ${doorWord(look.via)}. ${look.word === 'way' ? 'The way is blocked' : 'The door is closed'}; nothing beyond it can be seen. ${who} stays at ${here}.`;
+    if (look.kind === 'listen' && look.sound === 'clear') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Sounds from beyond it carry clearly. ${who} stays at ${here}.`;
+    if (look.kind === 'listen' && look.sound === 'none') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. No sound at all comes through it. ${who} stays at ${here}.`;
     if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
@@ -1296,12 +1338,14 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, displayName(loc), extra.look));
+    else if (extra.door?.type === 'stuck') lines.push(`What just happened: ${who} tries to open the ${doorWord(extra.door.direction)}, but it ${extra.door.why}. It stays shut. ${who} stays at ${displayName(loc)}.`);
     else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
     else lines.push(stayPutLine(who, displayName(loc)));
     if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
+    if (move?.traversal?.length && move.to === loc.address) lines.push(`On the way: ${move.traversal.join(' Then: ')} Work this into the narration of the move.`);
     if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(EXITS_HINT);
     lines.push(toolsOn
         ? 'Do not invent locations or exits that are not listed.'
@@ -1320,7 +1364,7 @@ async function applyFacts() {
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
         await loadCalendar();
         const d = gameDate();
-        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorStates() });
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
         reminder = arrivalReminder(loc, move);
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
@@ -1866,7 +1910,7 @@ export async function mapState() {
     return { ...base, on: true, world: activeWorld || defaultWorldId || '', worldName: worldName(activeWorld), map_version: mapVersion,
         clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
-        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], changes: chatChanges() };
+        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), changes: chatChanges() };
 }
 let broadcastTimer = null;
 export function broadcastMapState() {

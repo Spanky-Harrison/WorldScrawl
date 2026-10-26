@@ -45,6 +45,7 @@ body { background: var(--ws-bg); color: var(--SmartThemeBodyColor); font-family:
 .node { cursor: pointer; }
 .edge line { stroke: var(--SmartThemeEmColor); stroke-width: 2; }
 .edge.closed line { stroke-dasharray: 7 5; }
+.edge.blocked line { stroke-dasharray: 2 4; stroke: #c0503a; stroke-width: 3; }
 .edge text { fill: var(--SmartThemeEmColor); font-size: 11px; paint-order: stroke; stroke: var(--ws-bg); stroke-width: 3px; }
 .side { width: 300px; max-width: 45%; overflow: auto; padding: 10px; border-left: 1px solid var(--SmartThemeBorderColor); }
 @media (orientation: portrait) { .side { width: auto; max-width: none; max-height: 40%; border-left: 0; border-top: 1px solid var(--SmartThemeBorderColor); } }
