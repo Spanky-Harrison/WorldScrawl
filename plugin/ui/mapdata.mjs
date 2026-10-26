@@ -46,7 +46,14 @@ export function knownRoom(loc, { changes = [], reveals = [], rooms = new Map() }
 }
 
 /** Is this exit a closed door right now? */
-export const isClosed = (e, open = []) => e?.view === 'closed' && !(e.door && open.includes(e.door));
+export function isClosed(e, open = [], closed = []) {
+    if (!(e?.barrier || e?.view === 'closed')) return false;
+    if (e.door && closed.includes(e.door)) return true;
+    if (e.door && open.includes(e.door)) return false;
+    return !e.barrier?.starts_open;
+}
+/** A barrier that can't be opened at all (a cave-in, a barricade). */
+export const isBlocked = e => e?.barrier?.openable === false;
 /** Region id + name of a room ("region:sub/loc" addresses carry the region id when the room data doesn't). */
 const areaOf = (a, reg) => ({ regionId: reg?.id ?? (String(a).includes(':') ? String(a).split(':')[0] : ''), region: reg?.name ?? '' });
 const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0].slice(0, 200);
@@ -59,7 +66,7 @@ const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0].slice
 export function buildGraph(state, rooms) {
     const stood = new Set(state?.stood ?? []), nodes = new Map(), edges = [];
     if (state?.location) stood.add(state.location);
-    const open = state?.doors_open ?? [];
+    const open = state?.doors_open ?? [], shut = state?.doors_closed ?? [];
     const sub = r => ({ id: r?.subregion?.id ?? '', name: r?.subregion?.name ?? '' });
     for (const a of stood) {
         const r = rooms.get(a);
@@ -76,14 +83,14 @@ export function buildGraph(state, rooms) {
         const r = rooms.get(a);
         if (!r) continue;
         for (const e of (r.exits ?? []).filter(e => !e.hidden || e.revealed)) { // an unrevealed hidden exit is a secret: not even a stub
-            const closed = isClosed(e, open);
+            const closed = isClosed(e, open, shut), blocked = isBlocked(e), locked = closed && !!e.barrier?.locked;
             if (revealsDestination(e) && e.to) {
                 addSeen(e.to, e.to_name, e.to_subregion, '', e.to_region, rooms.get(e.to));
-                edges.push({ from: a, to: e.to, direction: e.direction, closed, dug: !!e.dug, description: e.description ?? '' });
+                edges.push({ from: a, to: e.to, direction: e.direction, closed, blocked, locked, dug: !!e.dug, description: e.description ?? '' });
             } else { // unrevealed: label only, the destination stays unknown
                 const id = `stub:${a}|${lc(e.direction)}`;
                 nodes.set(id, { id, kind: 'stub', name: e.direction, subregion: { id: '', name: '' }, region: '', description: '', pos: null, here: false });
-                edges.push({ from: a, to: id, direction: e.direction, closed, dug: false, description: e.description ?? '' });
+                edges.push({ from: a, to: id, direction: e.direction, closed, blocked, locked, dug: false, description: e.description ?? '' });
             }
         }
     }

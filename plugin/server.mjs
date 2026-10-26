@@ -190,8 +190,10 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
     const step = (world, loc, direction) => {
         const wanted = strip(direction).toLowerCase();
         const e = loc.exits.find(x => x.direction.toLowerCase() === wanted);
-        return e ? world.get(e.to) : null;
+        return e && !e.blocked ? world.get(e.to) : null;
     };
+    const exitAt = (loc, direction) => loc.exits.find(x => x.direction.toLowerCase() === strip(direction).toLowerCase()) ?? null;
+    const blockedError = (loc, e) => `The ${e.direction} exit from ${loc.name} is ${e.barrier.openable ? 'locked' : 'blocked'}.`;
     const stepSeconds = (world, loc, direction) => {
         const wanted = strip(direction).toLowerCase();
         const e = loc.exits.find(x => x.direction.toLowerCase() === wanted);
@@ -245,7 +247,9 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const from = field(body, 'from', 'str'), direction = field(body, 'direction', 'str'), changes = field(body, 'changes', 'list', []);
             const w = world_for(q('world'), changes);
             const loc = find(w, from), to = step(w, loc, direction);
-            if (to !== null) { log.info(`move ${loc.address} -${strip(direction)}-> ${to.address}`); return { ...w.to_dict(to), travel_seconds: stepSeconds(w, loc, direction) }; }
+            if (to !== null) { log.info(`move ${loc.address} -${strip(direction)}-> ${to.address}`); const tr = exitAt(loc, direction)?.traversal; return { ...w.to_dict(to), travel_seconds: stepSeconds(w, loc, direction), ...(tr ? { traversal: tr } : {}) }; }
+            const be = exitAt(loc, direction);
+            if (be?.blocked) { log.info(`move ${loc.address} -${strip(direction)}-> refused (blocked)`); throw new HttpError(400, { error: blockedError(loc, be), blocked: true, valid_directions: loc.exits.filter(x => !x.blocked).map(x => x.direction) }); }
             log.info(`move ${loc.address} -${strip(direction)}-> refused (no such exit)`);
             throw new HttpError(400, { error: `There is no exit ${repr(direction)} from ${loc.name}.`, valid_directions: loc.exits.map(e => e.direction) });
         },
@@ -275,16 +279,17 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const from = field(body, 'from', 'str'), steps = field(body, 'steps', 'strs'), changes = field(body, 'changes', 'list', []);
             const w = world_for(q('world'), changes);
             let at = find(w, from), stopped = false, reason = null, error = null;
-            const pathOut = [], stepTimes = [];
+            const pathOut = [], stepTimes = [], traversal = [];
             for (const direction of steps) {
                 const nxt = step(w, at, direction);
-                if (nxt === null) { stopped = true; reason = 'blocked'; error = `There is no exit ${repr(direction)} from ${at.name}.`; break; }
+                if (nxt === null) { stopped = true; reason = 'blocked'; const be = exitAt(at, direction); error = be?.blocked ? blockedError(at, be) : `There is no exit ${repr(direction)} from ${at.name}.`; break; }
                 stepTimes.push(stepSeconds(w, at, direction));
+                traversal.push(exitAt(at, direction)?.traversal ?? null);
                 at = nxt;
                 pathOut.push(w.to_dict(at));
             }
             log.info(`travel ${from} steps=${repr(steps)} -> ${at.address} (${pathOut.length}/${steps.length} steps${stopped ? `, stopped: ${reason}` : ''})`);
-            return { location: w.to_dict(at), path: pathOut, steps_completed: pathOut.length, steps_requested: steps.length, step_seconds: stepTimes, travel_seconds: stepTimes.reduce((a, b) => a + b, 0), stopped, reason, ...(error ? { error } : {}) };
+            return { location: w.to_dict(at), path: pathOut, steps_completed: pathOut.length, steps_requested: steps.length, step_seconds: stepTimes, travel_seconds: stepTimes.reduce((a, b) => a + b, 0), step_traversal: traversal, stopped, reason, ...(error ? { error } : {}) };
         },
         'POST /worlds/render': ({ body }) => render(needBody(body)),
     };

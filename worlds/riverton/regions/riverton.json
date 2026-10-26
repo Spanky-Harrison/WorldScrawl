@@ -18,9 +18,9 @@
           "name": "Common Room",
           "description": "A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.",
           "exits": [
-            { "direction": "out", "to": "streets/square", "travel_time": "1m", "description": "The front door opens onto the village square.", "view": "closed" },
+            { "direction": "out", "to": "streets/square", "travel_time": "1m", "description": "The front door opens onto the village square.", "barrier": {} },
             { "direction": "up", "to": "upstairs", "travel_time": "30s", "description": "A creaking staircase." },
-            { "direction": "back", "to": "courtyard", "travel_time": "30s", "description": "A back door to the courtyard.", "view": "closed" }
+            { "direction": "back", "to": "courtyard", "travel_time": "30s", "description": "A back door to the courtyard.", "barrier": {} }
           ]
         },
         "courtyard": {
@@ -28,8 +28,8 @@
           "exposure": "outdoor",
           "description": "A cobbled courtyard behind the tavern, stacked with ale barrels and firewood. Steam and the smell of stew drift from the kitchen door; the stable stands across the yard.",
           "exits": [
-            { "direction": "in", "to": "common_room", "travel_time": "30s", "description": "The back door into the common room.", "view": "closed" },
-            { "direction": "kitchen", "to": "kitchens", "travel_time": "30s", "description": "The kitchen door.", "view": "closed" },
+            { "direction": "in", "to": "common_room", "travel_time": "30s", "description": "The back door into the common room.", "barrier": {} },
+            { "direction": "kitchen", "to": "kitchens", "travel_time": "30s", "description": "The kitchen door.", "barrier": {} },
             { "direction": "stable", "to": "stable", "travel_time": "30s", "description": "Across the yard to the stable." },
             { "direction": "trapdoor", "to": "cellar", "travel_time": "30s", "obscured": true, "description": "A heavy cellar door set into the flagstones, its iron ring worn smooth." }
           ]
@@ -40,7 +40,7 @@
           "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
           "exits": [
             { "direction": "trapdoor", "to": "courtyard", "travel_time": "30s", "obscured": true, "description": "Wooden steps up to a heavy trapdoor." },
-            { "direction": "narrow door", "to": "secret_tunnel/tunnel", "travel_time": "10m", "hidden": true, "description": "A narrow door half-hidden behind the casks.", "view": "closed" }
+            { "direction": "narrow door", "to": "secret_tunnel/tunnel", "travel_time": "10m", "hidden": true, "description": "A narrow door half-hidden behind the casks.", "barrier": {}, "traversal": "Beyond the narrow door the passage is barely shoulder-wide: a long, stooping shuffle through dripping dark, rotten timbers creaking overhead." }
           ]
         },
         "kitchens": {
@@ -48,7 +48,7 @@
           "indoor_temp": 78,
           "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
-            { "direction": "out", "to": "courtyard", "travel_time": "30s", "description": "Back out to the courtyard.", "view": "closed" }
+            { "direction": "out", "to": "courtyard", "travel_time": "30s", "description": "Back out to the courtyard.", "barrier": {} }
           ]
         },
         "stable": {
@@ -58,7 +58,7 @@
           "description": "A straw-strewn stable with a few stalls, a water trough and a tired old mule. A wooden gate opens onto Market Lane.",
           "exits": [
             { "direction": "yard", "to": "courtyard", "travel_time": "30s", "description": "Out into the courtyard." },
-            { "direction": "gate", "to": "streets/market_lane", "travel_time": "1m", "description": "The stable gate onto Market Lane.", "view": "closed" }
+            { "direction": "gate", "to": "streets/market_lane", "travel_time": "1m", "description": "The stable gate onto Market Lane.", "barrier": {} }
           ]
         },
         "upstairs": {
@@ -83,7 +83,7 @@
           "name": "Common Room",
           "description": "A bright common room with whitewashed walls, brass lamps and round tables set with linen. A painted goose with a gilt crown hangs over the bar, and a carpeted stair leads up.",
           "exits": [
-            { "direction": "out", "to": "streets/market_lane", "travel_time": "1m", "description": "The door opens onto Market Lane.", "view": "closed" },
+            { "direction": "out", "to": "streets/market_lane", "travel_time": "1m", "description": "The door opens onto Market Lane.", "barrier": {} },
             { "direction": "up", "to": "upstairs", "travel_time": "30s", "description": "A carpeted staircase." }
           ]
         },
@@ -106,7 +106,7 @@
           "name": "Marlow's General Store",
           "description": "Shelves crammed with rope, lamp oil, sacks of flour, fishing tackle and dusty oddments. A brass bell hangs over the door and Marlow's counter is buried in ledgers.",
           "exits": [
-            { "direction": "out", "to": "streets/market_lane", "travel_time": "1m", "description": "The shop door, under the brass bell, opens onto Market Lane.", "view": "closed" }
+            { "direction": "out", "to": "streets/market_lane", "travel_time": "1m", "description": "The shop door, under the brass bell, opens onto Market Lane." }
           ]
         }
       }
@@ -138,22 +138,22 @@
           "name": "Village Square",
           "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river, the temple hill, Market Lane and the open country.",
           "exits": [
-            { "direction": "in", "to": "drowned_rat/common_room", "travel_time": "1m", "description": "The Drowned Rat's swinging sign hangs over the door.", "view": "closed" },
-            { "direction": "south", "to": "docks/piers", "travel_time": "3m", "description": "A muddy lane slopes down to the river." },
-            { "direction": "north", "to": "temple/nave", "travel_time": "1m", "description": "Steps climb the hill to the temple.", "view": "closed" },
-            { "direction": "east", "to": "east_road/road", "travel_time": "5m" },
-            { "direction": "west", "to": "market_lane", "travel_time": "3m", "description": "A narrow lane of shops." }
+            { "direction": "in", "to": "drowned_rat/common_room", "travel_time": "1m", "description": "The Drowned Rat's swinging sign hangs over the door.", "barrier": {} },
+            { "type": "open", "direction": "south", "to": "docks/piers", "travel_time": "3m", "description": "A muddy lane slopes down to the river." },
+            { "direction": "north", "to": "temple/nave", "travel_time": "1m", "description": "Steps climb the hill to the temple.", "barrier": {} },
+            { "type": "open", "direction": "east", "to": "east_road/road", "travel_time": "5m" },
+            { "type": "open", "direction": "west", "to": "market_lane", "travel_time": "3m", "description": "A narrow lane of shops." }
           ]
         },
         "market_lane": {
           "name": "Market Lane",
           "description": "A narrow lane of timber-framed shops. The Gilded Goose's gilt sign gleams on one side, Marlow's bell jangles on the other, and the clang of Brask's forge echoes from the end.",
           "exits": [
-            { "direction": "east", "to": "square", "travel_time": "3m" },
-            { "direction": "inn", "to": "gilded_goose/common_room", "travel_time": "1m", "description": "The Gilded Goose.", "view": "closed" },
-            { "direction": "store", "to": "general_store/shop", "travel_time": "1m", "description": "The door of Marlow's General Store.", "view": "closed" },
+            { "type": "open", "direction": "east", "to": "square", "travel_time": "3m" },
+            { "direction": "inn", "to": "gilded_goose/common_room", "travel_time": "1m", "description": "The Gilded Goose.", "barrier": {} },
+            { "direction": "store", "to": "general_store/shop", "travel_time": "1m", "description": "The door of Marlow's General Store, propped open for custom.", "barrier": { "starts_open": true } },
             { "direction": "smithy", "to": "smithy/forge", "travel_time": "1m", "description": "Brask's Smithy, its forge open to the lane." },
-            { "direction": "gate", "to": "drowned_rat/stable", "travel_time": "1m", "description": "The Drowned Rat's stable gate.", "view": "closed" }
+            { "direction": "gate", "to": "drowned_rat/stable", "travel_time": "1m", "description": "The Drowned Rat's stable gate.", "barrier": {} }
           ]
         }
       }
@@ -167,7 +167,7 @@
           "name": "River Docks",
           "description": "Weathered wooden piers jut into the slow brown river. Fishing boats bob at their moorings and gulls squabble over scraps.",
           "exits": [
-            { "direction": "north", "to": "streets/square", "travel_time": "3m", "description": "Back up the lane to the square." }
+            { "type": "open", "direction": "north", "to": "streets/square", "travel_time": "3m", "description": "Back up the lane to the square." }
           ]
         }
       }
@@ -184,8 +184,8 @@
           "name": "Temple of the Tides",
           "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
           "exits": [
-            { "direction": "south", "to": "streets/square", "travel_time": "1m", "description": "The steps lead back down to the square.", "view": "closed" },
-            { "direction": "grate", "to": "catacombs", "travel_time": "30s", "obscured": true, "description": "A stone stair behind an iron grate beside the altar.", "view": "closed" }
+            { "direction": "south", "to": "streets/square", "travel_time": "1m", "description": "The steps lead back down to the square.", "barrier": {} },
+            { "direction": "grate", "to": "catacombs", "travel_time": "30s", "obscured": true, "description": "A stone stair behind an iron grate beside the altar.", "barrier": { "closed_sight": "clear", "closed_sound": "clear" } }
           ]
         },
         "catacombs": {
@@ -193,8 +193,8 @@
           "exposure": "enclosed",
           "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
           "exits": [
-            { "direction": "up", "to": "nave", "travel_time": "30s", "description": "The stone stair up to the temple.", "view": "closed" },
-            { "direction": "tunnel", "to": "secret_tunnel/tunnel", "travel_time": "10m", "description": "A low, rough-cut passage leading away into the dark." }
+            { "direction": "up", "to": "nave", "travel_time": "30s", "description": "The stone stair up to the temple, behind the iron grate." },
+            { "direction": "tunnel", "to": "secret_tunnel/tunnel", "travel_time": "10m", "description": "A low, rough-cut passage leading away into the dark.", "traversal": "The passage is low and rough-cut; it is a long, cramped, stooping walk through the wet dark." }
           ]
         }
       }
@@ -209,8 +209,8 @@
           "name": "Secret Tunnel",
           "description": "A cramped, dripping tunnel shored up with rotting timbers. It slopes gently uphill, and the floor is scuffed by boots that came this way not so long ago.",
           "exits": [
-            { "direction": "narrow door", "to": "drowned_rat/cellar", "travel_time": "10m", "hidden": true, "description": "A narrow door in the tunnel wall.", "view": "closed" },
-            { "direction": "catacombs", "to": "temple/catacombs", "travel_time": "10m", "description": "The tunnel climbs toward old stonework." }
+            { "direction": "narrow door", "to": "drowned_rat/cellar", "travel_time": "10m", "hidden": true, "description": "A narrow door in the tunnel wall.", "traversal": "The tunnel narrows to a stooping crawl before the narrow door; it squeals on its hinges and opens behind the casks of a cellar." },
+            { "direction": "catacombs", "to": "temple/catacombs", "travel_time": "10m", "description": "The tunnel climbs toward old stonework.", "traversal": "The tunnel climbs, slick underfoot, until rough rock gives way to old fitted stonework." }
           ]
         }
       }
@@ -225,8 +225,8 @@
           "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton; beneath it, carved letters read \"Larkspur, two hours\" with an arrow pointing east.",
           "inherit_region_notes": true,
           "exits": [
-            { "direction": "west", "to": "streets/square", "travel_time": "5m", "description": "Back into the village square." },
-            { "direction": "east", "to": "larkspur:west_road/road", "travel_time": "2h", "description": "The road runs on east through farmland toward Larkspur, about two hours' walk." }
+            { "type": "open", "direction": "west", "to": "streets/square", "travel_time": "5m", "description": "Back into the village square." },
+            { "type": "open", "direction": "east", "to": "larkspur:west_road/road", "travel_time": "2h", "description": "The road runs on east through farmland toward Larkspur, about two hours' walk." }
           ]
         }
       }

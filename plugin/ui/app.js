@@ -166,7 +166,7 @@ function createMapWindow(win) {
             const ul = $('ul');
             for (const e of exits) {
                 const to = e.from === id ? e.to : e.from, t = current.graph.nodes.find(x => x.id === to);
-                ul.append($('li', {}, `${e.direction}${t && t.kind !== 'stub' ? ` → ${t.name}` : ''}${e.closed ? ' (closed door)' : ''}${e.dug ? ' (dug)' : ''}`));
+                ul.append($('li', {}, `${e.direction}${t && t.kind !== 'stub' ? ` → ${t.name}` : ''}${e.blocked ? ' (blocked)' : e.locked ? ' (locked)' : e.closed ? ' (closed door)' : ''}${e.dug ? ' (dug)' : ''}`));
             }
             if (!exits.length) ul.append($('li', { class: 'muted' }, 'none'));
             side.append(ul);
@@ -185,7 +185,7 @@ function createMapWindow(win) {
         const at = id => pos.get(id);
         const subs = new Map();
         for (const e of graph.edges) {
-            const a = at(e.from), b = at(e.to), g = S('g', { class: `edge${e.closed || e.back?.closed ? ' closed' : ''}` });
+            const a = at(e.from), b = at(e.to), g = S('g', { class: `edge${e.blocked || e.back?.blocked ? ' blocked' : e.closed || e.back?.closed ? ' closed' : ''}` });
             if (!a || !b) continue;
             g.append(S('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
             const label = (t, f) => { if (!t) return; const el = S('text', { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f - 4, 'text-anchor': 'middle' }); el.textContent = t; g.append(el); };
@@ -210,7 +210,7 @@ function createMapWindow(win) {
             world.append(g);
         }
         legend.replaceChildren(...[...subs.values()].map(s => $('span', {}, $('i', { style: `background:hsl(${s.hue} 55% 45%)` }), s.name)),
-            $('span', {}, '▭ been · ⋯ seen · ┄ closed door'));
+            $('span', {}, '▭ been · ⋯ seen · ┄ closed door · ✕ blocked'));
         const hereNode = graph.nodes.find(n => n.here)?.id;
         showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
