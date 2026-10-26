@@ -17,7 +17,7 @@
           "description": "A dusty road climbing out of the sheep pastures toward Larkspur's honey-coloured roofs. A stone bridge crosses a beck, and a signpost points west: Riverton, two hours on foot.",
           "inherit_region_notes": true,
           "exits": [
-            { "type": "open", "direction": "west", "to": "riverton:east_road/road", "travel_time": "2h", "description": "The long road back to Riverton, about two hours' walk through farmland." },
+            { "type": "open", "direction": "west", "to": "riverton:east_road/road", "travel_time": "2h", "sight": "none", "sound": "none", "description": "The long road west winds away through farmland until it drops out of sight. Riverton is about two hours' walk." },
             { "type": "open", "direction": "east", "to": "green/green", "travel_time": "5m", "description": "Up the hill into Larkspur." }
           ]
         }

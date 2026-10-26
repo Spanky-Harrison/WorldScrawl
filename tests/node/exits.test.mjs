@@ -103,11 +103,12 @@ test('traversal text is returned only on the move through that exit', () => {
 test('Riverton: gate, door and open street sight/sound', () => {
     const w = load_world(ROOT);
     const grate = w.get('riverton:temple/nave').exits.find(e => e.barrier && e.to.includes('catacombs'));
-    assert.equal(grate.barrier.closed_sight, 'clear');
+    assert.equal(grate.barrier.closed_sight, 'none'); // obscured: forced
+    assert.equal(grate.sight, 'none');
     assert.equal(grate.barrier.closed_sound, 'clear');
     const up = w.get('riverton:temple/catacombs').exits.find(e => e.to.includes('nave'));
     assert.equal(up.door, grate.door);
-    assert.equal(up.barrier.closed_sight, 'clear');
+    assert.equal(up.barrier.closed_sight, 'clear'); // from below you can see up into the nave
     const lane = w.get('riverton:streets/square').exits.find(e => e.direction === 'west');
     assert.equal(lane.type, 'open');
     assert.equal(lane.sight, 'clear');
@@ -123,4 +124,33 @@ test('a curtain: barrier that hides but lets sound through', () => {
     const w = W({ barrier: { closed_sight: 'none', closed_sound: 'clear' } });
     assert.equal(E(w, B, 'west').barrier.closed_sound, 'clear');
     assert.equal(E(w, B, 'west').barrier.closed_sight, 'none');
+});
+
+test('Riverton: the temple grate stays obscured (no destination) but has a near-side description; long roads are sight/sound none', () => {
+    const c = client(ROOT);
+    const g = c.get('/location/riverton:temple/nave').json().exits.find(e => e.direction === 'grate');
+    assert.equal(g.obscured, true);
+    assert.equal(g.to, undefined);
+    assert.match(g.description, /stair that descends into darkness/);
+    assert.equal(g.barrier.closed_sight, 'none');
+    assert.equal(g.sight, 'none');
+    for (const [a, d] of [['riverton:east_road/road', 'east'], ['larkspur:west_road/road', 'west']]) {
+        const r = c.get(`/location/${a}`).json().exits.find(e => e.direction === d);
+        assert.equal(r.sight, 'none'); assert.equal(r.sound, 'none'); assert.ok(r.description);
+    }
+});
+
+test('obscured forces sight none (and closed_sight none), warning on explicit other values; sight none does not imply obscured', () => {
+    let [w, logs] = caplog(() => W({ obscured: true, sight: 'clear', barrier: { closed_sight: 'clear' } }));
+    assert.match(logs, /is obscured, so its sight is none; ignoring "sight": 'clear' and barrier "closed_sight": 'clear'/);
+    assert.equal(E(w, A, 'east').sight, 'none');
+    assert.equal(E(w, A, 'east').barrier.closed_sight, 'none');
+    assert.equal(E(w, B, 'west').barrier.closed_sight, 'clear'); // the return side keeps its own view
+    [w, logs] = caplog(() => W({ obscured: true }));
+    assert.doesNotMatch(logs, /is obscured, so/);
+    assert.equal(E(w, A, 'east').sight, 'none');
+    w = W({ sight: 'none' });
+    assert.ok(!E(w, A, 'east').flags.obscured);
+    const d = client(makeWorld(tmpPath(), { r: two({ sight: 'none' }, {}) })).get('/location/' + A).json().exits[0];
+    assert.equal(d.to, B); assert.equal(d.to_name, 'B'); // still known where it goes
 });

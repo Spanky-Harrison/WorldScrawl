@@ -1054,8 +1054,10 @@ async function narrativeLook(msg, loc) {
         const t = (v === 'open' || v === 'peek') && revealsDestination(e) && e.to ? await fetchLocationCached(e.to) : null;
         const lvl = sightOf(e, opened ? new Map([[e.door, { type: 'open_door' }]]) : open);
         look = v === 'listen' ? { kind: 'listen', via: e.direction, sound: soundOf(e, open), word: barrierWord(e) }
+            : v === 'shut' && !stuck && e.description && !revealsDestination(e) ? { kind: 'threshold', via: e.direction, description: e.description, shut: true, unknown: !revealsDestination(e) }
             : v === 'shut' ? { kind: 'closed', via: e.direction, word: barrierWord(e), ...(stuck ? { stuck: stuckWhy(e) } : {}) }
             : t ? { kind: 'see', via: e.direction, to: t.address, name: displayName(t), description: t.description, opened, ...(v === 'peek' ? { peek: true } : { sight: lvl }), ...(through ? { through_closed: true } : {}) }
+            : e.description && v !== 'shut' ? { kind: 'threshold', via: e.direction, description: e.description, opened, ...(through ? { through_closed: true } : {}), ...(v === 'peek' ? { peek: true } : {}), unknown: !revealsDestination(e), ...(revealsDestination(e) && (e.to_label ?? e.to_name) ? { name: e.to_label ?? e.to_name } : {}) }
             : { kind: 'nothing', via: e.direction, opened };
     } else {
         let view = (loc.views ?? [])[0]; // hand-written views first, then an earlier view link: the same answer every time
@@ -1310,6 +1312,7 @@ export function lookText(who, here, look) {
     if (look.kind === 'see' && look.peek) return `What just happened: ${who} peeks through the closed ${doorWord(look.via)} without opening it and glimpses ${look.name}: ${look.description} The door stays closed. ${who} is still at ${here}. Describe only the glimpse.`;
     if (look.kind === 'see' && look.through_closed) return `What just happened: ${who} looks through the closed ${look.via} (it can be seen through) and sees ${look.name}: ${look.description} It stays closed. ${who} is still at ${here}. Describe only what can be seen from here.`;
     if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description}${look.sight === 'clear' ? ' The view is open and carries far.' : ''} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'threshold') return `What just happened: ${first}${who} looks ${look.through_closed ? `through the closed ${look.via}` : look.peek ? `through a gap in the closed ${doorWord(look.via)}` : look.shut ? `at the closed ${doorWord(look.via)}` : how}. All that can be seen is what is right there: ${look.description} ${look.unknown ? 'Where it leads is not clear and is unknown; do not name, describe or guess what lies beyond.' : `${look.name ? `It leads to ${look.name}, but that` : 'Where it leads'} cannot be seen from here; ${look.name ? 'it may be named but' : ''} do not describe what lies at the far end.`} ${who} is still at ${here}.`;
     if (look.kind === 'closed' && look.stuck) return `What just happened: ${who} tries to open the ${doorWord(look.via)}, but it ${look.stuck}. Nothing beyond it can be seen. ${who} stays at ${here}.`;
     if (look.kind === 'closed') return `What just happened: ${who} looks at the ${doorWord(look.via)}. ${look.word === 'way' ? 'The way is blocked' : 'The door is closed'}; nothing beyond it can be seen. ${who} stays at ${here}.`;
     if (look.kind === 'listen' && look.sound === 'clear') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Sounds from beyond it carry clearly. ${who} stays at ${here}.`;

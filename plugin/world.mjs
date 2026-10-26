@@ -294,6 +294,7 @@ export function exitShape(e, ex, where) {
     };
     const legacyNone = e.view === 'none';
     e.sight = level('sight', legacyNone ? 'none' : preset.sight ?? 'partial');
+    e._sight_given = has(ex, 'sight') ? ex.sight : null;
     e.sound = level('sound', legacyNone ? 'none' : preset.sound ?? 'partial');
     if (has(ex, 'barrier')) {
         const b = ex.barrier;
@@ -515,6 +516,17 @@ export function build_world(worldJson, rawRegions) {
                 back.barrier_explicit = true;
             }
         }
+    }
+
+    // Obscured = where it goes isn't clear, so nothing of the destination can be seen through it (open or closed).
+    for (const loc of locations.values()) for (const e of loc.exits) {
+        if (!e.flags.obscured) continue;
+        const bad = [];
+        if (e._sight_given !== null && e._sight_given !== 'none') bad.push(`"sight": ${repr(e._sight_given)}`);
+        if (e.barrier && e._barrier_given && has(e._barrier_given, 'closed_sight') && e._barrier_given.closed_sight !== 'none') bad.push(`barrier "closed_sight": ${repr(e._barrier_given.closed_sight)}`);
+        if (bad.length) log.warning(`world: ${loc.address} exit ${repr(e.direction)} is obscured, so its sight is none; ignoring ${bad.join(' and ')}`);
+        e.sight = 'none';
+        if (e.barrier) e.barrier = { ...e.barrier, closed_sight: 'none' }; // this side only: the return exit keeps its own
     }
 
     // Pair every hidden/obscured (or closable) exit with its return exit: passing through either side reveals both.
