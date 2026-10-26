@@ -175,7 +175,7 @@
     "temple": {
       "name": "Temple of the Tides",
       "exposure": "sheltered",
-      "indoor_temp": 60,
+      "indoor_temp": 65,
       "insulation": "drafty",
       "notes": "A hushed, holy place tended by Sister Amara, a serene, dark-eyed beauty in sea-green robes. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
       "inherit_notes": false,
