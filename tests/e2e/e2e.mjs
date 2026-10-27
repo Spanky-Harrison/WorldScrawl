@@ -1288,6 +1288,62 @@ try {
     const an1 = await nameRow();
     check('area Resolved: renamed, tagged with its message, orange marker', an1 && an1.v === 'The Gilded Quarter' && an1.src.includes(`from message #${nArea}`) && an1.mark, JSON.stringify(an1));
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
+    // ---- Turning past changes off and on again: dependents confirm, can't-apply notes, hidden notes, inspector toggle.
+    const BURNT = 'riverton:drowned_rat/burnt_inn', YARD = 'riverton:drowned_rat/courtyard';
+    const nTog = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    const stamped = await page.evaluate(async ([mod, CR, YARD, BURNT]) => {
+        const m = await import(mod);
+        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire');
+        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot');
+        m.renderPatchCards(); return [a, b];
+    }, [wsMod, CR, YARD, BURNT]);
+    check('toggle setup: two stamped changes, the second built on the first', stamped.every(r => r.ok) && stamped[0].msg === nTog && stamped[1].msg === nTog + 1, JSON.stringify(stamped));
+    const tA = nTog, tB = nTog + 1;
+    const cardA = page.locator(`#chat .mes[mesid="${tA}"] .worldscrawl_patchcard`), cardB = page.locator(`#chat .mes[mesid="${tB}"] .worldscrawl_patchcard`);
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).waitFor({ timeout: 10000 });
+    check('kept change cards have a Turn off button', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 1);
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
+    const conf = page.locator('.worldscrawl_confirm');
+    await conf.waitFor({ timeout: 10000 });
+    const confText = await conf.innerText();
+    check('turning off asks first, listing the later change that needs it', confText.includes(`#${tB}`) && /Turn off all/.test(confText) && /Just this one/.test(confText) && /Cancel/.test(confText), confText);
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Cancel' }).click(); await page.waitForTimeout(500);
+    check('Cancel leaves it on, no note', await page.evaluate(([a, n]) => { const c = SillyTavern.getContext(); return !c.chat[a].extra.worldscrawl_patches[0].off && c.chat.length === n; }, [tA, tB + 1]));
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
+    await conf.waitFor({ timeout: 10000 });
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Just this one' }).click(); await page.waitForTimeout(1500);
+    const off1 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off ?? false, kept: c.chat[a].extra.worldscrawl_patches[0].ops.length, mes: m.mes, sys: m.is_system, notice: m.extra?.worldscrawl_notice }; }, [tA, tB]);
+    check('Just this one: only it is turned off, still stored on its message', off1.a === true && off1.b === false && off1.kept === 1, JSON.stringify(off1));
+    check('a hidden note says what was turned off', off1.mes === `Map edit: turned off the change from #${tA}` && off1.sys === true && off1.notice === true, JSON.stringify(off1));
+    try { await cardB.locator('.worldscrawl_cant_apply').waitFor({ timeout: 10000 }); } catch {}
+    check('the later change that needed it shows a red can\'t apply note', /can't apply/.test(await cardB.innerText()), await cardB.innerText());
+    check('turned-off card offers Turn on', await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).count() === 1);
+    const mapCtxNow = await page.evaluate(async mod => { const m = await import(mod); return { changes: m.chatChanges(), now: m.chatElapsed(), world: SillyTavern.getContext().extensionSettings.worldscrawl.world || '' }; }, wsMod);
+    const mapRes = await stFetch(`/rooms${mapCtxNow.world ? `?world=${encodeURIComponent(mapCtxNow.world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addresses: [CR], changes: mapCtxNow.changes, now: mapCtxNow.now }) });
+    const mapOk = [mapRes.status, mapRes.ok ? (await mapRes.json()).rooms?.length : mapRes.text];
+    check('the map still works with the change off (the merged room is back)', mapOk[0] === 200 && mapOk[1] === 1, JSON.stringify(mapOk));
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).click(); await page.waitForTimeout(1500);
+    try { await page.waitForFunction(b => !document.querySelector(`#chat .mes[mesid="${b}"] .worldscrawl_cant_apply`), tB, { timeout: 10000 }); } catch {}
+    const on1 = await page.evaluate(a => { const c = SillyTavern.getContext(); return { off: c.chat[a].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, tA);
+    check('Turn on puts it back (with its own hidden note) and the red note goes', on1.off === undefined && on1.mes === `Map edit: turned on the change from #${tA}` && await cardB.locator('.worldscrawl_cant_apply').count() === 0, JSON.stringify(on1));
+    // The same toggle in the map window's inspector, Changes tab.
+    let tabOk = false;
+    for (let k = 0; k < 5 && !tabOk; k++) {
+        await ui.click(`.node[data-id="${BURNT}"]`).catch(() => {}); await ui.waitForTimeout(1200);
+        await ui.click('.side .tabs button:has-text("Changes")').catch(() => {}); await ui.waitForTimeout(500);
+        tabOk = await ui.locator(`.side li.change:has-text("Message #${tA}") .togglechange`).count() === 1;
+    }
+    check('inspector Changes tab has a Turn off button per change', tabOk);
+    await ui.click(`.side li.change:has-text("Message #${tA}") .togglechange`);
+    const uconf = ui.locator('.toggle-confirm');
+    try { await uconf.waitFor({ timeout: 10000 }); } catch {}
+    check('inspector asks first too, listing the dependent', (await uconf.count()) === 1 && (await uconf.innerText()).includes(`#${tB}`));
+    await uconf.locator('button:has-text("Turn off all")').click(); await page.waitForTimeout(2000);
+    const off2 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(); return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, [tA, tB]);
+    check('inspector Turn off all: both off, one hidden note naming both', off2.a === true && off2.b === true && off2.mes === `Map edit: turned off the change from #${tA} (and the changes from #${tB})`, JSON.stringify(off2));
+    try { await ui.waitForSelector(`.node[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
+    check('map shows the original rooms again', await ui.locator(`.node[data-id="${CR}"]`).count() === 1 && await ui.locator(`.node[data-id="${BURNT}"]`).count() === 0);
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), tA); await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
