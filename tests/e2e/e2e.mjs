@@ -1271,8 +1271,8 @@ try {
     await ui.click('.side .editlive');
     const nameIn = ui.locator('.side label:has-text("New display name") input').first();
     await nameIn.waitFor({ timeout: 10000 });
-    const themed = await nameIn.evaluate(el => el.classList.contains('text_pole') && /SmartThemeBorderColor/.test(el.style.border || el.getAttribute('style')));
-    check('area Edit live: update_area form prefilled with the live name, themed inputs', (await nameIn.inputValue()) === an0.v && themed, await nameIn.inputValue());
+    const areaThemed = await nameIn.evaluate(el => el.classList.contains('text_pole') && /SmartThemeBorderColor/.test(el.style.border || el.getAttribute('style')));
+    check('area Edit live: update_area form prefilled with the live name, themed inputs', (await nameIn.inputValue()) === an0.v && areaThemed, await nameIn.inputValue());
     await nameIn.fill('The Gilded Quarter');
     try { await ui.waitForFunction(() => /Gilded Quarter/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
     check('area Edit live: the red/green diff shows the rename', /Gilded Quarter/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
