@@ -58,9 +58,10 @@ export function expiredBetween(changes = [], before = 0, after = 0) {
     }
     return out.sort((a, b) => a.ends - b.ends);
 }
-/** The changes with expired patch ops dropped (patches left with no ops dropped too). */
+/** The changes with expired patch ops dropped (patches left with no ops dropped too), and turned-off changes skipped. */
 export function activeChanges(changes = [], now = null) {
     return (changes ?? []).flatMap(c => {
+        if (c?.off === true) return []; // turned off retroactively: stays stored on its message, skipped in the replay
         if (c?.type !== 'patch' || !Array.isArray(c.ops)) return [c];
         const ops = c.ops.filter(o => opActive(o, c, now));
         return ops.length ? [ops.length === c.ops.length ? c : { ...c, ops }] : [];

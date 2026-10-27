@@ -2036,6 +2036,12 @@ function openMapChannel() {
                 .then(r => ch.postMessage({ type: 'patch_result', req: ev.data.req, ...r }))
                 .catch(e => ch.postMessage({ type: 'patch_result', req: ev.data.req, ok: false, errors: [{ i: null, error: e.message }] }));
         }
+        if (ev.data?.type === 'toggle_change') { // the inspector's Turn off / Turn on: same flow as the cards; the map asks to confirm
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) toggleChange(Number(d.msg), String(d.id ?? ''), { choice: d.choice })
+                .then(r => ch.postMessage({ type: 'toggle_result', req: d.req, ...r }))
+                .catch(e => ch.postMessage({ type: 'toggle_result', req: d.req, ok: false, error: e.message }));
+        }
         if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
     });
     return ch;
@@ -2098,7 +2104,7 @@ export const patchesOn = m => (m?.extra?.[PATCH_KEY] ?? []).filter(p => (p?.swip
 function relocateFrom(addr, i, chat) {
     // Expired temporary patches ("lasts") no longer redirect (#47); the resolver handles any room that is still missing.
     const now = patchLib ? chatElapsed(chat) : null;
-    const live = p => !patchLib || patchLib.activeChanges([p], now).length > 0;
+    const live = p => p?.off !== true && (!patchLib || patchLib.activeChanges([p], now).length > 0);
     for (let j = i; j < chat.length; j++) for (const p of patchesOn(chat[j]).filter(live)) if (p?.relocate && Object.hasOwn(p.relocate, addr)) addr = p.relocate[addr];
     return addr;
 }
@@ -2108,7 +2114,7 @@ function mapCtx() { return { changes: chatChanges(), now: chatElapsed() }; }
 function patchSig() {
     const chat = ctx().chat ?? [];
     if (!chat.some(m => m?.extra?.[PATCH_KEY])) return '';
-    let ps = chatChanges(chat).filter(c => c.type === 'patch');
+    let ps = chatChanges(chat).filter(c => c.type === 'patch' && c.off !== true);
     if (patchLib && ps.length) ps = patchLib.activeChanges(ps, chatElapsed(chat));
     if (!ps.length) return '';
     const s = JSON.stringify(ps.map(p => [p.id, p._msg, p.ops.length]));
@@ -2196,6 +2202,86 @@ async function saveKeptEdit(id, pid, form) {
     toastr.success('WorldScrawl: change updated.');
     await applyFacts();
     renderAllExits();
+}
+/** Which kept changes can't apply any more (a change they built on was turned off): [{msg, id, error}], refreshed in the background. */
+let changeStatus = { key: null, failed: [], busy: null };
+const failedFor = (mi, pid) => changeStatus.failed.find(f => f.msg === mi && f.id === pid);
+async function refreshChangeStatus() {
+    const body = mapCtx(), key = JSON.stringify(body);
+    if (key === changeStatus.key || changeStatus.busy === key) return;
+    if (!body.changes.some(c => c?.type === 'patch')) { changeStatus = { key, failed: [], busy: null }; return; }
+    changeStatus.busy = key;
+    const r = await api('/changes/status', { method: 'POST', body: JSON.stringify(body) }).catch(() => ({ ok: false }));
+    if (changeStatus.busy !== key) return;
+    changeStatus = { key, failed: r.ok ? r.body.failed ?? [] : [], busy: null };
+    renderPatchCards();
+}
+/** What else depends on kept change (message mi, id pid): {hard, overlaps}, each [{msg, id, note, summary}]. */
+export async function changeDependents(mi, pid) {
+    const changes = chatChanges(), index = changes.findIndex(x => x._msg === mi && x.id === pid && x.type === 'patch');
+    if (index < 0) return { hard: [], overlaps: [] };
+    const r = await api('/changes/dependents', { method: 'POST', body: JSON.stringify({ changes, index, now: chatElapsed() }) });
+    return r.ok ? { hard: r.body.hard ?? [], overlaps: r.body.overlaps ?? [] } : { hard: [], overlaps: [] };
+}
+/** Turn a kept change off or on again (retroactively). It stays stored on its message; turned off, the replay skips it.
+ *  Turning off with dependents and no `choice` returns {ok:false, confirm:{hard, overlaps}}: ask, then call again with
+ *  choice 'all' (also turn those off), 'one' (just this one) or 'cancel'. Posts a hidden note the model doesn't see. */
+export async function toggleChange(mi, pid, { choice } = {}) {
+    const c = ctx(), chat = c.chat ?? [], find = (i, id) => patchesOn(chat[i]).find(x => x.id === id);
+    const p = find(mi, pid);
+    if (!p) return { ok: false, error: 'That change is no longer on its message.' };
+    const turningOn = p.off === true;
+    let others = [];
+    if (!turningOn) {
+        if (choice === 'cancel') return { ok: false, cancelled: true };
+        if (!choice) {
+            const deps = await changeDependents(mi, pid);
+            if (deps.hard.length || deps.overlaps.length) return { ok: false, confirm: deps };
+        } else if (choice === 'all') {
+            const deps = await changeDependents(mi, pid);
+            others = [...deps.hard, ...deps.overlaps].filter(d => d.msg != null && find(d.msg, d.id) && !find(d.msg, d.id).off);
+        }
+    }
+    for (const [i, id] of [[mi, pid], ...others.map(d => [d.msg, d.id])]) {
+        const q = find(i, id);
+        if (turningOn) delete q.off; else q.off = true;
+        syncSwipeExtra(chat[i]);
+    }
+    const also = [...new Set(others.map(d => d.msg))].filter(i => i !== mi);
+    const text = `Map edit: turned ${turningOn ? 'on' : 'off'} the change from #${mi}${also.length ? ` (and the changes from ${also.map(i => `#${i}`).join(', ')})` : ''}`;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text,
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[mi, pid], ...others.map(d => [d.msg, d.id])], worldscrawl_notice_on: turningOn } };
+    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+    renderPatchCards();
+    broadcastMapState();
+    return { ok: true, off: !turningOn, msgs: [mi, ...also], text };
+}
+globalThis.worldscrawlToggleChange = toggleChange;
+/** The small confirm before turning off a change others may need. Resolves 'all', 'one' or 'cancel'. */
+function confirmOff(mi, deps) {
+    return new Promise(done => {
+        document.querySelector('.worldscrawl_confirm')?.remove();
+        const box = document.createElement('div');
+        box.className = 'worldscrawl_confirm';
+        box.style.cssText = 'position:fixed;z-index:10000;left:50%;top:30%;transform:translateX(-50%);max-width:30em;padding:10px 14px;border:1px solid var(--SmartThemeBorderColor);border-radius:8px;background:var(--SmartThemeBlurTintColor, #222);color:var(--SmartThemeBodyColor);box-shadow:0 4px 18px rgba(0,0,0,0.5);';
+        const p = t => { const d = document.createElement('div'); d.textContent = t; return d; };
+        const desc = d => `#${d.msg}: ${(d.summary ?? []).join('; ') || d.note || d.id}`;
+        box.append(p(`Turn off the change from #${mi}?`));
+        if (deps.hard.length) { box.append(p('These later changes need it and will stop applying:')); for (const d of deps.hard) box.append(p(`• ${desc(d)}`)); }
+        if (deps.overlaps.length) { box.append(p('These touched the same places:')); for (const d of deps.overlaps) box.append(p(`• may depend on #${mi}: ${desc(d)}`)); }
+        const row = document.createElement('div'); row.style.marginTop = '6px';
+        for (const [label, v] of [['Turn off all', 'all'], ['Just this one', 'one'], ['Cancel', 'cancel']]) row.append(cardButton(label, () => { box.remove(); done(v); }));
+        box.append(row);
+        document.body.append(box);
+    });
+}
+async function toggleFromCard(mi, pid) {
+    let r = await toggleChange(mi, pid);
+    if (r.confirm) r = await toggleChange(mi, pid, { choice: await confirmOff(mi, r.confirm) });
+    if (!r.ok && r.error) toastr.error(`WorldScrawl: ${r.error}`);
 }
 /** A live edit from the map window (or anywhere): a hidden system message carrying the stamp. Returns {ok} or {ok:false, errors}. */
 export async function liveEdit(ops, note = '') {
@@ -2526,6 +2612,7 @@ function cardButton(label, onClick, title = '') {
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
+    if (isOn()) refreshChangeStatus();
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
         el.querySelector('.worldscrawl_patchcard')?.remove();
@@ -2586,11 +2673,22 @@ export function renderPatchCards() {
             }
         }
         for (const p of kept) {
-            const d = line(`🗺 Map changed here: ${(p.summary ?? []).join('; ') || p.note}`);
+            const what = (p.summary ?? []).join('; ') || p.note;
+            if (p.off === true) {
+                const d = line(`🗺 Map change turned off: ${what}`);
+                d.className = 'worldscrawl_change_off'; d.style.opacity = '0.6';
+                d.append(' ', cardButton('Turn on', () => toggleFromCard(id, p.id), 'Put this change back on the map'));
+                card.append(d);
+                continue;
+            }
+            const d = line(`🗺 Map changed here: ${what}`);
             const key = `${id}|${p.id}`, form = openForms.get(key);
             d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
+                cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)'),
                 cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
             card.append(d);
+            const bad = failedFor(id, p.id);
+            if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; card.append(w); }
             if (form) {
                 const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
                 form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
