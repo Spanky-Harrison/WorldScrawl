@@ -10,11 +10,13 @@
 //   {"type": "open_door" | "close_door", "from": A, "direction": "out", ...}   door state: replayed by the client;
 //       checked here (the exit must exist) but never written into a saved world
 //   {"type": "view_link", "from": A, "to": B}   what A's window (no exit) looks out on; saved into A's "views"
+//   {"type": "patch", "ops": [...], ...}   a map patch (fire, collapse, merged rooms): see ui/patches.mjs
 // The extension stamps changes on chat messages; the server applies them per request (/move, /travel) and when
 // rendering a new world folder. Anything else is rejected, so new types must be added here deliberately.
 import { WorldError, has, isObj, plen, repr, strip } from './world.mjs';
+import { applyPatch, PatchError } from './ui/patches.mjs';
 
-export const CHANGE_TYPES = ['add_exit', 'remove_exit', 'dig', 'add_room', 'open_door', 'close_door', 'view_link'];
+export const CHANGE_TYPES = ['add_exit', 'remove_exit', 'dig', 'add_room', 'open_door', 'close_door', 'view_link', 'patch'];
 export const MAX_NAME = 60, MAX_DIRECTION = 30, MAX_DESCRIPTION = 400;
 
 const get = (o, k) => (has(o, k) ? o[k] : undefined);
@@ -47,7 +49,7 @@ const sameDir = (e, d) => String(isObj(e) && has(e, 'direction') ? e.direction :
 const exitsOf = r => (isObj(r) && has(r, 'exits') ? r.exits : []);
 
 /** Copies of world.json and the region files with `changes` applied in order. Throws WorldError if invalid. */
-export function apply_changes(worldJson, rawIn, changes) {
+export function apply_changes(worldJson, rawIn, changes, { now = null, info = null } = {}) {
     worldJson = structuredClone(worldJson);
     const raw = structuredClone(rawIn);
     if (!Array.isArray(changes)) throw new WorldError('changes must be a list');
@@ -55,6 +57,13 @@ export function apply_changes(worldJson, rawIn, changes) {
         const where = `change #${i + 1}`;
         if (!isObj(ch) || !CHANGE_TYPES.includes(get(ch, 'type'))) {
             throw new WorldError(`${where}: unknown change type ${repr(isObj(ch) ? get(ch, 'type') : ch)} (known: ${CHANGE_TYPES.join(', ')})`);
+        }
+        if (ch.type === 'patch') {
+            try {
+                const r = applyPatch(raw, ch, { now, where });
+                if (info) (info.patches ??= []).push({ index: i, id: ch.id ?? null, note: ch.note ?? '', msg: ch._msg ?? null, ...r });
+            } catch (e) { if (e instanceof PatchError) throw new WorldError(e.message); throw e; }
+            return;
         }
         if (ch.type === 'add_room') {
             const address = text(ch, 'address', where);

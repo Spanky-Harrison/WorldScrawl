@@ -448,3 +448,18 @@ In the map window (WorldScrawl GUI), the **Editor** button in the top bar switch
 - **Warnings**: the loader warnings that concern the clicked item (served by `GET /api/plugins/worldscrawl/inspect?target=…`; `GET …/inspect/index` lists rooms, doors and the warning count).
 
 The inspector never changes anything. Click **Editor** again to return to the normal (play) map.
+
+## Map changes during play (fires, collapses, new doors)
+
+Sometimes the story changes the map: a bridge collapses, a fire guts a room, or someone knocks a hole in a wall. WorldScrawl can record that change on the chat without editing your world files.
+
+**For players**
+- To flag a reply that changed the map, click the 🚩 flag button on it, or type `/ws-change` (you can add a note, like `/ws-change the roof caved in`). The narrator can also flag a reply on its own.
+- WorldScrawl reads the last few messages and suggests a change, then shows a **Keep / Discard** card with a before/after view. You can move the start of the range on the card and click **Check again**.
+- Kept changes belong to that message and that swipe. If you delete the message, the change is undone. You can also click **Undo** on the card.
+- If you want changes applied without the card, turn on **Auto-keep map changes** in the settings. You can also turn off the narrator's flag tags there.
+- A change can be temporary (for example, "lasts": "2d"). It ends when that much game time has passed.
+
+**For creators:** you don't need to do anything. Changes are stored in the chat, never in `worlds/`. In the map's Inspect panel, the **Changes** tab lists them, and Resolved shows "Changed by" for anything that was patched.
+
+Patch ops (for the curious): `set_description`, `append_description`, `set_name`, `set_notes`, `append_notes`, `block_exit`, `open_exit`, `lock_exit`, `unlock_exit`, `break_exit`, `remove_exit`, `remove_location`, `merge`. Any of them can take an optional `lasts`.
