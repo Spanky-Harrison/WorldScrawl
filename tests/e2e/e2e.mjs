@@ -1392,6 +1392,27 @@ try {
     }, [wsMod, UPST]);
     check('discovery review setting: a Keep / Discard card, nothing stamped yet', rev.status === 'review' && !rev.stamped, JSON.stringify(rev));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, rev.id); await page.waitForTimeout(1500);
+    // A door no description mentions: "I open a door down the hall" in the upstairs hallway. The intent check offers
+    // "try another door", the narrator is told to open it only if it fits, and its flag adds the room.
+    const mode0 = await page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext(), was = m.settings().moveMode; m.settings().moveMode = 'typed';
+        c.chat.push({ name: 'User', is_user: true, mes: 'I head up to the hallway.', extra: { worldscrawl_location: UPST, worldscrawl_intent_checked: true } });
+        c.chat.push({ name: 'Narrator', is_user: false, mes: 'You stand in the upstairs hallway.', extra: { worldscrawl_location: UPST } });
+        await c.saveChat(); await c.reloadCurrentChat(); return { was, n: c.chat.length };
+    }, [wsMod, UPST]);
+    await page.waitForTimeout(1500);
+    expected = (await reqsNow()).length; rL = expected;
+    await queue([{ content: 'try another door' }, { content: 'Halfway down the hall a plain door gives under your hand. [ws_flag: discover | a door down the hall]' }, { content: ROOMJ }]);
+    await send('I open a door down the hall', 3);
+    for (let k = 0; k < 40; k++) { const st = await page.evaluate(() => SillyTavern.getContext().chat.at(-1)?.extra?.worldscrawl_flag?.status); if (st && st !== 'working') break; await page.waitForTimeout(250); }
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('undescribed door: the intent check offers "try another door"', lq.length >= 1 && promptOf(lq[0]).includes('try another door: the player opens or tries a door'), promptOf(lq[0] ?? {}).slice(-600));
+    check('undescribed door: the message is marked and the narrator is told to open it only if it fits', lk.extra.worldscrawl_new_door === true && promptOf(lq[1] ?? {}).includes('tries a door that is not among the exits') && promptOf(lq[1] ?? {}).includes('If no such door fits'), promptOf(lq[1] ?? {}).slice(-700));
+    const nd = await page.evaluate(() => { const m = SillyTavern.getContext().chat.at(-1); return { mes: m.mes, f: m.extra?.worldscrawl_flag, p: m.extra?.worldscrawl_patches?.[0] }; });
+    check('undescribed door: the flag adds the room behind it at once', nd.f?.kind === 'discover' && nd.f?.status === 'kept' && nd.p?.ops?.[0]?.op === 'discover' && !/ws_flag/.test(nd.mes), JSON.stringify(nd).slice(0, 600));
+    check('undescribed door: the discovery prompt allows a door the description does not mention', promptOf(lq[2] ?? {}).includes('does not mention but that plausibly fits'), promptOf(lq[2] ?? {}).slice(0, 400));
+    await page.evaluate(async ([mod, n, was]) => { const m = await import(mod), c = SillyTavern.getContext(); m.settings().moveMode = was; c.chat.splice(n - 2); await c.saveChat(); await c.reloadCurrentChat(); }, [wsMod, mode0.n, mode0.was]);
+    await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
