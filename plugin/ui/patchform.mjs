@@ -32,7 +32,7 @@ export const OP_FIELDS = {
     add_exit: [['loc', 1], ['direction', 1], ['to', 1], ['return_direction', 0], ['travel_time', 0], ['description', 0], ['return_description', 0], ['door', 0]],
     move_location: [['loc', 1], ['area', 1], ['id', 0]],
     move_area: [['area', 1], ['region', 1], ['id', 0]],
-    create_place: [['area', 1], ['name', 1], ['description', 1], ['exits', 1], ['notes', 0], ['id', 0]],
+    create_place: [['area', 1], ['name', 1], ['description', 1], ['exits', 1], ['id', 0]],
     create_subregion: [['region', 1], ['name', 1], ['place', 1], ['notes', 0], ['id', 0]],
     create_region: [['name', 1], ['subregion', 1], ['notes', 0], ['id', 0]],
     remove_area: [['area', 1], ['contents', 1], ['into', 0], ['ids', 0]],
@@ -181,7 +181,7 @@ export function buildPatchForm(doc, opts = {}) {
                     const idNote = st(mk('span', { class: 'wspf-newid' }), 'font-size:0.8em;opacity:0.7;');
                     const show = v => { idNote.textContent = d.into || !s(v) ? '' : `new place id: ${newRoomId(v)} (from the name; _2 is added if taken)`; };
                     box.append(field(lab, input(d.name, v => { d.name = v; show(v); })), idNote); show(d.name);
-                } else if (k === 'fields') box.append(field(lab, area(typeof d.fields === 'string' ? d.fields : JSON.stringify(d.fields ?? {}), set('fields'))));
+                } else if (JSON_KEYS.has(k)) box.append(field(lab, area(typeof d[k] === 'string' ? d[k] : d[k] == null ? '' : JSON.stringify(d[k]), set(k))));
                 else box.append(field(lab, input(typeof d[k] === 'boolean' ? String(d[k]) : d[k], set(k))));
             }
             box.append(field('Lasts (optional, e.g. 3d, 12h; empty = permanent)', input(d.lasts, set('lasts'), { placeholder: 'permanent' })));

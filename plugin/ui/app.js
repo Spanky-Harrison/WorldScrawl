@@ -1,7 +1,8 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
 import { placeWeather, fmtTemp } from './weather.mjs';
-import { buildEditForm } from './placeform.mjs';
+import { buildEditForm, expandPrompt } from './placeform.mjs';
+import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff } from './diffview.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
@@ -130,8 +131,26 @@ async function toggleFromInspector(c) {
 const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length, x.off ? 1 : 0])) + `|${st.now ?? ''}` : ''; };
 async function postJson(url, body) {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error(`map server answered ${r.status}`);
+    if (!r.ok) { // a 400 carries {detail: {error, clash?}}: keep it for the wizards' rename prompts
+        let detail = null; try { detail = (await r.json()).detail ?? null; } catch {}
+        const e = new Error(typeof detail?.error === 'string' ? detail.error : `map server answered ${r.status}`); e.detail = detail; throw e;
+    }
     return r.json();
+}
+/** "Expand with AI": the SillyTavern tab makes one model call with a prompt built here from /edit/ai-context. */
+const pendingExpands = new Map();
+function sendExpand(prompt) {
+    const req = `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    return new Promise((resolve, reject) => {
+        const t = setTimeout(() => { pendingExpands.delete(req); reject(new Error('No answer from SillyTavern. Is the chat open in a tab?')); }, 90000);
+        pendingExpands.set(req, r => { clearTimeout(t); pendingExpands.delete(req); if (r.ok) resolve(r.text); else reject(new Error(r.error ?? 'failed')); });
+        channel.postMessage({ type: 'expand', chatId: curState?.chatId, req, prompt });
+    });
+}
+async function aiText(st, { field, kind, name, area, rooms = [], text = '' }) {
+    const q = st?.world ? `?world=${encodeURIComponent(st.world)}` : '';
+    const c = await postJson(`${API}/edit/ai-context${q}`, { area: area ?? '', rooms, changes: st?.changes ?? [], now: st?.now ?? null });
+    return sendExpand(expandPrompt(c, { field, text, name, kind }));
 }
 let curState = null; // the latest state message (its changes go with inspector requests)
 async function worldIndex(world, version, st = curState) {
@@ -245,14 +264,25 @@ async function renderInspector(side, target, ctx) {
         const redraw = o => { clearTimeout(tmr); tmr = setTimeout(async () => {
             if (!o.length) { diffBox.replaceChildren($('p', { class: 'muted' }, 'No changes yet.')); return; }
             try {
-                const pv = await postJson(`${API}/patch/preview${q}`, { patch: { ops: o }, changes: st.changes ?? [], now: st.now ?? null });
-                diffBox.style.opacity = ''; errBox.replaceChildren(); diffBox.replaceChildren(renderDiff(document, pv));
-            } catch (e) { diffBox.style.opacity = '0.5'; errBox.replaceChildren($('li', {}, e.message)); }
+                const pv = await postJson(`${API}/patch/preview${q}`, { patch: { ops: withId(o) }, changes: st.changes ?? [], now: st.now ?? null });
+                diffBox.style.opacity = ''; if (!moveId) errBox.replaceChildren(); diffBox.replaceChildren(renderDiff(document, pv));
+            } catch (e) {
+                diffBox.style.opacity = '0.5'; errBox.replaceChildren($('li', {}, e.message));
+                const c = e.detail?.clash;
+                if (c && c.kind === 'room') {
+                    const inp = $('input', { type: 'text', class: 'mw-rename', value: moveId ?? c.suggest, oninput: () => { moveId = inp.value.trim() || c.suggest; redraw(form.getOps()); } });
+                    moveId ??= c.suggest; errBox.append($('li', { class: 'mw-clash' }, `A place with id "${c.id}" is already there. Move it in as: `, inp));
+                    redraw(form.getOps());
+                }
+            }
         }, 350); };
-        const form = buildEditForm(document, ectx, { onChange: o => redraw(o), expand });
+        let moveId = null; // a clashing Move gets a rename box prefilled with the suggested id
+        const withId = o => o.map(x => (x.op === 'move_location' && moveId ? { ...x, id: moveId } : x));
+        const ai = ({ kind, field, text, exit }) => aiText(st, { field, kind, text, name: ectx.title, area: ectx.area ?? target, rooms: exit ? [exit.to] : (ectx.exits ?? []).map(x => x.to).filter(Boolean) });
+        const form = buildEditForm(document, ectx, { onChange: o => redraw(o), expand, ai });
         const status = $('p', { class: 'muted' }, 'Submitted changes go on a hidden message in the chat: delete it there to undo.');
         const save = $('button', { class: 'crumb pf-submit', onclick: async () => {
-            const probs = form.problems(), o = form.getOps();
+            const probs = form.problems(), o = withId(form.getOps());
             if (probs.length) { errBox.replaceChildren(...probs.map(p => $('li', {}, p))); return; }
             if (!o.length) { errBox.replaceChildren($('li', {}, 'Nothing changed.')); return; }
             save.disabled = true; status.textContent = 'Saving…';
@@ -264,7 +294,20 @@ async function renderInspector(side, target, ctx) {
         redraw([]);
         pane.replaceChildren($('div', { class: 'editlive-pane' }, $('h4', {}, `${editLabel}: ${ectx.title}`), form.el, errBox, $('b', {}, 'Changes'), diffBox, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
     } }, editLabel);
-    side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · ${changes.length ? 'live (with this chat\'s changes)' : 'as in the file'} `, ...(d.kind === 'world' ? [] : [editLive])), bar, pane);
+    // Create / Move / Delete wizards for this level (they stamp changes like Edit; delete the message to undo).
+    const now = () => (state?.chatId && state.chatId === st?.chatId ? state : st); // the latest changes (a wizard may stamp several)
+    const wq = () => (now()?.world ? `?world=${encodeURIComponent(now().world)}` : '');
+    const io = {
+        outline: () => postJson(`${API}/edit/outline${wq()}`, { changes: now()?.changes ?? [], now: now()?.now ?? null }),
+        preview: ops => postJson(`${API}/patch/preview${wq()}`, { patch: { ops }, changes: now()?.changes ?? [], now: now()?.now ?? null }),
+        submit: ops => sendLiveEdit(ops), aiText: spec => aiText(now(), spec), renderDiff, back: () => show(tab),
+    };
+    const actionBtns = actionsFor(d.kind).map(([a, label]) => $('button', { class: 'crumb mapact', 'data-action': a, ...(live ? {} : { disabled: '' }), title: live ? label : 'Open a WorldScrawl chat in SillyTavern to change the map', onclick: async () => {
+        let outline; try { outline = await io.outline(); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't load the map outline: ${e.message}`)); return; }
+        bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        openAction(document, pane, a, { target: d.kind === 'world' ? '' : String(target).replace(/^region:/, '').replace(/^sub:/, ''), kind: d.kind, outline }, io);
+    } }, label));
+    side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · ${changes.length ? 'live (with this chat\'s changes)' : 'as in the file'} `, ...(d.kind === 'world' ? [] : [editLive]), ...actionBtns), bar, pane);
     show(Math.min(tab, tabs.length - 1));
 }
 
@@ -405,6 +448,7 @@ function createMapWindow(win) {
     view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
 
     let inspectSeq = 0;
+    globalThis.wsInspect = (t, c) => inspectTarget(t, c); // for the e2e tests and the console
     async function inspectTarget(target, ctx = {}) {
         const seq = ++inspectSeq, st = current?.st ?? state;
         const info = await worldInfo(st?.world ?? '');
@@ -532,7 +576,7 @@ function onState(st) {
     setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.last_wait?.recent ? ` (${st.last_wait.label})` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
-channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result') pendingToggles.get(ev.data.req)?.(ev.data); });
+channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result') pendingToggles.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'expand_result') pendingExpands.get(ev.data.req)?.(ev.data); });
 
 buildTopBar();
 setEditor(editor);

@@ -112,3 +112,15 @@ test('outline lists every container; Expand with AI sees only parent notes and t
     assert.ok(p.includes('smoky bar') && p.includes(a.neighbors[0].name) && p.includes('Riverton'));
     assert.ok(!p.includes('Larkspur') && !p.includes('Temple of the Tides'), 'never the whole world');
 });
+
+test('wizard helpers: last-item cascade and clash suggestions come from the outline', async () => {
+    const { cascadeOf, clashes, actionsFor } = await import('../../plugin/ui/mapactions.mjs');
+    const o = client(W2).post('/edit/outline', { json: { changes: [] } }).json();
+    assert.deepEqual(cascadeOf(o, 'room', 'riverton:smithy/forge'), { container: "Brask's Smithy", area: 'riverton:smithy', kind: 'subregion', also: null });
+    assert.equal(cascadeOf(o, 'room', TAVERN), null);
+    assert.equal(cascadeOf(o, 'subregion', 'riverton:smithy'), null);
+    assert.deepEqual(clashes(['common_room', 'upstairs', 'attic'], ['common_room', 'upstairs', 'cellar'], 'gilded_goose'),
+        [{ id: 'common_room', suggest: 'gilded_goose_common_room' }, { id: 'upstairs', suggest: 'gilded_goose_upstairs' }]);
+    assert.deepEqual(actionsFor('subregion').map(a => a[1]), ['Create place', 'Merge places', 'Move subregion', 'Delete subregion']);
+    assert.deepEqual(actionsFor('world').map(a => a[0]), ['create_region']);
+});

@@ -1336,6 +1336,79 @@ try {
     const an1 = await nameRow();
     check('area Resolved: renamed, tagged with its message, orange marker', an1 && an1.v === 'The Gilded Quarter' && an1.src.includes(`from message #${nArea}`) && an1.mark, JSON.stringify(an1));
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
+    // ---- Map wizards (PR B): cascade on the last place (Confirm / Cancel / Add a place first), Move with an id clash
+    // (rename prefilled), Delete subregion moving its places (= merge), Create region with Expand with AI, start region.
+    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length > n, sys: m.is_system, ops: m.extra?.worldscrawl_patches?.[0]?.ops ?? [], n: c.chat.length }; }, n);
+    const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
+    const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
+    const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action]`).first().waitFor({ timeout: 10000 }); };
+    const mwFORGE = 'riverton:smithy/forge';
+    let mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.evaluate(() => globalThis.wsInspect('sub:riverton:smithy')); await ui.locator('.side .mapact[data-action="create_place"]').waitFor({ timeout: 10000 });
+    const mwSubBtns = await ui.evaluate(() => [...document.querySelectorAll('.side .mapact')].map(b => b.textContent));
+    check('subregion inspector: Create place, Merge places, Move subregion, Delete subregion beside Edit', JSON.stringify(mwSubBtns) === JSON.stringify(['Create place', 'Merge places', 'Move subregion', 'Delete subregion']), JSON.stringify(mwSubBtns));
+    await mwAct(mwFORGE, 'delete_place');
+    const mwCasc = await ui.evaluate(() => ({ t: document.querySelector('.side .mw-cascade')?.textContent ?? '', b: [...document.querySelectorAll('.side .mapaction button')].map(b => b.textContent) }));
+    check('Delete the last place: required cascade warning with Confirm / Cancel / Add a place first', /Deleting the last place in Brask's Smithy will also delete Brask's Smithy/.test(mwCasc.t) && ['Confirm', 'Cancel', 'Add a place first'].every(x => mwCasc.b.includes(x)), JSON.stringify(mwCasc));
+    await ui.click('.side .mw-addfirst');
+    await ui.locator('.side .mapaction[data-action="create_place"]').waitFor({ timeout: 10000 });
+    await ui.fill('.side .mw-row[data-field="place_name"] input', 'Coal Shed');
+    await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'Sacks of coal.');
+    await ui.selectOption('.side .mw-exit select', mwFORGE);
+    await ui.fill('.side .mw-exit input >> nth=0', 'forge'); await ui.fill('.side .mw-exit input >> nth=1', 'shed');
+    try { await ui.waitForFunction(() => /Coal Shed/.test(document.querySelector('.side .mw-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('Create place wizard: the diff shows the new place before Submit', /Coal Shed/.test(await ui.evaluate(() => document.querySelector('.side .mw-diff')?.innerText ?? '')));
+    await ui.click('.side .mw-submit');
+    try { await ui.waitForFunction(() => document.querySelector('.side .mapaction')?.dataset.action === 'delete_place', null, { timeout: 12000 }); } catch {}
+    const mwCp = await mwLastMsg(mwNW);
+    const mwBack = await ui.evaluate(() => ({ a: document.querySelector('.side .mapaction')?.dataset.action, casc: !!document.querySelector('.side .mw-cascade'), sub: !!document.querySelector('.side .mw-submit') }));
+    check('Add a place first: stamps create_place (with its exit) and returns to the delete, now without the cascade', mwCp.grew && mwCp.sys && mwCp.ops[0]?.op === 'create_place' && mwCp.ops[0]?.exits?.[0]?.to === mwFORGE && mwBack.a === 'delete_place' && !mwBack.mwCasc && mwBack.sub, JSON.stringify([mwCp, mwBack]));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwDp = await mwLastMsg(mwCp.n);
+    check('Delete place: stamps remove_location', mwDp.grew && mwDp.ops[0]?.op === 'remove_location' && mwDp.ops[0]?.loc === mwFORGE, JSON.stringify(mwDp));
+    await mwCut(mwNW);
+    // Move with a clash: the rename box is prefilled with a suggested unique id; never overwritten.
+    mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await mwAct('riverton:drowned_rat/common_room', 'move_place');
+    await ui.selectOption('.side .mw-row[data-field="dest"] select', 'riverton:gilded_goose');
+    await ui.locator('.side .mw-rename').waitFor({ timeout: 8000 });
+    check('Move place onto a taken id: rename prompt prefilled with a suggested id', (await ui.inputValue('.side .mw-rename')) === 'drowned_rat_common_room');
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwMp = await mwLastMsg(mwNW);
+    check('Move place: stamps move_location with the new id', mwMp.grew && mwMp.ops[0]?.op === 'move_location' && mwMp.ops[0]?.area === 'riverton:gilded_goose' && mwMp.ops[0]?.id === 'drowned_rat_common_room', JSON.stringify(mwMp));
+    await mwCut(mwNW);
+    // Delete a subregion, moving its places into another (how two subregions merge), clashes renamed.
+    await mwAct('sub:riverton:gilded_goose', 'delete_subregion');
+    await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
+    await ui.selectOption('.side .mw-row[data-field="into"] select', 'riverton:drowned_rat');
+    const mwRen = await ui.evaluate(() => [...document.querySelectorAll('.side .mw-rename')].map(i => i.value));
+    check('Delete subregion → move places: every clashing id gets a prefilled rename', JSON.stringify(mwRen) === JSON.stringify(['gilded_goose_common_room', 'gilded_goose_upstairs']), JSON.stringify(mwRen));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwDs = await mwLastMsg(mwNW);
+    check('Delete subregion with move: stamps remove_area with into and the renames', mwDs.grew && mwDs.ops[0]?.op === 'remove_area' && mwDs.ops[0]?.contents === 'move' && mwDs.ops[0]?.into === 'riverton:drowned_rat' && mwDs.ops[0]?.ids?.common_room === 'gilded_goose_common_room', JSON.stringify(mwDs));
+    await mwCut(mwNW);
+    // The starting region can't be deleted.
+    await mwAct('region:riverton', 'delete_region');
+    check('Delete region: the starting region is refused', /starting region/.test(await ui.evaluate(() => document.querySelector('.side .mw-blocked')?.textContent ?? '')) && await ui.isDisabled('.side .mw-submit'));
+    // Create region (world level) with Expand with AI: the prompt holds the exit's neighbor, never the whole world.
+    await mwAct('world', 'create_region');
+    await ui.fill('.side .mw-row[data-field="region_name"] input', 'Fen Marsh');
+    await ui.fill('.side .mw-row[data-field="sub_name"] input', 'Reeds');
+    await ui.fill('.side .mw-row[data-field="place_name"] input', 'Reed Hut');
+    await ui.click('.side .mw-addexit');
+    await ui.selectOption('.side .mw-exit select', 'riverton:east_road/road');
+    await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'a hut');
+    await queue([{ content: 'A hut on stilts above black water.' }]);
+    const mwNReq = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await ui.click('.side .mapaction .mw-ai >> nth=-1');
+    try { await ui.waitForFunction(() => /stilts/.test(document.querySelector('.side .mw-row[data-field="place_description"] textarea')?.value ?? ''), null, { timeout: 20000 }); } catch {}
+    const mwReqs = (await (await fetch(`${FAKE}/__requests`)).json()).slice(mwNReq), mwPr = JSON.stringify(mwReqs.at(-1)?.messages ?? []);
+    check('Expand with AI: fills the field from the model', /stilts/.test(await ui.inputValue('.side .mw-row[data-field="place_description"] textarea')));
+    check('Expand with AI: the prompt has the draft and the exit\'s neighbor, not the whole world', /a hut/.test(mwPr) && /East Road|road/i.test(mwPr) && !/Temple of the Tides|Larkspur/.test(mwPr), mwPr.slice(0, 600));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwCr = await mwLastMsg(mwNW);
+    check('Create region: stamps create_region with its first subregion and starting place', mwCr.grew && mwCr.ops[0]?.op === 'create_region' && mwCr.ops[0]?.subregion?.name === 'Reeds' && mwCr.ops[0]?.subregion?.place?.exits?.[0]?.to === 'riverton:east_road/road', JSON.stringify(mwCr));
+    await mwCut(mwNW);
     // ---- Turning past changes off and on again: dependents confirm, can't-apply notes, hidden notes, inspector toggle.
     const BURNT = 'riverton:drowned_rat/burnt_inn', YARD = 'riverton:drowned_rat/courtyard';
     const nTog = await page.evaluate(() => SillyTavern.getContext().chat.length);
