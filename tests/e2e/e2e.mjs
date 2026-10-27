@@ -1221,7 +1221,7 @@ try {
     check('review card: an empty description is refused inline, nothing stamped', /text/i.test(await card.innerText()) && await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId), await card.innerText());
     await card.locator('.wspf-text').first().fill('Charred beams and ash.');
     await page.waitForFunction(id => document.querySelector(`#chat .mes[mesid="${id}"] .worldscrawl_patchcard .wsdiff-ins`)?.textContent.includes('Charred beams'), flagId, { timeout: 10000 }).catch(() => {});
-    const dl2 = { ...(await diffLook()), dbgBox: await card.evaluate(c => { const b = c.querySelector('.worldscrawl_diff'); return b ? [b.style.opacity, b.title, c.querySelector('.wspf-text')?.value, (window.__wsLive||[]).slice(-6)] : null; }) };
+    const dl2 = { ...(await diffLook()), dbgBox: await card.evaluate(c => { const b = c.querySelector('.worldscrawl_diff'); return b ? [b.style.opacity, b.title, c.querySelector('.wspf-text')?.value] : null; }) };
     check('review card: the diff follows the form live, before Keep', dl2.ins.includes('Charred beams and ash.') && !dl2.ins.includes('Smoky.'), JSON.stringify(dl2));
     await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(1500);
     const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);

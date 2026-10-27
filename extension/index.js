@@ -2118,16 +2118,13 @@ async function drawDiff(box, pv) {
 /** Re-preview edited ops (debounced) and redraw the diff: the view follows the form while you type. */
 const liveTimers = new WeakMap();
 function liveDiff(box0, ops, ctxOver, form = null) {
-    (window.__wsLive ??= []).push('call');
     const key = form ?? box0;
     if (form) form.diffBox = box0;
     clearTimeout(liveTimers.get(key));
     liveTimers.set(key, setTimeout(async () => {
         const box = form?.diffBox ?? box0; // cards re-render: always draw into the current box
-        (window.__wsLive ??= []).push('t:' + box.isConnected);
         if (!box.isConnected) return;
         const r = await previewOps(ops, { ...mapCtx(), ...ctxOver });
-        window.__wsLive.push('r:' + JSON.stringify(r).slice(0, 300));
         if (!r.ok) { box.style.opacity = '0.5'; box.title = 'Fix the form to update this view'; return; }
         box.style.opacity = ''; box.title = '';
         form?.setNoops?.(r.preview.noops ?? []);
@@ -2550,8 +2547,6 @@ export function renderPatchCards() {
                 if (form) {
                     card.append(form.el); form.diffBox = diffBox;
                     form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(chat.slice(0, id + 1)), now: chatElapsed(chat.slice(0, id + 1)) }, form);
-                    // also follow raw typing directly (capture, before the form's own handlers)
-                    if (!form.typingHooked) { form.typingHooked = true; for (const ev of ['input', 'change']) form.el.addEventListener(ev, () => setTimeout(() => form.onLive?.(form.getOps())), true); }
                 }
                 card.append(startPicker(), cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
                     form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')

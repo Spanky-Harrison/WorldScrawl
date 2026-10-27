@@ -167,7 +167,7 @@ export function buildPatchForm(doc, opts = {}) {
     adder.append(select(addType, OPS.map(o => [o, OP_LABELS[o] ?? o]), v => { addType = v; }), btn('Add change', () => { drafts.push(blankOp(addType, opts.context ?? {})); render(); }));
     root.append(lists, top, rowsBox, adder);
     render();
-    for (const ev of ['input', 'change']) root.addEventListener(ev, changed, true); // capture: the fields stop bubbling
+    for (const ev of ['input', 'change']) root.addEventListener(ev, () => setTimeout(changed), true); // capture (the fields stop bubbling); deferred so the field's own handler has updated the draft first
     stop(root);
     return {
         el: root,
