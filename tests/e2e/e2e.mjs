@@ -1342,6 +1342,27 @@ try {
     const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
     const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
     const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action]`).first().waitFor({ timeout: 10000 }); };
+    // No form or wizard prints "null" for a missing tag, reset or button (Edit region/subregion/place and every wizard).
+    const nullHits = [];
+    const sideText = () => ui.evaluate(() => document.querySelector('.side')?.innerText ?? '');
+    for (const t of ['region:riverton', 'sub:riverton:drowned_rat', 'riverton:drowned_rat/common_room']) {
+        await ui.evaluate(x => globalThis.wsInspect(x), t); await ui.locator('.side .editlive').waitFor({ timeout: 10000 }); await ui.click('.side .editlive');
+        await ui.locator('.side .placeform').waitFor({ timeout: 10000 }); await ui.waitForTimeout(300);
+        if (/\bnull\b/.test(await sideText())) nullHits.push(`edit ${t}`);
+        if (t.includes('/')) { const empty = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit .pf-radios')].filter(g => !g.querySelector('input:checked')).map(g => g.closest('.pf-row')?.dataset.field));
+            check('Edit place: every exit radio group (type, See/Hear destination) has the effective value selected', !empty.length, JSON.stringify(empty));
+            const why = await ui.evaluate(() => document.querySelector('.side .pf-exit .pf-row[data-field="sight"] .pf-from')?.textContent ?? '');
+            check('Edit place: See destination shows a default/set-here tag', why === 'default' || why === 'set here', why);
+            const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-door .pf-row[data-field="closed_sight"]')); return b ? [...b.querySelectorAll('.pf-sense-head, .pf-row[data-field="sight"] .pf-label, .pf-row[data-field="sound"] .pf-label, .pf-door .pf-row[data-field^="closed_"] .pf-label')].map(r => r.textContent) : null; });
+            check('Edit place: with a door, "Sense transparency – unblocked" on the exit and "– blocked" in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – blocked', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
+            const plainHead = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit')].find(x => !x.querySelector('.pf-door .pf-row'))?.querySelector('.pf-sense-head')?.textContent ?? null);
+            check('Edit place: without a door the heading is just "Sense transparency"', plainHead === null || plainHead === 'Sense transparency', plainHead); }
+    }
+    for (const [t, a] of [['world', 'create_region'], ['region:riverton', 'create_subregion'], ['sub:riverton:drowned_rat', 'create_place'], ['sub:riverton:drowned_rat', 'merge_places'],
+        ['sub:riverton:drowned_rat', 'delete_subregion'], ['sub:riverton:drowned_rat', 'move_subregion'], ['riverton:drowned_rat/common_room', 'move_place']]) {
+        try { await mwAct(t, a); await ui.waitForTimeout(300); if (/\bnull\b/.test(await sideText())) nullHits.push(`${a} on ${t}`); } catch (e) { nullHits.push(`${a} on ${t}: ${e.message.split('\n')[0]}`); }
+    }
+    check('no edit form or wizard contains the text "null"', !nullHits.length, JSON.stringify(nullHits));
     const mwFORGE = 'riverton:smithy/forge';
     let mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await ui.evaluate(() => globalThis.wsInspect('sub:riverton:smithy')); await ui.locator('.side .mapact[data-action="create_place"]').waitFor({ timeout: 10000 });

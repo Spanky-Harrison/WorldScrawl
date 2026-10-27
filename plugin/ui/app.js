@@ -11,7 +11,7 @@ const channel = new BroadcastChannel('worldscrawl');
 const NO_CHAT = 'Open a chat with WorldScrawl on in SillyTavern, and its map shows up here.';
 let state = null; // latest {type:'state', ...} from the extension
 const listeners = new Set();
-const $ = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v); } el.append(...kids); return el; };
+const $ = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) el.setAttribute(k, v === true ? '' : v); } el.append(...kids.flat().filter(x => x !== null && x !== undefined && x !== false)); return el; };
 const NS = 'http://www.w3.org/2000/svg';
 const S = (tag, attrs = {}) => { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
 const setStatus = t => { document.getElementById('status').textContent = t; };
