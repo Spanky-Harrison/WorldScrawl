@@ -94,7 +94,20 @@ export function exitRows(w, loc, e) {
  * target: "world" | "region:<id>" | "sub:<region>:<sub>" | "<region>:<sub>/<loc>" (a room) | "exit:<address>|<direction>".
  * Returns {target, kind, title, raw, resolved: [{key, value, source}], warnings: [{message}]}, or null if not found.
  */
-export function inspect(w, raw, target) {
+export function inspect(w, raw, target, patches = []) {
+    const t = String(target ?? '');
+    const list = (patches ?? []).map(p => ({ msg: p.msg, note: p.note, id: p.id, summary: p.summary, touched: [...new Set(p.touched ?? [])], relocate: p.relocate ?? {} }));
+    if (t === 'changes') {
+        const rows = list.length ? list.map(p => row(p.msg === null || p.msg === undefined ? 'patch' : `message #${p.msg}`, `${p.note ? `${p.note}: ` : ''}${p.summary.join('; ')}`, 'patch')) : [row('changes', 'none: this chat has not changed the map', 'derived')];
+        return { target: t, kind: 'changes', title: 'Map changes in this chat', raw: list, resolved: rows, warnings: [], changes: list };
+    }
+    const r = inspectBase(w, raw, t);
+    if (!r) return r;
+    const key = t.startsWith('exit:') ? t.slice(5).split('|')[0] : t.startsWith('region:') ? t.slice(7) : t.startsWith('sub:') ? t.slice(4) : t;
+    const hit = a => a === key || (!t.includes('/') && !t.startsWith('exit:') && t !== 'world' && t !== '' && a.startsWith(key)) || t === 'world' || t === '';
+    return { ...r, changes: list.filter(p => p.touched.some(hit) || Object.values(p.relocate).includes(key)) };
+}
+function inspectBase(w, raw, target) {
     const t = String(target ?? '');
     const [worldJson, regionsRaw] = raw;
     const out = (kind, title, rawObj, resolved, refs) => ({ target: t, kind, title, raw: rawObj, resolved, warnings: warningsFor(w, refs).map(x => ({ message: x.message })) });

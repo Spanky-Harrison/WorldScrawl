@@ -7,7 +7,7 @@ import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine } from './words.mjs';
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -27,7 +27,10 @@ const MODES = ['commands', 'typed', 'tools'];
 const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
-const TOOL_NAMES = ['ws_look', 'ws_move'];
+const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag'];
+const PATCH_KEY = 'worldscrawl_patches'; // [{type: 'patch', ops, relocate, swipe, ...}] on the message where a map change settled
+const FLAG_KEY = 'worldscrawl_flag'; // {swipe, loc, note, start, status, proposal}: a flagged message's review card
+const FLAGHINT_KEY = 'worldscrawl_flaghint';
 const NUDGE_KEY = 'worldscrawl_nudge';
 
 const ctx = () => SillyTavern.getContext();
@@ -195,7 +198,10 @@ export function chatChanges(chat = ctx().chat ?? []) {
     const base = chatWorld(chat);
     const from = base?.rebase ? base.index : -1;
     const out = [];
-    chat.forEach((m, i) => { const c = m?.extra?.[CHANGE_KEY]; if (c && i > from) out.push(...(Array.isArray(c) ? c : [c])); });
+    chat.forEach((m, i) => {
+        const c = m?.extra?.[CHANGE_KEY]; if (c && i > from) out.push(...(Array.isArray(c) ? c : [c]));
+        if (i > from) for (const p of patchesOn(m)) out.push({ ...p, _msg: i });
+    });
     return out;
 }
 /** A room with this chat's changes applied: exits dug from it added, removed exits dropped. */
@@ -316,7 +322,7 @@ export function getStoredLocation() {
     const chat = ctx().chat ?? [];
     for (let i = chat.length - 1; i >= 0; i--) {
         const loc = chat[i]?.extra?.[LOC_KEY];
-        if (loc) return loc;
+        if (loc) return relocateFrom(loc, i, chat);
     }
     return null;
 }
@@ -397,7 +403,7 @@ async function lookAction() {
 async function moveAction({ direction } = {}) {
     if (!direction) return JSON.stringify({ error: 'direction is required' });
     const from = (await currentLocation()).address;
-    const r = await api('/move', { method: 'POST', body: JSON.stringify({ from, direction }) });
+    const r = await api('/move', { method: 'POST', body: JSON.stringify({ from, direction, ...mapCtx() }) });
     if (!r.ok) {
         const d = r.body?.detail ?? {};
         return JSON.stringify({ error: d.error ?? `Move failed (${r.status})`, valid_directions: d.valid_directions ?? [] });
@@ -448,12 +454,26 @@ function registerTools() {
         action: moveAction,
         formatMessage: ({ direction } = {}) => `Moving ${direction ?? ''}...`,
     });
+    registerFunctionTool({
+        name: 'ws_flag',
+        displayName: 'WorldScrawl: Flag a map change',
+        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together). The engine reviews the change after your reply. Do not call it for ordinary events.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: { location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'A few words on what changed, e.g. "the inn burned down".' } },
+            required: ['note'],
+        },
+        action: async ({ location = '', note = '' } = {}) => { pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
+        formatMessage: () => 'Noting a map change...',
+    });
 }
 
 /** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
 function applyNudge() {
     const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? FLAG_HINT : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
 // ---- Engine-driven movement. The engine moves the party; the model never touches the map.
@@ -471,7 +491,7 @@ async function engineMove(direction) {
     const from = await currentLocation();
     const exit = from.exits.find(e => e.direction.toLowerCase() === String(direction).trim().toLowerCase());
     if (exit && isStuck(exit)) return { ok: false, error: `The ${exit.direction} ${stuckWhy(exit)}.`, valid: from.exits.filter(e => !isStuck(e)).map(e => e.direction) };
-    const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: from.address, direction: String(direction).trim(), changes: chatChanges() }) });
+    const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: from.address, direction: String(direction).trim(), ...mapCtx() }) });
     if (!r.ok) {
         const d = r.body?.detail ?? {};
         return { ok: false, error: d.error ?? `Move failed (${r.status})`, valid: d.valid_directions ?? from.exits.map(e => e.direction) };
@@ -725,7 +745,7 @@ async function engineTravel(target, prefix = null) {
     }
     // One request for the whole trip. The server walks it step by step and may stop early (blocked step now,
     // encounters later): the party goes where the server says it ended up, not where we asked to go.
-    const r = await api('/travel', { method: 'POST', body: JSON.stringify({ from: from.address, steps: steps.map(st => st.direction), changes: chatChanges() }) });
+    const r = await api('/travel', { method: 'POST', body: JSON.stringify({ from: from.address, steps: steps.map(st => st.direction), ...mapCtx() }) });
     if (!r.ok || !r.body?.path?.length) return { ok: false, error: r.body?.error ?? 'Route blocked.', valid: from.exits.map(e => e.direction) };
     r.body.path.forEach(primeCache);
     const at = r.body.location;
@@ -933,7 +953,7 @@ async function askValid(label, prompt, validate) {
 }
 /** Rooms near `loc` over the map (any exit, hidden too; name/area/first sentence only), nearest first. */
 async function nearbyRooms(loc) {
-    const r = await api('/nearby', { method: 'POST', body: JSON.stringify({ from: loc.address, depth: 3, limit: 12, changes: chatChanges() }) });
+    const r = await api('/nearby', { method: 'POST', body: JSON.stringify({ from: loc.address, depth: 3, limit: 12, ...mapCtx() }) });
     return r.ok ? r.body.rooms : [];
 }
 export const NEW_PLACE = 'somewhere new';
@@ -1531,7 +1551,7 @@ export async function saveWorld(name, switchChat = true, withKnowledge = false, 
         const seen = [...(await discoveredPlaces()).keys()].filter(a => !stood.includes(a));
         knowledge = { location: here.address, stood, seen, doors: [...await syncDoors()] };
     }
-    const body = { base: activeWorld || null, name, auto, elapsed: chatElapsed(), ...(auto ? { id_hint: autoIdHint() } : {}), changes: chatChanges(), ...(knowledge ? { knowledge } : {}) };
+    const body = { base: activeWorld || null, name, auto, elapsed: chatElapsed(), ...(auto ? { id_hint: autoIdHint() } : {}), ...mapCtx(), ...(knowledge ? { knowledge } : {}) };
     let r = await api('/worlds/render', { method: 'POST', body: JSON.stringify({ ...body, overwrite }) });
     if (!r.ok && r.body?.detail?.error === 'needs_overwrite') {
         // Name of ANOTHER living world: the panel asks; /ws-save-world needs overwrite=true.
@@ -1618,6 +1638,18 @@ function registerSlashCommands() {
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction, e.g. north', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: 'WorldScrawl: move through an exit or to a known place, then the model narrates the arrival.',
     }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-change',
+        callback: whenOn(async (_args, note) => {
+            const chat = ctx().chat ?? [];
+            let id = chat.length - 1;
+            while (id > 0 && chat[id]?.is_system && !chat[id]?.extra?.worldscrawl_notice) id--;
+            const t = await flagMessage(id, { note: String(note ?? '').trim(), source: 'command' });
+            toastr.info(`WorldScrawl: ${t}`); return '';
+        }),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'what changed, e.g. "the inn burned down" (optional)', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
+        helpString: 'WorldScrawl: the map changed in the latest message (fire, collapse, smashed door...). The engine works out the change and shows a Keep / Discard card.',
+    }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
@@ -1676,7 +1708,7 @@ export async function knownText() {
 // ---- Exits footer: display-only (DOM), never written into message.mes, so the model never sees it.
 const exitsCache = new Map(); // "world|address" -> Promise<location|null> (never shared between worlds)
 /** Cache key: the world the request goes to plus the address ("(start)" for the start room). */
-const ck = (a, w = activeWorld || defaultWorldId || '') => `${w}|${a ?? '(start)'}`;
+const ck = (a, w = activeWorld || defaultWorldId || '', sig = patchSig()) => `${w}|${sig}${a ?? '(start)'}`;
 
 /** /move returns the full new location: remember it so the next lookup needs no request. */
 function primeCache(loc, w) { if (loc?.room_token) roomTokens.set(loc.address, loc.room_token); const k = ck(loc?.address, w); if (loc?.address && !exitsCache.has(k)) exitsCache.set(k, Promise.resolve(loc)); }
@@ -1691,7 +1723,7 @@ function warmRooms(addresses) {
     const needStart = !exitsCache.has(ck(null, w));
     if (!missing.length) return needStart ? fetchLocationCached(null) : Promise.resolve();
     const batch = (async () => {
-        try { const r = await api(`/rooms?addresses=${encodeURIComponent(missing.join(','))}`); return r.ok ? r.body : null; } catch { return null; }
+        try { const r = patchSig() ? await api('/rooms', { method: 'POST', body: JSON.stringify({ addresses: missing, ...mapCtx() }) }) : await api(`/rooms?addresses=${encodeURIComponent(missing.join(','))}`); return r.ok ? r.body : null; } catch { return null; }
     })();
     const remember = (key, p) => { exitsCache.set(key, p); p.then(v => { if (v?.room_token) roomTokens.set(v.address, v.room_token); if (!v && exitsCache.get(key) === p) exitsCache.delete(key); }); };
     for (const a of missing) remember(ck(a, w), batch.then(b => b?.rooms?.find(x => x.address === a) ?? null));
@@ -1715,6 +1747,10 @@ function fetchRaw(address) {
     if (!exitsCache.has(key)) {
         const p = (async () => {
             try {
+                if (patchSig()) { // this chat changed the map: rooms come from the patched world
+                    const r = await api('/rooms', { method: 'POST', body: JSON.stringify({ addresses: address ? [address] : [], ...mapCtx() }) });
+                    return r.ok ? (address ? r.body.rooms?.[0] ?? null : r.body.start) : null;
+                }
                 const r = await api(address ? `/location/${encodeURIComponent(address)}` : '/start');
                 if (r.ok && !address) primeCache(r.body, w);
                 return r.ok ? r.body : null;
@@ -1731,7 +1767,7 @@ function locationAt(id) {
     const chat = ctx().chat ?? [];
     for (let i = Math.min(id, chat.length - 1); i >= 0; i--) {
         const loc = chat[i]?.extra?.[LOC_KEY];
-        if (loc) return loc;
+        if (loc) return relocateFrom(loc, i, chat.slice(0, id + 1));
     }
     return null;
 }
@@ -1882,6 +1918,7 @@ async function renderAllExits() {
     if (ctx().chat?.length) await warmRooms(chatAddresses()); // after a reload: one batch request instead of one per message
     await syncDoors();
     renderNotices();
+    renderPatchCards();
     document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
     if (!settings().showExits) return;
     document.querySelectorAll('#chat .mes[mesid]').forEach(el => renderExits(el.getAttribute('mesid')));
@@ -1914,7 +1951,7 @@ export async function mapState() {
         clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
         abs_seconds: (() => { try { const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(); return weatherLib && t && d ? weatherLib.absSeconds(d, t.calendar) : null; } catch { return null; } })(),
-        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), changes: chatChanges() };
+        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), ...mapCtx() };
 }
 let broadcastTimer = null;
 export function broadcastMapState() {
@@ -1969,6 +2006,280 @@ export async function openWorldFolder(id = '') {
     return r.ok;
 }
 
+// ---- Map patches: lasting changes to places (a fire, a collapse, a smashed door). A patch is stamped on the message
+// where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
+// (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
+// flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
+const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. Never write it otherwise.';
+const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
+const RANGE_CAP = 10;
+let pendingFlag = null; // from the ws_flag tool: attached to the reply when it arrives
+let patchLib = null;
+const swipeOf = m => m?.swipe_id ?? 0;
+/** The patches on a message that belong to the swipe being shown. */
+export const patchesOn = m => (m?.extra?.[PATCH_KEY] ?? []).filter(p => (p?.swipe ?? 0) === swipeOf(m));
+/** A location stamped on message i, after any later patch merged or removed that room. */
+function relocateFrom(addr, i, chat) {
+    for (let j = i; j < chat.length; j++) for (const p of patchesOn(chat[j])) if (p?.relocate && Object.hasOwn(p.relocate, addr)) addr = p.relocate[addr];
+    return addr;
+}
+/** Changes plus the game clock: every map request carries both (patch ops with "lasts" expire on the clock). */
+function mapCtx() { return { changes: chatChanges(), now: chatElapsed() }; }
+/** Short signature of the active patches ('' when none): part of the room cache key. */
+function patchSig() {
+    const chat = ctx().chat ?? [];
+    if (!chat.some(m => m?.extra?.[PATCH_KEY])) return '';
+    let ps = chatChanges(chat).filter(c => c.type === 'patch');
+    if (patchLib && ps.length) ps = patchLib.activeChanges(ps, chatElapsed(chat));
+    if (!ps.length) return '';
+    const s = JSON.stringify(ps.map(p => [p.id, p._msg, p.ops.length]));
+    let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    return `p${h.toString(36)}|`;
+}
+async function loadPatchLib() { try { patchLib ??= await import(`${baseUrl()}/ui/patches.mjs`); } catch (e) { console.warn('[WorldScrawl] patches lib unavailable:', e.message); } return patchLib; }
+
+/** Where the story range for a flag on message `end` starts: after the previous flag, or at the last move into or out of `loc`; at most ~10 messages back. */
+export function suggestStart(chat, end, loc) {
+    const floor = Math.max(0, end - RANGE_CAP + 1);
+    for (let i = end - 1; i >= floor; i--) {
+        const m = chat[i];
+        if (m?.extra?.[FLAG_KEY] || patchesOn(m).length) return i + 1;
+        const mv = m?.extra?.[MOVE_KEY];
+        if (mv && (mv.to === loc || mv.from === loc)) return i;
+    }
+    return floor;
+}
+const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
+function storyText(chat, start, end, budget = 9000) {
+    const lines = [];
+    for (let i = start; i <= end; i++) {
+        const m = chat[i];
+        if (!m || (m.is_system && !m.extra?.worldscrawl_notice)) continue;
+        lines.push(`#${i} ${m.name ?? (m.is_user ? 'Player' : 'Narrator')}: ${clip(m.mes, 1500)}`);
+    }
+    let out = lines.join('\n');
+    while (out.length > budget && lines.length > 1) { lines.shift(); out = lines.join('\n'); }
+    return out.slice(-budget);
+}
+/** First JSON object in a model answer (tolerates code fences and chatter). */
+export function parseJsonAnswer(text) {
+    const t = String(text ?? '').replace(/```(?:json)?/gi, '');
+    for (let i = t.indexOf('{'); i >= 0; i = t.indexOf('{', i + 1)) {
+        let depth = 0, inStr = false, esc = false;
+        for (let j = i; j < t.length; j++) {
+            const ch = t[j];
+            if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+            if (ch === '"') inStr = true; else if (ch === '{') depth++; else if (ch === '}' && --depth === 0) { try { return JSON.parse(t.slice(i, j + 1)); } catch { break; } }
+        }
+    }
+    return null;
+}
+const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
+const PATCH_SYS = `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}. Allowed ops (copy addresses exactly):
+{"op":"set_description","loc":ADDR,"text":"..."}  {"op":"append_description","loc":ADDR,"text":"..."}  {"op":"set_name","loc":ADDR,"text":"..."}
+{"op":"set_notes","area":AREA,"text":"..."}  {"op":"append_notes","area":AREA,"text":"..."}
+{"op":"block_exit"|"open_exit"|"lock_exit"|"unlock_exit"|"break_exit"|"remove_exit","loc":ADDR,"direction":"exit name"}
+{"op":"remove_location","loc":ADDR}
+{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept and rewritten)} or {"op":"merge","locs":[...],"id":"new_room_id","name":"...","description":"..."} (a new room; optional "area")
+Any op may add "lasts":"3d" (or "12h") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.`;
+
+async function flagContext(f, rooms = []) {
+    const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
+    if (!r.ok) throw new Error(r.body?.detail?.error ?? r.body?.detail ?? `map server answered ${r.status}`);
+    return r.body;
+}
+const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${o.exits.map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
+
+/** The two small model calls (which rooms; then the patch), checked by the server. Leaves the result on the flag. */
+async function analyzeFlag(id) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
+    if (!f) return;
+    f.status = 'working'; f.error = ''; delete f.proposal;
+    renderPatchCards();
+    try {
+        const story = storyText(chat, f.start, id);
+        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
+        const c1 = await flagContext(f);
+        const scopeQ = `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids whose general notes changed, e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
+        const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: SCOPE_SYS, responseLength: 200 }));
+        const known = new Set(c1.outline.map(o => o.address));
+        const rooms = [...new Set((a1?.rooms ?? []).map(String))].filter(a => known.has(a)).slice(0, 12);
+        const areas = [...new Set((a1?.areas ?? []).map(String))].filter(a => /^[a-z0-9_]+(:[a-z0-9_]+)?$/.test(a)).slice(0, 3);
+        if (!rooms.length && !areas.length) { f.status = 'nothing'; return; }
+        const c2 = await flagContext(f, [...rooms, ...areas]);
+        const patchQ = (err = '') => `Places that changed (their current JSON):\n${JSON.stringify(c2.rooms, null, 1)}\n${areas.length ? `Areas (current notes): ${JSON.stringify(c2.areas)}\n` : ''}Neighbouring map (for exits and merges):\n${outlineText(c2)}\n\nStory (messages #${f.start}-#${id}):\n${clip(story, 6000)}\n\n${what}\n${err ? `Your last patch was rejected: ${err}\nFix it.\n` : ''}Write the patch JSON.`;
+        let ops = null, err = '', preview = null;
+        for (let tries = 0; tries < 2; tries++) {
+            const ans = parseJsonAnswer(await c.generateRaw({ prompt: patchQ(err), systemPrompt: PATCH_SYS, responseLength: 900 }));
+            ops = Array.isArray(ans?.ops) ? ans.ops : null;
+            if (!ops) { err = 'the answer was not {"ops": [...]} JSON'; continue; }
+            if (!ops.length) { f.status = 'nothing'; return; }
+            const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
+            if (r.ok) { preview = r.body; break; }
+            err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
+        }
+        if (!preview) { f.status = 'error'; f.error = `The suggested change didn't fit the map: ${err}`; return; }
+        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate, before: preview.before, after: preview.after };
+        f.status = 'review';
+        if (settings().autoKeep) await keepFlag(id, { quiet: true });
+    } catch (e) {
+        f.status = 'error'; f.error = e.message;
+    } finally {
+        await c.saveChat?.();
+        renderPatchCards();
+    }
+}
+
+/**
+ * Flag message `id` as the place where a map change settled, and start the review. The one door for every trigger
+ * (button, tool, tag, /ws-change, and future engine actions): opts {note, hint, start, source}.
+ */
+export async function flagMessage(id, { note = '', hint = '', start = null, source = 'button' } = {}) {
+    if (!isOn()) return 'WorldScrawl is off in this chat.';
+    const c = ctx(), chat = c.chat ?? [];
+    id = Number(id);
+    const msg = chat[id];
+    if (!msg || (msg.is_system && !msg.extra?.worldscrawl_notice)) return 'Pick a story message to flag.';
+    await loadPatchLib();
+    const loc = locationAt(id) ?? (await currentLocation()).address;
+    msg.extra = msg.extra ?? {};
+    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: 'working' };
+    await c.saveChat?.();
+    analyzeFlag(id);
+    return 'Checking what changed on the map…';
+}
+globalThis.worldscrawlFlag = flagMessage;
+
+/** Keep: stamp the proposed patch on the message (the only thing that changes the map). */
+async function keepFlag(id, { quiet = false } = {}) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
+    if (!f?.proposal) return;
+    const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
+        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
+    msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
+    syncSwipeExtra(msg);
+    f.status = 'kept'; f.patch = p.id;
+    delete f.proposal.before; delete f.proposal.after;
+    await c.saveChat?.();
+    exitsCache.clear();
+    if (!quiet) toastr.success('WorldScrawl: map changed. Delete this message (or press Undo) to undo it.');
+    await applyFacts();
+    renderAllExits();
+}
+/** SillyTavern keeps each swipe's extra in swipe_info: mirror the patches there so swiping away and back keeps them. */
+function syncSwipeExtra(msg) {
+    const si = msg?.swipe_info?.[swipeOf(msg)];
+    if (!si) return;
+    si.extra = si.extra ?? {};
+    if (msg.extra[PATCH_KEY]) si.extra[PATCH_KEY] = msg.extra[PATCH_KEY]; else delete si.extra[PATCH_KEY];
+}
+async function undoFlag(id) {
+    const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
+    if (!msg) return;
+    msg.extra[PATCH_KEY] = (msg.extra[PATCH_KEY] ?? []).filter(p => p.id !== f?.patch);
+    if (!msg.extra[PATCH_KEY].length) delete msg.extra[PATCH_KEY];
+    delete msg.extra[FLAG_KEY];
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+}
+async function discardFlag(id) {
+    const c = ctx(), msg = c.chat?.[id];
+    if (msg?.extra) delete msg.extra[FLAG_KEY];
+    await c.saveChat?.();
+    renderPatchCards();
+}
+
+/** A reply arrived: a [ws_flag: ...] tag in it (non-tools mode) or a ws_flag tool call flags it. */
+async function onReplyForFlags(id) {
+    if (!isOn()) return;
+    const c = ctx(), msg = c.chat?.[id];
+    if (!msg || msg.is_user || msg.is_system) return;
+    let flag = null;
+    if (pendingFlag) { flag = pendingFlag; pendingFlag = null; }
+    const m = FLAG_TAG.exec(msg.mes ?? '');
+    if (m) {
+        msg.mes = msg.mes.replace(FLAG_TAG, '').trimEnd();
+        if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+        try { c.updateMessageBlock?.(id, msg); } catch {}
+        const [hint, ...rest] = m[1].split('|');
+        flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
+        await c.saveChat?.();
+    }
+    if (flag) await flagMessage(id, flag);
+}
+
+function cardButton(label, onClick, title = '') {
+    const b = document.createElement('span');
+    b.className = 'menu_button worldscrawl_card_btn'; b.textContent = label; if (title) b.title = title;
+    b.style.cssText = 'display:inline-block;padding:2px 8px;margin:2px 4px 0 0;font-size:0.9em;';
+    b.addEventListener('click', e => { e.stopPropagation(); onClick(); });
+    return b;
+}
+/** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
+function renderPatchCards() {
+    const ch = ctx().chat ?? [];
+    for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
+        const id = Number(el.getAttribute('mesid')), msg = ch[id];
+        el.querySelector('.worldscrawl_patchcard')?.remove();
+        if (!msg) continue;
+        const bar = el.querySelector('.extraMesButtons') ?? el.querySelector('.mes_buttons');
+        if (bar && !bar.querySelector('.worldscrawl_flag_btn') && !msg.is_system && isOn()) {
+            const b = document.createElement('div');
+            b.className = 'mes_button worldscrawl_flag_btn fa-solid fa-flag';
+            b.title = 'WorldScrawl: the map changed here (fire, collapse, smashed door...)';
+            b.addEventListener('click', e => { e.stopPropagation(); flagMessage(Number(el.getAttribute('mesid'))).then(t => t && toastr.info(`WorldScrawl: ${t}`)); });
+            bar.prepend(b);
+        }
+        if (!isOn()) { el.querySelector('.worldscrawl_flag_btn')?.remove(); continue; }
+        const f = msg.extra?.[FLAG_KEY];
+        const kept = patchesOn(msg);
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length) continue;
+        const card = document.createElement('div');
+        card.className = 'worldscrawl_patchcard';
+        card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
+        const line = t => { const d = document.createElement('div'); d.textContent = t; return d; };
+        const startPicker = () => {
+            const wrap = document.createElement('span');
+            wrap.append('Story from message #');
+            const inp = document.createElement('input');
+            inp.type = 'number'; inp.min = '0'; inp.max = String(id); inp.value = String(f.start); inp.style.cssText = 'width:4.5em;';
+            inp.addEventListener('click', e => e.stopPropagation());
+            inp.addEventListener('change', () => { f.start = Math.max(0, Math.min(id, Number(inp.value) || 0)); ctx().saveChat?.(); });
+            wrap.append(inp, ` to #${id} `);
+            return wrap;
+        };
+        if (f && (f.swipe ?? 0) === swipeOf(msg)) {
+            if (f.status === 'working') card.append(line(`🗺 Checking what changed on the map (messages #${f.start}–#${id})…`));
+            else if (f.status === 'nothing') card.append(line(`🗺 No lasting map change found in messages #${f.start}–#${id}.`), startPicker(), cardButton('Check again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
+            else if (f.status === 'error') card.append(line(`🗺 ${f.error || 'Something went wrong.'}`), startPicker(), cardButton('Try again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
+            else if (f.status === 'review' && f.proposal) {
+                card.append(line('🗺 Proposed map change:'));
+                const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
+                for (const s of f.proposal.summary ?? []) { const li = document.createElement('li'); li.textContent = s; ul.append(li); }
+                card.append(ul);
+                const here = getStoredLocation();
+                if (here && f.proposal.relocate?.[here]) card.append(line(`The party will be moved to ${f.proposal.relocate[here]}.`));
+                const det = document.createElement('details');
+                const sum = document.createElement('summary'); sum.textContent = 'Before / after (JSON)'; det.append(sum);
+                const pre = document.createElement('pre'); pre.style.cssText = 'max-height:240px;overflow:auto;font-size:0.85em;white-space:pre-wrap;';
+                pre.textContent = `BEFORE\n${JSON.stringify(f.proposal.before ?? {}, null, 1)}\n\nAFTER\n${JSON.stringify(f.proposal.after ?? {}, null, 1)}\n\nOPS\n${JSON.stringify(f.proposal.ops, null, 1)}`;
+                det.append(pre); card.append(det);
+                card.append(startPicker(), cardButton('Check again', () => analyzeFlag(id), 'Ask again with this story range'), cardButton('Keep', () => keepFlag(id)), cardButton('Discard', () => discardFlag(id)));
+            }
+        }
+        for (const p of kept) {
+            const d = line(`🗺 Map changed here: ${(p.summary ?? []).join('; ') || p.note}`);
+            d.append(' ', cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
+            card.append(d);
+        }
+        if (!card.childNodes.length) continue;
+        (el.querySelector('.mes_block') ?? el).appendChild(card);
+    }
+}
+
 function addSettingsPanel() {
     const html = `
 <div class="worldscrawl_settings">
@@ -1995,6 +2306,9 @@ function addSettingsPanel() {
       <div class="flex-container"><div id="worldscrawl_save" class="menu_button">Save world</div></div>
       <label class="checkbox_label"><input id="worldscrawl_save_switch" type="checkbox" checked> Switch this chat to the saved world</label>
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
+      <div>Map changes</div>
+      <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
+      <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="typed"> Clicks, commands and typed moves</label>
@@ -2022,6 +2336,12 @@ function addSettingsPanel() {
     const showExits = document.getElementById('worldscrawl_show_exits');
     showExits.checked = !!settings().showExits;
     showExits.addEventListener('change', () => { settings().showExits = showExits.checked; ctx().saveSettingsDebounced(); renderAllExits(); });
+    const autoKeep = document.getElementById('worldscrawl_auto_keep');
+    autoKeep.checked = !!settings().autoKeep;
+    autoKeep.addEventListener('change', () => { settings().autoKeep = autoKeep.checked; ctx().saveSettingsDebounced(); });
+    const flagTags = document.getElementById('worldscrawl_flag_tags');
+    flagTags.checked = !!settings().flagTags;
+    flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });
     document.querySelectorAll('input[name="worldscrawl_mode"]').forEach(r => {
         r.checked = r.value === settings().moveMode;
         r.addEventListener('change', () => { if (!r.checked) return; settings().moveMode = r.value; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });
@@ -2048,6 +2368,7 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
+    if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { onReplyForFlags(Number(id)).catch(e => console.error('[WorldScrawl] flag', e)); });
     eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; await applyChatState(); });
     eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0 && isOn()) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));

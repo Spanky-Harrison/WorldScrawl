@@ -66,8 +66,18 @@ function setEditor(on) {
     for (const fn of listeners) fn(state);
 }
 const indexCache = new Map(); // world|version -> {addresses, doors}
-async function worldIndex(world, version) {
-    const key = `${world}|${version}`;
+/** This chat's map patches (fire, collapse...): when there are any, map requests send the chat's changes. */
+const patchesOf = st => (st?.changes ?? []).filter(c => c?.type === 'patch');
+const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length])) + `|${st.now ?? ''}` : ''; };
+async function postJson(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(`map server answered ${r.status}`);
+    return r.json();
+}
+let curState = null; // the latest state message (its changes go with inspector requests)
+async function worldIndex(world, version, st = curState) {
+    const key = `${world}|${version}|${sigOf(st)}`;
+    if (!indexCache.has(key) && patchesOf(st).length) indexCache.set(key, await postJson(`${API}/inspect/index${world ? `?world=${encodeURIComponent(world)}` : ''}`, { changes: st.changes, now: st.now ?? null }));
     if (!indexCache.has(key)) {
         const r = await fetch(`${API}/inspect/index${world ? `?world=${encodeURIComponent(world)}` : ''}`);
         if (!r.ok) throw new Error(`map server answered ${r.status}`);
@@ -76,6 +86,7 @@ async function worldIndex(world, version) {
     return indexCache.get(key);
 }
 async function inspectData(world, target) {
+    if (patchesOf(curState).length) return postJson(`${API}/inspect${world ? `?world=${encodeURIComponent(world)}` : ''}`, { target, changes: curState.changes, now: curState.now ?? null });
     const r = await fetch(`${API}/inspect?target=${encodeURIComponent(target)}${world ? `&world=${encodeURIComponent(world)}` : ''}`);
     if (!r.ok) throw new Error(`map server answered ${r.status}`);
     return r.json();
@@ -97,17 +108,19 @@ const fmtSecs = s => s >= 3600 ? `${+(s / 3600).toFixed(2)}h` : s >= 60 ? `${+(s
 /** The inspector panel for one target, inside `side`. ctx: {st, room (server room dict, for rooms), exit (server exit dict), onExit(ref)}. */
 async function renderInspector(side, target, ctx) {
     const st = ctx.st;
+    curState = st ?? curState;
     side.replaceChildren($('p', { class: 'muted' }, 'Loading…'));
     let d;
     try { d = await inspectData(st?.world ?? '', target); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not inspect: ${e.message}`)); return; }
     if (ctx.stale?.()) return;
-    const tabs = ['Resolved', 'Raw', 'State', `Warnings${d.warnings.length ? ` (${d.warnings.length})` : ''}`];
+    const changes = d.changes ?? [];
+    const tabs = ['Resolved', 'Raw', 'State', `Warnings${d.warnings.length ? ` (${d.warnings.length})` : ''}`, `Changes${changes.length ? ` (${changes.length})` : ''}`];
     let tab = renderInspector.lastTab ?? 0;
     const bar = $('div', { class: 'tabs' }), pane = $('div', { class: 'tabpane' });
     const show = i => {
         tab = renderInspector.lastTab = i;
         bar.querySelectorAll('button').forEach((b, j) => b.classList.toggle('active', j === i));
-        pane.replaceChildren(...[resolvedPane, rawPane, statePane, warnPane][i]());
+        pane.replaceChildren(...[resolvedPane, rawPane, statePane, warnPane, changesPane][i]());
     };
     tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
     const resolvedPane = () => {
@@ -143,10 +156,14 @@ async function renderInspector(side, target, ctx) {
             else rows.push(['Door', 'no barrier']);
             if (e.hidden || e.obscured) rows.push(['Found by this chat', (st?.doors_revealed ?? []).includes(e.door) && !st?.editorOnly ? 'yes' : 'no']);
         }
+        if (changes.length) rows.push(['Changed by', changes.map(c => `${c.msg === null || c.msg === undefined ? 'a patch' : `message #${c.msg}`}${c.note ? ` (${c.note})` : ''}`).join('; ')]);
         const tbl = $('table', { class: 'resolved' });
         for (const [k, v] of rows) tbl.append($('tr', {}, $('th', {}, k), $('td', { colspan: '2' }, v)));
         return [tbl];
     };
+    const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Delete the message to undo one.' : 'Map changes from this chat that touch this. Delete the message to undo one.'),
+        $('ul', { class: 'warnings' }, ...changes.map(c => $('li', {}, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}`)))]
+        : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
     side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · read-only`), bar, pane);
     show(Math.min(tab, tabs.length - 1));
@@ -156,14 +173,19 @@ async function renderInspector(side, target, ctx) {
 const roomCache = new Map(); // world -> Map(address -> room)
 const revealCache = new Map(); // world -> Map(door -> [reveal])
 const worldStart = new Map(); // world -> start address (the world layer's layout root)
-async function fetchRooms(world, addresses) {
-    if (!roomCache.has(world)) roomCache.set(world, new Map());
-    const cache = roomCache.get(world), missing = [...new Set(addresses)].filter(a => a && !cache.has(a));
+async function fetchRooms(world, addresses, st = null) {
+    const sig = sigOf(st), ckey = `${world}|${sig}`;
+    if (!roomCache.has(ckey)) roomCache.set(ckey, new Map());
+    const cache = roomCache.get(ckey), missing = [...new Set(addresses)].filter(a => a && !cache.has(a));
     for (let i = 0; i < missing.length; i += 40) {
         const part = missing.slice(i, i + 40);
-        const r = await fetch(`${API}/rooms?addresses=${encodeURIComponent(part.join(','))}${world ? `&world=${encodeURIComponent(world)}` : ''}`);
-        if (!r.ok) throw new Error(`map server answered ${r.status}`);
-        const b = await r.json();
+        let b;
+        if (sig) b = await postJson(`${API}/rooms${world ? `?world=${encodeURIComponent(world)}` : ''}`, { addresses: part, changes: st.changes, now: st.now ?? null });
+        else {
+            const r = await fetch(`${API}/rooms?addresses=${encodeURIComponent(part.join(','))}${world ? `&world=${encodeURIComponent(world)}` : ''}`);
+            if (!r.ok) throw new Error(`map server answered ${r.status}`);
+            b = await r.json();
+        }
         if (b.start) worldStart.set(world, b.start.address ?? b.start);
         for (const room of b.rooms ?? []) cache.set(room.address, room);
         for (const a of b.unknown ?? []) cache.set(a, null);
@@ -189,7 +211,8 @@ export async function knownRooms(st) {
     noteVersion(st);
     const changes = st.changes ?? [];
     const dugTo = expandChanges(changes).filter(c => c.type === 'add_exit').map(c => c.to);
-    const raw = new Map(await fetchRooms(st.world, [...st.stood, ...st.seen, st.location, ...dugTo]));
+    curState = st;
+    const raw = new Map(await fetchRooms(st.world, [...st.stood, ...st.seen, st.location, ...dugTo], st));
     for (const [a, v] of [...raw]) if (v === null) raw.delete(a);
     for (const [a, r] of newRooms(changes, raw)) raw.set(a, r);
     const reveals = await fetchReveals(st.world, st.doors_revealed ?? []);
@@ -252,7 +275,7 @@ function createMapWindow(win) {
     }
     function inspectExit(ref) {
         const [addr, dir] = [ref.slice(5, ref.lastIndexOf('|')), ref.slice(ref.lastIndexOf('|') + 1)];
-        const room = roomCache.get(current?.st?.world ?? state?.world ?? '')?.get(addr);
+        const room = roomCache.get(`${current?.st?.world ?? state?.world ?? ''}|${sigOf(current?.st ?? state)}`)?.get(addr);
         const exit = room?.exits?.find(e => e.direction.toLowerCase() === dir) ?? null;
         inspectTarget(ref, { exit });
     }
@@ -260,7 +283,7 @@ function createMapWindow(win) {
         if (!n) return inspectTarget('world');
         if (n.kind === 'stub') return inspectExit(`exit:${n.id.slice(5)}`);
         if (n.layer) return inspectTarget(n.layer.level === 'region' ? `region:${n.layer.region}` : `sub:${n.layer.region}:${n.layer.subregion}`);
-        inspectTarget(n.id, { room: roomCache.get(current?.st?.world ?? '')?.get(n.id) });
+        inspectTarget(n.id, { room: roomCache.get(`${current?.st?.world ?? ''}|${sigOf(current?.st)}`)?.get(n.id) });
     }
     function showSide(id) {
         selected = id;

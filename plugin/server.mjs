@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
+import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -116,6 +117,7 @@ function field(body, key, kind, dflt) {
         }
     }
 }
+const nowOf = body => (isObj(body) && typeof body.now === 'number' && Number.isFinite(body.now) ? body.now : null);
 const needBody = body => { if (!isObj(body)) bad(null, body === undefined ? 'Field required' : 'Input should be a valid dictionary', body ?? null); return body; };
 
 /**
@@ -171,22 +173,29 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
     }
 
     const changedCache = new Map(); // LRU of worlds with a chat's changes applied
-    function world_for(wid, changes) {
+    /** The world with a chat's changes applied ({w, worldJson, raw, info}); expired patch ops (game time `now`) left out. */
+    function changed_for(wid, changesIn, now = null) {
         const lw = get_world(wid);
-        if (!changes.length) return lw.world;
+        const changes = activeChanges(changesIn, now);
+        if (!changes.length) return { w: lw.world, worldJson: lw.raw[0], raw: lw.raw[1], info: { patches: [] } };
         const key = `${lw.id}\u0000${lw.version}\u0000${stable(changes)}`;
-        let w = changedCache.get(key);
-        if (w === undefined) {
-            try { w = build_world(...apply_changes(...lw.raw, changes)); } catch (e) {
-                if (e instanceof WorldError) throw new HttpError(400, { error: e.message });
-                throw e;
+        let e = changedCache.get(key);
+        if (e === undefined) {
+            try {
+                const info = { patches: [] };
+                const [wj, raw] = apply_changes(...lw.raw, changes, { now, info });
+                e = { w: build_world(wj, raw), worldJson: wj, raw, info };
+            } catch (err) {
+                if (err instanceof WorldError) throw new HttpError(400, { error: err.message });
+                throw err;
             }
         }
         changedCache.delete(key);
-        changedCache.set(key, w);
+        changedCache.set(key, e);
         while (changedCache.size > 32) changedCache.delete(changedCache.keys().next().value);
-        return w;
+        return e;
     }
+    const world_for = (wid, changes, now = null) => changed_for(wid, changes, now).w;
 
     const step = (world, loc, direction) => {
         const wanted = strip(direction).toLowerCase();
@@ -243,10 +252,50 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const found = wanted.map(a => [a, w.get(a)]);
             return { start: w.to_dict(w.get(w.start)), rooms: found.filter(([, l]) => l !== null).map(([, l]) => w.to_dict(l)), unknown: found.filter(([, l]) => l === null).map(([a]) => a) };
         },
+        'POST /rooms': ({ q, body }) => { // the same, with this chat's changes (map patches) applied
+            needBody(body);
+            const w = world_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const wanted = [...new Set(field(body, 'addresses', 'strs', []).map(strip).filter(Boolean))];
+            const found = wanted.map(a => [a, w.get(a)]);
+            return { start: w.to_dict(w.get(w.start)), rooms: found.filter(([, l]) => l !== null).map(([, l]) => w.to_dict(l)), unknown: found.filter(([, l]) => l === null).map(([a]) => a) };
+        },
+        // Map patches. context: what the model needs to write one; preview: check one (never stamped by the server).
+        'POST /patch/context': ({ q, body }) => {
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const at = field(body, 'location', 'str'), wanted = field(body, 'rooms', 'strs', []);
+            const loc = find(e.w, at), sub = e.w.sub_of(loc);
+            const inSub = [...e.w.locations.values()].filter(l => e.w.sub_of(l) === sub);
+            const near = new Set(inSub.map(l => l.address));
+            for (const l of inSub) for (const x of l.exits) near.add(x.to);
+            const outline = [...near].map(a => e.w.get(a)).filter(Boolean).map(l => ({ address: l.address, name: l.name, area: `${l.address.split('/')[0]}`, area_name: e.w.sub_of(l).name,
+                exits: l.exits.map(x => ({ direction: x.direction, to: x.to, ...(x.barrier ? { door: x.blocked ? 'blocked' : x.barrier.locked ? 'locked' : 'door' } : {}) })) }));
+            const raw = structuredClone(e.raw); normalizeRefs(raw);
+            const rooms = {};
+            for (const a of wanted) { const r = getRoom(raw, a); if (r) rooms[a] = r; }
+            return { location: loc.address, area: loc.address.split('/')[0], area_name: sub.name, region_name: e.w.regions.get(loc.address.split(':')[0])?.name ?? '', outline, rooms,
+                areas: Object.fromEntries(wanted.filter(a => !a.includes('/')).map(a => { const [r, s2] = a.split(':'); const o = s2 ? raw[r]?.subregions?.[s2] : raw[r]; return [a, o ? { name: o.name, notes: o.notes ?? '' } : null]; })) };
+        },
+        'POST /patch/preview': ({ q, body }) => {
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const patch = field(body, 'patch', 'dict?');
+            if (!patch) bad('patch', 'Input should be a valid dictionary', patch);
+            const raw = structuredClone(e.raw);
+            let r;
+            try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch' }); build_world(e.worldJson, raw); } catch (err) {
+                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message });
+                throw err;
+            }
+            const before = structuredClone(e.raw); normalizeRefs(before);
+            const touched = [...new Set(r.touched)].filter(a => a.includes('/'));
+            const pick = src => Object.fromEntries(touched.map(a => [a, getRoom(src, a)]));
+            return { ok: true, summary: r.summary, relocate: r.relocate, touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
+        },
         'POST /move': ({ q, body }) => {
             needBody(body);
             const from = field(body, 'from', 'str'), direction = field(body, 'direction', 'str'), changes = field(body, 'changes', 'list', []);
-            const w = world_for(q('world'), changes);
+            const w = world_for(q('world'), changes, nowOf(body));
             const loc = find(w, from), to = step(w, loc, direction);
             if (to !== null) { log.info(`move ${loc.address} -${strip(direction)}-> ${to.address}`); const tr = exitAt(loc, direction)?.traversal; return { ...w.to_dict(to), travel_seconds: stepSeconds(w, loc, direction), ...(tr ? { traversal: tr } : {}) }; }
             const be = exitAt(loc, direction);
@@ -257,7 +306,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'POST /nearby': ({ q, body }) => {
             needBody(body);
             const from = field(body, 'from', 'str'), depth = field(body, 'depth', [1, 6], 3), limit = field(body, 'limit', [1, 30], 12), changes = field(body, 'changes', 'list', []);
-            const w = world_for(q('world'), changes);
+            const w = world_for(q('world'), changes, nowOf(body));
             const start = find(w, from);
             const dist = new Map([[start.address, 0]]);
             let frontier = [start];
@@ -281,11 +330,20 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(q('target'))}.`);
             return r;
         },
+        'POST /inspect/index': ({ q, body }) => { needBody(body); const lw = get_world(q('world')), e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)); return { world: lw.id, map_version: lw.version, ...inspectIndex(e.w) }; },
+        'POST /inspect': ({ q, body }) => { // with this chat's changes: patched rooms show which message changed them
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const target = field(body, 'target', 'str', 'world');
+            const r = inspect(e.w, [e.worldJson, e.raw], target, e.info.patches);
+            if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(target)}.`);
+            return r;
+        },
         'POST /doors': ({ q, body }) => { needBody(body); const doors = field(body, 'doors', 'strs'); return { exits: get_world(q('world')).world.door_reveals(doors) }; },
         'POST /travel': ({ q, body }) => {
             needBody(body);
             const from = field(body, 'from', 'str'), steps = field(body, 'steps', 'strs'), changes = field(body, 'changes', 'list', []);
-            const w = world_for(q('world'), changes);
+            const w = world_for(q('world'), changes, nowOf(body));
             let at = find(w, from), stopped = false, reason = null, error = null;
             const pathOut = [], stepTimes = [], traversal = [];
             for (const direction of steps) {
@@ -349,7 +407,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         const target = path.join(rootDir, wid);
         let wj, raw, know;
         try {
-            [wj, raw] = apply_changes(...base.raw, req.changes);
+            [wj, raw] = apply_changes(...base.raw, activeChanges(req.changes, typeof req.now === 'number' ? req.now : (typeof req.elapsed === 'number' ? req.elapsed : null)));
             wj.name = name;
             wj.living = true; // saves are living: they can be saved over later
             // Bake the clock in the same write as the changes: the saved world starts when this chat's clock is now.
