@@ -1145,6 +1145,27 @@ try {
     await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
     await ui.click('.mapbuttons .topbutton'); await ui.waitForTimeout(300);
     check('Centre goes back to the current room\'s layer', (await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id)) === m2.here);
+    // Waiting / sleeping: /ws-wait stamps a message and advances the clock; the map's Wait picker asks this tab; delete undoes.
+    const clockNow = () => page.evaluate(async () => (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).chatElapsed());
+    const t0 = await clockNow(), hereBefore = await stored();
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2h')); await waitReqs();
+    check('/ws-wait 2h: clock +2h, no move', (await clockNow()) - t0 === 7200 && (await stored()) === hereBefore, `${(await clockNow()) - t0}`);
+    const wq = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = ch.filter(m => m.is_user).pop(); return { mes: u.mes, w: u.extra.worldscrawl_wait }; });
+    check('/ws-wait: stamped user message', /waits for 2h/.test(wq.mes) && wq.w?.seconds === 7200, JSON.stringify(wq));
+    const lastBody = async () => JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).pop());
+    check('/ws-wait: narrator told how long and the new time', /waited here for 2h/.test(await lastBody()));
+    const t1 = await clockNow();
+    expected += 1; await ui.selectOption('#waitPick', 'sleep|8h'); await waitReqs();
+    check('map Wait picker: sleep 8h via the chat tab', (await clockNow()) - t1 === 8 * 3600, `${(await clockNow()) - t1}`);
+    check('sleep: narrator told to wake up', /slept here for 8h/.test(await lastBody()));
+    try { await ui.waitForFunction(() => /slept 8h/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 5000 }); } catch {}
+    check('map clock shows the wait', /slept 8h/.test(await ui.evaluate(() => document.getElementById('status')?.textContent ?? '')));
+    const t2 = await clockNow();
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until midnight')); await waitReqs();
+    const dm = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return m.gameDate(); });
+    check('/ws-wait until midnight lands on 00:00', (await clockNow()) > t2 && dm?.time === '00:00', JSON.stringify(dm));
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
+    check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);

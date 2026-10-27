@@ -168,9 +168,62 @@ export function defaultTravel(fromAddress, toAddress) {
     return fs === ts ? DEFAULT_TRAVEL.same_subregion : DEFAULT_TRAVEL.same_region;
 }
 
-/** Travel seconds stamped on chat messages after index `after` (the latest rebase; -1 = all): sum of extra.worldscrawl_move.seconds. */
+/**
+ * Game seconds stamped on chat messages after index `after` (the latest rebase; -1 = all): travel
+ * (extra.worldscrawl_move.seconds) plus waiting/sleeping (extra.worldscrawl_wait.seconds). Both live on the message, so
+ * deleting the message undoes them and swipes keep them.
+ */
 export function sumTravel(chat, after = -1) {
     let sum = 0;
-    (chat ?? []).forEach((m, i) => { const s = m?.extra?.worldscrawl_move?.seconds; if (i > after && Number.isFinite(s) && s > 0) sum += s; });
+    (chat ?? []).forEach((m, i) => {
+        if (i <= after) return;
+        for (const k of ['worldscrawl_move', 'worldscrawl_wait']) { const s = m?.extra?.[k]?.seconds; if (Number.isFinite(s) && s > 0) sum += s; }
+    });
     return sum;
 }
+
+// ---- Waiting and sleeping. "/ws-wait 2h", "/ws-wait 1h30m", "/ws-wait 2d", "/ws-wait until dawn", "/ws-wait until 14:30".
+export const WAIT_TARGETS = ['dawn', 'morning', 'noon', 'dusk', 'evening', 'night', 'midnight'];
+export const SLEEP_DEFAULT = 8 * 3600;
+/** Parse wait arguments: {seconds} for a duration (days allowed: "2d", "1d6h"), {until} for a time of day; throws. */
+export function parseWait(text, cal = GREGORIAN) {
+    const s = String(text ?? '').trim().toLowerCase().replace(/^for\s+/, '');
+    if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
+    const u = /^(?:until|till|til|to)\s+(.+)$/.exec(s);
+    if (u) {
+        const t = u[1].trim().replace(/^the\s+/, '');
+        if (t === 'sunrise') return { until: 'dawn' };
+        if (t === 'sunset') return { until: 'dusk' };
+        if (WAIT_TARGETS.includes(t)) return { until: t };
+        parseClock(t, cal);
+        return { until: t };
+    }
+    const d = /^(\d+)\s*d(?:ays?)?\s*(.*)$/.exec(s);
+    const days = d ? +d[1] * secondsPerDay(cal) : 0, rest = d ? d[2].trim() : s;
+    const n = rest ? (/^\d+$/.test(rest) ? +rest * 3600 : parseDuration(rest.replace(/hours?|hrs?/g, 'h').replace(/minutes?|mins?/g, 'm').replace(/\s+/g, ''))) : 0;
+    if (days + n <= 0) throw new Error('the wait must be longer than zero');
+    return { seconds: days + n };
+}
+/**
+ * Seconds from game time `elapsed` until the next `target` (a WAIT_TARGETS word or "HH:MM") - always in the future,
+ * rolling to the next day when today's has passed. sunAt(elapsedNearNoonOfThatDay) may return {sunrise, sunset}
+ * (seconds of the day, from the weather's daylight); without it dawn/dusk use the day-part boundaries.
+ */
+export function untilSeconds(elapsed, target, start = null, cal = null, sunAt = null) {
+    cal = checkCalendar(cal);
+    const spd = secondsPerDay(cal), d = dateAt(elapsed, start, cal);
+    const sod = d.hour * 3600 + d.minute * 60 + d.second, dayStart = Math.max(0, Math.floor(elapsed)) - sod;
+    const frac = f => Math.round(f * spd);
+    for (let k = 0; k < 3; k++) {
+        const day0 = dayStart + k * spd;
+        let sun = null; try { sun = sunAt?.(Math.max(0, day0 + spd / 2)) ?? null; } catch { sun = null; }
+        const okSun = sun && Number.isFinite(sun.sunrise) && Number.isFinite(sun.sunset) && sun.sunset > sun.sunrise;
+        const at = { dawn: okSun ? sun.sunrise : frac(6 / 24), morning: okSun ? Math.min(sun.sunrise + 3600, frac(0.5)) : frac(7 / 24),
+            noon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
+            ?? parseClock(target, cal);
+        const t = day0 + Math.round(at);
+        if (t > elapsed) return t - Math.floor(elapsed);
+    }
+    throw new Error(`could not find the next ${target}`);
+}
+

@@ -52,6 +52,13 @@ function toggleWindow(def, force) {
 function buildTopBar() {
     const nav = document.getElementById('windowButtons');
     for (const def of WINDOWS) nav.append($('button', { class: 'topbutton', 'data-window': def.id, onclick: () => toggleWindow(def) }, def.title));
+    // Wait: the map never changes state itself; it asks the SillyTavern tab to post a stamped wait message.
+    const waitSel = $('select', { class: 'topbutton', id: 'waitPick', title: 'Pass time here without moving (posts a message in the chat; delete it to undo)', onchange: ev => {
+        const [kind, args] = String(ev.target.value).split('|'); ev.target.value = '';
+        if (!kind || !state?.on || !state.chatId) return;
+        channel.postMessage({ type: 'wait', chatId: state.chatId, sleep: kind === 'sleep', args });
+    } }, $('option', { value: '' }, 'Wait…'), $('option', { value: 'wait|1h' }, 'Wait 1 hour'), $('option', { value: 'wait|until morning' }, 'Wait until morning'), $('option', { value: 'sleep|8h' }, 'Sleep 8 hours'));
+    nav.append(waitSel);
     nav.append($('button', { class: 'topbutton editor-toggle', id: 'editorToggle', title: 'Editor mode: see the whole world and inspect its data (read-only)', onclick: () => setEditor(!editor) }, 'Editor'));
 }
 
@@ -137,6 +144,7 @@ async function renderInspector(side, target, ctx) {
     const rawPane = () => [$('pre', { class: 'raw' }, JSON.stringify(d.raw, null, 2)), ...(d.kind === 'region' || d.kind === 'subregion' ? [$('p', { class: 'muted' }, 'Child areas/rooms are collapsed to "…"; click them to see theirs.')] : [])];
     const statePane = () => {
         const rows = [['Chat', st?.editorOnly ? 'none open (showing the default world)' : st?.chatName || '—'], ['Clock', st?.clock || '—']];
+        if (st?.last_wait) rows.push(['Last wait', `${st.last_wait.label} (message #${st.last_wait.msg})`]);
         if (d.kind === 'room' && ctx.room) {
             rows.push(['Party here', st?.location === ctx.room.address ? 'yes' : 'no']);
             const w = ctx.info?.weather && st?.abs_seconds !== null && st?.abs_seconds !== undefined ? placeWeather(ctx.info.weather, ctx.room.weather, st.abs_seconds, ctx.info.calendar) : null;
@@ -384,7 +392,8 @@ function createMapWindow(win) {
 function onState(st) {
     state = st;
     if (st.theme) applyTheme(st.theme);
-    setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
+    const wp = document.getElementById('waitPick'); if (wp) wp.disabled = !st.on;
+    setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.last_wait?.recent ? ` (${st.last_wait.label})` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
 channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); });
