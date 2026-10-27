@@ -1353,9 +1353,8 @@ try {
             check('Edit place: every exit radio group (type, See/Hear destination) has the effective value selected', !empty.length, JSON.stringify(empty));
             const why = await ui.evaluate(() => document.querySelector('.side .pf-exit .pf-row[data-field="sight"] .pf-from')?.textContent ?? '');
             check('Edit place: See destination shows a default/set-here tag', why === 'default' || why === 'set here', why);
-            const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-senses-group[data-when="closed"]')); return b ? [...b.querySelectorAll('.pf-senses b, .pf-senses i, .pf-senses .pf-label')].map(l => l.textContent) : null; });
-            check('Edit place: with a door, "Seeing and hearing" groups When open / When the door is closed', JSON.stringify(doorLabels) === JSON.stringify(['Seeing and hearing through this exit', 'When open', 'See destination', 'Hear destination', 'When the door is closed', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
-            check('Edit place: the Door block no longer holds the closed see/hear rows', await ui.evaluate(() => !document.querySelector('.side .pf-door .pf-row[data-field^="closed_"]'))); }
+            const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-door .pf-row[data-field="closed_sight"]')); return b ? [...b.querySelectorAll('.pf-row[data-field="sight"], .pf-row[data-field="sound"], .pf-door .pf-row[data-field^="closed_"]')].map(r => r.querySelector('.pf-label').textContent) : null; });
+            check('Edit place: with a door, See/Hear destination read (door open) on the exit and (door closed) in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['See destination (door open)', 'Hear destination (door open)', 'See destination (door closed)', 'Hear destination (door closed)']), JSON.stringify(doorLabels)); }
     }
     for (const [t, a] of [['world', 'create_region'], ['region:riverton', 'create_subregion'], ['sub:riverton:drowned_rat', 'create_place'], ['sub:riverton:drowned_rat', 'merge_places'],
         ['sub:riverton:drowned_rat', 'delete_subregion'], ['sub:riverton:drowned_rat', 'move_subregion'], ['riverton:drowned_rat/common_room', 'move_place']]) {

@@ -131,5 +131,3 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .mapaction .mw-clash, .editlive-pane .mw-clash { color: #e9a23b; }
 .mapaction .mw-picks { display: flex; flex-direction: column; }
 .side .mapact { margin-left: 4px; }
-.pf-senses { margin: 4px 0; } .pf-senses-head { display: block; font-size: .9em; }
-.pf-senses-group { margin: 2px 0 4px 10px; } .pf-senses-group > i { display: block; font-size: .85em; opacity: .8; }
