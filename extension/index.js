@@ -25,6 +25,7 @@ const WORLD_KEY = 'worldscrawl_world'; // {id, version, rebase?, at?, from?}: wh
 const CHANGE_KEY = 'worldscrawl_change'; // {type: 'add_exit'|'remove_exit', ...} on the system message that made the change
 const MODES = ['commands', 'typed', 'tools'];
 const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
+const WAIT_KEY = 'worldscrawl_wait'; // {seconds, sleep, label, before}: on the message where time passed without moving
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
 const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag'];
@@ -88,7 +89,7 @@ const rememberWorlds = body => {
     if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); } }
 };
 
-// ---- Game clock. Only travel takes time: each move stamps its seconds on its message (move.seconds), so swipes keep
+// ---- Game clock. Travel and waiting take time: each move or wait stamps its seconds on its message (move.seconds, wait.seconds), so swipes keep
 // them and deleting the message undoes them. Clock = the chat world's start_date + the seconds stamped after the latest
 // rebase (a save bakes everything before it into the saved world's start_date).
 let calendarLib = null;
@@ -461,11 +462,18 @@ function registerTools() {
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'A few words on what changed, e.g. "the inn burned down".' } },
+            properties: { action: { type: 'string', enum: ['change', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
+                location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
-        action: async ({ location = '', note = '' } = {}) => { pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
-        formatMessage: () => 'Noting a map change...',
+        action: async ({ action = 'change', location = '', note = '' } = {}) => {
+            if (action === 'wait' || action === 'sleep') {
+                const w = await planWait(String(note ?? ''), action === 'sleep');
+                if (w.error) return `Could not pass time: ${w.error}`;
+                pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.`;
+            }
+            pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
+        formatMessage: ({ action } = {}) => action === 'wait' || action === 'sleep' ? 'Passing time...' : 'Noting a map change...',
     });
 }
 
@@ -1389,6 +1397,8 @@ async function applyFacts() {
         const d = gameDate();
         text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
         reminder = arrivalReminder(loc, move);
+        const wf = await waitFacts(c.chat ?? [], loc);
+        if (wf) text = `${text}\n${wf}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     // Small models weigh the last lines most: on a move/travel turn, repeat where the turn ends after the player's message.
@@ -1649,6 +1659,13 @@ function registerSlashCommands() {
         }),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'what changed, e.g. "the inn burned down" (optional)', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
         helpString: 'WorldScrawl: the map changed in the latest message (fire, collapse, smashed door...). The engine works out the change and shows a Keep / Discard card.',
+    }));
+    for (const sleep of [false, true]) SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: sleep ? 'ws-sleep' : 'ws-wait',
+        callback: async (_n, arg) => waitCommand(String(arg ?? ''), sleep),
+        helpString: sleep ? 'WorldScrawl: sleep here (default 8h): /ws-sleep, /ws-sleep 6h, /ws-sleep until morning. Time passes without moving; delete the message to undo.'
+            : 'WorldScrawl: wait here: /ws-wait 2h, /ws-wait 1h30m, /ws-wait 2d, /ws-wait until dawn|morning|noon|dusk|evening|night|midnight|14:30. Delete the message to undo.',
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'how long, or "until <time>"', typeList: [ARGUMENT_TYPE.STRING], isRequired: !sleep })],
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
@@ -1951,6 +1968,7 @@ export async function mapState() {
         clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
         abs_seconds: (() => { try { const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(); return weatherLib && t && d ? weatherLib.absSeconds(d, t.calendar) : null; } catch { return null; } })(),
+        last_wait: (() => { const ch = c.chat ?? []; for (let i = ch.length - 1; i >= 0; i--) { const w = ch[i]?.extra?.[WAIT_KEY]; if (w?.seconds > 0) return { msg: i, label: w.label, sleep: !!w.sleep, recent: i >= lastUserIndex(ch) }; } return null; })(),
         location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), ...mapCtx() };
 }
 let broadcastTimer = null;
@@ -1963,7 +1981,11 @@ export function broadcastMapState() {
 }
 function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
-    ch.addEventListener('message', ev => { if (ev.data?.type === 'hello') broadcastMapState(); });
+    ch.addEventListener('message', ev => {
+        if (ev.data?.type === 'hello') broadcastMapState();
+        // The map's Wait button: only the tab showing that chat acts on it (the map never changes state itself).
+        if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
+    });
     return ch;
 }
 export function openMapWindow() {
@@ -2010,8 +2032,9 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. Never write it otherwise.';
+const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_flag: wait | 2h] or [ws_flag: sleep | until morning]. Never write these otherwise.';
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
+let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
 let pendingFlag = null; // from the ws_flag tool: attached to the reply when it arrives
 let patchLib = null;
@@ -2205,10 +2228,105 @@ async function onReplyForFlags(id) {
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
         const [hint, ...rest] = m[1].split('|');
-        flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
+        const kind = hint.trim().toLowerCase();
+        if ((kind === 'wait' || kind === 'sleep') && !pendingWait) {
+            const w = await planWait(rest.join('|'), kind === 'sleep');
+            if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error);
+        } else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
         await c.saveChat?.();
     }
+    if (pendingWait) {
+        const w = pendingWait; pendingWait = null;
+        stampWait(msg, w); await c.saveChat?.();
+        await applyFacts(); renderAllExits(); broadcastMapState();
+    }
     if (flag) await flagMessage(id, flag);
+}
+
+// ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
+// a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
+// /ws-wait, /ws-sleep, the map window's Wait button (asks this tab over the channel), and ws_flag action wait/sleep
+// (or a [ws_flag: wait | 2h] tag) from the narrator - stamped straight away, no extra model call, no review card.
+/** Sunrise/sunset (seconds of the day) where the party is, from the weather's daylight, for "until dawn" etc. */
+function sunFor(loc) {
+    const t = worldTimes.get(activeWorld || defaultWorldId);
+    if (!weatherLib?.weatherAt || !t?.weather || !loc?.weather?.weather_region) return null;
+    return e => { const d = calendarLib.dateAt(e, t.start_date, t.calendar); const w = weatherLib.weatherAt(t.weather, loc.weather.weather_region, weatherLib.absSeconds(d, t.calendar), t.calendar); return { sunrise: w.sunrise, sunset: w.sunset }; };
+}
+/** Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped. */
+export async function planWait(args, sleep = false) {
+    if (!(await loadCalendar())) return { error: 'the game clock is unavailable' };
+    const t = worldTimes.get(activeWorld || defaultWorldId), cal = t?.calendar ?? null;
+    args = String(args ?? '').trim();
+    let p;
+    try { p = args ? calendarLib.parseWait(args, cal ? calendarLib.checkCalendar(cal) : undefined) : sleep ? { seconds: calendarLib.SLEEP_DEFAULT } : null; } catch (e) { return { error: e.message }; }
+    if (!p) return { error: 'say how long, e.g. "/ws-wait 2h" or "/ws-wait until morning"' };
+    const now = chatElapsed();
+    let seconds = p.seconds;
+    if (p.until) {
+        let sun = null; try { sun = sunFor(await currentLocation()); } catch {}
+        try { seconds = calendarLib.untilSeconds(now, p.until, t?.start_date ?? null, cal, sun); } catch (e) { return { error: e.message }; }
+    }
+    const dur = calendarLib.formatDuration(seconds);
+    const label = `${sleep ? 'slept' : 'waited'} ${dur}${p.until ? ` (until ${p.until})` : ''}`;
+    let afterText = '';
+    try { afterText = calendarLib.describeDate(calendarLib.dateAt(now + seconds, t?.start_date ?? null, cal)); } catch {}
+    return { seconds, sleep, label, until: p.until ?? null, afterText };
+}
+function stampWait(msg, w) {
+    msg.extra = msg.extra ?? {};
+    msg.extra[WAIT_KEY] = { seconds: w.seconds, sleep: !!w.sleep, label: w.label, ...(w.until ? { until: w.until } : {}) };
+}
+/** The auto-sent wait message: "*Knarfy waits for 2h.*", "*Knarfy sleeps for 8h, until morning.*" */
+export function waitNote(who, w) {
+    const dur = calendarLib?.formatDuration ? calendarLib.formatDuration(w.seconds) : `${w.seconds}s`;
+    return `*${who} ${w.sleep ? 'sleeps' : 'waits'} for ${dur}${w.until ? `, until ${w.until}` : ''}.*`;
+}
+/** /ws-wait and /ws-sleep (and the map's Wait button): post a stamped message, then let the narrator describe it. */
+export async function waitCommand(args, sleep = false) {
+    const c = ctx();
+    if (!isOn()) { toastr.info(OFF_NOTICE); return OFF_NOTICE; }
+    if (engineBusy) return 'WorldScrawl: busy.';
+    if (c.characterId === undefined && !c.groupId) { toastr.warning('Open a chat first.'); return ''; }
+    const w = await planWait(args, sleep);
+    if (w.error) { toastr.warning(`WorldScrawl: ${w.error}`); return w.error; }
+    engineBusy = true;
+    try {
+        const who = whoMoves(), dur = calendarLib.formatDuration(w.seconds);
+        const note = waitNote(who, w);
+        await c.executeSlashCommandsWithOptions(`/send ${note}`);
+        const msg = c.chat[c.chat.length - 1];
+        stampWait(msg, w);
+        msg.extra.worldscrawl_engine = true;
+        await c.saveChat();
+        renderAllExits(); broadcastMapState();
+        await c.executeSlashCommandsWithOptions('/trigger await=true');
+        return '';
+    } catch (e) { toastr.error(e.message); return e.message; } finally { engineBusy = false; }
+}
+/** The latest wait the narrator has not described yet: on the latest user message or after it. */
+function recentWait(chat) {
+    const ui = lastUserIndex(chat);
+    for (let i = chat.length - 1; i >= Math.max(0, ui); i--) if (chat[i]?.extra?.[WAIT_KEY]?.seconds > 0) return { i, w: chat[i].extra[WAIT_KEY] };
+    return null;
+}
+/** Narrator lines for a wait: how long, the time before and now, daylight/weather now and before, expired changes. */
+async function waitFacts(chat, loc) {
+    const r = recentWait(chat);
+    if (!r || !calendarLib) return '';
+    const t = worldTimes.get(activeWorld || defaultWorldId), after = chatElapsed(chat.slice(0, r.i + 1)), before = after - r.w.seconds;
+    const who = whoMoves(), dur = calendarLib.formatDuration(r.w.seconds);
+    const lines = [];
+    try {
+        const d0 = calendarLib.dateAt(before, t?.start_date ?? null, t?.calendar ?? null), d1 = calendarLib.dateAt(after, t?.start_date ?? null, t?.calendar ?? null);
+        lines.push(`What just happened: ${who} ${r.w.sleep ? 'slept' : 'waited'} here for ${dur}, without travelling. It was ${calendarLib.describeDate(d0)}; it is now ${calendarLib.describeDate(d1)}.${d0.part !== d1.part ? ` The light has changed from ${d0.part} to ${d1.part}.` : ''}${r.w.sleep ? ' Narrate waking up.' : ''}`);
+    } catch {}
+    const w0 = placeWeatherNow(loc, chat.map((m, j) => (j === r.i ? { ...m, extra: { ...m.extra, [WAIT_KEY]: undefined } } : m))), w1 = placeWeatherNow(loc, chat);
+    if (w0?.line && w1?.line && w0.line !== w1.line) lines.push(`Before the wait: ${w0.line} Describe how the weather has changed.`);
+    const lib = await loadPatchLib();
+    const gone = lib?.expiredBetween ? lib.expiredBetween(chatChanges(chat), before, after) : [];
+    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => g.note).join('; ')}.`);
+    return lines.join('\n');
 }
 
 function cardButton(label, onClick, title = '') {

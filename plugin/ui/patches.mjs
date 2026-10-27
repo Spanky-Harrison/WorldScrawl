@@ -41,6 +41,22 @@ export function opActive(op, patch, now) {
     if (!has(op, 'lasts') || now === null || now === undefined || !Number.isFinite(Number(patch?.at))) return true;
     try { return now < Number(patch.at) + parseLasts(op.lasts); } catch { return true; } // a bad "lasts" is reported when applied
 }
+/**
+ * Temporary patch ops that run out after game time `before` and by `after` (a wait or a journey):
+ * [{patch, op, note, ends}] in the order they run out.
+ */
+export function expiredBetween(changes = [], before = 0, after = 0) {
+    const out = [];
+    for (const c of changes ?? []) {
+        if (c?.type !== 'patch' || !Array.isArray(c.ops) || !Number.isFinite(Number(c.at))) continue;
+        c.ops.forEach((op, i) => {
+            if (!has(op, 'lasts')) return;
+            let ends; try { ends = Number(c.at) + parseLasts(op.lasts); } catch { return; }
+            if (ends > before && ends <= after) out.push({ patch: c.id, op, note: c.summary?.[i] ?? c.note ?? String(op.op ?? '').replace(/_/g, ' '), ends });
+        });
+    }
+    return out.sort((a, b) => a.ends - b.ends);
+}
 /** The changes with expired patch ops dropped (patches left with no ops dropped too). */
 export function activeChanges(changes = [], now = null) {
     return (changes ?? []).flatMap(c => {

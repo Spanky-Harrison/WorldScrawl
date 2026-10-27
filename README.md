@@ -300,7 +300,7 @@ Put `[ws-start]` anywhere in a character's greeting (or alternate greetings). Wo
 
 ## Game time
 
-Only travel takes time. Each exit can have `"travel_time"`: `"2h"`, `"90m"`, `"1h30m"`, `"45s"`. Without one, a step inside one subregion (a building's rooms, along one street) takes 1 minute, into another subregion 3 minutes, into another region 10 minutes. Every move stamps its seconds on its chat message (`worldscrawl_move.seconds`; a multi-step trip stamps the sum of its steps), so swipes keep it and deleting the message undoes it. The clock is the world's `start_date` plus those seconds; saving a world writes the current clock as the saved world's `start_date` in the same write. The date, weekday and time of day go to the narrator, the footer under the latest reply, and the map window's top bar.
+Time passes on travel **and** on waiting or sleeping (see *Waiting and sleeping* below). Each exit can have `"travel_time"`: `"2h"`, `"90m"`, `"1h30m"`, `"45s"`. Without one, a step inside one subregion (a building's rooms, along one street) takes 1 minute, into another subregion 3 minutes, into another region 10 minutes. Every move stamps its seconds on its chat message (`worldscrawl_move.seconds`; a multi-step trip stamps the sum of its steps), so swipes keep it and deleting the message undoes it. The clock is the world's `start_date` plus those seconds; saving a world writes the current clock as the saved world's `start_date` in the same write. The date, weekday and time of day go to the narrator, the footer under the latest reply, and the map window's top bar.
 
 `world.json`:
 
@@ -318,6 +318,18 @@ Only travel takes time. Each exit can have `"travel_time"`: `"2h"`, `"90m"`, `"1
 ```
 
 `calendar` is optional (default: Gregorian, February gets a 29th every 4th year, weekdays match real dates 1900-2100). The week is as long as `days_of_week`; a year is all its months added up; hours, minutes and seconds are always 60/60. `leap_every`/`leap_days` (default 1) are per month. Optional `first_weekday` picks which day name year 1 starts on (index, default 0). Time of day: night, dawn, morning, afternoon, evening, scaled to `hours_per_day` (on 24 hours: dawn 5-7, morning 7-12, afternoon 12-17, evening 17-21).
+
+### Waiting and sleeping
+
+Time can pass without moving:
+
+- `/ws-wait 2h`, `/ws-wait 1h30m`, `/ws-wait 2d` wait that long. There is no upper limit.
+- `/ws-wait until dawn` (also `morning`, `noon`, `dusk`, `evening`, `night`, `midnight`, or a clock time like `14:30`) waits until the next one. If it has already passed today, it waits until tomorrow's. Dawn and dusk follow the place's sunrise and sunset from the weather. Custom calendars with a different `hours_per_day` work too.
+- `/ws-sleep` sleeps 8 hours. `/ws-sleep 6h` and `/ws-sleep until morning` work like `/ws-wait`, and the narrator is told to narrate waking up.
+- The map window's **Wait…** menu has quick picks: wait 1 hour, wait until morning, sleep 8 hours. It asks the SillyTavern tab to post the message; the map never changes anything itself.
+- The narrator can pass time too, through the same flag as map changes: the `ws_flag` tool with action `wait` or `sleep`, or a `[ws_flag: wait | 2h]` / `[ws_flag: sleep | until morning]` tag. This is stamped straight away, with no review card.
+
+A wait is stamped on its chat message (`worldscrawl_wait.seconds`) exactly like a move's travel time. Deleting the message undoes it, and swipes keep it. On the next reply the narrator is told how long passed, the time before and after, a change of light (night to dawn and so on), how the weather changed, and any temporary map changes that ran out during the wait. The map's top bar shows the wait next to the clock.
 
 ## Weather
 
@@ -444,7 +456,7 @@ In the map window (WorldScrawl GUI), the **Editor** button in the top bar switch
 
 - **Resolved**: the effective value of every field, each with where it came from (`own`, `from subregion`, `from region`, `default`, `from type "portal"`, or for an inherited barrier `from <room> side (<direction>)`).
 - **Raw**: the JSON exactly as written in the world file.
-- **State**: the chat's clock, the weather at that room (temperature, feels-like, inside temperature) and, for an exit, whether its door is open, closed or locked right now.
+- **State**: the chat's clock (and the latest wait or sleep, with its message number), the weather at that room (temperature, feels-like, inside temperature) and, for an exit, whether its door is open, closed or locked right now.
 - **Warnings**: the loader warnings that concern the clicked item (served by `GET /api/plugins/worldscrawl/inspect?target=…`; `GET …/inspect/index` lists rooms, doors and the warning count).
 
 The inspector never changes anything. Click **Editor** again to return to the normal (play) map.
