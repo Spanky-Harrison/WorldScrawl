@@ -225,7 +225,7 @@ export class World {
             name: loc.name,
             display_name: World.place_label(loc.name, sub.name),
             description: loc.description,
-            effective_notes: this.effective_notes(loc),
+            effective_notes: this.effective_notes(loc), expandable: loc.expandable !== false,
             exits: loc.exits.map(e => this._exit_dict(e, loc)),
             views: loc.views.map(a => this.view_dict(a)),
             weather: this.place_weather(loc),

@@ -483,11 +483,11 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_flag',
         displayName: 'WorldScrawl: Flag a map change',
-        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action "discover" when the characters open a door the room description mentions that is not a listed exit. The engine handles it after your reply. Do not call it for ordinary events.',
+        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action "discover" when the characters open a door that is not a listed exit, either one the room description mentions or one that plausibly fits the room (e.g. another door along a hallway). The engine handles it after your reply. Do not call it for ordinary events.',
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "discover": the characters go through a door (or stairs, hatch...) that the room description mentions but that is not one of its exits, e.g. one of the guest rooms off a hallway; the engine adds the room behind it. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
+            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "discover": the characters open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room, e.g. one of the guest rooms off a hallway; the engine adds the room behind it. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
                 location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
@@ -1074,7 +1074,7 @@ async function narrativeDig(msg, loc) {
 }
 export const digStayPrompt = said => `${said}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.`;
 // ---- Looking and doors (the party never moves).
-export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door';
+export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door', NEW_DOOR = 'try another door';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 export const DOOR_OPEN_RE = /\b(?:open|opens|opened|opening|unlatch\w*|unbar\w*)\b/i;
 export const DOOR_CLOSE_RE = /\b(?:close|closes|closed|closing|shut|shuts|shutting|slam|slams|slammed|slamming)\b/i;
@@ -1183,7 +1183,8 @@ async function parseIntent(msg) {
     const doors = doorCandidates(loc);
     doors.toOpen = [...doors.toOpen, ...doors.stuck]; // trying a locked door is still the 'open' intent; it just doesn't give
     const canOpenDoor = DOOR_OPEN_RE.test(msg.mes ?? '') && doors.toOpen.length > 0, canCloseDoor = DOOR_CLOSE_RE.test(msg.mes ?? '') && doors.toClose.length > 0;
-    const extras = [...(canOpen ? [OPEN] : []), ...(canLook ? [LOOK] : []), ...(canOpenDoor ? [OPEN_DOOR] : []), ...(canCloseDoor ? [CLOSE_DOOR] : [])];
+    const canNewDoor = DOOR_OPEN_RE.test(msg.mes ?? '') && loc.expandable !== false; // a door not on the map yet: maybe a discovery
+    const extras = [...(canOpen ? [OPEN] : []), ...(canLook ? [LOOK] : []), ...(canOpenDoor ? [OPEN_DOOR] : []), ...(canCloseDoor ? [CLOSE_DOOR] : []), ...(canNewDoor ? [NEW_DOOR] : [])];
     // Only looking ("I look out the door"): no move options, so a word like "out" can't pick the "out" exit.
     const onlyLook = canLook && lookOnly(msg.mes);
     const moveDirs = onlyLook ? [] : dirs, movePlaces = onlyLook ? [] : places;
@@ -1202,6 +1203,7 @@ async function parseIntent(msg) {
         + (canLook ? `- ${LOOK}: the player looks, peers, peeks or listens at something from here, without going anywhere\n` : '')
         + (canOpenDoor ? `- ${OPEN_DOOR}: the player opens a closed door here, without going through it\n` : '')
         + (canCloseDoor ? `- ${CLOSE_DOOR}: the player closes an open door here\n` : '')
+        + (canNewDoor ? `- ${NEW_DOOR}: the player opens or tries a door, hatch or stair that is none of the exits listed above (e.g. another door along a hallway)\n` : '')
         + `- ${STAY}: the player is not trying to travel anywhere\n`
         + (onlyLook ? '\n' : `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
         + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`)
@@ -1212,6 +1214,7 @@ async function parseIntent(msg) {
     let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), ...extras]);
     if (choice === OPEN) return await narrativeDig(msg, loc);
     if (choice === LOOK) return await narrativeLook(msg, loc);
+    if (choice === NEW_DOOR) { msg.extra.worldscrawl_new_door = true; return { kind: STAY, loc }; }
     if (choice === OPEN_DOOR || choice === CLOSE_DOOR) return await narrativeDoor(msg, loc, choice === OPEN_DOOR ? doors.toOpen : doors.toClose, choice === OPEN_DOOR ? 'open_door' : 'close_door');
     if (onlyLook) { console.log(`[WorldScrawl] look-only message, answer ${JSON.stringify(String(answer).slice(0, 40))} -> stay`); return { kind: 'stay', loc }; }
     const ans = trimAnswer(cleanAnswer(answer));
@@ -1395,6 +1398,8 @@ export function lookText(who, here, look) {
 }
 export const EXITS_HINT = 'In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the "you can see" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.';
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
+/** The narration line for a door that is not on the map yet: open it (and flag a discovery) only if it fits the room. */
+export const newDoorLine = (who, place, tools) => `What just happened: ${who} tries a door that is not among the exits. If such a door plausibly fits ${place} (its description and the area notes), narrate it opening and ${tools ? 'call ws_flag with action "discover" and a note naming the door' : 'end your reply with [ws_flag: discover | which door]'}; the engine adds the room behind it. If no such door fits, narrate that there is none. ${who} stays at ${place} for now.`;
 export function factsText(loc, move, toolsOn, extra = {}) {
     const who = whoMoves();
     const lines = [
@@ -1415,6 +1420,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, displayName(loc), extra.look));
     else if (extra.door?.type === 'stuck') lines.push(`What just happened: ${who} tries to open the ${doorWord(extra.door.direction)}, but it ${extra.door.why}. It stays shut. ${who} stays at ${displayName(loc)}.`);
+    else if (extra.newDoor) lines.push(newDoorLine(who, displayName(loc), toolsOn));
     else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
     else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
     else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
@@ -1440,7 +1446,7 @@ async function applyFacts() {
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
         await loadCalendar();
         const d = gameDate();
-        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
         reminder = arrivalReminder(loc, move);
         const rn = relocationNote(c.chat ?? [], loc, whoMoves());
         if (rn) text = `${text}\n${rn}`;
@@ -2091,7 +2097,7 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that the room description mentions but that is not one of its exits (e.g. one of the guest rooms off a hallway), end your reply with [ws_flag: discover | which door]. Never write it otherwise.';
+const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.';
 const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
@@ -2414,7 +2420,7 @@ async function analyzeFlag(id) {
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one "discover" patch op (a new room with an engine-made id
 // and one door pair). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
-const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened, which the current room's description only mentioned. Reply with JSON only:
+const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:
 {"name": "...", "description": "...", "direction": "exit name from the current room", "return_direction": "exit name back", "exit_description": "...", "return_description": "..."}
 name: short display name (e.g. "Guest Room"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. "east guest room", "green door"). return_direction: usually "out" or "hallway". exit_description / return_description: one sentence each about the door from each side.`;
 async function analyzeDiscovery(id) {
