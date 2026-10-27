@@ -63,8 +63,8 @@ export const DOOR_FIELDS = [
     { k: 'openable', type: 'bool', label: 'Can be opened', dflt: true },
     { k: 'locked', type: 'bool', label: 'Locked', dflt: false },
     { k: 'starts_open', type: 'bool', label: 'Starts open', dflt: false },
-    { k: 'closed_sight', type: 'choice', label: 'See destination (door closed)', options: ENUMS.closed_sight, dflt: 'none' },
-    { k: 'closed_sound', type: 'choice', label: 'Hear destination (door closed)', options: ENUMS.closed_sound, dflt: 'partial' },
+    { k: 'closed_sight', type: 'choice', label: 'See destination', options: ENUMS.closed_sight, dflt: 'none' },
+    { k: 'closed_sound', type: 'choice', label: 'Hear destination', options: ENUMS.closed_sound, dflt: 'partial' },
 ];
 
 /** What an exit's unset sight/sound comes to while open (or with no door), and why (obscured, exit type), from the form's live state. */
@@ -267,11 +267,15 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
                 body.append(el('div', { class: 'pf-row', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), to));
             } else body.append(el('div', { class: 'pf-row muted', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), e.to_name ?? e.to));
             const live = [];
-            const upd2 = () => { for (const x of live) x.rerender(); upd(); };
+            const senseHead = el('b', { class: 'pf-sense-head', 'data-for': 'exit' });
+            const headText = () => { senseHead.textContent = e.barrier ? 'Sense transparency – unblocked' : 'Sense transparency'; };
+            const upd2 = () => { for (const x of live) x.rerender(); headText(); upd(); };
+            headText();
             for (const s of EXIT_FIELDS) {
+                if (s.k === 'sight') body.append(senseHead);
                 const holder = s.shared ? e : e.side;
                 const lv = s.k === 'sight' || s.k === 'sound' ? () => exitLevelDefault(e, s.k) : null;
-                const sp = lv ? { ...s, label: () => `${s.label}${e.barrier ? ' (door open)' : ''}` } : s;
+                const sp = s;
                 const fr = fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : sp, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
                 if (lv) live.push(fr);
                 body.append(fr);
@@ -282,7 +286,7 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
                     fieldRow(doc, { k: 'return_description', type: 'textarea', label: 'Way back description' }, rd, { onChange: () => { e.return_description = rd.return_description ?? ''; upd(); } }));
             }
             const doorBox = el('div', { class: 'pf-door' });
-            const doorRows = () => doorBox.replaceChildren(...(e.barrier ? DOOR_FIELDS.map(s => fieldRow(doc, s, e.barrier, { onChange: upd2 })) : []));
+            const doorRows = () => doorBox.replaceChildren(...(e.barrier ? DOOR_FIELDS.flatMap(s => [...(s.k === 'closed_sight' ? [el('b', { class: 'pf-sense-head', 'data-for': 'door' }, 'Sense transparency – blocked')] : []), fieldRow(doc, s, e.barrier, { onChange: upd2 })]) : []));
             const dk = el('input', { type: 'checkbox', class: 'pf-input' }); dk.checked = !!e.barrier;
             dk.addEventListener('change', () => { e.barrier = dk.checked ? {} : null; doorRows(); upd2(); });
             body.append(el('div', { class: 'pf-row', 'data-field': 'door' }, el('label', { class: 'pf-label' }, 'Door (shared by both sides)'), dk), doorBox);
