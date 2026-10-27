@@ -8,3 +8,17 @@ export const MOVE_RE = /\b(?:go|goes|going|went|gone|walk|walks|walked|walking|h
 export const lookOnly = text => LOOK_RE.test(String(text ?? '')) && !MOVE_RE.test(String(text ?? ''));
 /** The stay-put line for a turn with no move. */
 export const stayPutLine = (who, here) => `${who} has NOT moved this turn and is still at ${here}. No move happened: do not describe ${who} leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in ${here}.`;
+
+// ---- Narrator wait: ws_wait tool args and the [ws_wait: ...] tag (non-tools mode).
+export const WAIT_TAG = /\[ws_wait:\s*([^\]]{0,100})\]/i;
+/** Tool/tag arguments -> parseWait text: {duration, until} -> "2h" or "until morning". */
+export function waitArgs({ duration = '', until = '' } = {}) {
+    const u = String(until ?? '').trim();
+    return u ? `until ${u.replace(/^until\s+/i, '')}` : String(duration ?? '').trim();
+}
+/** A [ws_wait: ...] tag body -> {args, sleep}: "2h", "sleep", "sleep 6h", "sleep until morning", "until dusk". */
+export function parseWaitTag(body) {
+    const t = String(body ?? '').trim();
+    const m = /^(sleep|wait|rest)\b\s*(?:for\s+)?(.*)$/i.exec(t);
+    return m ? { sleep: m[1].toLowerCase() === 'sleep', args: m[2].trim() } : { sleep: false, args: t };
+}
