@@ -69,3 +69,26 @@ export function editContext(w, worldJson, raw, target) {
             ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
         ] };
 }
+
+/** Every region, subregion and place (ids and names): the map's wizards and Move / Delete dialogs pick from it. */
+export function outline(raw) {
+    return Object.entries(raw).filter(([, r]) => isObj(r)).map(([rid, r]) => ({
+        id: rid, name: r.name ?? rid,
+        subregions: Object.entries(r.subregions ?? {}).filter(([, s]) => isObj(s)).map(([sid, s]) => ({
+            id: sid, area: `${rid}:${sid}`, name: s.name ?? sid,
+            rooms: Object.entries(s.locations ?? {}).filter(([, l]) => isObj(l)).map(([lid, l]) => ({ id: lid, address: `${rid}:${sid}/${lid}`, name: l.name ?? lid })),
+        })),
+    }));
+}
+
+const short = t => { const s = String(t ?? '').trim().replace(/\s+/g, ' '); const m = /^(.{20,200}?[.!?])(\s|$)/.exec(s); return m ? m[1] : s.slice(0, 200); };
+/**
+ * What "Expand with AI" may see: only the parent region and subregion (names and notes) and the names and first
+ * sentences of the places the exits connect to. Never the rest of the world.
+ * area: "region:sub" or "region"; rooms: addresses the exits lead to.
+ */
+export function aiContext(raw, area, rooms = []) {
+    const [rid, sid] = String(area ?? '').split(':'), r = raw[rid], s = sid ? r?.subregions?.[sid] : null;
+    const neighbors = [...new Set(rooms)].slice(0, 12).map(a => getRoom(raw, a) ? { name: getRoom(raw, a).name ?? a, short: short(getRoom(raw, a).description) } : null).filter(Boolean);
+    return { region: isObj(r) ? { name: r.name ?? rid, notes: r.notes ?? '' } : null, subregion: isObj(s) ? { name: s.name ?? sid, notes: s.notes ?? '' } : null, neighbors };
+}
