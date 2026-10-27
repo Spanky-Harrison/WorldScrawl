@@ -291,7 +291,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const raw = structuredClone(e.raw);
             let r;
             try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch', dropNoops: true }); build_world(e.worldJson, raw); } catch (err) {
-                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message });
+                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message, ...(err.choices ? { choices: err.choices, key: err.key } : {}) });
                 throw err;
             }
             const before = structuredClone(e.raw); normalizeRefs(before);

@@ -28,6 +28,22 @@ export function blockDiff(oldText, newText) {
     return ops;
 }
 
+/** Word diff (LCS on words and spaces): [{type: 'same'|'del'|'ins', text}]. Used inside a changed sentence run. */
+export function wordDiff(oldText, newText) {
+    const a = String(oldText ?? '').split(/(\s+)/).filter(Boolean), b = String(newText ?? '').split(/(\s+)/).filter(Boolean), n = a.length, m = b.length, w = m + 1;
+    if (n * m > 400_000) return [...(n ? [{ type: 'del', text: a.join('') }] : []), ...(m ? [{ type: 'ins', text: b.join('') }] : [])];
+    const t = new Int32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) t[i * w + j] = a[i] === b[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
+    const out = [], push = (type, x) => { const l = out.at(-1); if (l?.type === type) l.text += x; else out.push({ type, text: x }); };
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+        if (i < n && j < m && a[i] === b[j]) { push('same', a[i]); i++; j++; }
+        else if (i < n && (j >= m || t[(i + 1) * w + j] >= t[i * w + j + 1])) push('del', a[i++]);
+        else push('ins', b[j++]);
+    }
+    return out;
+}
+
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** An exit's door state in words. */
 export function exitState(e) {
@@ -72,6 +88,8 @@ export function mergeLines(diffs) {
 
 const CSS = `
 .wsdiff{font-size:0.92em;margin:4px 0;}
+.wsdiff-wdel{background:rgba(220,60,60,0.45);text-decoration:line-through;border-radius:2px;}
+.wsdiff-wins{background:rgba(60,180,80,0.45);border-radius:2px;}
 .wsdiff-place{margin:6px 0;padding:4px 6px;border:1px solid var(--SmartThemeBorderColor,#555);border-radius:6px;}
 .wsdiff-title{font-weight:bold;margin-bottom:2px;}
 .wsdiff-tag{font-size:0.75em;opacity:0.7;font-weight:normal;margin-left:6px;}
@@ -103,7 +121,19 @@ export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = 
     const textDiff = f => {
         const box = mk('div', 'wsdiff-text');
         if (!f.changed) { box.append(blk('same', f.new || '(empty)')); return box; }
-        for (const op of blockDiff(f.old, f.new)) box.append(blk(op.type, op.blocks.join('\n')));
+        const ops = blockDiff(f.old, f.new);
+        ops.forEach((op, k) => {
+            // A removed run followed by an added one: mark the changed words inside each (red struck / green).
+            const pair = op.type === 'del' && ops[k + 1]?.type === 'ins' ? ops[k + 1] : op.type === 'ins' && ops[k - 1]?.type === 'del' ? ops[k - 1] : null;
+            if (!pair) { box.append(blk(op.type, op.blocks.join('\n'))); return; }
+            const e = blk(op.type, '');
+            const [o, nw] = op.type === 'del' ? [op, pair] : [pair, op];
+            for (const p of wordDiff(o.blocks.join('\n'), nw.blocks.join('\n'))) {
+                if (p.type !== 'same' && p.type !== op.type) continue;
+                e.append(p.type === 'same' ? doc.createTextNode(p.text) : mk('span', `wsdiff-w${p.type}`, p.text));
+            }
+            box.append(e);
+        });
         return box;
     };
     const listDiff = f => {

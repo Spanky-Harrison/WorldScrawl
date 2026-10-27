@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { blockDiff, fieldDiffs, mergeLines, exitState } from '../../plugin/ui/diffview.mjs';
+import { blockDiff, fieldDiffs, mergeLines, exitState, wordDiff } from '../../plugin/ui/diffview.mjs';
 
 test('diff: sentences kept, removed and added; an inserted paragraph is a clean ADDED block', () => {
     assert.deepEqual(blockDiff('A cosy inn. Fire crackles.', 'A cosy inn. Smoke hangs. Fire crackles.'),
@@ -37,4 +37,10 @@ test('index: friendly place and area names for the form pickers', () => {
     const r = client(RIVERTON).get('/inspect/index').json();
     assert.match(r.names[TAVERN], /^Common Room \(.+\)$/);
     assert.ok(Object.values(r.areaNames).some(v => /\(region\)$/.test(v)));
+});
+
+test('word diff: only the changed words are marked', () => {
+    const d = wordDiff('A smoky common room with a long bar.', 'A gilded common room with a long bar.');
+    assert.deepEqual(d.filter(p => p.type !== 'same').map(p => [p.type, p.text]), [['del', 'smoky'], ['ins', 'gilded']]);
+    assert.equal(d.filter(p => p.type !== 'ins').map(p => p.text).join(''), 'A smoky common room with a long bar.');
 });
