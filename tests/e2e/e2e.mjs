@@ -1379,7 +1379,7 @@ try {
         return { r, loc: st.location, off: c.chat[id].extra.worldscrawl_patches[0].off };
     }, [wsMod, nDisc, DROOM]);
     check('discovery: turning it off while standing in it moves the party to the hallway', offDisc.off === true && offDisc.loc === UPST, JSON.stringify(offDisc));
-    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n - 1}-${SillyTavern.getContext().chat.length - 1}`), nDisc); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n - 1); await c.saveChat(); await c.reloadCurrentChat(); }, nDisc); await page.waitForTimeout(1500);
     // With "Ask before adding a discovered room" on, a review card comes instead.
     await queue([{ content: ROOMJ }]);
     const rev = await page.evaluate(async ([mod, UPST]) => {
@@ -1391,7 +1391,7 @@ try {
         return { id, status: c.chat[id].extra.worldscrawl_flag?.status, stamped: !!c.chat[id].extra.worldscrawl_patches };
     }, [wsMod, UPST]);
     check('discovery review setting: a Keep / Discard card, nothing stamped yet', rev.status === 'review' && !rev.stamped, JSON.stringify(rev));
-    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), rev.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, rev.id); await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
