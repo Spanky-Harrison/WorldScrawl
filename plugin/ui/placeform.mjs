@@ -63,18 +63,17 @@ export const DOOR_FIELDS = [
     { k: 'openable', type: 'bool', label: 'Can be opened', dflt: true },
     { k: 'locked', type: 'bool', label: 'Locked', dflt: false },
     { k: 'starts_open', type: 'bool', label: 'Starts open', dflt: false },
-    { k: 'closed_sight', type: 'choice', label: 'Sight when closed', options: ENUMS.closed_sight, dflt: 'none' },
-    { k: 'closed_sound', type: 'choice', label: 'Sound when closed', options: ENUMS.closed_sound, dflt: 'partial' },
+    { k: 'closed_sight', type: 'choice', label: 'See destination (door closed)', options: ENUMS.closed_sight, dflt: 'none' },
+    { k: 'closed_sound', type: 'choice', label: 'Hear destination (door closed)', options: ENUMS.closed_sound, dflt: 'partial' },
 ];
 
 const LEVEL_WORDS = { sight: { clear: 'clear', partial: 'partial', none: 'blocked' }, sound: { clear: 'clear', partial: 'muffled', none: 'silent' } };
-/** What an exit's unset sight/sound comes to, and why (door closed / open, obscured, exit type), from the form's live state. */
+/** What an exit's unset sight/sound comes to while open (or with no door), and why (obscured, exit type), from the form's live state. */
 export function exitLevelDefault(e, k) {
     const side = e.side ?? {}, b = e.barrier, why = (v, r) => ({ value: v, from: 'default', tag: `default: ${LEVEL_WORDS[k][v] ?? v} (${r})` });
     if (k === 'sight' && side.obscured === true) return why('none', 'obscured');
-    if (b && !b.starts_open) { const v = b[`closed_${k}`] ?? (k === 'sight' ? 'none' : 'partial'); return why(v, 'door closed'); }
     const type = side.type ?? 'portal', preset = { portal: 'partial', open: 'clear' }[type] ?? 'partial';
-    return why(preset, b ? `door open, ${type}` : type);
+    return why(preset, `${type} exit`); // the open / no-door value; a closed door uses the door's closed_sight / closed_sound
 }
 
 /** The form's starting state: a copy of what the place itself sets (inherited fields stay unset). */
@@ -210,7 +209,7 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
             aiBtn.disabled = true; const was = aiBtn.textContent; aiBtn.textContent = '…';
             try { const t = await ai(spec.k, String(ctl.value ?? '')); if (t) { ctl.value = t; ctl.dispatchEvent(new Event('input')); } } catch (e) { aiBtn.title = `Expand failed: ${e.message}`; } finally { aiBtn.disabled = false; aiBtn.textContent = was; }
         } }, '✨ Expand with AI') : null;
-        row.replaceChildren(...[el('label', { class: 'pf-label' }, spec.label), ctl, tag, reset, aiBtn].filter(x => x !== null && x !== undefined));
+        row.replaceChildren(...[el('label', { class: 'pf-label' }, typeof spec.label === 'function' ? spec.label() : spec.label), ctl, tag, reset, aiBtn].filter(x => x !== null && x !== undefined));
     };
     render();
     row.rerender = render;
@@ -274,7 +273,8 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
             for (const s of EXIT_FIELDS) {
                 const holder = s.shared ? e : e.side;
                 const lv = s.k === 'sight' || s.k === 'sound' ? () => exitLevelDefault(e, s.k) : null;
-                const fr = fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : s, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
+                const sp = lv ? { ...s, label: () => `${s.label}${e.barrier ? ' (door open)' : ''}` } : s;
+                const fr = fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : sp, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
                 if (lv) live.push(fr);
                 body.append(fr);
             }
