@@ -1247,7 +1247,7 @@ try {
     const nLiveEdit = await page.evaluate(() => SillyTavern.getContext().chat.length);
     check('room inspector button reads "Edit place"', (await ui.locator('.side .editlive').textContent()) === 'Edit place');
     await ui.click('.side .editlive');
-    const descIn = ui.locator('.side .placeform .pf-row[data-field="description"] textarea');
+    const descIn = ui.locator('.side .placeform > .pf-row[data-field="description"] textarea');
     await descIn.waitFor({ timeout: 10000 });
     const pf0 = await ui.evaluate(() => { const f = document.querySelector('.side .placeform'), r = k => f.querySelector(`.pf-row[data-field="${k}"]`);
         return { name: r('name').querySelector('input').value, exp: r('exposure').classList.contains('inherited'), expTag: r('exposure').querySelector('.pf-from')?.textContent, expandable: r('expandable').querySelector('input').type,
@@ -1317,7 +1317,7 @@ try {
     check('area inspector has an Edit live button and an unmarked name row', /^(sub)?region/.test(areaKind) && await ui.locator('.side .editlive').count() === 1 && an0 && !an0.mark, areaKind + JSON.stringify(an0));
     const nArea = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await ui.click('.side .editlive');
-    const nameIn = ui.locator('.side .placeform .pf-row[data-field="name"] input').first();
+    const nameIn = ui.locator('.side .placeform > .pf-row[data-field="name"] input').first();
     await nameIn.waitFor({ timeout: 10000 });
     const areaForm = await ui.evaluate(() => ({ kind: document.querySelector('.side .placeform')?.dataset.kind, btn: document.querySelector('.side .editlive')?.textContent, notes: !!document.querySelector('.side .placeform .pf-row[data-field="notes"] textarea'), stays: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-from')?.textContent }));
     check('area Edit form: same style, prefilled with the live name, notes textarea, defaults tagged', (await nameIn.inputValue()) === an0.v && /^(sub)?region$/.test(areaForm.kind) && /^Edit (sub)?region$/.test(areaForm.btn) && areaForm.notes && areaForm.stays === 'default', await nameIn.inputValue() + JSON.stringify(areaForm));
