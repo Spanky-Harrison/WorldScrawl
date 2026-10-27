@@ -48,12 +48,35 @@ function text(ch, key, where) {
 const sameDir = (e, d) => String(isObj(e) && has(e, 'direction') ? e.direction : '').toLowerCase() === d.toLowerCase();
 const exitsOf = r => (isObj(r) && has(r, 'exits') ? r.exits : []);
 
-/** Copies of world.json and the region files with `changes` applied in order. Throws WorldError if invalid. */
-export function apply_changes(worldJson, rawIn, changes, { now = null, info = null } = {}) {
+/** Copies of world.json and the region files with `changes` applied in order. Throws WorldError if invalid,
+ *  unless `lenient`: then a change that can't apply (its room, exit or merge target is gone, e.g. after an earlier
+ *  change was turned off) is skipped on its own and reported in info.failed [{index, id, msg, error}].
+ *  Changes with off: true are always skipped (turned off retroactively; they stay stored on their message). */
+export function apply_changes(worldJson, rawIn, changes, opts = {}) {
+    if (!Array.isArray(changes)) throw new WorldError('changes must be a list');
+    if (!opts.lenient) return applyStrict(worldJson, rawIn, changes, opts);
+    let wj = structuredClone(worldJson), raw = structuredClone(rawIn);
+    const info = opts.info;
+    if (info) info.patches ??= [];
+    changes.forEach((ch, i) => {
+        if (ch?.off === true) return;
+        const pi = info?.patches?.length ?? 0;
+        try {
+            const sub = info ? { patches: [] } : null;
+            [wj, raw] = applyStrict(wj, raw, [ch], { now: opts.now, info: sub });
+            for (const p of sub?.patches ?? []) (info.patches ??= []).push({ ...p, index: i });
+        } catch (e) {
+            if (!(e instanceof WorldError)) throw e;
+            if (info) { info.patches.length = pi; (info.failed ??= []).push({ index: i, id: ch?.id ?? null, msg: ch?._msg ?? null, error: e.message.replace(/^change #1(, )?:? ?/, '') }); }
+        }
+    });
+    return [wj, raw];
+}
+function applyStrict(worldJson, rawIn, changes, { now = null, info = null } = {}) {
     worldJson = structuredClone(worldJson);
     const raw = structuredClone(rawIn);
-    if (!Array.isArray(changes)) throw new WorldError('changes must be a list');
     changes.forEach((ch, i) => {
+        if (ch?.off === true) return;
         const where = `change #${i + 1}`;
         if (!isObj(ch) || !CHANGE_TYPES.includes(get(ch, 'type'))) {
             throw new WorldError(`${where}: unknown change type ${repr(isObj(ch) ? get(ch, 'type') : ch)} (known: ${CHANGE_TYPES.join(', ')})`);

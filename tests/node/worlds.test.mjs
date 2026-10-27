@@ -71,9 +71,10 @@ test('render with changes and unknown type', () => {
     const w = load_world(P(wd, 'dug'));
     assert.ok(exits(w, SQUARE).some(e => e.direction === 'dig' && e.to === YARD));
     assert.ok(!exits(w, TAVERN).some(e => e.direction === 'up'));
-    assert.equal(client.post('/worlds/render', { json: { id: 'bad', changes: [{ type: 'teleport' }] } }).status_code, 400);
-    assert.equal(client.post('/worlds/render', { json: { id: 'bad', changes: [{ type: 'remove_exit', from: TAVERN, direction: 'nope' }] } }).status_code, 400);
-    assert.ok(!fs.existsSync(P(wd, 'bad')));
+    // A change that cannot apply is skipped on its own (lenient replay): the save still works, without it.
+    assert.equal(client.post('/worlds/render', { json: { id: 'bad', changes: [{ type: 'teleport' }] } }).status_code, 200);
+    assert.equal(client.post('/worlds/render', { json: { id: 'bad2', changes: [{ type: 'remove_exit', from: TAVERN, direction: 'nope' }] } }).status_code, 200);
+    assert.ok(exits(load_world(P(wd, 'bad2')), TAVERN).some(e => e.direction === 'up'));
 });
 
 test('move and travel with changes', () => {
@@ -237,7 +238,7 @@ test('two way dig and new room', () => {
         [{ type: 'add_room', address: 'riverton:nowhere/x', name: 'A', description: 'B' }],
         [{ type: 'add_room', address: 'riverton:drowned_rat/../x', name: 'A', description: 'B' }],
         [{ type: 'add_room', address: hole, name: 'A'.repeat(61), description: 'B' }]])
-        assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'out', changes: bad } }).status_code, 400, JSON.stringify(bad));
+        assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'out', changes: bad } }).status_code, 200, JSON.stringify(bad));
 });
 
 test('nearby rooms', () => {
@@ -296,8 +297,8 @@ test('door and view link changes', () => {
         { type: 'close_door', from: TAVERN, direction: 'out' },
         { type: 'view_link', from: up, to: SQUARE }];
     assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'up', changes: ch } }).json().views[0].address, SQUARE);
-    assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'up', changes: [{ type: 'open_door', from: TAVERN, direction: 'nope' }] } }).status_code, 400);
-    assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'up', changes: [{ type: 'view_link', from: up, to: up }] } }).status_code, 400);
+    assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'up', changes: [{ type: 'open_door', from: TAVERN, direction: 'nope' }] } }).status_code, 200);
+    assert.equal(client.post('/move', { json: { from: TAVERN, direction: 'up', changes: [{ type: 'view_link', from: up, to: up }] } }).status_code, 200);
     assert.equal(client.post('/worlds/render', { json: { id: 'viewy', changes: ch } }).status_code, 200);
     const raw = read(P(wd, 'viewy', 'regions', 'riverton.json'));
     assert.deepEqual(JSON.parse(raw).subregions.drowned_rat.locations.upstairs.views, [SQUARE]);

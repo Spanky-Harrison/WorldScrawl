@@ -184,7 +184,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         if (e === undefined) {
             try {
                 const info = { patches: [] };
-                const [wj, raw] = apply_changes(...lw.raw, changes, { now, info });
+                const [wj, raw] = apply_changes(...lw.raw, changes, { now, info, lenient: true });
                 e = { w: build_world(wj, raw), worldJson: wj, raw, info };
             } catch (err) {
                 if (err instanceof WorldError) throw new HttpError(400, { error: err.message });
@@ -300,6 +300,35 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const areaOf = (src, a) => { const [rid, sid] = a.split(':'); const o = sid ? src[rid]?.subregions?.[sid] : src[rid]; return o ? { name: o.name ?? a, notes: o.notes ?? '', area: true } : null; };
             const pick = src => Object.fromEntries(touched.map(a => [a, a.includes('/') ? getRoom(src, a) : areaOf(src, a)]));
             return { ok: true, ops: r.ops, noops: r.noops, summary: r.summary, relocate: r.relocate, touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
+        },
+        'POST /changes/status': ({ q, body }) => {
+            // Which stored changes can't apply any more (skipped one by one in the replay; the map never breaks).
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            return { failed: e.info.failed ?? [] };
+        },
+        'POST /changes/dependents': ({ q, body }) => {
+            // Before turning change #index off: later changes that would fail without it (hard), and later ones that
+            // touched the same rooms/areas/exits (overlaps: "may depend on").
+            needBody(body);
+            const wid = q('world'), changes = field(body, 'changes', 'list', []), now = nowOf(body);
+            const index = body.index;
+            if (!Number.isInteger(index) || index < 0 || index >= changes.length) throw new HttpError(400, { error: '"index" must point at a change' });
+            const run = list => { const info = { patches: [] }; apply_changes(...get_world(wid).raw, list, { now, info, lenient: true }); return info; };
+            const base = run(changes);
+            const without = run(changes.map((c, i) => (i === index ? { ...c, off: true } : c)));
+            const failedBefore = new Set((base.failed ?? []).map(f => f.index));
+            const ref = (c, i) => ({ index: i, msg: c?._msg ?? null, id: c?.id ?? null, note: c?.note ?? '', summary: c?.summary ?? [] });
+            const hard = (without.failed ?? []).filter(f => f.index > index && !failedBefore.has(f.index)).map(f => ({ ...ref(changes[f.index], f.index), error: f.error }));
+            const keysOf = c => { const out = new Set(); for (const o of c?.ops ?? []) { for (const a of [o.loc, o.into, o.area, o.to, ...(Array.isArray(o.locs) ? o.locs : [])]) if (typeof a === 'string' && a) out.add(a);
+                if (o.loc && o.direction) out.add(`${o.loc}|${String(o.direction).toLowerCase()}`); }
+                for (const a of [c?.from, c?.to, c?.address]) if (typeof a === 'string') out.add(a);
+                if (c?.from && c?.direction) out.add(`${c.from}|${String(c.direction).toLowerCase()}`);
+                for (const p of base.patches.filter(p => p.index === changes.indexOf(c))) for (const t of p.touched ?? []) out.add(t);
+                return out; };
+            const mine = keysOf(changes[index]), hardIdx = new Set(hard.map(h => h.index));
+            const overlaps = changes.map((c, i) => [c, i]).filter(([c, i]) => i > index && c?.off !== true && !hardIdx.has(i) && [...keysOf(c)].some(k => mine.has(k))).map(([c, i]) => ref(c, i));
+            return { hard, overlaps };
         },
         'POST /resolve': ({ q, body }) => {
             // Blanket position resolver: any stored location -> a real room of the effective map.
@@ -433,7 +462,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         const target = path.join(rootDir, wid);
         let wj, raw, know;
         try {
-            [wj, raw] = apply_changes(...base.raw, activeChanges(req.changes, typeof req.now === 'number' ? req.now : (typeof req.elapsed === 'number' ? req.elapsed : null)));
+            [wj, raw] = apply_changes(...base.raw, activeChanges(req.changes, typeof req.now === 'number' ? req.now : (typeof req.elapsed === 'number' ? req.elapsed : null)), { lenient: true });
             wj.name = name;
             wj.living = true; // saves are living: they can be saved over later
             // Bake the clock in the same write as the changes: the saved world starts when this chat's clock is now.
