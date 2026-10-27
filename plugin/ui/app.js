@@ -1,7 +1,7 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
 import { placeWeather, fmtTemp } from './weather.mjs';
-import { buildPatchForm, liveOps } from './patchform.mjs';
+import { buildEditForm } from './placeform.mjs';
 import { renderDiff } from './diffview.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
@@ -233,35 +233,37 @@ async function renderInspector(side, target, ctx) {
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
     const live = !!(st?.on && st.chatId && !st.editorOnly);
-    const val = k => d.resolved.find(r => r.key === k)?.value;
-    const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this place in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit live', ...(live ? {} : { disabled: '' }), onclick: async () => {
-        let ids = [], idx = {};
-        try { idx = await worldIndex(st.world ?? '', st.map_version); ids = idx.addresses ?? []; } catch { /* suggestions only */ }
-        const ops = liveOps(target, { description: val('description'), notes: val('notes'), name: val('name') });
-        const loc = target.startsWith('exit:') ? target.slice(5).split('|')[0] : target.includes('/') ? target : '';
-        const exits = loc && ctx.room ? { [loc]: (ctx.room.exits ?? []).map(e => e.direction.toLowerCase()) } : {};
+    const editLabel = { room: 'Edit place', exit: 'Edit place', subregion: 'Edit subregion', region: 'Edit region' }[d.kind] ?? 'Edit';
+    const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit', ...(live ? {} : { disabled: '' }), onclick: async () => {
+        const q = st.world ? `?world=${encodeURIComponent(st.world)}` : '';
+        let ectx;
+        try { ectx = await postJson(`${API}/edit/context${q}`, { target, changes: st.changes ?? [], now: st.now ?? null }); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't edit this: ${e.message}`)); return; }
+        const expand = target.startsWith('exit:') ? target.split('|')[1] : null;
         const diffBox = $('div', { class: 'editlive-diff' });
+        const errBox = $('ul', { class: 'pf-errors warnings' });
         let tmr = null;
         const redraw = o => { clearTimeout(tmr); tmr = setTimeout(async () => {
+            if (!o.length) { diffBox.replaceChildren($('p', { class: 'muted' }, 'No changes yet.')); return; }
             try {
-                const pv = await postJson(`${API}/patch/preview${st.world ? `?world=${encodeURIComponent(st.world)}` : ''}`, { patch: { ops: o }, changes: st.changes ?? [], now: st.now ?? null });
-                diffBox.style.opacity = ''; form.setNoops(pv.noops ?? []); diffBox.replaceChildren(renderDiff(document, pv));
-            } catch { diffBox.style.opacity = '0.5'; }
+                const pv = await postJson(`${API}/patch/preview${q}`, { patch: { ops: o }, changes: st.changes ?? [], now: st.now ?? null });
+                diffBox.style.opacity = ''; errBox.replaceChildren(); diffBox.replaceChildren(renderDiff(document, pv));
+            } catch (e) { diffBox.style.opacity = '0.5'; errBox.replaceChildren($('li', {}, e.message)); }
         }, 350); };
-        const form = buildPatchForm(document, { onChange: o => redraw(o), names: idx.names, areaNames: idx.areaNames, ops, rooms: ids, areas: [...new Set(ids.flatMap(a => [a.split('/')[0], a.split(':')[0]]))], exits, context: { loc, area: loc ? loc.split('/')[0] : target.replace(/^(sub|region):/, '') } });
-        const status = $('p', { class: 'muted' }, 'Saved changes go on a hidden message in the chat: delete it there to undo.');
-        const save = $('button', { class: 'crumb', onclick: async () => {
-            const o = form.getOps();
-            if (!o.length) { form.setErrors([{ i: null, error: 'Add a change first.' }]); return; }
+        const form = buildEditForm(document, ectx, { onChange: o => redraw(o), expand });
+        const status = $('p', { class: 'muted' }, 'Submitted changes go on a hidden message in the chat: delete it there to undo.');
+        const save = $('button', { class: 'crumb pf-submit', onclick: async () => {
+            const probs = form.problems(), o = form.getOps();
+            if (probs.length) { errBox.replaceChildren(...probs.map(p => $('li', {}, p))); return; }
+            if (!o.length) { errBox.replaceChildren($('li', {}, 'Nothing changed.')); return; }
             save.disabled = true; status.textContent = 'Saving…';
             const r = await sendLiveEdit(o);
             save.disabled = false;
-            if (!r.ok) { form.setErrors(r.errors ?? []); status.textContent = 'Not saved: fix the marked fields.'; return; }
+            if (!r.ok) { errBox.replaceChildren(...(r.errors ?? []).map(e => $('li', {}, e.error))); status.textContent = 'Not saved.'; return; }
             status.textContent = `Saved as message #${r.msg}: ${(r.summary ?? []).join('; ')}`;
-        } }, 'Save to chat');
-        redraw(form.getOps());
-        pane.replaceChildren($('div', { class: 'editlive-pane' }, form.el, diffBox, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
-    } }, 'Edit live');
+        } }, 'Submit');
+        redraw([]);
+        pane.replaceChildren($('div', { class: 'editlive-pane' }, $('h4', {}, `${editLabel}: ${ectx.title}`), form.el, errBox, $('b', {}, 'Changes'), diffBox, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
+    } }, editLabel);
     side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · ${changes.length ? 'live (with this chat\'s changes)' : 'as in the file'} `, ...(d.kind === 'world' ? [] : [editLive])), bar, pane);
     show(Math.min(tab, tabs.length - 1));
 }

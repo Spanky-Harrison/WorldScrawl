@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
 import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
+import { editContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -396,6 +397,14 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'GET /inspect': ({ q }) => {
             const lw = get_world(q('world')), r = inspect(lw.world, lw.raw, q('target') ?? 'world');
             if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(q('target'))}.`);
+            return r;
+        },
+        'POST /edit/context': ({ q, body }) => { // the map's Edit place / subregion / region form: own values, inherited ones, exits, dropdown lists
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const raw = structuredClone(e.raw); normalizeRefs(raw);
+            const r = editContext(e.w, e.worldJson, raw, field(body, 'target', 'str', ''));
+            if (!r) throw new HttpError(404, `Nothing to edit at ${repr(field(body, 'target', 'str', ''))}.`);
             return r;
         },
         'POST /inspect/index': ({ q, body }) => { needBody(body); const lw = get_world(q('world')), e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)); return { world: lw.id, map_version: lw.version, ...inspectIndex(e.w) }; },

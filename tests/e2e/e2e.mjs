@@ -1245,13 +1245,24 @@ try {
     const dr0 = await descRow();
     check('inspector Resolved shows the room\'s own description, from file', dr0 && dr0[0].length > 10 && /from file/.test(dr0[1] ?? dr0.join('')), JSON.stringify(dr0));
     const nLiveEdit = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    check('room inspector button reads "Edit place"', (await ui.locator('.side .editlive').textContent()) === 'Edit place');
     await ui.click('.side .editlive');
-    await ui.locator('.side .wspf-text').first().waitFor({ timeout: 10000 });
-    await ui.locator('.side .wspf-text').first().fill('Burned to the rafters.');
-    await ui.click('.side button:has-text("Save to chat")');
+    const descIn = ui.locator('.side .placeform .pf-row[data-field="description"] textarea');
+    await descIn.waitFor({ timeout: 10000 });
+    const pf0 = await ui.evaluate(() => { const f = document.querySelector('.side .placeform'), r = k => f.querySelector(`.pf-row[data-field="${k}"]`);
+        return { name: r('name').querySelector('input').value, exp: r('exposure').classList.contains('inherited'), expTag: r('exposure').querySelector('.pf-from')?.textContent, expandable: r('expandable').querySelector('input').type,
+            radios: r('insulation').querySelectorAll('input[type=radio]').length, select: !!r('exposure').querySelector('select'), move: r('move').querySelector('select').value,
+            exits: f.querySelectorAll('.pf-exit').length, collapsed: [...f.querySelectorAll('.pf-exit-body')].every(b => b.hidden), ops: !!document.querySelector('.side select.wspf-op') }; });
+    check('Edit place: a form with the place\'s data (inputs, checkbox, radios for 3 options, dropdown for 4+, move dropdown, collapsed exits)', pf0.name === 'Common Room' && pf0.expandable === 'checkbox' && pf0.radios === 3 && pf0.select && pf0.move === 'riverton:drowned_rat' && pf0.exits === 3 && pf0.collapsed && !pf0.ops, JSON.stringify(pf0));
+    check('Edit place: inherited fields are greyed with a "from subregion" tag', pf0.exp && pf0.expTag === 'from subregion', JSON.stringify(pf0));
+    await descIn.fill('Burned to the rafters.');
+    try { await ui.waitForFunction(() => /Burned to the rafters/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('Edit place: the red/green diff shows the change before Submit', /Burned to the rafters/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
     const le = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, p: m.extra?.worldscrawl_patches }; }, nLiveEdit);
-    check('GUI Edit live: SillyTavern adds a hidden system message carrying the stamp', le.grew && le.sys === true && /^Map edit: /.test(le.mes) && le.p?.[0]?.ops?.[0]?.text === 'Burned to the rafters.', JSON.stringify(le));
+    check('GUI Edit place: SillyTavern adds a hidden system message carrying the stamp', le.grew && le.sys === true && /^Map edit: /.test(le.mes) && le.p?.[0]?.ops?.[0]?.text === 'Burned to the rafters.', JSON.stringify(le));
+    check('Edit place: only the changed field became an op (no inherited values copied in)', le.p?.[0]?.ops?.length === 1 && le.p[0].ops[0].op === 'set_description', JSON.stringify(le.p?.[0]?.ops));
     try { await ui.waitForSelector(`.node.patched[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
     check('map marks the patched room', await ui.locator(`.node.patched[data-id="${CR}"] .patchdot`).count() === 1);
     await ui.click(`.node[data-id="${CR}"]`); await ui.waitForTimeout(1500);
@@ -1261,6 +1272,43 @@ try {
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nLiveEdit); await page.waitForTimeout(1500);
     try { await ui.waitForFunction(id => !document.querySelector(`.node.patched[data-id="${id}"]`), CR, { timeout: 10000 }); } catch {}
     check('deleting the map-edit message undoes it (marker gone)', told && await ui.locator(`.node.patched[data-id="${CR}"]`).count() === 0 && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => m.extra?.worldscrawl_patches)));
+    // Edit place: inherited checkbox + reset, exit blocks (collapse/expand, X removes the pair, Add exit), per-side vs shared.
+    await ui.click(`.node[data-id="${CR}"]`); await ui.waitForTimeout(1200);
+    const nPf = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.click('.side .editlive');
+    await ui.locator('.side .placeform .pf-exit').first().waitFor({ timeout: 10000 });
+    await ui.click('.side .pf-expand');
+    const allOpen = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit-body')].every(b => !b.hidden));
+    await ui.click('.side .pf-collapse');
+    const allShut = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit-body')].every(b => b.hidden));
+    check('Edit place: Expand all / Collapse all toggle every exit block', allOpen && allShut);
+    const expRow = '.side .placeform > .pf-row[data-field="expandable"]';
+    await ui.click(`${expRow} input`);
+    const ex1 = await ui.evaluate(r => { const e = document.querySelector(r); return { inh: e.classList.contains('inherited'), reset: !e.querySelector('.pf-reset').hidden, on: e.querySelector('input').checked }; }, expRow);
+    await ui.click(`${expRow} .pf-reset`);
+    const ex2 = await ui.evaluate(r => { const e = document.querySelector(r); return { inh: e.classList.contains('inherited'), reset: !e.querySelector('.pf-reset').hidden, on: e.querySelector('input').checked, tag: e.querySelector('.pf-from')?.textContent }; }, expRow);
+    check('Edit place: overriding an inherited checkbox shows a reset button; reset goes back to the greyed inherited value', !ex1.inh && ex1.reset && ex1.on === false && ex2.inh && !ex2.reset && ex2.on === true && ex2.tag === 'default', JSON.stringify([ex1, ex2]));
+    await ui.click(`${expRow} input`); // off again: stays overridden
+    const block = dir => ui.locator('.side .pf-exit', { has: ui.locator(`.pf-exit-title:text-matches("^${dir} →")`) });
+    await block('up').locator('.pf-x').click();
+    await block('out').locator('.pf-toggle').click();
+    await block('out').locator('.pf-row[data-field="sight"] input[value="clear"]').check();
+    const outDoor = await block('out').locator('.pf-row[data-field="door"] input').isChecked();
+    await ui.click('.side .pf-addexit');
+    const newBlk = ui.locator('.side .pf-exit').first();
+    await newBlk.locator('.pf-row[data-field="direction"] input').fill('side door');
+    await newBlk.locator('.pf-row[data-field="to"] select').selectOption('riverton:streets/market_lane');
+    await newBlk.locator('.pf-row[data-field="return_direction"] input').fill('tavern');
+    const nbTitle = await newBlk.locator('.pf-exit-title').textContent();
+    await ui.click('.side button.pf-submit');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const pfOps = await page.evaluate(n => { const c = SillyTavern.getContext(); return c.chat.length === n + 1 ? c.chat[n].extra?.worldscrawl_patches?.[0]?.ops : null; }, nPf);
+    const byOp = k => (pfOps ?? []).filter(o => o.op === k);
+    check('Edit place: the door field shows the shared door; a new block reads its name and destination', outDoor && nbTitle === 'side door → Market Lane', nbTitle);
+    check('Edit place Submit: expandable false, X → remove_exit, a per-side sight change → set_exit, Add exit → add_exit (nothing else)',
+        pfOps?.length === 4 && byOp('set_expandable')[0]?.value === false && byOp('remove_exit')[0]?.direction === 'up' && JSON.stringify(byOp('set_exit')[0]?.fields) === '{"sight":"clear"}'
+        && byOp('add_exit')[0]?.to === 'riverton:streets/market_lane' && byOp('add_exit')[0]?.return_direction === 'tavern', JSON.stringify(pfOps));
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nPf); await page.waitForTimeout(1500);
     // Edit live on a region / subregion page: rename via update_area, stamped on a hidden message, tagged in Resolved.
     await ui.click('.crumb.inspect'); await ui.waitForTimeout(1200);
     const areaKind = await ui.evaluate(() => document.querySelector('.side .area')?.textContent ?? '');
@@ -1269,17 +1317,17 @@ try {
     check('area inspector has an Edit live button and an unmarked name row', /^(sub)?region/.test(areaKind) && await ui.locator('.side .editlive').count() === 1 && an0 && !an0.mark, areaKind + JSON.stringify(an0));
     const nArea = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await ui.click('.side .editlive');
-    const nameIn = ui.locator('.side label:has-text("New display name") input').first();
+    const nameIn = ui.locator('.side .placeform .pf-row[data-field="name"] input').first();
     await nameIn.waitFor({ timeout: 10000 });
-    const areaThemed = await nameIn.evaluate(el => el.classList.contains('text_pole') && /SmartThemeBorderColor/.test(el.style.border || el.getAttribute('style')));
-    check('area Edit live: update_area form prefilled with the live name, themed inputs', (await nameIn.inputValue()) === an0.v && areaThemed, await nameIn.inputValue());
+    const areaForm = await ui.evaluate(() => ({ kind: document.querySelector('.side .placeform')?.dataset.kind, btn: document.querySelector('.side .editlive')?.textContent, notes: !!document.querySelector('.side .placeform .pf-row[data-field="notes"] textarea'), stays: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-from')?.textContent }));
+    check('area Edit form: same style, prefilled with the live name, notes textarea, defaults tagged', (await nameIn.inputValue()) === an0.v && /^(sub)?region$/.test(areaForm.kind) && /^Edit (sub)?region$/.test(areaForm.btn) && areaForm.notes && areaForm.stays === 'default', await nameIn.inputValue() + JSON.stringify(areaForm));
     await nameIn.fill('The Gilded Quarter');
     try { await ui.waitForFunction(() => /Gilded Quarter/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
     check('area Edit live: the red/green diff shows the rename', /Gilded Quarter/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
-    await ui.click('.side button:has-text("Save to chat")');
+    await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
     const ae = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, op: m.extra?.worldscrawl_patches?.[0]?.ops?.[0] }; }, nArea);
-    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter', JSON.stringify(ae));
+    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter' && !('notes' in ae.op), JSON.stringify(ae));
     await ui.waitForTimeout(1500);
     for (let k = 0; k < 4; k++) { // the map re-renders after the stamp; reopen the area page once it settles
         await ui.click('.crumb.inspect'); await ui.waitForTimeout(1000);

@@ -21,10 +21,27 @@
 //       its region's, else world.json's; default true). Written as if it was always there.
 //   {op: "set_expandable", target, value}   target: a room, "region:sub" or "region"; value true, false or null
 //       (null / "inherit": drop the setting so the next level up decides).
+//   {op: "set_fields", target, fields: {key: value | null}}   the map's Edit forms: plain settings of a room, subregion
+//       ("region:sub") or region ("region"); null drops the setting (inherit / default). Allowed keys: FIELD_KEYS.
+//   {op: "set_exit", loc, direction, fields: {key: value | null}}   one exit's settings. Per side (only this side changes):
+//       direction, description, type, sight, sound, traversal, hidden, obscured. Shared by the pair (synced to the way back):
+//       travel_time and barrier (the door: an object, or null for no door).
+//   {op: "add_exit", loc, direction, to, return_direction?, travel_time?, description?, return_description?, door?}
+//       a new exit pair between two existing rooms (one way when return_direction is empty and one_way is true).
+//   {op: "move_location", loc, area}   a room moves to another subregion of its region; it keeps its id and exits.
 
 import { parseDuration } from './calendar.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable'];
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
+    'set_fields', 'set_exit', 'add_exit', 'move_location'];
+/** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
+export const FIELD_KEYS = {
+    room: ['inherit_region_notes', 'inherit_subregion_notes', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+    subregion: ['inherit_notes', 'label_rooms', 'stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+    region: ['stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+};
+export const EXIT_SIDE_KEYS = ['direction', 'description', 'type', 'sight', 'sound', 'traversal', 'hidden', 'obscured'];
+export const EXIT_SHARED_KEYS = ['travel_time', 'barrier'];
 export const MAX_OPS = 20, MAX_TEXT = 1500, MAX_PATCH_NAME = 60;
 
 export class PatchError extends Error {}
@@ -118,6 +135,8 @@ export function normalizeOp(raw, op) {
     if (!isObj(op)) return op;
     const o = { ...op };
     for (const k of ['loc', 'into']) if (typeof o[k] === 'string' && o[k].trim()) o[k] = resolveRoom(raw, o[k]);
+    if (o.op === 'set_fields' && typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target);
+    if (o.op === 'add_exit' && typeof o.to === 'string' && o.to.trim()) o.to = resolveRoom(raw, o.to);
     if (o.op === 'set_expandable') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
     if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
     if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
@@ -270,8 +289,119 @@ function applyOp(raw, op, w, out, world = null) {
             out.touched.push(t);
             return `${obj.name ?? t}: ${v === null ? 'discoveries follow the level above' : v ? 'new rooms can be discovered' : 'no new rooms can be discovered'}`;
         }
+        case 'set_fields': return fieldsOp(raw, op, w, out);
+        case 'set_exit': return setExitOp(raw, op, w, out);
+        case 'add_exit': return addExitOp(raw, op, w, out);
+        case 'move_location': {
+            const a = str(op.loc), r = needRoom(raw, a, w), area = str(op.area), [rid] = split(a);
+            if (area === a.slice(0, a.indexOf('/'))) throw new PatchError(`${w}: ${r.name} is already in that subregion`);
+            const [arid, asid] = area.split(':'), sub = raw[arid]?.subregions?.[asid];
+            if (!asid || !isObj(sub)) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a subregion ("region:subregion")`);
+            if (arid !== rid) throw new PatchError(`${w}: a room can only move to a subregion of its own region`);
+            mergeOp(raw, { op: 'merge', locs: [a], into: a, area }, w, out);
+            return `${r.name} moved to ${sub.name ?? area}`;
+        }
     }
     throw new PatchError(`${w}: unknown op`);
+}
+
+export const ENUMS = { exposure: ['outdoor', 'sheltered', 'enclosed', 'fixed'], insulation: ['drafty', 'normal', 'cozy'], type: ['portal', 'open'], sight: ['clear', 'partial', 'none'], sound: ['clear', 'partial', 'none'],
+    closed_sight: ['clear', 'partial', 'none'], closed_sound: ['clear', 'partial', 'none'] };
+const BOOL_KEYS = new Set(['inherit_region_notes', 'inherit_subregion_notes', 'inherit_notes', 'label_rooms', 'stays_open', 'hidden', 'obscured',
+    'openable', 'locked', 'starts_open']);
+const NUM_KEYS = new Set(['indoor_temp', 'temp_offset']);
+/** One form value checked (enums, booleans, numbers, short text); null passes (it means "drop it"). */
+function fieldValue(k, v, w) {
+    if (v === null) return null;
+    if (BOOL_KEYS.has(k)) { if (typeof v !== 'boolean') throw new PatchError(`${w}: "${k}" must be true or false`); return v; }
+    if (NUM_KEYS.has(k)) { const n = typeof v === 'number' ? v : Number(str(String(v))); if (!Number.isFinite(n) || str(String(v)) === '') throw new PatchError(`${w}: "${k}" must be a number`); return n; }
+    if (ENUMS[k] && !ENUMS[k].includes(v)) throw new PatchError(`${w}: "${k}" must be one of ${ENUMS[k].join(', ')}`);
+    if (typeof v !== 'string' || !v.trim()) throw new PatchError(`${w}: "${k}" must be a non-empty string`);
+    if (v.length > 400) throw new PatchError(`${w}: "${k}" is too long (at most 400 characters)`);
+    return v.trim();
+}
+const showVal = v => (v === null ? 'inherited' : typeof v === 'string' ? JSON.stringify(v) : String(v));
+function fieldsOp(raw, op, w, out) {
+    const t = str(op.target), p = split(t), [rid, sid] = p ?? t.split(':');
+    const kind = p ? 'room' : sid ? 'subregion' : 'region';
+    const obj = p ? getRoom(raw, t) : sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+    if (!isObj(obj) || !rid) throw new PatchError(`${w}: "target" ${JSON.stringify(op.target)} is not a room, subregion ("region:subregion") or region ("region")`);
+    if (!isObj(op.fields) || !Object.keys(op.fields).length) throw new PatchError(`${w}: "fields" must be an object with at least one setting`);
+    const bits = [];
+    for (const [k, v0] of Object.entries(op.fields)) {
+        if (!FIELD_KEYS[kind].includes(k)) throw new PatchError(`${w}: a ${kind} has no setting "${k}" here (allowed: ${FIELD_KEYS[kind].join(', ')})`);
+        let v = fieldValue(k, v0, w);
+        if (k === 'entrance' && v !== null) {
+            const rel = kind === 'subregion' ? v.split('/').pop() : v.includes(':') ? v.split(':')[1] : v;
+            const ok = kind === 'subregion' ? has(obj.locations, rel) : (() => { const [s, l] = rel.split('/'); return isObj(obj.subregions?.[s]) && (l === undefined || has(obj.subregions[s].locations, l)); })();
+            if (!ok) throw new PatchError(`${w}: "entrance" ${JSON.stringify(v)} is not a room in ${obj.name ?? t}`);
+            v = rel;
+        }
+        if (v === null) delete obj[k]; else obj[k] = v;
+        bits.push(`${k} ${showVal(v)}`);
+    }
+    out.touched.push(t);
+    return `${obj.name ?? t}: ${bits.join(', ')}`;
+}
+function barrierValue(b, w) {
+    if (b === null) return null;
+    if (!isObj(b)) throw new PatchError(`${w}: "barrier" must be an object (the door) or null (no door)`);
+    const o = {};
+    for (const [k, v] of Object.entries(b)) {
+        if (!['closed_sight', 'closed_sound', 'openable', 'locked', 'starts_open', 'stays_open'].includes(k)) throw new PatchError(`${w}: a door has no setting "${k}"`);
+        if (v === null || v === undefined) continue;
+        o[k] = k === 'stays_open' ? (typeof v === 'boolean' ? v : (() => { throw new PatchError(`${w}: "stays_open" must be true or false`); })()) : fieldValue(k, v, w);
+    }
+    return o;
+}
+function setExitOp(raw, op, w, out) {
+    const a = str(op.loc), { r, ex, back, backRoom } = findExit(raw, a, op.direction, w);
+    if (!isObj(op.fields) || !Object.keys(op.fields).length) throw new PatchError(`${w}: "fields" must be an object with at least one setting`);
+    const label = `${r.name} ${ex.direction} exit${backRoom ? ` (to ${backRoom.name})` : ''}`, bits = [];
+    for (const [k, v0] of Object.entries(op.fields)) {
+        if (k === 'barrier') {
+            const b = barrierValue(v0, w);
+            if (back) { delete back.barrier; if (back.view === 'closed') delete back.view; }
+            if (ex.view === 'closed') delete ex.view;
+            if (b === null) delete ex.barrier; else ex.barrier = b;
+            bits.push(b === null ? 'no door (both sides)' : 'door changed (both sides)');
+        } else if (k === 'travel_time') {
+            const t = needText({ t: v0 }, w, 't', 20);
+            try { parseDuration(t); } catch (err) { throw new PatchError(`${w}: "travel_time": ${err.message}`); }
+            ex.travel_time = t; if (back) back.travel_time = t;
+            bits.push(`travel time ${t} (both ways)`);
+        } else if (EXIT_SIDE_KEYS.includes(k)) {
+            const v = k === 'description' && v0 !== null ? needText({ t: v0 }, w, 't', 400) : fieldValue(k, v0, w);
+            if (k === 'direction') {
+                if (v === null) throw new PatchError(`${w}: an exit needs a "direction"`);
+                if (r.exits.some(e => e !== ex && isObj(e) && lc(e.direction) === lc(v))) throw new PatchError(`${w}: ${r.name} already has an exit ${JSON.stringify(v)}`);
+            }
+            if (v === null) delete ex[k]; else ex[k] = v;
+            bits.push(`${k} ${showVal(v)}`);
+        } else throw new PatchError(`${w}: an exit has no setting "${k}" here (allowed: ${[...EXIT_SIDE_KEYS, ...EXIT_SHARED_KEYS].join(', ')})`);
+    }
+    out.touched.push(a, ex.to);
+    return `${label}: ${bits.join(', ')}`;
+}
+function addExitOp(raw, op, w, out) {
+    const a = str(op.loc), r = needRoom(raw, a, w), to = str(op.to), t = needRoom(raw, to, w, 'to');
+    if (to === a) throw new PatchError(`${w}: an exit can't lead back into the same room`);
+    const dir = needText(op, w, 'direction', 60), back = str(op.return_direction);
+    if (back.length > 60) throw new PatchError(`${w}: "return_direction" is too long (at most 60 characters)`);
+    if (!back && op.one_way !== true) throw new PatchError(`${w}: the way back needs a "return_direction" (or one_way: true)`);
+    if ((r.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(dir))) throw new PatchError(`${w}: ${r.name} already has an exit ${JSON.stringify(dir)}`);
+    if ((r.exits ?? []).some(e => isObj(e) && e.to === to)) throw new PatchError(`${w}: ${r.name} already has an exit to ${t.name}`);
+    if (back && (t.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(back))) throw new PatchError(`${w}: ${t.name} already has an exit ${JSON.stringify(back)}`);
+    if (back && (t.exits ?? []).some(e => isObj(e) && e.to === a)) throw new PatchError(`${w}: ${t.name} already has an exit to ${r.name}`);
+    const time = str(op.travel_time) || '30s';
+    try { parseDuration(time); } catch (err) { throw new PatchError(`${w}: "travel_time": ${err.message}`); }
+    const ex = { direction: dir, to, travel_time: time, description: str(op.description).slice(0, 400) || `The way to ${t.name}.` };
+    if (op.door === true) ex.barrier = {};
+    if (!back) ex.one_way = true;
+    r.exits = [...(Array.isArray(r.exits) ? r.exits : []), ex];
+    if (back) t.exits = [...(Array.isArray(t.exits) ? t.exits : []), { direction: back, to: a, travel_time: time, description: str(op.return_description).slice(0, 400) || `The way back to ${r.name}.` }];
+    out.touched.push(a, to);
+    return `${r.name} ${dir}: new exit to ${t.name}${back ? ` (back: ${back})` : ' (one way)'}`;
 }
 
 /** "expandable" for a room: its own setting, else its subregion's, else its region's, else world.json's; default true. */
