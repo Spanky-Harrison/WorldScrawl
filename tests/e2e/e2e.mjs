@@ -1349,6 +1349,10 @@ try {
         await ui.evaluate(x => globalThis.wsInspect(x), t); await ui.locator('.side .editlive').waitFor({ timeout: 10000 }); await ui.click('.side .editlive');
         await ui.locator('.side .placeform').waitFor({ timeout: 10000 }); await ui.waitForTimeout(300);
         if (/\bnull\b/.test(await sideText())) nullHits.push(`edit ${t}`);
+        if (t.includes('/')) { const empty = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit .pf-radios')].filter(g => !g.querySelector('input:checked')).map(g => g.closest('.pf-row')?.dataset.field));
+            check('Edit place: every exit radio group (type, See/Hear destination) has the effective value selected', !empty.length, JSON.stringify(empty));
+            const why = await ui.evaluate(() => document.querySelector('.side .pf-exit .pf-row[data-field="sight"] .pf-from')?.textContent ?? '');
+            check('Edit place: See destination says why its default applies', /^default: \w+ \(/.test(why) || why === 'set here', why); }
     }
     for (const [t, a] of [['world', 'create_region'], ['region:riverton', 'create_subregion'], ['sub:riverton:drowned_rat', 'create_place'], ['sub:riverton:drowned_rat', 'merge_places'],
         ['sub:riverton:drowned_rat', 'delete_subregion'], ['sub:riverton:drowned_rat', 'move_subregion'], ['riverton:drowned_rat/common_room', 'move_place']]) {

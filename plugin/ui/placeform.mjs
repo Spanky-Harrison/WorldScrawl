@@ -53,8 +53,8 @@ export const EXIT_FIELDS = [
     { k: 'description', type: 'textarea', label: 'Description (this side)', ai: true },
     { k: 'travel_time', type: 'text', label: 'Travel time (both ways)', shared: true },
     { k: 'type', type: 'choice', label: 'Type', options: ENUMS.type, dflt: 'portal' },
-    { k: 'sight', type: 'choice', label: 'Sight through it', options: ENUMS.sight },
-    { k: 'sound', type: 'choice', label: 'Sound through it', options: ENUMS.sound },
+    { k: 'sight', type: 'choice', label: 'See destination', options: ENUMS.sight },
+    { k: 'sound', type: 'choice', label: 'Hear destination', options: ENUMS.sound },
     { k: 'traversal', type: 'text', label: 'Traversal (e.g. climb, swim)' },
     { k: 'hidden', type: 'bool', label: 'Hidden', dflt: false },
     { k: 'obscured', type: 'bool', label: 'Obscured', dflt: false },
@@ -66,6 +66,16 @@ export const DOOR_FIELDS = [
     { k: 'closed_sight', type: 'choice', label: 'Sight when closed', options: ENUMS.closed_sight, dflt: 'none' },
     { k: 'closed_sound', type: 'choice', label: 'Sound when closed', options: ENUMS.closed_sound, dflt: 'partial' },
 ];
+
+const LEVEL_WORDS = { sight: { clear: 'clear', partial: 'partial', none: 'blocked' }, sound: { clear: 'clear', partial: 'muffled', none: 'silent' } };
+/** What an exit's unset sight/sound comes to, and why (door closed / open, obscured, exit type), from the form's live state. */
+export function exitLevelDefault(e, k) {
+    const side = e.side ?? {}, b = e.barrier, why = (v, r) => ({ value: v, from: 'default', tag: `default: ${LEVEL_WORDS[k][v] ?? v} (${r})` });
+    if (k === 'sight' && side.obscured === true) return why('none', 'obscured');
+    if (b && !b.starts_open) { const v = b[`closed_${k}`] ?? (k === 'sight' ? 'none' : 'partial'); return why(v, 'door closed'); }
+    const type = side.type ?? 'portal', preset = { portal: 'partial', open: 'clear' }[type] ?? 'partial';
+    return why(preset, b ? `door open, ${type}` : type);
+}
 
 /** The form's starting state: a copy of what the place itself sets (inherited fields stay unset). */
 export function initialState(ctx) {
@@ -156,9 +166,10 @@ const showVal = v => (v === null || v === undefined ? '(none)' : typeof v === 'b
 export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange = () => {}, ai = null } = {}) {
     const el = (tag, attrs = {}, ...kids) => { const n = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v === true ? '' : v); } n.append(...kids.filter(x => x !== null && x !== undefined)); return n; };
     const row = el('div', { class: 'pf-row', 'data-field': spec.k });
-    const fallback = inh ?? (spec.dflt !== undefined ? { value: spec.dflt, from: 'default' } : null);
+    const getInh = typeof inh === 'function' ? inh : () => inh;
     const opts = (options ?? spec.options ?? []).map(x => (isObj(x) ? x : { value: x, label: x }));
     const render = () => {
+        const fallback = getInh() ?? (spec.dflt !== undefined ? { value: spec.dflt, from: 'default' } : null);
         const set = has(obj, spec.k) && obj[spec.k] !== undefined, cur = set ? obj[spec.k] : fallback?.value;
         row.classList.toggle('inherited', !set && !!fallback);
         const change = v => { if (v === undefined) delete obj[spec.k]; else obj[spec.k] = v; onChange(); render(); };
@@ -192,7 +203,7 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
                 onChange();
             });
         }
-        const tag = !set && fallback ? el('span', { class: 'pf-from' }, fallback.from === 'default' ? 'default' : `from ${fallback.from}`) : set && inh ? el('span', { class: 'pf-from pf-own' }, 'set here') : null;
+        const tag = !set && fallback ? el('span', { class: 'pf-from' }, fallback.tag ?? (fallback.from === 'default' ? 'default' : `from ${fallback.from}`)) : set && inh ? el('span', { class: 'pf-from pf-own' }, 'set here') : null;
         const reset = el('button', { type: 'button', class: 'pf-reset', title: fallback ? `${fallback.from === 'default' ? 'Reset to default' : `Reset to inherited (from ${fallback.from}`}: ${showVal(fallback.value)}${fallback.from === 'default' ? '' : ')'}` : 'Reset', 'aria-label': fallback?.from === 'default' ? 'Reset to default' : 'Reset to inherited', onclick: () => change(undefined) }, '↺');
         reset.hidden = !(set && fallback && !spec.required);
         const aiBtn = ai && spec.ai ? el('button', { type: 'button', class: 'pf-ai', title: 'Expand with AI: a richer present-tense text from what is here (you can still edit it)', onclick: async () => {
@@ -202,6 +213,7 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
         row.replaceChildren(...[el('label', { class: 'pf-label' }, spec.label), ctl, tag, reset, aiBtn].filter(x => x !== null && x !== undefined));
     };
     render();
+    row.rerender = render;
     return row;
 }
 
@@ -257,9 +269,14 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
                 to.addEventListener('change', () => { e.to = to.value; e.to_name = null; upd(); });
                 body.append(el('div', { class: 'pf-row', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), to));
             } else body.append(el('div', { class: 'pf-row muted', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), e.to_name ?? e.to));
+            const live = [];
+            const upd2 = () => { for (const x of live) x.rerender(); upd(); };
             for (const s of EXIT_FIELDS) {
                 const holder = s.shared ? e : e.side;
-                body.append(fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : s, holder, { onChange: upd, ai: aiFor(e) }));
+                const lv = s.k === 'sight' || s.k === 'sound' ? () => exitLevelDefault(e, s.k) : null;
+                const fr = fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : s, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
+                if (lv) live.push(fr);
+                body.append(fr);
             }
             if (e.orig === null) {
                 const rd = { return_direction: e.return_direction, return_description: e.return_description };
@@ -267,9 +284,9 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
                     fieldRow(doc, { k: 'return_description', type: 'textarea', label: 'Way back description' }, rd, { onChange: () => { e.return_description = rd.return_description ?? ''; upd(); } }));
             }
             const doorBox = el('div', { class: 'pf-door' });
-            const doorRows = () => doorBox.replaceChildren(...(e.barrier ? DOOR_FIELDS.map(s => fieldRow(doc, s, e.barrier, { onChange: upd })) : []));
+            const doorRows = () => doorBox.replaceChildren(...(e.barrier ? DOOR_FIELDS.map(s => fieldRow(doc, s, e.barrier, { onChange: upd2 })) : []));
             const dk = el('input', { type: 'checkbox', class: 'pf-input' }); dk.checked = !!e.barrier;
-            dk.addEventListener('change', () => { e.barrier = dk.checked ? {} : null; doorRows(); upd(); });
+            dk.addEventListener('change', () => { e.barrier = dk.checked ? {} : null; doorRows(); upd2(); });
             body.append(el('div', { class: 'pf-row', 'data-field': 'door' }, el('label', { class: 'pf-label' }, 'Door (shared by both sides)'), dk), doorBox);
             doorRows();
             blk.append(head, body);

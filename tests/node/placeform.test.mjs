@@ -121,3 +121,12 @@ test('field specs: choices with 2-3 options are radios, 4+ dropdowns (per the fo
     const exp = ROOM_FIELDS.find(f => f.k === 'exposure'), ins = ROOM_FIELDS.find(f => f.k === 'insulation'), type = EXIT_FIELDS.find(f => f.k === 'type');
     assert.ok(exp.options.length >= 4 && ins.options.length === 3 && type.options.length === 2);
 });
+
+test('exit See/Hear destination: an unset value defaults from the door, obscured or the exit type, with the reason', async () => {
+    const { exitLevelDefault } = await import('../../plugin/ui/placeform.mjs');
+    assert.deepEqual(exitLevelDefault({ side: {}, barrier: {} }, 'sight'), { value: 'none', from: 'default', tag: 'default: blocked (door closed)' });
+    assert.equal(exitLevelDefault({ side: {}, barrier: {} }, 'sound').tag, 'default: muffled (door closed)');
+    assert.equal(exitLevelDefault({ side: {}, barrier: { starts_open: true } }, 'sight').tag, 'default: partial (door open, portal)');
+    assert.equal(exitLevelDefault({ side: { type: 'open' }, barrier: null }, 'sound').value, 'clear');
+    assert.equal(exitLevelDefault({ side: { obscured: true }, barrier: null }, 'sight').tag, 'default: blocked (obscured)');
+});
