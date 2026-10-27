@@ -9,7 +9,9 @@
 //                    change that has since expired) exists again.
 //   4. 'neighbor'    a surviving room that the missing room's exits led to, using the latest
 //                    previous map state where the room existed.
-//   5. 'subregion'   the entrance of the room's subregion, 6. 'region' the region entrance,
+//   5. 'history'     the most recent earlier stamped position (newest first) that still exists, e.g. after
+//                    swiping away the change that created the room.
+//   6. 'subregion'   the entrance of the room's subregion, 6. 'region' the region entrance,
 //   7. 'start'       the world start.
 
 const MAX_HOPS = 32;
@@ -21,9 +23,10 @@ const MAX_HOPS = 32;
  *   relocate: {old: new}      merged redirect map (active changes)
  *   allRelocate: {old: new}   redirects of every change, expired ones included (for step 3)
  *   before: addr => World|null  latest previous map state in which addr existed
+ *   history: [address]        earlier stamped positions, newest first
  * @returns {{address, moved, how, from}}
  */
-export function resolvePosition(w, address, { relocate = {}, allRelocate = relocate, before = null } = {}) {
+export function resolvePosition(w, address, { relocate = {}, allRelocate = relocate, before = null, history = [] } = {}) {
     const ok = a => typeof a === 'string' && w.locations.has(a);
     const done = (a, how) => ({ address: a, moved: a !== address, how, from: address });
     if (ok(address)) return done(address, 'here');
@@ -46,6 +49,7 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
             if (ok(t)) return done(t, 'neighbor');
         }
     }
+    for (const h of history ?? []) { const t = ok(h) ? h : follow(h, relocate); if (ok(t)) return done(t, 'history'); }
     const [region, rest = ''] = String(address).split(':');
     const subId = rest.split('/')[0];
     const sub = w.subregions.get(`${region}:${subId}`);

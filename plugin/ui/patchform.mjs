@@ -70,11 +70,11 @@ export function blankOp(type, { loc = '', area = '', direction = '', text = '' }
     return op;
 }
 /** Starting ops for "Edit live" on an inspector target, prefilled from its live values. */
-export function liveOps(target, { description = '', notes = '' } = {}) {
+export function liveOps(target, { description = '', notes = '', name = '' } = {}) {
     const t = String(target ?? '');
     if (t.startsWith('exit:')) { const ref = t.slice(5), i = ref.lastIndexOf('|'); return [blankOp('block_exit', { loc: ref.slice(0, i), direction: ref.slice(i + 1) })]; }
-    if (t.startsWith('region:')) return [blankOp('set_notes', { area: t.slice(7), text: notes ?? '' })];
-    if (t.startsWith('sub:')) return [blankOp('set_notes', { area: t.slice(4), text: notes ?? '' })];
+    // Regions and subregions: rename and/or rewrite the notes (update_area); set_notes / append_notes can be added in the form.
+    if (t.startsWith('region:') || t.startsWith('sub:')) return [{ ...blankOp('update_area', { area: t.slice(t.startsWith('sub:') ? 4 : 7) }), name: name ?? '', notes: notes ?? '' }];
     if (t.includes('/')) return [blankOp('set_description', { loc: t, text: description ?? '' })];
     return [];
 }

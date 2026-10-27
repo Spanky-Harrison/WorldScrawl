@@ -224,9 +224,9 @@ function applyOp(raw, op, w, out) {
             if (!str(op.name) && !str(op.notes)) throw new PatchError(`${w}: update_area needs a "name" and/or "notes"`);
             const old = obj.name ?? area, bits = [];
             if (str(op.name) && str(op.name) !== str(obj.name)) { obj.name = needText(op, w, 'name', MAX_PATCH_NAME); bits.push(`now called ${obj.name}`); }
-            if (str(op.notes)) { obj.notes = needText(op, w, 'notes'); bits.push('notes rewritten'); }
+            if (str(op.notes) && str(op.notes) !== str(obj.notes)) { obj.notes = needText(op, w, 'notes'); bits.push('notes rewritten'); }
             out.touched.push(area);
-            return `${old}: ${bits.join(', ')}`;
+            return `${old}: ${bits.join(', ') || 'unchanged'}`;
         }
         case 'block_exit': case 'open_exit': case 'lock_exit': case 'unlock_exit': case 'break_exit': case 'remove_exit':
             return exitOp(raw, op, w, out);

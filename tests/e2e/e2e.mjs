@@ -714,7 +714,7 @@ try {
     check('deleting back past the rebase reverts to the previous world and its changes', back.w === 'riverton' && JSON.stringify(back.ch) === '["add_exit"]' && (await wsExits()).includes('east (') && (await wsExits()).includes('south ('), JSON.stringify(back) + (await wsExits()));
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'v', extra: { worldscrawl_location: 'atlantis:nowhere/void', worldscrawl_intent_checked: true } }); await c.saveChat(); });
     const exMissing = await wsExits();
-    check('missing room: falls back to the start with a system notice', (await lastMes()).includes('no longer exists in this world') && (await stored()) === 'riverton:drowned_rat/common_room' && exMissing.startsWith('Exits: out'), exMissing + ' | ' + (await lastMes()));
+    check('missing room: walks back to the last room in the move history, with a system notice', (await lastMes()).includes('no longer exists in this world') && (await stored()) === 'riverton:streets/square' && exMissing.startsWith('Exits: in'), exMissing + ' | ' + (await lastMes()));
     await page.evaluate(() => document.getElementById('worldscrawl_who').dispatchEvent(new Event('input'))); // refresh the facts prompt
     await page.waitForTimeout(800);
     check('missing room: the narrator gets one "now in" note', /no longer exists in this world\. .* is now in /.test(await page.evaluate(() => SillyTavern.getContext().extensionPrompts?.worldscrawl_facts?.value ?? '')));
@@ -1261,6 +1261,33 @@ try {
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nLiveEdit); await page.waitForTimeout(1500);
     try { await ui.waitForFunction(id => !document.querySelector(`.node.patched[data-id="${id}"]`), CR, { timeout: 10000 }); } catch {}
     check('deleting the map-edit message undoes it (marker gone)', told && await ui.locator(`.node.patched[data-id="${CR}"]`).count() === 0 && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => m.extra?.worldscrawl_patches)));
+    // Edit live on a region / subregion page: rename via update_area, stamped on a hidden message, tagged in Resolved.
+    await ui.click('.crumb.inspect'); await ui.waitForTimeout(1200);
+    const areaKind = await ui.evaluate(() => document.querySelector('.side .area')?.textContent ?? '');
+    const nameRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'name'); return tr ? { v: tr.querySelector('.val')?.textContent ?? '', src: tr.querySelector('.src')?.textContent ?? '', mark: !!tr.querySelector('.patchmark') } : null; });
+    const an0 = await nameRow();
+    check('area inspector has an Edit live button and an unmarked name row', /^(sub)?region/.test(areaKind) && await ui.locator('.side .editlive').count() === 1 && an0 && !an0.mark, areaKind + JSON.stringify(an0));
+    const nArea = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.click('.side .editlive');
+    const nameIn = ui.locator('.side label:has-text("New display name") input').first();
+    await nameIn.waitFor({ timeout: 10000 });
+    const areaThemed = await nameIn.evaluate(el => el.classList.contains('text_pole') && /SmartThemeBorderColor/.test(el.style.border || el.getAttribute('style')));
+    check('area Edit live: update_area form prefilled with the live name, themed inputs', (await nameIn.inputValue()) === an0.v && areaThemed, await nameIn.inputValue());
+    await nameIn.fill('The Gilded Quarter');
+    try { await ui.waitForFunction(() => /Gilded Quarter/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('area Edit live: the red/green diff shows the rename', /Gilded Quarter/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    await ui.click('.side button:has-text("Save to chat")');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const ae = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, op: m.extra?.worldscrawl_patches?.[0]?.ops?.[0] }; }, nArea);
+    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter', JSON.stringify(ae));
+    await ui.waitForTimeout(1500);
+    for (let k = 0; k < 4; k++) { // the map re-renders after the stamp; reopen the area page once it settles
+        await ui.click('.crumb.inspect'); await ui.waitForTimeout(1000);
+        if ((await nameRow())?.v === 'The Gilded Quarter') break;
+    }
+    const an1 = await nameRow();
+    check('area Resolved: renamed, tagged with its message, orange marker', an1 && an1.v === 'The Gilded Quarter' && an1.src.includes(`from message #${nArea}`) && an1.mark, JSON.stringify(an1));
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
