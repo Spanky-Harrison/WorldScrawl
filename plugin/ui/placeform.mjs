@@ -63,8 +63,8 @@ export const DOOR_FIELDS = [
     { k: 'openable', type: 'bool', label: 'Can be opened', dflt: true },
     { k: 'locked', type: 'bool', label: 'Locked', dflt: false },
     { k: 'starts_open', type: 'bool', label: 'Starts open', dflt: false },
-    { k: 'closed_sight', type: 'choice', label: 'See destination (closed)', options: ENUMS.closed_sight, dflt: 'none' },
-    { k: 'closed_sound', type: 'choice', label: 'Hear destination (closed)', options: ENUMS.closed_sound, dflt: 'partial' },
+    { k: 'closed_sight', type: 'choice', label: 'See destination', options: ENUMS.closed_sight, dflt: 'none' },
+    { k: 'closed_sound', type: 'choice', label: 'Hear destination', options: ENUMS.closed_sound, dflt: 'partial' },
 ];
 
 /** What an exit's unset sight/sound comes to while open (or with no door) (exit type; obscured is always none), from the form's live state. */
@@ -271,14 +271,14 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
             let live = [];
             const upd2 = () => { for (const x of live) x.rerender(); upd(); };
             const senseRows = () => {
-                const rows = [];
-                for (const k of ['sight', 'sound']) {
-                    const s = EXIT_FIELDS.find(x => x.k === k);
-                    rows.push(fieldRow(doc, { ...s, label: `${s.label}${e.barrier ? ' (open)' : ''}` }, e.side, { onChange: upd2, inh: () => exitLevelDefault(e, k) }));
-                    if (e.barrier) rows.push(fieldRow(doc, DOOR_FIELDS.find(x => x.k === `closed_${k}`), e.barrier, { onChange: upd2 }));
-                }
-                live = rows.filter((_, i) => !e.barrier || i % 2 === 0);
-                senses.replaceChildren(...rows);
+                const row = (k, closed) => closed ? fieldRow(doc, DOOR_FIELDS.find(x => x.k === `closed_${k}`), e.barrier, { onChange: upd2 })
+                    : fieldRow(doc, EXIT_FIELDS.find(x => x.k === k), e.side, { onChange: upd2, inh: () => exitLevelDefault(e, k) });
+                const open = [row('sight'), row('sound')];
+                live = open;
+                const head = el('b', { class: 'pf-senses-head' }, 'Seeing and hearing through this exit');
+                if (!e.barrier) { senses.replaceChildren(head, ...open); return; }
+                senses.replaceChildren(head, el('div', { class: 'pf-senses-group', 'data-when': 'open' }, el('i', {}, 'When open'), ...open),
+                    el('div', { class: 'pf-senses-group', 'data-when': 'closed' }, el('i', {}, 'When the door is closed'), row('sight', true), row('sound', true)));
             };
             for (const s of EXIT_FIELDS) {
                 if (s.k === 'sound') continue;
