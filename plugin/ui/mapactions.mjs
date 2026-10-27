@@ -131,13 +131,13 @@ export function openAction(doc, pane, action, ctx, io) {
         const name = input(), desc = area(), ex = exitsEditor(null, needExit);
         return { els: [row(`${title} name`, name, { 'data-field': 'place_name' }), row(`${title} description`, desc, { 'data-field': 'place_description' }),
             aiBtn(desc, () => ({ field: 'description', kind: 'room', name: name.value, area: areaRef(), rooms: ex.rooms() })), ex.el],
-        get() { if (!name.value.trim()) throw new Error(`${title} name is required.`); if (!desc.value.trim()) throw new Error(`${title} description is required.`); const exits = ex.get(); if (needExit && !exits.length) throw new Error('A new place needs at least one exit to an existing place.'); return { name: name.value.trim(), description: desc.value.trim(), ...(exits.length ? { exits } : {}) }; } };
+        get() { if (!name.value.trim()) throw new Error(`${title} name is required.`); if (!desc.value.trim()) throw new Error(`${title} description is required.`); const exits = ex.get().map(e => e.return_direction ? e : { ...e, return_direction: `to ${name.value.trim()}` }); if (needExit && !exits.length) throw new Error('A new place needs at least one exit to an existing place.'); return { name: name.value.trim(), description: desc.value.trim(), ...(exits.length ? { exits } : {}) }; } };
     };
     const t = ctx.target, header = (h, ...kids) => box.replaceChildren($('h4', {}, h), ...kids, errs, $('b', {}, 'Changes'), diff, submit, cancel, status);
 
     switch (action) {
         case 'create_region': {
-            const n = input(), notes = area(), sn = input(), snotes = area(), p = placeFields(() => '', false, 'Starting place');
+            const n = input(), notes = area(), sn = input(), snotes = area(), p = placeFields(() => '', true, 'Starting place');
             build = () => { if (!n.value.trim()) throw new Error('Region name is required.'); if (!sn.value.trim()) throw new Error('First subregion name is required.');
                 return [{ op: 'create_region', name: n.value.trim(), ...(notes.value.trim() ? { notes: notes.value.trim() } : {}), subregion: { name: sn.value.trim(), ...(snotes.value.trim() ? { notes: snotes.value.trim() } : {}), place: p.get() } }]; };
             header('Create region', $('p', { class: 'muted' }, 'A region needs its first subregion and a starting place.'), row('Region name', n, { 'data-field': 'region_name' }), row('Region notes', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'region', name: n.value, area: '', rooms: [] })),
