@@ -284,6 +284,18 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             return { location: loc.address, area: loc.address.split('/')[0], area_name: sub.name, region_name: e.w.regions.get(loc.address.split(':')[0])?.name ?? '', outline, rooms, neighbors, mentions,
                 areas: Object.fromEntries(wanted.filter(a => !a.includes('/')).map(a => { const [r, s2] = a.split(':'); const o = s2 ? raw[r]?.subregions?.[s2] : raw[r]; return [a, o ? { name: o.name, notes: o.notes ?? '' } : null]; })) };
         },
+        // A discovery (a room behind a door the description only mentions): the room, its neighbors one step out, and
+        // the subregion and region notes, for the model call that writes the new room.
+        'POST /discover/context': ({ q, body }) => {
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const loc = find(e.w, field(body, 'location', 'str')), sub = e.w.sub_of(loc), [rid, sid] = loc.address.split(/[:/]/);
+            const reg = e.raw[rid] ?? {}, subRaw = reg.subregions?.[sid] ?? {};
+            return { location: loc.address, name: loc.name, description: loc.description ?? '', expandable: loc.expandable !== false,
+                exits: loc.exits.map(x => ({ direction: x.direction, to: x.to, ...(x.description ? { description: x.description } : {}) })),
+                neighbors: neighborsOf(e.w, [loc.address]), area: `${rid}:${sid}`, area_name: sub.name, area_notes: subRaw.notes ?? '',
+                region: rid, region_name: reg.name ?? rid, region_notes: reg.notes ?? '' };
+        },
         'POST /patch/preview': ({ q, body }) => {
             needBody(body);
             const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
@@ -339,7 +351,9 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const e = changed_for(wid, changes, now);
             const all = changed_for(wid, changes, null);
             const before = a => {
-                for (let k = changes.length - 1; k >= 0; k--) { let pw; try { pw = changed_for(wid, changes.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
+                // Turned-off changes count here: a room made by a change that is now off (a discovery) still had real exits.
+                const onAgain = changes.map(c => (c?.off ? { ...c, off: false } : c));
+                for (let k = changes.length - (changes.some(c => c?.off) ? 0 : 1); k >= 0; k--) { let pw; try { pw = changed_for(wid, onAgain.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
                 return null;
             };
             const r = resolvePosition(e.w, address, { relocate: relocateMap(e.info.patches, since), allRelocate: relocateMap(all.info.patches), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });

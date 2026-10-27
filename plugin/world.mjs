@@ -473,7 +473,7 @@ export function build_world(worldJson, rawRegions) {
                 locations.set(address, {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), exits,
                     inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
-                    views: [], pos: optionalPos(loc, where), place: place(loc, where),
+                    expandable: optionalBool(loc, 'expandable', where) !== false, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
                 if (locations.get(address).place.exposure) anyExposure = true;
             }

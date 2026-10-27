@@ -14,10 +14,14 @@
 //       into: keep that room (rewritten with name/description if given); otherwise a new room `id` in `area`
 //       (default: the subregion most of the rooms are in). Exits between merged rooms disappear, outside exits lead
 //       to the merged room. Merging every room of a subregion is a collapse.
+//   {op: "discover", loc, direction, name, description, id?, return_direction?, exit_description?, return_description?, door?}
+//       A room found behind set dressing (a door the description only mentions): a new room `id` (made by the engine
+//       from the name when missing, stamped with the patch) in loc's subregion, joined to loc by one exit pair (a door
+//       unless door: false). Refused on rooms with "expandable": false. Written as if it was always there.
 
 import { parseDuration } from './calendar.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge'];
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover'];
 export const MAX_OPS = 20, MAX_TEXT = 1500, MAX_PATCH_NAME = 60;
 
 export class PatchError extends Error {}
@@ -117,6 +121,11 @@ export function normalizeOp(raw, op) {
         const m = /^([^:/\s]+):([^/\s]+)\//.exec(o.id.trim().toLowerCase());
         if (m && !str(o.area) && !o.into && isObj(raw[m[1]]?.subregions?.[m[2]])) o.area = `${m[1]}:${m[2]}`;
         o.id = slugId(o.id);
+    }
+    if (o.op === 'discover') {
+        // The engine picks the new room's id once (from its name) and it is stamped with the op, so replays agree.
+        const p = split(o.loc);
+        o.id = typeof o.id === 'string' && o.id.trim() ? slugId(o.id) : (p && str(o.name) ? split(freeAddress(raw, `${p[0]}:${p[1]}`, newRoomId(o.name) || 'room'))[2] : o.id);
     }
     return o;
 }
@@ -247,8 +256,31 @@ function applyOp(raw, op, w, out) {
         }
         case 'remove_location': return removeOp(raw, op, w, out);
         case 'merge': return mergeOp(raw, op, w, out);
+        case 'discover': return discoverOp(raw, op, w, out);
     }
     throw new PatchError(`${w}: unknown op`);
+}
+
+function discoverOp(raw, op, w, out) {
+    const a = str(op.loc), r = needRoom(raw, a, w), [rid, sid] = split(a);
+    if (r.expandable === false) throw new PatchError(`${w}: ${r.name} can't be expanded (it is marked "expandable": false)`);
+    const name = needText(op, w, 'name', MAX_PATCH_NAME), desc = needText(op, w, 'description');
+    const dir = needText(op, w, 'direction', 60), back = str(op.return_direction) || 'out';
+    if (back.length > 60) throw new PatchError(`${w}: "return_direction" is too long (at most 60 characters)`);
+    if ((r.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(dir))) throw new PatchError(`${w}: ${r.name} already has an exit ${JSON.stringify(dir)}`);
+    const id = str(op.id);
+    if (!SLUG.test(id)) throw new PatchError(`${w}: "id" ${JSON.stringify(op.id)} must be lowercase letters, digits and _`);
+    const to = `${rid}:${sid}/${id}`;
+    if (getRoom(raw, to)) throw new PatchError(`${w}: a room ${to} already exists`);
+    const time = str(op.travel_time) || '10s';
+    try { parseDuration(time); } catch (err) { throw new PatchError(`${w}: "travel_time": ${err.message}`); }
+    const ex = { direction: dir, to, travel_time: time, description: str(op.exit_description).slice(0, 400) || `A door leads to ${name}.` };
+    if (op.door !== false) ex.barrier = {}; // one door, shared with the way back
+    r.exits = [...(Array.isArray(r.exits) ? r.exits : []), ex];
+    raw[rid].subregions[sid].locations[id] = { name, description: desc,
+        exits: [{ direction: back, to: a, travel_time: time, description: str(op.return_description).slice(0, 400) || `The way back to ${r.name}.` }] };
+    out.touched.push(a, to);
+    return `${r.name} ${dir}: leads to ${name} (a newly found room)`;
 }
 
 function findExit(raw, a, d, w) {
