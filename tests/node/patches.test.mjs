@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
 import { build_world, read_world_raw, WorldError } from '../../plugin/world.mjs';
-import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom } from '../../plugin/ui/patches.mjs';
+import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom, roomMatches } from '../../plugin/ui/patches.mjs';
 
 const R = 'riverton:drowned_rat/';
 const KITCHEN = R + 'kitchens', CELLAR = R + 'cellar', STABLE = R + 'stable', UP = R + 'upstairs';
@@ -217,4 +217,21 @@ test('renames: unlabeled exits show the destination\'s current name; hand-writte
     assert.ok(tun.includes('narrow door') && !tun.some(d => /treasury/i.test(d)));
     const yard = w.to_dict(w.get(YARD)).exits.find(e => e.direction === 'trapdoor');
     assert.equal(yard.direction, 'trapdoor');
+});
+
+test('travel_time is shared by an exit pair; hidden/label stay per side', () => {
+    const w = worldWith([patch([{ op: 'set_travel_time', loc: TAVERN, direction: 'up', time: '10m' }])]);
+    assert.equal(exit(w, TAVERN, 'up').travel_time, 600);
+    assert.equal(exit(w, UP, 'down').travel_time, 600, 'the way back takes the same time');
+    assert.throws(() => worldWith([patch([{ op: 'set_travel_time', loc: TAVERN, direction: 'up', time: 'soon' }])]), /travel time must look like/);
+});
+
+test('ambiguous bare id: not guessed, error lists the choices', () => {
+    const [, raw] = base();
+    const sub = Object.values(raw.riverton.subregions).find(s => s.locations && !s.locations.cellar);
+    sub.locations.cellar = { name: 'Other Cellar', description: 'x', exits: [] };
+    assert.ok(roomMatches(raw, 'cellar').length > 1);
+    assert.equal(resolveRoom(raw, 'cellar'), 'cellar');
+    let err; try { applyPatch(raw, patch([{ op: 'set_description', loc: 'cellar', text: 'Damp.' }]), { now: null }); } catch (e) { err = e; }
+    assert.ok(err instanceof PatchError && err.choices?.length > 1, String(err));
 });

@@ -15,8 +15,9 @@
 //       (default: the subregion most of the rooms are in). Exits between merged rooms disappear, outside exits lead
 //       to the merged room. Merging every room of a subregion is a collapse.
 
+import { parseDuration } from './calendar.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'remove_location', 'merge'];
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge'];
 export const MAX_OPS = 20, MAX_TEXT = 1500, MAX_PATCH_NAME = 60;
 
 export class PatchError extends Error {}
@@ -85,8 +86,16 @@ export function resolveRoom(raw, ref) {
     const lower = a.toLowerCase();
     if (getRoom(raw, lower)) return lower;
     const tail = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
-    const hits = [...eachRoom(raw)].map(x => x[0]).filter(addr => addr.toLowerCase().endsWith(tail.includes('/') ? `:${tail}` : `/${slugId(tail)}`));
+    const hits = roomMatches(raw, a);
     return hits.length === 1 ? hits[0] : a;
+}
+/** Every room a partial reference ("sub/id" or a bare "id", any case) could mean. Several = ambiguous: the card asks. */
+export function roomMatches(raw, ref) {
+    const lower = String(ref ?? '').trim().toLowerCase();
+    if (!lower) return [];
+    if (getRoom(raw, lower)) return [lower];
+    const tail = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
+    return [...eachRoom(raw)].map(x => x[0]).filter(addr => addr.toLowerCase().endsWith(tail.includes('/') ? `:${tail}` : `/${slugId(tail)}`));
 }
 /** The id a brand-new room named `name` gets: slugified name ("The Burned Hall" -> "the_burned_hall"). */
 export const newRoomId = name => slugId(String(name ?? '').replace(/[:/]/g, ' ')).slice(0, 60).replace(/_+$/, '');
@@ -174,6 +183,7 @@ export function noopOf(raw, op) {
 
 function needRoom(raw, a, w, key = 'loc') {
     const r = typeof a === 'string' ? getRoom(raw, a.trim()) : null;
+    if (!r && typeof a === 'string') { const m = roomMatches(raw, a); if (m.length > 1) { const e = new PatchError(`${w}: "${key}" ${JSON.stringify(a)} could be ${m.join(' or ')}; pick one`); e.choices = m; e.key = key; throw e; } }
     if (!r) throw new PatchError(`${w}: "${key}" ${JSON.stringify(a)} is not a room (addresses look like "region:subregion/room")`);
     return r;
 }
@@ -225,6 +235,14 @@ function applyOp(raw, op, w, out) {
             const a = str(op.loc), { r, ex } = findExit(raw, a, op.direction, w), t = needText(op, w, 'text', 400);
             ex.description = t; out.touched.push(a);
             return `${r.name} ${ex.direction} exit: description rewritten (this side only)`;
+        }
+        case 'set_travel_time': {
+            // Shared by an exit pair: the way back takes the same time.
+            const a = str(op.loc), { r, ex, back } = findExit(raw, a, op.direction, w), t = needText(op, w, 'time', 20);
+            try { parseDuration(t); } catch (err) { throw new PatchError(`${w}: "time": ${err.message}`); }
+            ex.travel_time = t; if (back) back.travel_time = t;
+            out.touched.push(a, ex.to);
+            return `${r.name} ${ex.direction} exit: travel time ${t} (both ways)`;
         }
         case 'remove_location': return removeOp(raw, op, w, out);
         case 'merge': return mergeOp(raw, op, w, out);

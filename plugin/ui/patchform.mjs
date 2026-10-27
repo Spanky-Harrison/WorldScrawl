@@ -8,7 +8,7 @@ export const EXIT_OPS = ['block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 
 export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
     set_notes: 'Rewrite area notes', update_area: 'Rename area / rewrite its notes', append_notes: 'Add to area notes',
-    block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)',
+    block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
     remove_location: 'Remove place', merge: 'Merge places',
 };
 /** The fields each op type has (besides "op" and "lasts"), and which are required. */
@@ -18,6 +18,7 @@ export const OP_FIELDS = {
     set_notes: [['area', 1], ['text', 1]], append_notes: [['area', 1], ['text', 1]],
     ...Object.fromEntries(EXIT_OPS.map(o => [o, [['loc', 1], ['direction', 1]]])),
     set_exit_description: [['loc', 1], ['direction', 1], ['text', 1]],
+    set_travel_time: [['loc', 1], ['direction', 1], ['time', 1]],
     remove_location: [['loc', 1]],
     merge: [['locs', 1], ['into', 0], ['name', 0], ['description', 0], ['area', 0]],
 };
@@ -109,6 +110,12 @@ export function buildPatchForm(doc, opts = {}) {
     const areaLabel = a => opts.areaNames?.[a] ?? (a.includes(':') ? `${pretty(a.split(':')[1])} (in ${pretty(a.split(':')[0])})` : `${pretty(a)} (region)`);
     const picker = (val, list, label, on, blank) => {
         const vals = [...new Set([...(list ?? [])])].sort((x, y) => label(x).localeCompare(label(y)));
+        const tail = String(val ?? '').trim().toLowerCase().split(/[:/]/).pop().replace(/[^a-z0-9]+/g, '_');
+        const amb = val && !vals.includes(val) ? vals.filter(v => v.includes('/') && v.toLowerCase().endsWith(`/${tail}`)) : [];
+        if (amb.length > 1) { // ambiguous reference: ask which one instead of guessing
+            const el = select('', [['', `"${val}" could be several places — which one?`], ...amb.map(v => [v, label(v)]), ...vals.filter(v => !amb.includes(v)).map(v => [v, label(v)])], on);
+            el.style.width = '100%'; el.classList.add('wspf-pick', 'wspf-ambig'); return el;
+        }
         if (val && !vals.includes(val)) vals.unshift(val); // keep an unknown value visible so the error next to it makes sense
         const el = select(val ?? '', [['', blank], ...vals.map(v => [v, label(v)])], on);
         el.style.width = '100%'; el.classList.add('wspf-pick'); return el;

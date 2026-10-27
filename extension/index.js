@@ -2233,6 +2233,7 @@ Allowed ops:
 {"op":"set_notes","area":AREA,"text":"..."}  {"op":"append_notes","area":AREA,"text":"..."}
 {"op":"block_exit"|"open_exit"|"lock_exit"|"unlock_exit"|"break_exit"|"remove_exit","loc":ADDR,"direction":"exit name"}
 {"op":"set_exit_description","loc":ADDR,"direction":"exit name","text":"..."} (that side's exit text only; the way back keeps its own)
+{"op":"set_travel_time","loc":ADDR,"direction":"exit name","time":"10m"} (both ways)
 {"op":"remove_location","loc":ADDR}
 {"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept and rewritten)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (a new room: just give its name, the engine makes its id; optional "area":AREA)
 Example, a whole inn turned into a palace: {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace"},{"op":"set_description","loc":"riverton:drowned_rat/common_room","text":"A gilded throne hall; an old brass rail shows under the gold leaf."},{"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."},{"op":"set_description","loc":"riverton:drowned_rat/courtyard","text":"..."}]}
