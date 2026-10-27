@@ -140,6 +140,28 @@ try {
     const reqs2 = await (await fetch(`${FAKE}/__requests`)).json();
     check('bad move returns valid directions', JSON.stringify(reqs2[reqs2.length - 1].messages).includes('valid_directions'));
 
+    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - stamped at once, no review.
+    const waits = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_wait).filter(Boolean));
+    check('ws_wait tool sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_wait'));
+    await queue([{ tool_calls: [{ name: 'ws_wait', arguments: { duration: '3h' } }] }, { content: 'You wait by the well.' }]);
+    await send('I wait three hours.');
+    let ws = await waits();
+    check('ws_wait tool stamps 3h', ws.length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep, JSON.stringify(ws));
+    check('ws_wait keeps location', (await stored()) === 'riverton:streets/square');
+    check('ws_wait tool result tells model the time', JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-1).messages).includes('Time passes'));
+    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning]' }]);
+    await send('I sleep.', 1);
+    ws = await waits();
+    check('[ws_wait] tag stamps sleep until morning', ws.length === 2 && ws[1].sleep && ws[1].until === 'morning' && ws[1].seconds > 0, JSON.stringify(ws));
+    check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
+    await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
+    await send('I wait an hour.');
+    ws = await waits();
+    check('ws_flag wait alias still stamps', ws.length === 3 && ws[2].seconds === 3600, JSON.stringify(ws));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 8'); });
+    await page.waitForTimeout(1500);
+    check('deleting wait messages undoes them', (await waits()).length === 0, JSON.stringify(await waits()));
+
     await queue([{ tool_calls: [{ name: 'ws_move', arguments: { direction: 'north' } }] }, { content: 'The temple.' }]);
     await send('Up to the temple.');
     check('move north -> temple', (await stored()) === 'riverton:temple/nave');
@@ -1166,6 +1188,7 @@ try {
     check('/ws-wait until midnight lands on 00:00', (await clockNow()) > t2 && dm?.time === '00:00', JSON.stringify(dm));
     await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
     check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
+    check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning]')));
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);

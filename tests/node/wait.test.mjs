@@ -76,3 +76,25 @@ test('temporary patches run out across a wait', () => {
     const now = sumTravel([{ extra: { worldscrawl_wait: { seconds: 6 * H } } }, { extra: { worldscrawl_wait: { seconds: 8 * H, sleep: true } } }]);
     assert.equal(activeChanges(changes, now)[0].ops.length, 1);
 });
+
+import { WAIT_TAG, waitArgs, parseWaitTag } from '../../extension/words.mjs';
+
+test('ws_wait tool args -> wait text', () => {
+    assert.equal(waitArgs({ duration: '2h' }), '2h');
+    assert.equal(waitArgs({ until: 'morning' }), 'until morning');
+    assert.equal(waitArgs({ until: 'until dusk', duration: '3h' }), 'until dusk');
+    assert.equal(waitArgs({}), '');
+    assert.deepEqual(parseWait(waitArgs({ until: 'morning' })), { until: 'morning' });
+});
+
+test('[ws_wait: ...] tag parsing', () => {
+    assert.equal(WAIT_TAG.exec('They rest. [ws_wait: sleep until morning]')[1], 'sleep until morning');
+    assert.equal(WAIT_TAG.exec('no tag [ws_flag: wait | 2h]'), null);
+    assert.deepEqual(parseWaitTag('2h'), { sleep: false, args: '2h' });
+    assert.deepEqual(parseWaitTag('sleep until morning'), { sleep: true, args: 'until morning' });
+    assert.deepEqual(parseWaitTag('sleep'), { sleep: true, args: '' });
+    assert.deepEqual(parseWaitTag('Sleep 6h'), { sleep: true, args: '6h' });
+    assert.deepEqual(parseWaitTag('wait for 3 hours'), { sleep: false, args: '3 hours' });
+    assert.deepEqual(parseWaitTag('until dusk'), { sleep: false, args: 'until dusk' });
+    assert.deepEqual(parseWait(parseWaitTag('wait for 3 hours').args), { seconds: 3 * H });
+});

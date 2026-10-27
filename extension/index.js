@@ -3,7 +3,7 @@
 // and narrates. Optional, off by default: the old ws_look/ws_move tools.
 // The party's location is stored on chat messages (message.extra.worldscrawl_location) so that
 // deleting or swiping messages rolls the location back with them.
-import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine } from './words.mjs';
+import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -28,7 +28,7 @@ const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name
 const WAIT_KEY = 'worldscrawl_wait'; // {seconds, sleep, label, before}: on the message where time passed without moving
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
-const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag'];
+const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag', 'ws_wait'];
 const PATCH_KEY = 'worldscrawl_patches'; // [{type: 'patch', ops, relocate, swipe, ...}] on the message where a map change settled
 const FLAG_KEY = 'worldscrawl_flag'; // {swipe, loc, note, start, status, proposal}: a flagged message's review card
 const FLAGHINT_KEY = 'worldscrawl_flaghint';
@@ -475,13 +475,32 @@ function registerTools() {
             pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
         formatMessage: ({ action } = {}) => action === 'wait' || action === 'sleep' ? 'Passing time...' : 'Noting a map change...',
     });
+    registerFunctionTool({
+        name: 'ws_wait',
+        displayName: 'WorldScrawl: Wait or sleep',
+        description: 'Call this when the characters spend a long time where they are without travelling: waiting, resting, or sleeping. Give a duration ("2h", "1h30m", "2d") or a time to wait until ("morning", "dusk", "14:00"). The game clock moves on; the result says the new time.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: { duration: { type: 'string', description: 'How long, e.g. "2h", "1h30m", "2d".' },
+                until: { type: 'string', description: 'Instead of a duration: wait until dawn, morning, noon, dusk, evening, night, midnight, or a time like "14:00".' },
+                sleep: { type: 'boolean', description: 'true if they sleep (default 8h when no duration or until is given).' } },
+            required: [],
+        },
+        action: async ({ duration = '', until = '', sleep = false } = {}) => {
+            const w = await planWait(waitArgs({ duration, until }), sleep === true || sleep === 'true');
+            if (w.error) return `Could not pass time: ${w.error}`;
+            pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.`;
+        },
+        formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
+    });
 }
 
 /** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
 function applyNudge() {
     const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
-    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? FLAG_HINT : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? `${FLAG_HINT}\n${WAIT_HINT}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
 // ---- Engine-driven movement. The engine moves the party; the model never touches the map.
@@ -2032,7 +2051,8 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_flag: wait | 2h] or [ws_flag: sleep | until morning]. Never write these otherwise.';
+const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. Never write it otherwise.';
+const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
@@ -2233,6 +2253,14 @@ async function onReplyForFlags(id) {
             const w = await planWait(rest.join('|'), kind === 'sleep');
             if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error);
         } else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
+        await c.saveChat?.();
+    }
+    const wt = WAIT_TAG.exec(msg.mes ?? '');
+    if (wt) {
+        msg.mes = msg.mes.replace(WAIT_TAG, '').trimEnd();
+        if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+        try { c.updateMessageBlock?.(id, msg); } catch {}
+        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error); }
         await c.saveChat?.();
     }
     if (pendingWait) {
