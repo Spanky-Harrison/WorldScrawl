@@ -192,14 +192,14 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
                 onChange();
             });
         }
-        const tag = !set && fallback ? el('span', { class: 'pf-from' }, fallback.from === 'default' ? 'default' : `from ${fallback.from}`) : null;
-        const reset = el('button', { type: 'button', class: 'pf-reset', title: fallback ? `Reset: use ${fallback.from === 'default' ? 'the default' : `the ${fallback.from}'s`} (${showVal(fallback.value)})` : 'Reset', onclick: () => change(undefined) }, '↺');
+        const tag = !set && fallback ? el('span', { class: 'pf-from' }, fallback.from === 'default' ? 'default' : `from ${fallback.from}`) : set && inh ? el('span', { class: 'pf-from pf-own' }, 'set here') : null;
+        const reset = el('button', { type: 'button', class: 'pf-reset', title: fallback ? `${fallback.from === 'default' ? 'Reset to default' : `Reset to inherited (from ${fallback.from}`}: ${showVal(fallback.value)}${fallback.from === 'default' ? '' : ')'}` : 'Reset', 'aria-label': fallback?.from === 'default' ? 'Reset to default' : 'Reset to inherited', onclick: () => change(undefined) }, '↺');
         reset.hidden = !(set && fallback && !spec.required);
         const aiBtn = ai && spec.ai ? el('button', { type: 'button', class: 'pf-ai', title: 'Expand with AI: a richer present-tense text from what is here (you can still edit it)', onclick: async () => {
             aiBtn.disabled = true; const was = aiBtn.textContent; aiBtn.textContent = '…';
             try { const t = await ai(spec.k, String(ctl.value ?? '')); if (t) { ctl.value = t; ctl.dispatchEvent(new Event('input')); } } catch (e) { aiBtn.title = `Expand failed: ${e.message}`; } finally { aiBtn.disabled = false; aiBtn.textContent = was; }
         } }, '✨ Expand with AI') : null;
-        row.replaceChildren(el('label', { class: 'pf-label' }, spec.label), ctl, tag, reset, aiBtn);
+        row.replaceChildren(...[el('label', { class: 'pf-label' }, spec.label), ctl, tag, reset, aiBtn].filter(x => x !== null && x !== undefined));
     };
     render();
     return row;
