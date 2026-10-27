@@ -1139,6 +1139,14 @@ try {
     try { await ui.waitForSelector('.node.here', { timeout: 15000 }); } catch {}
     const m1 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, ids: [...document.querySelectorAll('.node')].map(n => n.dataset.id), side: document.querySelector('.side')?.innerText ?? '', btn: document.querySelector('[data-window="map"]')?.className }));
     check('map window receives the broadcast and highlights the current room', m1.here === 'riverton:drowned_rat/common_room' && /Common Room/.test(m1.side) && /active/.test(m1.btn), JSON.stringify(m1).slice(0, 400));
+    {
+        const sp = await ui.$('.splitter'); const b = await sp.boundingBox(); const w0 = await ui.evaluate(() => document.querySelector('.side').getBoundingClientRect().width);
+        await ui.mouse.move(b.x + 3, b.y + 50); await ui.mouse.down(); await ui.mouse.move(b.x - 120, b.y + 50, { steps: 4 }); await ui.mouse.up();
+        const r = await ui.evaluate(() => ({ w: document.querySelector('.side').getBoundingClientRect().width, saved: localStorage.getItem('worldscrawl_sizes') }));
+        check('map/panel splitter drags wider and persists the size', r.w > w0 + 60 && /side:/.test(r.saved ?? ''), JSON.stringify({ w0, ...r }));
+        await sp.dblclick(); const w2 = await ui.evaluate(() => document.querySelector('.side').getBoundingClientRect().width);
+        check('double-clicking the splitter resets the panel size', Math.abs(w2 - w0) < 3, `${w0} ${w2}`);
+    }
     check('map window shows no hidden place', !m1.ids.some(i => /cellar|tunnel|catacomb/.test(i)), JSON.stringify(m1.ids));
     const themed = await ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
     const stTheme = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
