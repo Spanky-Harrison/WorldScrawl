@@ -99,3 +99,24 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 
 /* A Resolved value a chat stamp changed: the same orange dot as patched rooms on the map. */
 .side table.resolved .patchmark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f0a030; border: 1px solid #222; margin-right: 4px; vertical-align: middle; }
+
+/* Edit place / subregion / region forms */
+.placeform { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.pf-row { display: grid; grid-template-columns: 11em 1fr auto auto auto; gap: 6px; align-items: center; }
+.pf-row .pf-label { font-size: 12px; color: #bbb; }
+.pf-row textarea.pf-input, .pf-row input[type=text].pf-input, .pf-row input[type=number].pf-input, .pf-row select.pf-input { width: 100%; box-sizing: border-box; }
+.pf-row.inherited .pf-input, .pf-row.inherited .pf-radios { opacity: .5; }
+.pf-row.inherited input::placeholder, .pf-row.inherited textarea::placeholder { color: #888; font-style: italic; }
+.pf-from { font-size: 11px; color: #888; font-style: italic; white-space: nowrap; }
+.pf-reset, .pf-x, .pf-toggle, .pf-ai { font-size: 11px; padding: 0 5px; cursor: pointer; background: none; border: 1px solid #555; color: inherit; border-radius: 3px; }
+.pf-exits-head { margin-top: 8px; }
+.pf-exit { border: 1px solid #444; border-radius: 4px; padding: 4px 6px; margin: 4px 0; }
+.pf-exit-head { display: flex; gap: 6px; align-items: center; }
+.pf-exit-title { flex: 1; cursor: pointer; font-weight: bold; }
+.pf-exit.removed .pf-exit-title { text-decoration: line-through; opacity: .6; }
+.pf-exit-body { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
+.pf-door { margin-left: 1.5em; display: flex; flex-direction: column; gap: 4px; }
+.pf-errors li { color: #e55; }
+.pf-parent-notes { margin: -2px 0 8px; padding: 4px 8px; border-left: 2px solid #8884; font-size: 0.9em; }
+.pf-parent-note { opacity: 0.7; white-space: pre-wrap; }
+.pf-parent-note.off { text-decoration: line-through; opacity: 0.4; }
