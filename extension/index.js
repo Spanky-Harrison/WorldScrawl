@@ -7,7 +7,7 @@ import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitT
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -483,11 +483,11 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_flag',
         displayName: 'WorldScrawl: Flag a map change',
-        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together). The engine reviews the change after your reply. Do not call it for ordinary events.',
+        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action "discover" when the characters open a door the room description mentions that is not a listed exit. The engine handles it after your reply. Do not call it for ordinary events.',
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
+            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "discover": the characters go through a door (or stairs, hatch...) that the room description mentions but that is not one of its exits, e.g. one of the guest rooms off a hallway; the engine adds the room behind it. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
                 location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
@@ -497,6 +497,7 @@ function registerTools() {
                 if (w.error) return `Could not pass time: ${w.error}`;
                 pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.`;
             }
+            if (action === 'discover') { pendingFlag = { kind: 'discover', hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will add the room behind that door after your reply.'; }
             pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
         formatMessage: ({ action } = {}) => action === 'wait' || action === 'sleep' ? 'Passing time...' : 'Noting a map change...',
     });
@@ -2090,7 +2091,7 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. Never write it otherwise.';
+const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that the room description mentions but that is not one of its exits (e.g. one of the guest rooms off a hallway), end your reply with [ws_flag: discover | which door]. Never write it otherwise.';
 const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
@@ -2368,6 +2369,7 @@ const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_
 async function analyzeFlag(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f) return;
+    if (f.kind === 'discover') return analyzeDiscovery(id);
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
     f.status = 'working'; f.error = ''; delete f.proposal;
     renderPatchCards();
@@ -2409,11 +2411,53 @@ async function analyzeFlag(id) {
     }
 }
 
+// ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
+// room behind it is added as if it had always been there: one "discover" patch op (a new room with an engine-made id
+// and one door pair). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
+const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened, which the current room's description only mentioned. Reply with JSON only:
+{"name": "...", "description": "...", "direction": "exit name from the current room", "return_direction": "exit name back", "exit_description": "...", "return_description": "..."}
+name: short display name (e.g. "Guest Room"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. "east guest room", "green door"). return_direction: usually "out" or "hallway". exit_description / return_description: one sentence each about the door from each side.`;
+async function analyzeDiscovery(id) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
+    if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
+    f.status = 'working'; f.error = ''; delete f.proposal;
+    renderPatchCards();
+    try {
+        const r0 = await api('/discover/context', { method: 'POST', body: JSON.stringify({ location: f.loc, ...mapCtx() }) });
+        if (!r0.ok) throw new Error(r0.body?.detail?.error ?? r0.body?.detail ?? `map server answered ${r0.status}`);
+        const k = r0.body;
+        if (!k.expandable) { f.status = 'error'; f.error = `${k.name} can't have new rooms (it is marked "expandable": false).`; return; }
+        const exits = k.exits.map(x => `${x.direction} -> ${x.to}${x.description ? `: ${x.description}` : ''}`).join('\n') || 'none';
+        const near = k.neighbors.map(n => `${n.name} (${n.address}): ${clip(n.description, 300)}`).join('\n') || 'none';
+        const story = clip(storyText(chat, f.start, id), 4000);
+        const q = err => `Region: ${k.region_name}. ${k.region_notes}\nArea: ${k.area_name}. ${k.area_notes}\n\nCurrent room: ${k.name} (${k.location})\n${k.description}\nIts exits:\n${exits}\n\nRooms one step away:\n${near}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${f.note ? `The door: "${clip(f.note, 200)}".\n` : ''}${err ? `Your last answer did not fit: ${err}. Fix it.\n` : ''}Describe the room behind the door that was opened.`;
+        let preview = null, ops = null, err = '';
+        for (let tries = 0; tries < 2 && !preview; tries++) {
+            const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: DISCOVER_SYS, responseLength: 500 }));
+            if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
+            ops = [{ op: 'discover', loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) }];
+            const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
+            if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; } else err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
+        }
+        if (!preview) { f.status = 'error'; f.error = `The new room didn't fit the map: ${err}`; return; }
+        f.note = f.note || clip(preview.summary[0], 120);
+        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate ?? {}, before: preview.before, after: preview.after };
+        f.status = 'review';
+        if (!settings().reviewDiscoveries || settings().autoKeep) await keepFlag(id, { quiet: true });
+    } catch (e) {
+        f.status = 'error'; f.error = e.message;
+    } finally {
+        await c.saveChat?.();
+        renderPatchCards();
+        broadcastMapState();
+    }
+}
+
 /**
  * Flag message `id` as the place where a map change settled, and start the review. The one door for every trigger
  * (button, tool, tag, /ws-change, and future engine actions): opts {note, hint, start, source}.
  */
-export async function flagMessage(id, { note = '', hint = '', start = null, source = 'button' } = {}) {
+export async function flagMessage(id, { note = '', hint = '', start = null, source = 'button', kind = '' } = {}) {
     if (!isOn()) return 'WorldScrawl is off in this chat.';
     const c = ctx(), chat = c.chat ?? [];
     id = Number(id);
@@ -2422,10 +2466,10 @@ export async function flagMessage(id, { note = '', hint = '', start = null, sour
     await loadPatchLib();
     const loc = locationAt(id) ?? (await currentLocation()).address;
     msg.extra = msg.extra ?? {};
-    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: 'working' };
+    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: 'working', ...(kind === 'discover' ? { kind } : {}) };
     await c.saveChat?.();
     analyzeFlag(id);
-    return 'Checking what changed on the map…';
+    return kind === 'discover' ? 'Adding the room behind that door…' : 'Checking what changed on the map…';
 }
 globalThis.worldscrawlFlag = flagMessage;
 
@@ -2481,7 +2525,7 @@ async function discardFlag(id) {
 }
 
 /** A reply arrived: a [ws_flag: ...] tag in it (non-tools mode) or a ws_flag tool call flags it. */
-async function onReplyForFlags(id) {
+export async function onReplyForFlags(id) {
     if (!isOn()) return;
     const c = ctx(), msg = c.chat?.[id];
     if (!msg || msg.is_user || msg.is_system) return;
@@ -2497,7 +2541,8 @@ async function onReplyForFlags(id) {
         if ((kind === 'wait' || kind === 'sleep') && !pendingWait) {
             const w = await planWait(rest.join('|'), kind === 'sleep');
             if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error);
-        } else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
+        } else if (kind === 'discover') flag ??= { kind: 'discover', hint: '', note: rest.join('|').trim(), source: 'tag' };
+        else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
         await c.saveChat?.();
     }
     const wt = WAIT_TAG.exec(msg.mes ?? '');
@@ -2729,6 +2774,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Map changes</div>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
+      <label class="checkbox_label"><input id="worldscrawl_review_discoveries" type="checkbox"> Ask before adding a discovered room (show the Keep / Discard card)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
@@ -2760,6 +2806,9 @@ function addSettingsPanel() {
     const autoKeep = document.getElementById('worldscrawl_auto_keep');
     autoKeep.checked = !!settings().autoKeep;
     autoKeep.addEventListener('change', () => { settings().autoKeep = autoKeep.checked; ctx().saveSettingsDebounced(); });
+    const reviewDisc = document.getElementById('worldscrawl_review_discoveries');
+    reviewDisc.checked = !!settings().reviewDiscoveries;
+    reviewDisc.addEventListener('change', () => { settings().reviewDiscoveries = reviewDisc.checked; ctx().saveSettingsDebounced(); });
     const flagTags = document.getElementById('worldscrawl_flag_tags');
     flagTags.checked = !!settings().flagTags;
     flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });

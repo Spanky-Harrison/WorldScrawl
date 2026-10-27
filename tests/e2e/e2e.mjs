@@ -1344,6 +1344,54 @@ try {
     try { await ui.waitForSelector(`.node[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
     check('map shows the original rooms again', await ui.locator(`.node[data-id="${CR}"]`).count() === 1 && await ui.locator(`.node[data-id="${BURNT}"]`).count() === 0);
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), tA); await page.waitForTimeout(1500);
+    // ---- Discovery rooms: a door the description only mentions is opened; the room behind it is added at once.
+    const UPST = 'riverton:drowned_rat/upstairs';
+    const roomsNow = async addrs => { const x = await page.evaluate(async mod => { const m = await import(mod); return { changes: m.chatChanges(), now: m.chatElapsed(), world: SillyTavern.getContext().extensionSettings.worldscrawl.world || '' }; }, wsMod);
+        const r = await stFetch(`/rooms${x.world ? `?world=${encodeURIComponent(x.world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addresses: addrs, changes: x.changes, now: x.now }) }); return r.ok ? (await r.json()).rooms : r.text; };
+    const upDesc0 = (await roomsNow([UPST]))?.[0]?.description;
+    const ROOMJ = JSON.stringify({ name: 'End Guest Room', description: 'A low room with a narrow bed and a washstand under the eaves.', direction: 'end guest room', return_direction: 'hallway', exit_description: 'A plain door at the end of the hall.', return_description: 'The door back to the hallway.' });
+    await queue([{ content: ROOMJ }]);
+    const nDisc = await page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext();
+        c.chat.push({ name: 'User', is_user: true, mes: 'I try the door at the end of the hall.', extra: { worldscrawl_location: UPST, worldscrawl_intent_checked: true } },
+            { name: 'Narrator', is_user: false, mes: 'The door creaks open. [ws_flag: discover | the door at the end of the hall]', extra: {} });
+        await c.saveChat();
+        const id = c.chat.length - 1; await m.onReplyForFlags(id); return id;
+    }, [wsMod, UPST]);
+    try { await page.waitForFunction(id => SillyTavern.getContext().chat[id]?.extra?.worldscrawl_patches?.length, nDisc, { timeout: 20000 }); } catch {}
+    const disc = await page.evaluate(id => { const m = SillyTavern.getContext().chat[id]; return { mes: m.mes, f: m.extra.worldscrawl_flag, p: m.extra.worldscrawl_patches?.[0] }; }, nDisc);
+    const DROOM = 'riverton:drowned_rat/end_guest_room';
+    check('discovery: the [ws_flag: discover] tag is stripped and the room is stamped at once (no review card)', !/ws_flag/.test(disc.mes) && disc.f?.status === 'kept' && disc.p?.ops?.[0]?.op === 'discover' && disc.p.ops[0].id === 'end_guest_room', JSON.stringify(disc));
+    const discCard = page.locator(`#chat .mes[mesid="${nDisc}"] .worldscrawl_patchcard`);
+    check('discovery: no Keep / Discard buttons', await discCard.locator('.worldscrawl_card_btn', { hasText: 'Discard' }).count() === 0);
+    const dReqs = await (await fetch(`${FAKE}/__requests`)).json();
+    const dPrompt = JSON.stringify(dReqs[dReqs.length - 1]);
+    check('discovery: the model sees the room, its neighbours and the area notes', /Upstairs Rooms/.test(dPrompt) && /Common Room/.test(dPrompt) && /Area: /.test(dPrompt), dPrompt.slice(0, 300));
+    const after = await roomsNow([UPST, DROOM]);
+    check('discovery: the new room exists, the hallway text is untouched', after?.length === 2 && after.some(r => r.name === 'End Guest Room') && after.find(r => r.address === UPST || r.name === 'Upstairs Rooms')?.description === upDesc0, JSON.stringify(after));
+    // Standing in the discovered room, then turning the discovery off: the party is moved back to the hallway.
+    const offDisc = await page.evaluate(async ([mod, id, DROOM]) => {
+        const m = await import(mod), c = SillyTavern.getContext();
+        c.chat.push({ name: 'User', is_user: true, mes: 'I step inside.', extra: { worldscrawl_location: DROOM, worldscrawl_intent_checked: true } }); await c.saveChat();
+        const pid = c.chat[id].extra.worldscrawl_patches[0].id;
+        const r = await m.toggleChange(id, pid, { choice: 'one' });
+        const st = await m.mapState();
+        return { r, loc: st.location, off: c.chat[id].extra.worldscrawl_patches[0].off };
+    }, [wsMod, nDisc, DROOM]);
+    check('discovery: turning it off while standing in it moves the party to the hallway', offDisc.off === true && offDisc.loc === UPST, JSON.stringify(offDisc));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n - 1); await c.saveChat(); await c.reloadCurrentChat(); }, nDisc); await page.waitForTimeout(1500);
+    // With "Ask before adding a discovered room" on, a review card comes instead.
+    await queue([{ content: ROOMJ }]);
+    const rev = await page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext(); m.settings().reviewDiscoveries = true;
+        c.chat.push({ name: 'Narrator', is_user: false, mes: 'The door opens.', extra: { worldscrawl_location: UPST } }); await c.saveChat();
+        const id = c.chat.length - 1; await m.flagMessage(id, { kind: 'discover', note: 'end door', source: 'tag' });
+        for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
+        m.settings().reviewDiscoveries = false;
+        return { id, status: c.chat[id].extra.worldscrawl_flag?.status, stamped: !!c.chat[id].extra.worldscrawl_patches };
+    }, [wsMod, UPST]);
+    check('discovery review setting: a Keep / Discard card, nothing stamped yet', rev.status === 'review' && !rev.stamped, JSON.stringify(rev));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, rev.id); await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
