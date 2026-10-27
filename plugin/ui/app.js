@@ -132,7 +132,8 @@ async function renderInspector(side, target, ctx) {
     tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
     const resolvedPane = () => {
         const tbl = $('table', { class: 'resolved' });
-        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('td', { class: `src${r.source === 'own' ? ' own' : ''}` }, r.source)));
+        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'own' ? ' own' : ''}` }, r.source))));
+        addColResizer(tbl);
         const out = [tbl];
         if (d.kind === 'room' && ctx.room) {
             const ul = $('ul', { class: 'exitlinks' });
@@ -166,7 +167,8 @@ async function renderInspector(side, target, ctx) {
         }
         if (changes.length) rows.push(['Changed by', changes.map(c => `${c.msg === null || c.msg === undefined ? 'a patch' : `message #${c.msg}`}${c.note ? ` (${c.note})` : ''}`).join('; ')]);
         const tbl = $('table', { class: 'resolved' });
-        for (const [k, v] of rows) tbl.append($('tr', {}, $('th', {}, k), $('td', { colspan: '2' }, v)));
+        for (const [k, v] of rows) tbl.append($('tr', {}, $('th', {}, k), $('td', {}, v)));
+        addColResizer(tbl);
         return [tbl];
     };
     const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Delete the message to undo one.' : 'Map changes from this chat that touch this. Delete the message to undo one.'),
@@ -233,9 +235,47 @@ export async function knownRooms(st) {
 const NODE_W = 160, NODE_H = 46;
 const savedLayout = key => { try { return JSON.parse(localStorage.getItem(`worldscrawl_layout:${key}`) ?? 'null'); } catch { return null; } };
 const saveLayout = (key, pos) => { try { localStorage.setItem(`worldscrawl_layout:${key}`, JSON.stringify(Object.fromEntries(pos))); } catch {} };
+// ---- Draggable partitions (sizes persist in localStorage; double-click resets).
+const SIZE_KEY = 'worldscrawl_sizes';
+const sizes = (() => { try { return JSON.parse(localStorage.getItem(SIZE_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+const saveSizes = () => { try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch {} };
+const portrait = () => matchMedia('(orientation: portrait)').matches;
+const sideKey = () => `side:${portrait() ? 'p' : 'l'}${document.body.classList.contains('editor') ? ':ed' : ''}`;
+function applySide(side) { const v = sizes[sideKey()]; side.style.flexBasis = v ? `${v}px` : ''; side.classList.toggle('sized', !!v); }
+function dragger(el, onMove, onEnd) {
+    el.addEventListener('pointerdown', ev => {
+        ev.preventDefault(); ev.stopPropagation(); el.setPointerCapture(ev.pointerId); el.classList.add('active');
+        const move = e => onMove(e), up = () => { el.classList.remove('active'); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); onEnd(); };
+        el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    });
+}
+function makeSplitter(side) {
+    const sp = $('div', { class: 'splitter', title: 'Drag to resize, double-click to reset' });
+    dragger(sp, e => {
+        const body = side.parentElement.getBoundingClientRect(), p = portrait();
+        const total = p ? body.height : body.width, raw = p ? body.bottom - e.clientY : body.right - e.clientX;
+        const v = Math.round(Math.max(160, Math.min(total - 120, raw)));
+        sizes[sideKey()] = v; applySide(side);
+    }, saveSizes);
+    sp.addEventListener('dblclick', () => { delete sizes[sideKey()]; saveSizes(); applySide(side); });
+    applySide(side);
+    new MutationObserver(() => applySide(side)).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    matchMedia('(orientation: portrait)').addEventListener('change', () => applySide(side));
+    return sp;
+}
+function addColResizer(tbl) {
+    const apply = () => tbl.style.setProperty('--ws-keycol', sizes.keycol ? `${sizes.keycol}px` : '');
+    apply();
+    const first = tbl.querySelector('th'); if (!first) return;
+    const h = $('span', { class: 'colresize', title: 'Drag to resize, double-click to reset' });
+    first.append(h);
+    dragger(h, e => { const r = tbl.getBoundingClientRect(); sizes.keycol = Math.round(Math.max(50, Math.min(r.width - 80, e.clientX - r.left))); for (const t of document.querySelectorAll('table.resolved')) t.style.setProperty('--ws-keycol', `${sizes.keycol}px`); }, saveSizes);
+    h.addEventListener('dblclick', () => { delete sizes.keycol; saveSizes(); for (const t of document.querySelectorAll('table.resolved')) t.style.removeProperty('--ws-keycol'); });
+}
+
 function createMapWindow(win) {
     const body = $('div', { class: 'wsbody' }), view = $('div', { class: 'mapview' }), side = $('aside', { class: 'side' });
-    win.append(body); body.append(view, side);
+    win.append(body); body.append(view, makeSplitter(side), side);
     const svg = S('svg'), world = S('g');
     svg.append(world);
     const legend = $('div', { class: 'legend' });
