@@ -9,7 +9,7 @@ export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
     set_notes: 'Rewrite area notes', update_area: 'Rename area / rewrite its notes', append_notes: 'Add to area notes',
     block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
-    remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door',
+    remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms',
 };
 /** The fields each op type has (besides "op" and "lasts"), and which are required. */
 export const OP_FIELDS = {
@@ -22,6 +22,7 @@ export const OP_FIELDS = {
     remove_location: [['loc', 1]],
     merge: [['locs', 1], ['into', 0], ['name', 0], ['description', 0], ['area', 0]],
     discover: [['loc', 1], ['direction', 1], ['name', 1], ['description', 1], ['return_direction', 0], ['exit_description', 0], ['return_description', 0], ['id', 0]],
+    set_expandable: [['target', 1], ['value', 1]],
 };
 const s = v => (typeof v === 'string' ? v.trim() : v === null || v === undefined ? '' : String(v).trim());
 
@@ -141,7 +142,7 @@ export function buildPatchForm(doc, opts = {}) {
             box.append(head);
             const set = k => v => { d[k] = v; };
             for (const [k, req] of OP_FIELDS[d.op] ?? []) {
-                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Notes' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)' }[k] ?? k}${req ? '' : ' (optional)'}`;
+                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Notes' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)', target: 'Room, area (region:subregion) or region', value: 'true, false or inherit' }[k] ?? k}${req ? '' : ' (optional)'}`;
                 if (k === 'text') box.append(field(lab, d.op === 'set_name' ? input(d.text, set('text')) : area(d.text, set('text'))));
                 else if (k === 'notes') box.append(field('New notes (optional)', area(d.notes, set('notes'))));
                 else if (k === 'description') box.append(field(lab, area(d.description, set('description'))));

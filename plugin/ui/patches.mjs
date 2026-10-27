@@ -17,11 +17,14 @@
 //   {op: "discover", loc, direction, name, description, id?, return_direction?, exit_description?, return_description?, door?}
 //       A room found behind set dressing (a door the description only mentions): a new room `id` (made by the engine
 //       from the name when missing, stamped with the patch) in loc's subregion, joined to loc by one exit pair (a door
-//       unless door: false). Refused on rooms with "expandable": false. Written as if it was always there.
+//       unless door: false). Refused where "expandable" is false (the room's own setting, else its subregion's, else
+//       its region's, else world.json's; default true). Written as if it was always there.
+//   {op: "set_expandable", target, value}   target: a room, "region:sub" or "region"; value true, false or null
+//       (null / "inherit": drop the setting so the next level up decides).
 
 import { parseDuration } from './calendar.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover'];
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable'];
 export const MAX_OPS = 20, MAX_TEXT = 1500, MAX_PATCH_NAME = 60;
 
 export class PatchError extends Error {}
@@ -115,6 +118,7 @@ export function normalizeOp(raw, op) {
     if (!isObj(op)) return op;
     const o = { ...op };
     for (const k of ['loc', 'into']) if (typeof o[k] === 'string' && o[k].trim()) o[k] = resolveRoom(raw, o[k]);
+    if (o.op === 'set_expandable') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
     if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
     if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
     if (o.op === 'merge' && typeof o.id === 'string' && o.id.trim()) {
@@ -148,7 +152,7 @@ const nameOf = (raw, a) => getRoom(raw, a)?.name ?? a;
  * Returns {summary: [readable lines], relocate: {oldAddress: newAddress}, touched: [addresses and areas]}.
  * Throws PatchError with a clear message on an invalid op.
  */
-export function applyPatch(raw, patch, { now = null, where = 'patch', dropNoops = false } = {}) {
+export function applyPatch(raw, patch, { now = null, where = 'patch', dropNoops = false, world = null } = {}) {
     if (!isObj(patch) || !Array.isArray(patch.ops)) throw new PatchError(`${where}: "ops" must be a list`);
     if (!patch.ops.length) throw new PatchError(`${where}: no ops`);
     if (patch.ops.length > MAX_OPS) throw new PatchError(`${where}: at most ${MAX_OPS} ops`);
@@ -163,7 +167,7 @@ export function applyPatch(raw, patch, { now = null, where = 'patch', dropNoops 
         if (!isObj(op) || !OPS.includes(op.op)) throw new PatchError(`${w}: unknown op ${JSON.stringify(isObj(op) ? op.op : op)} (known: ${OPS.join(', ')})`);
         if (has(op, 'lasts')) { try { parseLasts(op.lasts); } catch (e) { throw new PatchError(`${w}: ${e.message}`); } }
         if (!opActive(op, patch, now)) return;
-        const line = applyOp(raw, op, w, out);
+        const line = applyOp(raw, op, w, out, world);
         out.summary.push(has(op, 'lasts') ? `${line} (for ${str(String(op.lasts))})` : line);
     });
     if (!out.ops.length) throw new PatchError(`${where}: nothing changes (${out.noops.map(n => n.why).join('; ')})`);
@@ -208,7 +212,7 @@ const relocateTo = (out, from, to) => {
     if (from !== to) out.relocate[from] = to;
 };
 
-function applyOp(raw, op, w, out) {
+function applyOp(raw, op, w, out, world = null) {
     switch (op.op) {
         case 'set_description': case 'append_description': case 'set_name': {
             const a = str(op.loc), r = needRoom(raw, a, w), t = needText(op, w, 'text', op.op === 'set_name' ? MAX_PATCH_NAME : MAX_TEXT);
@@ -256,14 +260,38 @@ function applyOp(raw, op, w, out) {
         }
         case 'remove_location': return removeOp(raw, op, w, out);
         case 'merge': return mergeOp(raw, op, w, out);
-        case 'discover': return discoverOp(raw, op, w, out);
+        case 'discover': return discoverOp(raw, op, w, out, world);
+        case 'set_expandable': {
+            const t = str(op.target), p = split(t), [rid, sid] = p ?? t.split(':');
+            const obj = p ? getRoom(raw, t) : sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+            if (!isObj(obj) || !rid) throw new PatchError(`${w}: "target" ${JSON.stringify(op.target)} is not a room, subregion ("region:subregion") or region ("region")`);
+            const v = expandValue(op.value, w);
+            if (v === null) delete obj.expandable; else obj.expandable = v;
+            out.touched.push(t);
+            return `${obj.name ?? t}: ${v === null ? 'discoveries follow the level above' : v ? 'new rooms can be discovered' : 'no new rooms can be discovered'}`;
+        }
     }
     throw new PatchError(`${w}: unknown op`);
 }
 
-function discoverOp(raw, op, w, out) {
+/** "expandable" for a room: its own setting, else its subregion's, else its region's, else world.json's; default true. */
+export function expandableOf(raw, address, world = null) {
+    const p = split(address); if (!p) return true;
+    const reg = raw[p[0]], sub = reg?.subregions?.[p[1]], room = sub?.locations?.[p[2]];
+    for (const o of [room, sub, reg, world]) if (isObj(o) && typeof o.expandable === 'boolean') return o.expandable;
+    return true;
+}
+function expandValue(v, w) {
+    if (v === true || v === false || v === null || v === undefined) return v ?? null;
+    const t = String(v).trim().toLowerCase();
+    if (t === 'true' || t === 'yes') return true;
+    if (t === 'false' || t === 'no') return false;
+    if (t === '' || t === 'null' || t === 'inherit') return null;
+    throw new PatchError(`${w}: "value" must be true, false or inherit`);
+}
+function discoverOp(raw, op, w, out, world = null) {
     const a = str(op.loc), r = needRoom(raw, a, w), [rid, sid] = split(a);
-    if (r.expandable === false) throw new PatchError(`${w}: ${r.name} can't be expanded (it is marked "expandable": false)`);
+    if (!expandableOf(raw, a, world)) throw new PatchError(`${w}: ${r.name} can't be expanded ("expandable" is false for it or its area)`);
     const name = needText(op, w, 'name', MAX_PATCH_NAME), desc = needText(op, w, 'description');
     const dir = needText(op, w, 'direction', 60), back = str(op.return_direction) || 'out';
     if (back.length > 60) throw new PatchError(`${w}: "return_direction" is too long (at most 60 characters)`);
