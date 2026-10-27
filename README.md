@@ -451,16 +451,20 @@ Real-world Köppen climates. Use the id or the code.
 | `tropical_savanna_dry_summer` | As | Hot all year; the rains come in winter instead | Chennai, India; Mombasa, Kenya; Fortaleza, Brazil |
 | `tundra` | ET | Cold all year; a brief cool thaw | Nuuk; Barrow (Utqiaġvik); Svalbard |
 
-## Editor mode (read-only inspector)
+## Editor mode (inspector and live edits)
 
 In the map window (WorldScrawl GUI), the **Editor** button in the top bar switches to editor mode. It shows the whole world (every room and door, not just what the party has discovered) and works even with no chat open (it then shows the default world). Click a room, an area box, an exit line/stub, an exit in a room's exit list, or the ⓘ button by the breadcrumb (the current world/region/area) to open the inspector beside the map:
 
-- **Resolved**: the effective value of every field, each with where it came from (`own`, `from subregion`, `from region`, `default`, `from type "portal"`, or for an inherited barrier `from <room> side (<direction>)`).
-- **Raw**: the JSON exactly as written in the world file.
+- **Resolved**: the live value of every field: the world file plus inheritance plus every map change in this chat. A room shows its own description, name, address and notes settings too. Each value says where it came from (`from file`, `from subregion`, `from region`, `default`, `from type "portal"`, or for an inherited barrier `from <room> side (<direction>)`, or `from message #N` when a map change in the chat set it).
+- **Raw**: the JSON exactly as written in the world file (map changes never show here).
 - **State**: the chat's clock (and the latest wait or sleep, with its message number), the weather at that room (temperature, feels-like, inside temperature) and, for an exit, whether its door is open, closed or locked right now.
 - **Warnings**: the loader warnings that concern the clicked item (served by `GET /api/plugins/worldscrawl/inspect?target=…`; `GET …/inspect/index` lists rooms, doors and the warning count).
 
-The inspector never changes anything. Click **Editor** again to return to the normal (play) map.
+Rooms that a map change in this chat touched get a small orange dot on the map.
+
+**Edit live**: with a WorldScrawl chat open in SillyTavern, the inspector's **Edit live** button (on a room, an area or an exit) opens the change editor, prefilled from what you clicked (a room's description, an area's notes, or blocking an exit). Edit it, add or remove changes, and click **Save to chat**. The SillyTavern tab then adds a short hidden line to the chat, like "Map edit: Common Room: description rewritten". The model never sees that line, but the change applies from there on. Delete the line to undo the change. World files are never written. If something doesn't fit the map, the error shows next to the field it concerns and nothing is saved.
+
+Click **Editor** again to return to the normal (play) map.
 
 ## Map changes during play (fires, collapses, new doors)
 
@@ -469,6 +473,8 @@ Sometimes the story changes the map: a bridge collapses, a fire guts a room, or 
 **For players**
 - To flag a reply that changed the map, click the 🚩 flag button on it, or type `/ws-change` (you can add a note, like `/ws-change the roof caved in`). The narrator can also flag a reply on its own.
 - WorldScrawl reads the last few messages and suggests a change, then shows a **Keep / Discard** card with a before/after view. You can move the start of the range on the card and click **Check again**.
+- Click **Edit** on the card to change the suggestion before keeping it. Every part shows as a form: text boxes for descriptions and notes, a pick list and place for exits, and for a merge the places to merge (add or remove them), the place to keep or a new id, name, description and area. Every part also has a **lasts** box (for example `2d`; leave it empty for permanent). You can add or remove parts. **Keep edited** checks the whole change against the map. Problems show inline, and nothing is kept until it fits. What gets stamped is exactly what the form shows.
+- A kept change has an **Edit** button too. Change it and click **Save change**, and it is re-stamped on the same message.
 - Kept changes belong to that message and that swipe. If you delete the message, the change is undone. You can also click **Undo** on the card.
 - If you want changes applied without the card, turn on **Auto-keep map changes** in the settings. You can also turn off the narrator's flag tags there.
 - A change can be temporary (for example, "lasts": "2d"). It ends when that much game time has passed.

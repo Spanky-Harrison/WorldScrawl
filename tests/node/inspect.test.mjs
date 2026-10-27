@@ -53,7 +53,7 @@ test('inspector labels sources: inherited place fields and the inherited barrier
     assert.deepEqual(d.raw, { direction: 'west', to: 'a' });
     assert.match(row(d, 'barrier.locked').source, /^from A side/);
     [s, d] = get(c, 'sub:r:s');
-    assert.equal(row(d, 'exposure').source, 'own');
+    assert.equal(row(d, 'exposure').source, 'from file');
     assert.equal(row(d, 'fixed_weather').value, null);
     assert.equal(get(c, 'exit:r:s/a|nowhere')[0], 404);
     assert.equal(get(c, 'world')[1].kind, 'world');
