@@ -2,22 +2,25 @@
 // map window's "Edit live" button. The pure helpers (cleanOp, formOps, checkOps, errorsByOp, blankOp, liveOps) run in
 // node too; buildPatchForm needs a DOM `document`. The form never changes the map itself: the caller previews the
 // ops on the server and stamps them on a chat message.
-import { OPS, parseLasts } from './patches.mjs';
+import { OPS, parseLasts, newRoomId } from './patches.mjs';
 
 export const EXIT_OPS = ['block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit'];
 export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
-    set_notes: 'Rewrite area notes', append_notes: 'Add to area notes',
-    block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove',
+    set_notes: 'Rewrite area notes', update_area: 'Rename area / rewrite its notes', append_notes: 'Add to area notes',
+    block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
     remove_location: 'Remove place', merge: 'Merge places',
 };
 /** The fields each op type has (besides "op" and "lasts"), and which are required. */
 export const OP_FIELDS = {
     set_description: [['loc', 1], ['text', 1]], append_description: [['loc', 1], ['text', 1]], set_name: [['loc', 1], ['text', 1]],
+    update_area: [['area', 1], ['name', 0], ['notes', 0]],
     set_notes: [['area', 1], ['text', 1]], append_notes: [['area', 1], ['text', 1]],
     ...Object.fromEntries(EXIT_OPS.map(o => [o, [['loc', 1], ['direction', 1]]])),
+    set_exit_description: [['loc', 1], ['direction', 1], ['text', 1]],
+    set_travel_time: [['loc', 1], ['direction', 1], ['time', 1]],
     remove_location: [['loc', 1]],
-    merge: [['locs', 1], ['into', 0], ['id', 0], ['name', 0], ['description', 0], ['area', 0]],
+    merge: [['locs', 1], ['into', 0], ['name', 0], ['description', 0], ['area', 0]],
 };
 const s = v => (typeof v === 'string' ? v.trim() : v === null || v === undefined ? '' : String(v).trim());
 
@@ -46,10 +49,10 @@ export function checkOps(ops) {
             if (!req) continue;
             if (k === 'locs' ? !(op.locs?.length) : !s(op[k])) errs.push({ i, error: `"${k}" is required.` });
         }
+        if (op.op === 'update_area' && !s(op.name) && !s(op.notes)) errs.push({ i, error: 'Give the area a new name and/or notes.' });
         if (op.op === 'merge') {
             if (op.into && !op.locs?.includes(op.into)) errs.push({ i, error: '"Keep as" must be one of the merged places.' });
-            if (!op.into && (!s(op.id) || !s(op.name) || !s(op.description))) errs.push({ i, error: 'A merge into a new place needs an id, a name and a description (or pick one place to keep).' });
-            if (op.id && !/^[a-z0-9]+(_[a-z0-9]+)*$/.test(op.id)) errs.push({ i, error: '"id" must be lowercase letters, digits and single underscores.' });
+            if (!op.into && (!s(op.name) || !s(op.description))) errs.push({ i, error: 'A merge into a new place needs a name and a description (or pick one place to keep).' });
         }
         if (op.lasts) { try { parseLasts(op.lasts); } catch (e) { errs.push({ i, error: e.message }); } }
     });
@@ -96,15 +99,38 @@ export function buildPatchForm(doc, opts = {}) {
     const dl = (id, vals) => { const d = mk('datalist', { id }); for (const v of vals ?? []) d.append(mk('option', { value: v })); return d; };
     lists.append(dl(`${uid}-rooms`, opts.rooms), dl(`${uid}-areas`, opts.areas));
     const stop = el => { for (const ev of ['click', 'keydown', 'keyup', 'input', 'mousedown']) el.addEventListener(ev, e => e.stopPropagation()); return el; };
-    const input = (val, on, attrs = {}) => stop(st(mk('input', { type: 'text', value: val ?? '', class: 'text_pole wspf-in', ...attrs, oninput: e => on(e.target.value) }), 'width:100%;box-sizing:border-box;margin:0;'));
-    const area = (val, on) => { const t = stop(st(mk('textarea', { class: 'text_pole wspf-text', rows: '4', oninput: e => on(e.target.value) }), 'width:100%;box-sizing:border-box;min-height:5em;resize:vertical;margin:0;')); t.value = val ?? ''; return t; };
+    const input = (val, on, attrs = {}) => stop(st(mk('input', { type: 'text', value: val ?? '', class: 'text_pole wspf-in', ...attrs, oninput: e => on(e.target.value) }), 'width:100%;box-sizing:border-box;margin:0;border:1px solid var(--SmartThemeBorderColor, #888);background-color:var(--black30a, rgba(0,0,0,0.3));color:var(--SmartThemeBodyColor, inherit);border-radius:4px;padding:3px 5px;'));
+    const area = (val, on) => { const t = stop(st(mk('textarea', { class: 'text_pole wspf-text', rows: '4', oninput: e => on(e.target.value) }), 'width:100%;box-sizing:border-box;min-height:5em;resize:vertical;margin:0;border:1px solid var(--SmartThemeBorderColor, #888);background-color:var(--black30a, rgba(0,0,0,0.3));color:var(--SmartThemeBodyColor, inherit);border-radius:4px;padding:3px 5px;')); t.value = val ?? ''; return t; };
     const field = (label, ctl) => st(mk('label', {}, st(mk('span', { text: label }), 'display:block;font-size:0.85em;opacity:0.8;'), ctl), 'display:block;');
     const btn = (label, on, title = '') => stop(st(mk('button', { type: 'button', class: 'menu_button wspf-btn', title, onclick: e => { e.preventDefault(); on(); } }, label), 'display:inline-block;width:auto;padding:2px 8px;margin:0 4px 0 0;font-size:0.9em;cursor:pointer;'));
-    const select = (val, choices, on) => { const el = stop(st(mk('select', { class: 'text_pole wspf-sel', onchange: e => on(e.target.value) }), 'width:auto;margin:0;')); for (const [v, l] of choices) { const o = mk('option', { value: v, text: l }); if (v === val) o.selected = true; el.append(o); } return el; };
+    const select = (val, choices, on) => { const el = stop(st(mk('select', { class: 'text_pole wspf-sel', onchange: e => on(e.target.value) }), 'width:auto;margin:0;border:1px solid var(--SmartThemeBorderColor, #888);background-color:var(--black30a, rgba(0,0,0,0.3));color:var(--SmartThemeBodyColor, inherit);border-radius:4px;padding:3px 5px;')); for (const [v, l] of choices) { const o = mk('option', { value: v, text: l }); if (v === val) o.selected = true; el.append(o); } return el; };
+    // Places and areas are always picked from the map, never typed: labels are friendly names ("Common Room (Drowned Rat)").
+    const pretty = id => String(id).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const roomLabel = a => opts.names?.[a] ?? (a.includes('/') ? `${pretty(a.split('/').pop())} (${pretty(a.split('/')[0].split(':').pop())})` : a);
+    const areaLabel = a => opts.areaNames?.[a] ?? (a.includes(':') ? `${pretty(a.split(':')[1])} (in ${pretty(a.split(':')[0])})` : `${pretty(a)} (region)`);
+    const picker = (val, list, label, on, blank) => {
+        const vals = [...new Set([...(list ?? [])])].sort((x, y) => label(x).localeCompare(label(y)));
+        const tail = String(val ?? '').trim().toLowerCase().split(/[:/]/).pop().replace(/[^a-z0-9]+/g, '_');
+        const amb = val && !vals.includes(val) ? vals.filter(v => v.includes('/') && v.toLowerCase().endsWith(`/${tail}`)) : [];
+        if (amb.length > 1) { // ambiguous reference: ask which one instead of guessing
+            const el = select('', [['', `"${val}" could be several places — which one?`], ...amb.map(v => [v, label(v)]), ...vals.filter(v => !amb.includes(v)).map(v => [v, label(v)])], on);
+            el.style.width = '100%'; el.classList.add('wspf-pick', 'wspf-ambig'); return el;
+        }
+        if (val && !vals.includes(val)) vals.unshift(val); // keep an unknown value visible so the error next to it makes sense
+        const el = select(val ?? '', [['', blank], ...vals.map(v => [v, label(v)])], on);
+        el.style.width = '100%'; el.classList.add('wspf-pick'); return el;
+    };
+    const roomPick = (val, on, blank = '— pick a place —') => picker(val, opts.rooms, roomLabel, on, blank);
+    const areaPick = (val, on, blank = '— pick an area —') => picker(val, opts.areas, areaLabel, on, blank);
+    let noops = [];
     const rowsBox = mk('div');
     const top = st(mk('div', { class: 'wspf-error' }), 'color:#e66;');
-    function render() {
+    let drawn = false;
+    const changed = () => { if (drawn) opts.onChange?.(formOps(drafts)); };
+    function render(quiet = false) {
         rowsBox.replaceChildren();
+        if (!quiet) queueMicrotask(changed);
+        drawn = true;
         top.textContent = errors.filter(e => e.i === null || e.i >= drafts.length).map(e => e.error).join(' ');
         drafts.forEach((d, i) => {
             const box = st(mk('div', { class: 'wspf-op', 'data-op': d.op }), 'border:1px solid var(--SmartThemeBorderColor, #666);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px;');
@@ -114,24 +140,30 @@ export function buildPatchForm(doc, opts = {}) {
             box.append(head);
             const set = k => v => { d[k] = v; };
             for (const [k, req] of OP_FIELDS[d.op] ?? []) {
-                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Notes' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: 'New name', description: 'New description', area_m: 'Area' }[k] ?? k}${req ? '' : ' (optional)'}`;
+                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Notes' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area' }[k] ?? k}${req ? '' : ' (optional)'}`;
                 if (k === 'text') box.append(field(lab, d.op === 'set_name' ? input(d.text, set('text')) : area(d.text, set('text'))));
+                else if (k === 'notes') box.append(field('New notes (optional)', area(d.notes, set('notes'))));
                 else if (k === 'description') box.append(field(lab, area(d.description, set('description'))));
-                else if (k === 'loc') box.append(field(lab, input(d.loc, v => { d.loc = v; }, { list: `${uid}-rooms` })));
-                else if (k === 'area') box.append(field(d.op === 'merge' ? 'Area for the merged place (optional)' : lab, input(d.area, set('area'), { list: `${uid}-areas` })));
+                else if (k === 'loc') box.append(field(lab, roomPick(d.loc, v => { d.loc = v; render(); })));
+                else if (k === 'area') box.append(field(d.op === 'merge' ? 'Area for the merged place (optional)' : lab.replace(' (region or region:subregion)', ''), areaPick(d.area, set('area'), d.op === 'merge' ? '— same as the kept place —' : undefined)));
                 else if (k === 'direction') {
                     const known = opts.exits?.[s(d.loc)] ?? [];
                     box.append(field(lab, input(d.direction, set('direction'), { list: `${uid}-ex-${i}` })), dl(`${uid}-ex-${i}`, known));
                 } else if (k === 'locs') {
                     const ul = st(mk('ul', { class: 'wspf-locs' }), 'margin:0;padding-left:1.2em;');
-                    (d.locs ??= []).forEach((a, j) => ul.append(mk('li', {}, `${a} `, btn('×', () => { d.locs.splice(j, 1); if (d.into === a) d.into = ''; render(); }, 'Take this place out of the merge'))));
-                    let add = '';
-                    const addIn = input('', v => { add = v; }, { list: `${uid}-rooms`, placeholder: 'region:area/place' });
-                    box.append(field(lab, ul), st(mk('div', {}, addIn, btn('Add place', () => { const a = s(add); if (a && !d.locs.includes(a)) d.locs.push(a); render(); })), 'display:flex;gap:4px;'));
-                } else if (k === 'into') box.append(field(lab, select(d.into ?? '', [['', 'a new place (give id, name, description)'], ...(d.locs ?? []).map(a => [a, a])], v => { d.into = v; render(); })));
-                else box.append(field(lab, input(d[k], set(k))));
+                    (d.locs ??= []).forEach((a, j) => ul.append(mk('li', { title: a }, `${roomLabel(a)} `, btn('×', () => { d.locs.splice(j, 1); if (d.into === a) d.into = ''; render(); }, 'Take this place out of the merge'))));
+                    const addIn = picker('', (opts.rooms ?? []).filter(a => !d.locs.includes(a)), roomLabel, v => { if (v && !d.locs.includes(v)) d.locs.push(v); render(); }, '+ add a place to merge…');
+                    box.append(field(lab, ul), addIn);
+                } else if (k === 'into') box.append(field(lab, select(d.into ?? '', [['', 'a new place (give name, description)'], ...(d.locs ?? []).map(a => [a, roomLabel(a)])], v => { d.into = v; render(); })));
+                else if (k === 'name' && d.op === 'merge') {
+                    const idNote = st(mk('span', { class: 'wspf-newid' }), 'font-size:0.8em;opacity:0.7;');
+                    const show = v => { idNote.textContent = d.into || !s(v) ? '' : `new place id: ${newRoomId(v)} (from the name; _2 is added if taken)`; };
+                    box.append(field(lab, input(d.name, v => { d.name = v; show(v); })), idNote); show(d.name);
+                } else box.append(field(lab, input(d[k], set(k))));
             }
             box.append(field('Lasts (optional, e.g. 3d, 12h; empty = permanent)', input(d.lasts, set('lasts'), { placeholder: 'permanent' })));
+            const nop = noops.find(n => n.i === i);
+            if (nop) { box.style.opacity = '0.55'; box.classList.add('wspf-noop'); head.append(st(mk('span', { class: 'wspf-nochange', text: 'no change', title: nop.why }), 'font-size:0.8em;font-style:italic;padding:0 6px;border:1px solid var(--SmartThemeBorderColor);border-radius:8px;')); }
             const errs = errors.filter(e => e.i === i);
             if (errs.length) box.append(st(mk('div', { class: 'wspf-error', text: errs.map(e => e.error).join(' ') }), 'color:#e66;'));
             rowsBox.append(box);
@@ -142,11 +174,14 @@ export function buildPatchForm(doc, opts = {}) {
     adder.append(select(addType, OPS.map(o => [o, OP_LABELS[o] ?? o]), v => { addType = v; }), btn('Add change', () => { drafts.push(blankOp(addType, opts.context ?? {})); render(); }));
     root.append(lists, top, rowsBox, adder);
     render();
+    for (const ev of ['input', 'change']) root.addEventListener(ev, () => setTimeout(changed), true); // capture (the fields stop bubbling); deferred so the field's own handler has updated the draft first
     stop(root);
     return {
         el: root,
         getOps: () => formOps(drafts),
         setErrors: list => { errors = list ?? []; render(); },
+        /** Grey out ops that change nothing ([{i, why}] from the preview), without re-firing onChange. */
+        setNoops: list => { const n = JSON.stringify(list ?? []); if (n === JSON.stringify(noops)) return; noops = list ?? []; render(true); },
         setOps: ops => { drafts = structuredClone(ops ?? []); errors = []; render(); },
     };
 }

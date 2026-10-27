@@ -2,6 +2,7 @@
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildPatchForm, liveOps } from './patchform.mjs';
+import { renderDiff } from './diffview.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -198,12 +199,20 @@ async function renderInspector(side, target, ctx) {
     const live = !!(st?.on && st.chatId && !st.editorOnly);
     const val = k => d.resolved.find(r => r.key === k)?.value;
     const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this place in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit live', ...(live ? {} : { disabled: '' }), onclick: async () => {
-        let ids = [];
-        try { ids = (await worldIndex(st.world ?? '', st.map_version)).addresses ?? []; } catch { /* suggestions only */ }
+        let ids = [], idx = {};
+        try { idx = await worldIndex(st.world ?? '', st.map_version); ids = idx.addresses ?? []; } catch { /* suggestions only */ }
         const ops = liveOps(target, { description: val('description'), notes: val('notes') });
         const loc = target.startsWith('exit:') ? target.slice(5).split('|')[0] : target.includes('/') ? target : '';
         const exits = loc && ctx.room ? { [loc]: (ctx.room.exits ?? []).map(e => e.direction.toLowerCase()) } : {};
-        const form = buildPatchForm(document, { ops, rooms: ids, areas: [...new Set(ids.flatMap(a => [a.split('/')[0], a.split(':')[0]]))], exits, context: { loc, area: loc ? loc.split('/')[0] : target.replace(/^(sub|region):/, '') } });
+        const diffBox = $('div', { class: 'editlive-diff' });
+        let tmr = null;
+        const redraw = o => { clearTimeout(tmr); tmr = setTimeout(async () => {
+            try {
+                const pv = await postJson(`${API}/patch/preview${st.world ? `?world=${encodeURIComponent(st.world)}` : ''}`, { patch: { ops: o }, changes: st.changes ?? [], now: st.now ?? null });
+                diffBox.style.opacity = ''; form.setNoops(pv.noops ?? []); diffBox.replaceChildren(renderDiff(document, pv));
+            } catch { diffBox.style.opacity = '0.5'; }
+        }, 350); };
+        const form = buildPatchForm(document, { onChange: o => redraw(o), names: idx.names, areaNames: idx.areaNames, ops, rooms: ids, areas: [...new Set(ids.flatMap(a => [a.split('/')[0], a.split(':')[0]]))], exits, context: { loc, area: loc ? loc.split('/')[0] : target.replace(/^(sub|region):/, '') } });
         const status = $('p', { class: 'muted' }, 'Saved changes go on a hidden message in the chat: delete it there to undo.');
         const save = $('button', { class: 'crumb', onclick: async () => {
             const o = form.getOps();
@@ -214,7 +223,8 @@ async function renderInspector(side, target, ctx) {
             if (!r.ok) { form.setErrors(r.errors ?? []); status.textContent = 'Not saved: fix the marked fields.'; return; }
             status.textContent = `Saved as message #${r.msg}: ${(r.summary ?? []).join('; ')}`;
         } }, 'Save to chat');
-        pane.replaceChildren($('div', { class: 'editlive-pane' }, form.el, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
+        redraw(form.getOps());
+        pane.replaceChildren($('div', { class: 'editlive-pane' }, form.el, diffBox, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
     } }, 'Edit live');
     side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · ${changes.length ? 'live (with this chat\'s changes)' : 'as in the file'} `, ...(d.kind === 'world' ? [] : [editLive])), bar, pane);
     show(Math.min(tab, tabs.length - 1));

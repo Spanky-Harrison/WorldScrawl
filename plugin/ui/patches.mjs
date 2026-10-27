@@ -15,8 +15,9 @@
 //       (default: the subregion most of the rooms are in). Exits between merged rooms disappear, outside exits lead
 //       to the merged room. Merging every room of a subregion is a collapse.
 
-export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'remove_location', 'merge'];
+import { parseDuration } from './calendar.mjs';
+export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge'];
 export const MAX_OPS = 20, MAX_TEXT = 1500, MAX_PATCH_NAME = 60;
 
 export class PatchError extends Error {}
@@ -76,6 +77,48 @@ function* eachRoom(raw) {
         for (const [sid, sub] of Object.entries(reg.subregions)) if (isObj(sub?.locations))
             for (const [lid, loc] of Object.entries(sub.locations)) yield [`${rid}:${sid}/${lid}`, loc, rid, sid, lid];
 }
+/** A new room id from whatever the model wrote: the last segment of an address, lowercased, other characters -> "_". */
+export const slugId = v => String(v ?? '').trim().split(/[:/]/).pop().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+/** A room reference as a full address: an existing address as is, else a unique room matching "sub/id" or "id" (any case). */
+export function resolveRoom(raw, ref) {
+    const a = String(ref ?? '').trim();
+    if (!a || getRoom(raw, a)) return a;
+    const lower = a.toLowerCase();
+    if (getRoom(raw, lower)) return lower;
+    const tail = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
+    const hits = roomMatches(raw, a);
+    return hits.length === 1 ? hits[0] : a;
+}
+/** Every room a partial reference ("sub/id" or a bare "id", any case) could mean. Several = ambiguous: the card asks. */
+export function roomMatches(raw, ref) {
+    const lower = String(ref ?? '').trim().toLowerCase();
+    if (!lower) return [];
+    if (getRoom(raw, lower)) return [lower];
+    const tail = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
+    return [...eachRoom(raw)].map(x => x[0]).filter(addr => addr.toLowerCase().endsWith(tail.includes('/') ? `:${tail}` : `/${slugId(tail)}`));
+}
+/** The id a brand-new room named `name` gets: slugified name ("The Burned Hall" -> "the_burned_hall"). */
+export const newRoomId = name => slugId(String(name ?? '').replace(/[:/]/g, ' ')).slice(0, 60).replace(/_+$/, '');
+/** `${area}/${id}`, or with _2, _3... if a room (other than one of `except`) already has it. */
+export function freeAddress(raw, area, id, except = []) {
+    let a = `${area}/${id}`, n = 2;
+    while (getRoom(raw, a) && !except.includes(a)) a = `${area}/${id}_${n++}`;
+    return a;
+}
+/** One op with its room references written as full addresses and a merge's new "id" as a bare id (the area taken from a full address). */
+export function normalizeOp(raw, op) {
+    if (!isObj(op)) return op;
+    const o = { ...op };
+    for (const k of ['loc', 'into']) if (typeof o[k] === 'string' && o[k].trim()) o[k] = resolveRoom(raw, o[k]);
+    if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
+    if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
+    if (o.op === 'merge' && typeof o.id === 'string' && o.id.trim()) {
+        const m = /^([^:/\s]+):([^/\s]+)\//.exec(o.id.trim().toLowerCase());
+        if (m && !str(o.area) && !o.into && isObj(raw[m[1]]?.subregions?.[m[2]])) o.area = `${m[1]}:${m[2]}`;
+        o.id = slugId(o.id);
+    }
+    return o;
+}
 /** Every exit "to" and view written as a full address, so rooms can move between subregions safely. */
 export function normalizeRefs(raw) {
     for (const [, loc, rid, sid] of eachRoom(raw)) {
@@ -95,13 +138,17 @@ const nameOf = (raw, a) => getRoom(raw, a)?.name ?? a;
  * Returns {summary: [readable lines], relocate: {oldAddress: newAddress}, touched: [addresses and areas]}.
  * Throws PatchError with a clear message on an invalid op.
  */
-export function applyPatch(raw, patch, { now = null, where = 'patch' } = {}) {
+export function applyPatch(raw, patch, { now = null, where = 'patch', dropNoops = false } = {}) {
     if (!isObj(patch) || !Array.isArray(patch.ops)) throw new PatchError(`${where}: "ops" must be a list`);
     if (!patch.ops.length) throw new PatchError(`${where}: no ops`);
     if (patch.ops.length > MAX_OPS) throw new PatchError(`${where}: at most ${MAX_OPS} ops`);
     normalizeRefs(raw);
-    const out = { summary: [], relocate: {}, touched: [] };
-    patch.ops.forEach((op, i) => {
+    const out = { summary: [], relocate: {}, touched: [], ops: [], noops: [] };
+    patch.ops.forEach((op0, i) => {
+        const op = normalizeOp(raw, op0);
+        const why = dropNoops ? noopOf(raw, op) : '';
+        if (why) { out.noops.push({ i, why }); return; } // e.g. a rename to the same name: dropped, nothing stamped
+        out.ops.push(op);
         const w = `${where}, op #${i + 1}`;
         if (!isObj(op) || !OPS.includes(op.op)) throw new PatchError(`${w}: unknown op ${JSON.stringify(isObj(op) ? op.op : op)} (known: ${OPS.join(', ')})`);
         if (has(op, 'lasts')) { try { parseLasts(op.lasts); } catch (e) { throw new PatchError(`${w}: ${e.message}`); } }
@@ -109,11 +156,34 @@ export function applyPatch(raw, patch, { now = null, where = 'patch' } = {}) {
         const line = applyOp(raw, op, w, out);
         out.summary.push(has(op, 'lasts') ? `${line} (for ${str(String(op.lasts))})` : line);
     });
+    if (!out.ops.length) throw new PatchError(`${where}: nothing changes (${out.noops.map(n => n.why).join('; ')})`);
     return out;
+}
+
+/** Why an op changes nothing on the map as it stands (same name, identical text), or '' if it does something. */
+export function noopOf(raw, op) {
+    if (!isObj(op)) return '';
+    const same = (a, b) => str(a) !== '' && str(a) === str(b);
+    if (op.op === 'set_name' || op.op === 'set_description') {
+        const r = typeof op.loc === 'string' ? getRoom(raw, op.loc.trim()) : null;
+        if (!r) return '';
+        if (op.op === 'set_name' && same(op.text, r.name)) return `${r.name} already has that name`;
+        if (op.op === 'set_description' && same(op.text, r.description)) return `${r.name ?? op.loc}: description is already that`;
+    }
+    if (op.op === 'set_notes' || op.op === 'update_area') {
+        const [rid, sid] = str(op.area).split(':'), obj = sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+        if (!isObj(obj)) return '';
+        const n = op.op === 'set_notes' ? op.text : op.notes;
+        if (op.op === 'set_notes') return same(n, obj.notes) ? `${obj.name ?? op.area}: notes are already that` : '';
+        const nameNo = !str(op.name) || same(op.name, obj.name), notesNo = !str(n) || same(n, obj.notes);
+        if (nameNo && notesNo) return `${obj.name ?? op.area} already has that name and notes`;
+    }
+    return '';
 }
 
 function needRoom(raw, a, w, key = 'loc') {
     const r = typeof a === 'string' ? getRoom(raw, a.trim()) : null;
+    if (!r && typeof a === 'string') { const m = roomMatches(raw, a); if (m.length > 1) { const e = new PatchError(`${w}: "${key}" ${JSON.stringify(a)} could be ${m.join(' or ')}; pick one`); e.choices = m; e.key = key; throw e; } }
     if (!r) throw new PatchError(`${w}: "${key}" ${JSON.stringify(a)} is not a room (addresses look like "region:subregion/room")`);
     return r;
 }
@@ -146,8 +216,34 @@ function applyOp(raw, op, w, out) {
             out.touched.push(area);
             return `${obj.name ?? area}: notes ${op.op === 'set_notes' ? 'rewritten' : 'added to'}`;
         }
+        case 'update_area': {
+            // A region or subregion's display name and/or notes; its id (and every room address in it) never changes.
+            const area = str(op.area), [rid, sid] = area.split(':');
+            const obj = sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+            if (!isObj(obj) || !rid) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a region ("region") or subregion ("region:subregion")`);
+            if (!str(op.name) && !str(op.notes)) throw new PatchError(`${w}: update_area needs a "name" and/or "notes"`);
+            const old = obj.name ?? area, bits = [];
+            if (str(op.name) && str(op.name) !== str(obj.name)) { obj.name = needText(op, w, 'name', MAX_PATCH_NAME); bits.push(`now called ${obj.name}`); }
+            if (str(op.notes)) { obj.notes = needText(op, w, 'notes'); bits.push('notes rewritten'); }
+            out.touched.push(area);
+            return `${old}: ${bits.join(', ')}`;
+        }
         case 'block_exit': case 'open_exit': case 'lock_exit': case 'unlock_exit': case 'break_exit': case 'remove_exit':
             return exitOp(raw, op, w, out);
+        case 'set_exit_description': {
+            // Per side: only this side's text changes; the way back keeps its own (an exit pair shares only its door state).
+            const a = str(op.loc), { r, ex } = findExit(raw, a, op.direction, w), t = needText(op, w, 'text', 400);
+            ex.description = t; out.touched.push(a);
+            return `${r.name} ${ex.direction} exit: description rewritten (this side only)`;
+        }
+        case 'set_travel_time': {
+            // Shared by an exit pair: the way back takes the same time.
+            const a = str(op.loc), { r, ex, back } = findExit(raw, a, op.direction, w), t = needText(op, w, 'time', 20);
+            try { parseDuration(t); } catch (err) { throw new PatchError(`${w}: "time": ${err.message}`); }
+            ex.travel_time = t; if (back) back.travel_time = t;
+            out.touched.push(a, ex.to);
+            return `${r.name} ${ex.direction} exit: travel time ${t} (both ways)`;
+        }
         case 'remove_location': return removeOp(raw, op, w, out);
         case 'merge': return mergeOp(raw, op, w, out);
     }
@@ -178,7 +274,6 @@ function exitOp(raw, op, w, out) {
     if (op.op === 'break_exit') {
         delete ex.barrier; clearBack();
         if (ex.hidden || ex.obscured) ex.view = 'open';
-        if (back && (back.hidden || back.obscured)) back.view = 'open';
         return `${label} broken open (no door any more)`;
     }
     const b = { ...own };
@@ -263,10 +358,10 @@ function mergeOp(raw, op, w, out) {
     let target;
     if (into && !str(op.area)) target = into;
     else {
-        const id = str(op.id) || (into ? split(into)[2] : '');
-        if (!SLUG.test(id)) throw new PatchError(`${w}: "id" ${JSON.stringify(op.id)} must be a room id (lowercase letters, digits and single underscores)`);
-        target = `${arid}:${asid}/${id}`;
-        if (getRoom(raw, target) && !locs.includes(target)) throw new PatchError(`${w}: a room ${target} already exists (pick another "id")`);
+        // A brand-new room's id comes from its name (the model's "id" is ignored); a moved room keeps its id. Taken ids get _2, _3...
+        const want = into ? split(into)[2] : newRoomId(str(op.name));
+        if (!SLUG.test(want)) throw new PatchError(`${w}: a new place needs a "name" with letters or digits`);
+        target = freeAddress(raw, `${arid}:${asid}`, want, locs);
     }
     const base = into ? structuredClone(getRoom(raw, into)) : {};
     const oldNames = locs.map(a => nameOf(raw, a));
@@ -314,4 +409,58 @@ export function relocated(address, changes = []) {
     let a = address;
     for (const c of changes ?? []) if (c?.type === 'patch' && isObj(c.relocate) && has(c.relocate, a)) a = c.relocate[a];
     return a;
+}
+
+/**
+ * The patch call's prompt. `c` is /patch/context's answer: rooms (full JSON of the changed places), areas, outline,
+ * and neighbors (one exit beyond the change, compact). Neighbors may get proposals too; leaving them alone is fine.
+ */
+export function patchPrompt(c, { story = '', what = '', err = '', range = '' } = {}) {
+    const outline = (c.outline ?? []).map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${(o.exits ?? []).map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
+    const nb = (c.neighbors ?? []).map(n => `${n.address} = ${n.name}: ${n.description ?? ''} | exits: ${(n.exits ?? []).map(x => `${x.direction}->${x.to}${x.description ? ` "${x.description}"` : ''}`).join('; ') || 'none'}`).join('\n');
+    const areas = Object.keys(c.areas ?? {}).length ? `Areas (current notes): ${JSON.stringify(c.areas)}\n` : '';
+    return `Places that changed (their current JSON):\n${JSON.stringify(c.rooms ?? {}, null, 1)}\n${areas}`
+        + (nb ? `One step beyond the change (neighbors: name: description | exits "exit text"). If a neighbor's description or exit text names or describes a changed place the old way, you may patch it too (set_description, or set_exit_description for that side's exit text); leaving them alone is fine:\n${nb}\n` : '')
+        + ((c.mentions ?? []).length ? `Other world text that names a changed place (where.field: text). Patch it only if it now reads wrong: set_description for a room, set_exit_description for an exit, update_area/set_notes for a region or subregion's notes:\n${c.mentions.map(m => `${m.where}${m.field ? `.${m.field}` : ''}: ${m.text}`).join('\n')}\n` : '')
+        + `Neighbouring map (for exits and merges):\n${outline}\n\nStory (messages ${range}):\n${story}\n\n${what}\n${err ? `Your last patch was rejected: ${err}\nFix it.\n` : ''}Write the patch JSON.`;
+}
+
+/** Rooms one exit away from any affected room (either direction), outside the affected set. `w` is a built World. */
+export function neighborsOf(w, affected) {
+    const aff = new Set(affected), out = new Set();
+    for (const l of w.locations.values()) for (const x of l.exits) {
+        if (aff.has(l.address) && !aff.has(x.to)) out.add(x.to);
+        if (aff.has(x.to) && !aff.has(l.address)) out.add(l.address);
+    }
+    return [...out].map(a => w.get(a)).filter(Boolean).slice(0, 24).map(l => ({ address: l.address, name: l.name, description: l.description ?? '',
+        exits: l.exits.map(x => ({ direction: x.direction, to: x.to, ...(x.description ? { description: x.description } : {}) })) }));
+}
+
+/**
+ * Every world text that names one of `names` (the changed places' current names), outside the changed places:
+ * room descriptions and exit texts, region/subregion notes, and any other string field (NPCs etc.). Compact:
+ * [{where, field, text}], where = a room address, an area id, or an area id + a field path.
+ */
+export function mentionsOf(raw, names, skip = new Set()) {
+    const want = [...new Set(names.map(n => str(n)).filter(n => n.length >= 3))];
+    if (!want.length) return [];
+    const re = new RegExp(want.map(n => n.replace(/^the\s+/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i');
+    const out = [];
+    const walk = (v, where, path) => {
+        if (out.length >= 30) return;
+        if (typeof v === 'string') { if (re.test(v)) out.push({ where, field: path, text: v.length > 300 ? `${v.slice(0, 300)}…` : v }); return; }
+        if (Array.isArray(v)) { v.forEach((x, i) => walk(x, where, `${path}[${isObj(x) && x.direction ? x.direction : i}]`)); return; }
+        if (isObj(v)) for (const [k, x] of Object.entries(v)) if (k !== 'name' && k !== 'to' && k !== 'subregions' && k !== 'locations') walk(x, where, path ? `${path}.${k}` : k);
+    };
+    for (const [rid, r] of Object.entries(raw)) {
+        if (!isObj(r)) continue;
+        if (!skip.has(rid)) walk(r, rid, '');
+        for (const [sid, sub] of Object.entries(r.subregions ?? {})) {
+            if (!isObj(sub)) continue;
+            const area = `${rid}:${sid}`;
+            if (!skip.has(area)) walk(sub, area, '');
+            for (const [lid, l] of Object.entries(sub.locations ?? {})) { const a = `${area}/${lid}`; if (!skip.has(a) && !skip.has(area)) walk(l, a, ''); }
+        }
+    }
+    return out;
 }

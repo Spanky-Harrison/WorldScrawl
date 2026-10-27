@@ -2094,7 +2094,7 @@ async function formChoices() {
     const r = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
     const rooms = r.ok ? r.body.addresses ?? [] : [];
     const areas = [...new Set(rooms.flatMap(a => { const ar = a.split('/')[0]; return [ar, ar.split(':')[0]]; }))];
-    formRooms = { v: mapVersion, list: { rooms, areas } };
+    formRooms = { v: mapVersion, list: { rooms, areas, names: r.ok ? r.body.names ?? {} : {}, areaNames: r.ok ? r.body.areaNames ?? {} : {} } };
     return formRooms.list;
 }
 /** Check edited ops against the map (changes = the chat's changes the patch sits on). Returns {ok, preview} or {ok:false, error, at}. */
@@ -2107,13 +2107,40 @@ export async function previewOps(ops, ctxOver = mapCtx()) {
     const msg = r.body?.detail?.error ?? (typeof r.body?.detail === 'string' ? r.body.detail : `server error ${r.status}`);
     return { ok: false, errors: [fl ? fl.errorsByOp(msg) : { i: null, error: msg }] };
 }
+let diffLib = null;
+async function loadDiffLib() { try { diffLib ??= await import(`${baseUrl()}/ui/diffview.mjs`); } catch (e) { console.warn('[WorldScrawl] diff view unavailable:', e.message); } return diffLib; }
+/** The red/green before/after view of a preview ({before, after, ops, relocate}) into `box`. */
+async function drawDiff(box, pv) {
+    const dl = await loadDiffLib();
+    if (!dl) { box.textContent = ''; return; }
+    box.replaceChildren(dl.renderDiff(document, { before: pv.before ?? {}, after: pv.after ?? {}, ops: pv.ops ?? [], relocate: pv.relocate ?? {} }));
+}
+/** Re-preview edited ops (debounced) and redraw the diff: the view follows the form while you type. */
+const liveTimers = new WeakMap();
+function liveDiff(box0, ops, ctxOver, form = null) {
+    const key = form ?? box0;
+    if (form) form.diffBox = box0;
+    clearTimeout(liveTimers.get(key));
+    liveTimers.set(key, setTimeout(async () => {
+        const box = form?.diffBox ?? box0; // cards re-render: always draw into the current box
+        if (!box.isConnected) return;
+        const r = await previewOps(ops, { ...mapCtx(), ...ctxOver });
+        if (!r.ok) { box.style.opacity = '0.5'; box.title = 'Fix the form to update this view'; return; }
+        box.style.opacity = ''; box.title = '';
+        form?.setNoops?.(r.preview.noops ?? []);
+        if (form) form.lastPreview = r.preview;
+        await drawDiff(form?.diffBox ?? box, r.preview);
+    }, 350));
+}
 /** Open editors on cards, kept across re-renders: key "<msg>|flag" or "<msg>|<patch id>". */
 const openForms = new Map();
 async function openEditor(key, ops, context = {}) {
     const fl = await loadFormLib();
     if (!fl) { toastr.error('WorldScrawl: the change editor could not load. Restart SillyTavern after updating.'); return; }
     const ch = await formChoices();
-    openForms.set(key, fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, context }));
+    let form = null;
+    form = fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, names: ch.names, areaNames: ch.areaNames, context, onChange: o => { form?.onLive?.(o); } });
+    openForms.set(key, form);
     renderPatchCards();
 }
 /** Re-stamp a kept change with edited ops (same message, same id); the rest of the chat's changes must still fit. */
@@ -2125,7 +2152,7 @@ async function saveKeptEdit(id, pid, form) {
     const r = await previewOps(ops, { changes: before, now: chatElapsed(chat.slice(0, id + 1)) });
     if (!r.ok) { form.setErrors(r.errors); return; }
     const old = { ops: p.ops, summary: p.summary, relocate: p.relocate };
-    Object.assign(p, { ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, edited: Date.now() });
+    Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, edited: Date.now() });
     const all = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
     if (!all.ok) {
         Object.assign(p, old);
@@ -2148,7 +2175,7 @@ export async function liveEdit(ops, note = '') {
     if (!r.ok) return r;
     const fl = await loadFormLib();
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: note || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: chatElapsed(chat),
-        ops, relocate: r.preview.relocate ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
+        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
     const text = fl ? fl.editLine(r.preview.summary) : `Map edit: ${(r.preview.summary ?? []).join('; ')}`;
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'map_edit', [PATCH_KEY]: [p] } };
     chat.push(msg); c.addOneMessage(msg); await c.saveChat?.();
@@ -2197,13 +2224,22 @@ export function parseJsonAnswer(text) {
     return null;
 }
 const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
-const PATCH_SYS = `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}. Allowed ops (copy addresses exactly):
-{"op":"set_description","loc":ADDR,"text":"..."}  {"op":"append_description","loc":ADDR,"text":"..."}  {"op":"set_name","loc":ADDR,"text":"..."}
+const PATCH_SYS = `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
+ADDR is a room's full address copied exactly from the map, e.g. "riverton:drowned_rat/common_room". AREA is a region id ("riverton") or subregion id ("riverton:drowned_rat"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.
+Allowed ops:
+{"op":"set_description","loc":ADDR,"text":"..."}  {"op":"append_description","loc":ADDR,"text":"..."}  {"op":"set_name","loc":ADDR,"text":"New display name"}
+{"op":"update_area","area":AREA,"name":"New display name","notes":"..."} (rename a whole building/area and/or rewrite its notes; give name, notes or both)
 {"op":"set_notes","area":AREA,"text":"..."}  {"op":"append_notes","area":AREA,"text":"..."}
 {"op":"block_exit"|"open_exit"|"lock_exit"|"unlock_exit"|"break_exit"|"remove_exit","loc":ADDR,"direction":"exit name"}
+{"op":"set_exit_description","loc":ADDR,"direction":"exit name","text":"..."} (that side's exit text only; the way back keeps its own)
+{"op":"set_travel_time","loc":ADDR,"direction":"exit name","time":"10m"} (both ways)
 {"op":"remove_location","loc":ADDR}
-{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept and rewritten)} or {"op":"merge","locs":[...],"id":"new_room_id","name":"...","description":"..."} (a new room; optional "area")
-Any op may add "lasts":"3d" (or "12h") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.`;
+{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept and rewritten)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (a new room: just give its name, the engine makes its id; optional "area":AREA)
+Example, a whole inn turned into a palace: {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace"},{"op":"set_description","loc":"riverton:drowned_rat/common_room","text":"A gilded throne hall; an old brass rail shows under the gold leaf."},{"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."},{"op":"set_description","loc":"riverton:drowned_rat/courtyard","text":"..."}]}
+Any op may add "lasts":"3d" (or "12h") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters.
+DESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now ("scorch marks blacken the beams", "an old brass rail shows under the gold leaf"). Never narrate the change itself: no "has been replaced by", "was transformed", "was once", "now". History goes in notes instead: a short append_notes on the place's area, e.g. {"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."}. Exception: a temporary change with "lasts" (smoke, a fresh fire) may mention the event.
+People and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule.
+Exit names (the "direction", e.g. "grate", "narrow door") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.`;
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -2216,20 +2252,25 @@ const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_
 async function analyzeFlag(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f) return;
+    if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
     f.status = 'working'; f.error = ''; delete f.proposal;
     renderPatchCards();
     try {
         const story = storyText(chat, f.start, id);
         const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
         const c1 = await flagContext(f);
-        const scopeQ = `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids whose general notes changed, e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
+        const scopeQ = `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids changed as a whole (renamed, or general notes changed), e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
         const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: SCOPE_SYS, responseLength: 200 }));
-        const known = new Set(c1.outline.map(o => o.address));
-        const rooms = [...new Set((a1?.rooms ?? []).map(String))].filter(a => known.has(a)).slice(0, 12);
-        const areas = [...new Set((a1?.areas ?? []).map(String))].filter(a => /^[a-z0-9_]+(:[a-z0-9_]+)?$/.test(a)).slice(0, 3);
+        const known = [...new Set(c1.outline.map(o => o.address))];
+        const toKnown = a => { a = String(a).trim().toLowerCase(); if (known.includes(a)) return a; const t = a.slice(a.indexOf(':') + 1), hit = known.filter(k => k.endsWith(t.includes('/') ? `:${t}` : `/${t}`)); return hit.length === 1 ? hit[0] : null; };
+        const areas = [...new Set((a1?.areas ?? []).map(x => String(x).trim().toLowerCase().replace(/\/.*$/, '')))].filter(a => /^[a-z0-9_]+(:[a-z0-9_]+)?$/.test(a)).slice(0, 3);
+        // A place changed as a whole (a subregion named in areas): every room in it goes to the patch call too.
+        const whole = known.filter(k => areas.some(ar => ar.includes(':') && k.startsWith(`${ar}/`)));
+        const rooms = [...new Set([...(a1?.rooms ?? []).map(toKnown).filter(Boolean), ...whole])].slice(0, 20);
         if (!rooms.length && !areas.length) { f.status = 'nothing'; return; }
         const c2 = await flagContext(f, [...rooms, ...areas]);
-        const patchQ = (err = '') => `Places that changed (their current JSON):\n${JSON.stringify(c2.rooms, null, 1)}\n${areas.length ? `Areas (current notes): ${JSON.stringify(c2.areas)}\n` : ''}Neighbouring map (for exits and merges):\n${outlineText(c2)}\n\nStory (messages #${f.start}-#${id}):\n${clip(story, 6000)}\n\n${what}\n${err ? `Your last patch was rejected: ${err}\nFix it.\n` : ''}Write the patch JSON.`;
+        const pl = await loadPatchLib();
+        const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
         let ops = null, err = '', preview = null;
         for (let tries = 0; tries < 2; tries++) {
             const ans = parseJsonAnswer(await c.generateRaw({ prompt: patchQ(err), systemPrompt: PATCH_SYS, responseLength: 900 }));
@@ -2237,7 +2278,7 @@ async function analyzeFlag(id) {
             if (!ops) { err = 'the answer was not {"ops": [...]} JSON'; continue; }
             if (!ops.length) { f.status = 'nothing'; return; }
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
-            if (r.ok) { preview = r.body; break; }
+            if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
         if (!preview) { f.status = 'error'; f.error = `The suggested change didn't fit the map: ${err}`; return; }
@@ -2282,7 +2323,7 @@ async function keepFlag(id, { quiet = false } = {}) {
         if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Discard.' }]); return; }
         const r = await previewOps(ops, { changes: chatChanges(chat.slice(0, id + 1)), now: chatElapsed(chat.slice(0, id + 1)) });
         if (!r.ok) { form.setErrors(r.errors); return; }
-        f.proposal = { ...f.proposal, ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {} };
+        f.proposal = { ...f.proposal, ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {} };
         openForms.delete(`${id}|flag`);
     }
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
@@ -2479,9 +2520,13 @@ export function renderPatchCards() {
             const wrap = document.createElement('span');
             wrap.append('Story from message #');
             const inp = document.createElement('input');
-            inp.type = 'number'; inp.min = '0'; inp.max = String(id); inp.value = String(f.start); inp.style.cssText = 'width:4.5em;';
+            const suggested = suggestStart(ctx().chat ?? [], id, f.loc);
+            if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggested;
+            inp.type = 'number'; inp.min = '0'; inp.max = String(id); inp.value = String(f.start); inp.placeholder = String(suggested);
+            inp.className = 'text_pole worldscrawl_start';
+            inp.style.cssText = 'width:5em;display:inline-block;margin:0 2px;padding:1px 4px;color:var(--SmartThemeBodyColor);background-color:var(--SmartThemeShadowColor, rgba(0,0,0,0.3));border:1px solid var(--SmartThemeBorderColor);border-radius:4px;';
             inp.addEventListener('click', e => e.stopPropagation());
-            inp.addEventListener('change', () => { f.start = Math.max(0, Math.min(id, Number(inp.value) || 0)); ctx().saveChat?.(); });
+            inp.addEventListener('change', () => { const v = inp.value.trim(); f.start = v === '' || !Number.isFinite(Number(v)) ? suggested : Math.max(0, Math.min(id, Math.floor(Number(v)))); inp.value = String(f.start); ctx().saveChat?.(); });
             wrap.append(inp, ` to #${id} `);
             return wrap;
         };
@@ -2496,13 +2541,14 @@ export function renderPatchCards() {
                 card.append(ul);
                 const here = getStoredLocation();
                 if (here && f.proposal.relocate?.[here]) card.append(line(`The party will be moved to ${f.proposal.relocate[here]}.`));
-                const det = document.createElement('details');
-                const sum = document.createElement('summary'); sum.textContent = 'Before / after (JSON)'; det.append(sum);
-                const pre = document.createElement('pre'); pre.style.cssText = 'max-height:240px;overflow:auto;font-size:0.85em;white-space:pre-wrap;';
-                pre.textContent = `BEFORE\n${JSON.stringify(f.proposal.before ?? {}, null, 1)}\n\nAFTER\n${JSON.stringify(f.proposal.after ?? {}, null, 1)}\n\nOPS\n${JSON.stringify(f.proposal.ops, null, 1)}`;
-                det.append(pre); card.append(det);
+                const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
+                card.append(diffBox);
                 const form = openForms.get(`${id}|flag`);
-                if (form) card.append(form.el);
+                drawDiff(diffBox, form?.lastPreview ?? f.proposal);
+                if (form) {
+                    card.append(form.el); form.diffBox = diffBox;
+                    form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
+                }
                 card.append(startPicker(), cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
                     form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
                         : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before keeping it'),
@@ -2515,7 +2561,12 @@ export function renderPatchCards() {
             d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
                 cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
             card.append(d);
-            if (form) card.append(form.el, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
+            if (form) {
+                const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
+                form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
+                card.append(form.el, diffBox, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
+                form.onLive(form.getOps());
+            }
         }
         if (!card.childNodes.length) continue;
         (el.querySelector('.mes_block') ?? el).appendChild(card);

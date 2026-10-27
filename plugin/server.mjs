@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
-import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs } from './ui/patches.mjs';
+import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -273,7 +273,14 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const raw = structuredClone(e.raw); normalizeRefs(raw);
             const rooms = {};
             for (const a of wanted) { const r = getRoom(raw, a); if (r) rooms[a] = r; }
-            return { location: loc.address, area: loc.address.split('/')[0], area_name: sub.name, region_name: e.w.regions.get(loc.address.split(':')[0])?.name ?? '', outline, rooms,
+            // One step beyond the change: neighbors of every changed room, and of every room in a changed area.
+            const affected = [...e.w.locations.keys()].filter(a => wanted.includes(a) || wanted.some(x => !x.includes('/') && (a.startsWith(`${x}/`) || (!x.includes(':') && a.startsWith(`${x}:`)))));
+            const neighbors = neighborsOf(e.w, affected);
+            // Old-name search: the changed places' names anywhere else in the world's text (rooms, areas, NPCs...).
+            const areaName = x => { const [r0, s0] = x.split(':'); return (s0 ? e.raw[r0]?.subregions?.[s0] : e.raw[r0])?.name; };
+            const names = [...affected.filter(a => wanted.includes(a)).map(a => e.w.get(a)?.name), ...wanted.filter(x => !x.includes('/')).map(areaName)].filter(Boolean);
+            const mentions = mentionsOf(e.raw, names, new Set([...affected, ...wanted]));
+            return { location: loc.address, area: loc.address.split('/')[0], area_name: sub.name, region_name: e.w.regions.get(loc.address.split(':')[0])?.name ?? '', outline, rooms, neighbors, mentions,
                 areas: Object.fromEntries(wanted.filter(a => !a.includes('/')).map(a => { const [r, s2] = a.split(':'); const o = s2 ? raw[r]?.subregions?.[s2] : raw[r]; return [a, o ? { name: o.name, notes: o.notes ?? '' } : null]; })) };
         },
         'POST /patch/preview': ({ q, body }) => {
@@ -283,14 +290,15 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             if (!patch) bad('patch', 'Input should be a valid dictionary', patch);
             const raw = structuredClone(e.raw);
             let r;
-            try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch' }); build_world(e.worldJson, raw); } catch (err) {
-                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message });
+            try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch', dropNoops: true }); build_world(e.worldJson, raw); } catch (err) {
+                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message, ...(err.choices ? { choices: err.choices, key: err.key } : {}) });
                 throw err;
             }
             const before = structuredClone(e.raw); normalizeRefs(before);
-            const touched = [...new Set(r.touched)].filter(a => a.includes('/'));
-            const pick = src => Object.fromEntries(touched.map(a => [a, getRoom(src, a)]));
-            return { ok: true, summary: r.summary, relocate: r.relocate, touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
+            const touched = [...new Set(r.touched)];
+            const areaOf = (src, a) => { const [rid, sid] = a.split(':'); const o = sid ? src[rid]?.subregions?.[sid] : src[rid]; return o ? { name: o.name ?? a, notes: o.notes ?? '', area: true } : null; };
+            const pick = src => Object.fromEntries(touched.map(a => [a, a.includes('/') ? getRoom(src, a) : areaOf(src, a)]));
+            return { ok: true, ops: r.ops, noops: r.noops, summary: r.summary, relocate: r.relocate, touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
         },
         'POST /move': ({ q, body }) => {
             needBody(body);

@@ -13,7 +13,11 @@ const row = (key, value, source) => ({ key, value: value === undefined ? null : 
 export function inspectIndex(w) {
     const doors = new Set();
     for (const l of w.locations.values()) for (const e of l.exits) if (e.door) doors.add(e.door);
-    return { addresses: [...w.locations.keys()], doors: [...doors], warnings: (w.warnings ?? []).length };
+    const areaNames = {}, names = {};
+    for (const [id, r] of w.regions) areaNames[id] = `${r.name ?? id} (region)`;
+    for (const [id, sr] of w.subregions) areaNames[id] = `${sr.name ?? id} (in ${w.regions.get(id.split(':')[0])?.name ?? id.split(':')[0]})`;
+    for (const [a, l] of w.locations) names[a] = `${l.name ?? a} (${w.subregions.get(a.split('/')[0])?.name ?? a.split('/')[0]})`;
+    return { addresses: [...w.locations.keys()], names, areaNames, doors: [...doors], warnings: (w.warnings ?? []).length };
 }
 
 /** A copy of a raw object with one big child collapsed to its keys (so a region doesn't dump every room). */
@@ -172,7 +176,7 @@ function inspectBase(w, raw, target) {
         row('inherit_region_notes', loc.inherit_region_notes, has(own, 'inherit_region_notes') ? 'own' : 'default (from subregion inherit_notes)'),
         row('inherit_subregion_notes', loc.inherit_subregion_notes, has(own, 'inherit_subregion_notes') ? 'own' : 'default'),
         row('region notes', notes.region, notes.region ? 'from region' : 'not inherited'), row('subregion notes', notes.subregion, notes.subregion ? 'from subregion' : 'not inherited'),
-        ...placeRows(raw, w, loc), stays(w, lv), row('exits', loc.exits.map(e => e.direction), 'own'), row('views', loc.views, loc.views.length ? 'own' : 'default'),
+        ...placeRows(raw, w, loc), stays(w, lv), row('exits', loc.exits.map(e => World.reveals_destination(e) && w.get(e.to) ? `${e.direction} → ${w.exit_label(loc, w.get(e.to))}` : e.direction), 'own'), row('views', loc.views, loc.views.length ? 'own' : 'default'),
         ...(loc.pos ? [row('pos', loc.pos, 'own')] : [])];
     void region;
     return out('room', World.place_label(loc.name, sub.name), lv[0][1], rows, [`loc:${loc.address}`, ...loc.exits.map(e => `exit:${loc.address}|${lc(e.direction)}`)]);
