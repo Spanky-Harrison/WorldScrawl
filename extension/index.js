@@ -2118,6 +2118,7 @@ async function drawDiff(box, pv) {
 /** Re-preview edited ops (debounced) and redraw the diff: the view follows the form while you type. */
 const liveTimers = new WeakMap();
 function liveDiff(box0, ops, ctxOver, form = null) {
+    console.log('[WSDBG] liveDiff', box0.isConnected);
     const key = form ?? box0;
     if (form) form.diffBox = box0;
     clearTimeout(liveTimers.get(key));
@@ -2139,7 +2140,7 @@ async function openEditor(key, ops, context = {}) {
     if (!fl) { toastr.error('WorldScrawl: the change editor could not load. Restart SillyTavern after updating.'); return; }
     const ch = await formChoices();
     let form = null;
-    form = fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, names: ch.names, areaNames: ch.areaNames, context, onChange: o => form?.onLive?.(o) });
+    form = fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, names: ch.names, areaNames: ch.areaNames, context, onChange: o => { console.log('[WSDBG] onChange', !!form?.onLive, JSON.stringify(o).slice(0,120)); form?.onLive?.(o); } });
     openForms.set(key, form);
     renderPatchCards();
 }
@@ -2545,7 +2546,7 @@ export function renderPatchCards() {
                 const form = openForms.get(`${id}|flag`);
                 drawDiff(diffBox, form?.lastPreview ?? f.proposal);
                 if (form) {
-                    card.append(form.el); form.diffBox = diffBox;
+                    card.append(form.el); form.diffBox = diffBox; console.log('[WSDBG] flag form render', id);
                     form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(chat.slice(0, id + 1)), now: chatElapsed(chat.slice(0, id + 1)) }, form);
                 }
                 card.append(startPicker(), cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
