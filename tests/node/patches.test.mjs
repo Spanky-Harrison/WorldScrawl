@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
 import { build_world, read_world_raw, WorldError } from '../../plugin/world.mjs';
-import { activeChanges, applyPatch, parseLasts, relocated, PatchError } from '../../plugin/ui/patches.mjs';
+import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom } from '../../plugin/ui/patches.mjs';
 
 const R = 'riverton:drowned_rat/';
 const KITCHEN = R + 'kitchens', CELLAR = R + 'cellar', STABLE = R + 'stable', UP = R + 'upstairs';
@@ -34,11 +34,11 @@ test('block, open, break and remove exits (both sides)', () => {
 
 test('merge into a new room rewires exits and relocates', () => {
     const info = {};
-    const [wj, raw] = apply_changes(...base(), [patch([{ op: 'merge', locs: [TAVERN, YARD, KITCHEN, UP], id: 'ruins', name: 'Burned Ruins', description: 'Ash.' }])], { info });
+    const [wj, raw] = apply_changes(...base(), [patch([{ op: 'merge', locs: [TAVERN, YARD, KITCHEN, UP], id: 'ignored', name: 'Ruins', description: 'Ash.' }])], { info });
     const w = build_world(wj, raw), ruins = R + 'ruins';
     for (const a of [TAVERN, YARD, KITCHEN, UP]) assert.equal(w.get(a), null);
     const r = w.get(ruins);
-    assert.equal(r.name, 'Burned Ruins');
+    assert.equal(r.name, 'Ruins');
     assert.ok(!r.exits.some(e => [TAVERN, YARD, KITCHEN, UP, ruins].includes(e.to)), 'no exits between merged rooms');
     assert.ok(r.exits.some(e => e.to === SQUARE) && r.exits.some(e => e.to === CELLAR) && r.exits.some(e => e.to === STABLE));
     assert.equal(exit(w, SQUARE, 'in').to, ruins, 'outside exits rerouted');
@@ -61,7 +61,7 @@ test('merge keeping one room, and dedupe of exits sharing a target', () => {
 
 test('collapse a whole subregion into a room elsewhere', () => {
     const rooms = ['common_room', 'courtyard', 'cellar', 'kitchens', 'stable', 'upstairs'].map(x => R + x);
-    const w = worldWith([patch([{ op: 'merge', locs: rooms, id: 'rubble', area: 'riverton:streets', name: 'Rubble Heap', description: 'All that is left of the inn.' }])]);
+    const w = worldWith([patch([{ op: 'merge', locs: rooms, area: 'riverton:streets', name: 'Rubble', description: 'All that is left of the inn.' }])]);
     assert.equal(w.subregions.get('riverton:drowned_rat'), undefined);
     assert.ok(w.get('riverton:streets/rubble'));
     assert.equal(w.start, 'riverton:streets/rubble');
@@ -83,7 +83,7 @@ test('validation: clear errors', () => {
     bad([{ op: 'block_exit', loc: TAVERN, direction: 'sideways' }]);
     bad([{ op: 'merge', locs: [TAVERN], into: YARD }]);
     bad([{ op: 'merge', locs: [TAVERN, YARD] }]);
-    bad([{ op: 'merge', locs: [TAVERN, YARD], id: 'square', area: 'riverton:streets', name: 'x', description: 'y' }]);
+    bad([{ op: 'merge', locs: [TAVERN, YARD], area: 'riverton:streets', name: '!!', description: 'y' }]);
     bad([{ op: 'set_description', loc: TAVERN, text: 'a', lasts: 'forever' }]);
     assert.throws(() => applyPatch(base()[1], { ops: [] }), PatchError);
     assert.throws(() => worldWith([patch([{ op: 'set_name', loc: TAVERN, text: 'x' }]), { type: 'add_exit', from: TAVERN, direction: 'zz', to: 'riverton:none/x' }]), /does not exist/);
@@ -131,4 +131,90 @@ test('server: preview, context, rooms and inspector with patches', () => {
     assert.equal(list.kind, 'changes');
     assert.match(list.resolved[0].value, /The Ashes/);
     assert.equal(c.post('/move', { json: { from: TAVERN, direction: 'out', changes: [patch([{ op: 'block_exit', loc: TAVERN, direction: 'out' }])] } }).status_code, 400);
+});
+
+test('ids: full addresses or bare ids are accepted; new room ids come from the name, deduped', () => {
+    const raw = base()[1];
+    assert.equal(resolveRoom(raw, 'kitchens'), KITCHEN);
+    assert.equal(resolveRoom(raw, 'drowned_rat/common_room'), TAVERN);
+    assert.equal(resolveRoom(raw, ' Riverton:Drowned_Rat/Common_Room '), TAVERN);
+    assert.equal(resolveRoom(raw, 'nowhere'), 'nowhere');
+    assert.equal(slugId('riverton:golden_palace/common_room'), 'common_room');
+    assert.equal(newRoomId('The Burned Hall!'), 'the_burned_hall');
+    const n = normalizeOp(raw, { op: 'merge', locs: ['drowned_rat/common_room', 'courtyard'], id: 'riverton:streets/Big Hole', name: 'Hole', description: 'x' });
+    assert.deepEqual(n.locs, [TAVERN, YARD]); assert.equal(n.id, 'big_hole'); assert.equal(n.area, 'riverton:streets');
+    assert.equal(normalizeOp(raw, { op: 'block_exit', loc: 'kitchens', direction: 'up' }).loc, KITCHEN);
+    // the bug report: a full address as the new id no longer fails, and bare loc refs work
+    const w = worldWith([patch([{ op: 'merge', locs: ['drowned_rat/common_room', 'courtyard'], id: 'riverton:golden_palace/common_room', name: 'Common Room', description: 'Ash.' }])]);
+    assert.ok(w.get(TAVERN), 'name "Common Room" in its own area reuses the freed id');
+    const w2 = worldWith([patch([{ op: 'merge', locs: [YARD, KITCHEN], area: 'riverton:drowned_rat', name: 'Common Room', description: 'Ash.' }])]);
+    assert.ok(w2.get(TAVERN) && w2.get(R + 'common_room_2'), 'taken id gets _2');
+    const r = applyPatch(base()[1], { ops: [{ op: 'set_name', loc: 'drowned_rat/common_room', text: 'X' }] });
+    assert.equal(r.ops[0].loc, TAVERN, 'normalized ops are returned');
+});
+
+test('update_area: the Drowned Rat becomes a golden palace (area renamed, every room re-described, ids and exits unchanged)', () => {
+    const rooms = ['common_room', 'courtyard', 'cellar', 'kitchens', 'stable', 'upstairs'].map(x => R + x);
+    const before = worldWith([]);
+    const ops = [{ op: 'update_area', area: 'riverton:drowned_rat', name: 'The Golden Palace', notes: 'Gold everywhere.' }, ...rooms.map(a => ({ op: 'set_description', loc: a, text: `Gilded ${a}.` }))];
+    const w = worldWith([patch(ops)]);
+    assert.equal(w.subregions.get('riverton:drowned_rat').name, 'The Golden Palace');
+    for (const a of rooms) {
+        assert.equal(w.get(a).description, `Gilded ${a}.`);
+        assert.deepEqual(w.get(a).exits.map(e => [e.direction, e.to]), before.get(a).exits.map(e => [e.direction, e.to]));
+    }
+    assert.equal(exit(w, SQUARE, 'in').to, TAVERN);
+    assert.throws(() => worldWith([patch([{ op: 'update_area', area: 'riverton:drowned_rat' }])]), WorldError);
+    assert.throws(() => worldWith([patch([{ op: 'update_area', area: 'riverton:golden_palace', name: 'x' }])]), WorldError);
+    const r = applyPatch(base()[1], { ops: [{ op: 'update_area', area: 'riverton', name: 'Goldton', lasts: '1d' }] });
+    assert.match(r.summary[0], /Goldton/);
+});
+
+test('no-ops: a rename to the same name or identical text is dropped from a preview, and a patch of only no-ops is refused', () => {
+    const raw = structuredClone(base()[1]);
+    const name = getRoom(raw, TAVERN).name;
+    const r = applyPatch(raw, { ops: [{ op: 'set_name', loc: TAVERN, text: name }, { op: 'set_description', loc: TAVERN, text: 'Ash.' }] }, { dropNoops: true });
+    assert.deepEqual(r.noops.map(n => n.i), [0]);
+    assert.equal(r.ops.length, 1);
+    assert.equal(noopOf(raw, { op: 'set_description', loc: TAVERN, text: 'Ash.' }) !== '', true);
+    assert.throws(() => applyPatch(structuredClone(base()[1]), { ops: [{ op: 'set_name', loc: TAVERN, text: name }] }, { dropNoops: true }), /nothing changes/);
+    // replaying stamped patches never drops anything
+    assert.equal(applyPatch(structuredClone(base()[1]), { ops: [{ op: 'set_name', loc: TAVERN, text: name }] }).ops.length, 1);
+});
+
+test('exit pairs: shared door state follows both sides, per-side fields (description, hidden) stay on one side', () => {
+    // edit on one side: locking from the yard locks the cellar side too
+    let w = worldWith([patch([{ op: 'lock_exit', loc: YARD, direction: 'trapdoor' }])]);
+    assert.equal(exit(w, YARD, 'trapdoor').barrier.locked, true);
+    assert.equal(exit(w, CELLAR, 'trapdoor').barrier.locked, true);
+    // removal on one side removes the pair
+    w = worldWith([patch([{ op: 'remove_exit', loc: CELLAR, direction: 'trapdoor' }])]);
+    assert.equal(exit(w, CELLAR, 'trapdoor'), undefined);
+    assert.equal(exit(w, YARD, 'trapdoor'), undefined);
+    // per-side: rewriting one side's description leaves the way back as written
+    const before = exit(worldWith([]), SQUARE, 'in').description, back0 = exit(worldWith([]), TAVERN, 'out').description;
+    w = worldWith([patch([{ op: 'set_exit_description', loc: SQUARE, direction: 'in', text: 'A golden sign blazes over the door.' }])]);
+    assert.notEqual(before, 'A golden sign blazes over the door.');
+    assert.equal(exit(w, SQUARE, 'in').description, 'A golden sign blazes over the door.');
+    assert.equal(exit(w, TAVERN, 'out').description, back0);
+    // per-side: breaking the hidden cellar door open reveals it from the cellar only, not from the tunnel
+    const tunnel = 'riverton:secret_tunnel/tunnel';
+    w = worldWith([patch([{ op: 'break_exit', loc: CELLAR, direction: 'narrow door' }])]);
+    assert.equal(exit(w, CELLAR, 'narrow door').view, 'open');
+    assert.equal(exit(w, tunnel, 'narrow door').flags.hidden, true, 'the tunnel side keeps its own visibility');
+});
+
+test('renames: unlabeled exits show the destination\'s current name; hand-written exit names stay as written', () => {
+    const w = worldWith([patch([{ op: 'update_area', area: 'riverton:drowned_rat', name: 'The Golden Palace' }, { op: 'set_name', loc: CELLAR, text: 'Treasury' }])]);
+    const sq = w.to_dict(w.get(SQUARE)), into = sq.exits.find(e => e.direction === 'in');
+    assert.equal(into.to_label, 'The Golden Palace');
+    assert.ok(!JSON.stringify(sq.exits.map(e => e.to_label ?? '')).includes('Drowned Rat'));
+    const c = client(RIVERTON);
+    const ins = c.post('/inspect', { json: { target: SQUARE, changes: [patch([{ op: 'update_area', area: 'riverton:drowned_rat', name: 'The Golden Palace' }])] } }).json();
+    assert.ok(JSON.stringify(ins).includes('The Golden Palace'), 'resolved view names the new place');
+    // the hand-labeled hidden door from the tunnel keeps its own name ("narrow door"), never the renamed target
+    const tun = w.to_dict(w.get('riverton:secret_tunnel/tunnel')).exits.map(e => e.direction);
+    assert.ok(tun.includes('narrow door') && !tun.some(d => /treasury/i.test(d)));
+    const yard = w.to_dict(w.get(YARD)).exits.find(e => e.direction === 'trapdoor');
+    assert.equal(yard.direction, 'trapdoor');
 });

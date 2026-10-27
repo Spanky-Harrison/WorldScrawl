@@ -1203,17 +1203,26 @@ try {
     const flagId = await page.evaluate(async ([CR, mod]) => {
         const c = SillyTavern.getContext(), id = c.chat.findLastIndex(m => !m.is_system && !m.is_user);
         c.chat[id].extra = c.chat[id].extra ?? {};
-        c.chat[id].extra.worldscrawl_flag = { status: 'review', start: id, swipe: c.chat[id].swipe_id ?? 0, note: 'fire', proposal: { ops: [{ op: 'set_description', loc: CR, text: 'Smoky.' }], summary: ['Common Room: description rewritten'], relocate: {}, before: {}, after: {} } };
+        c.chat[id].extra.worldscrawl_flag = { status: 'review', start: id, swipe: c.chat[id].swipe_id ?? 0, note: 'fire', proposal: { ops: [{ op: 'set_description', loc: CR, text: 'Smoky.' }], summary: ['Common Room: description rewritten'], relocate: {}, before: { [CR]: { name: 'Common Room', description: 'Warm and loud.' } }, after: { [CR]: { name: 'Common Room', description: 'Smoky.' } } } };
         (await import(mod)).renderPatchCards(); return id;
     }, [CR, wsMod]);
     const card = page.locator(`#chat .mes[mesid="${flagId}"] .worldscrawl_patchcard`);
+    await card.locator('.wsdiff-del').first().waitFor({ timeout: 10000 });
+    const diffLook = () => card.evaluate(c => { const bg = s => s ? getComputedStyle(s).backgroundColor : ''; const d = c.querySelector('.wsdiff-del'), i = c.querySelector('.wsdiff-ins'); return { del: d?.textContent ?? '', ins: i?.textContent ?? '', dbg: bg(d), ibg: bg(i), json: !!c.querySelector('.wsdiff pre'), raw: [...c.querySelectorAll('.wsdiff-toggle')].map(t => t.textContent).join('|') }; });
+    const dl1 = await diffLook();
+    check('review card: description change shows red removed / green added blocks (no JSON dump up front)', dl1.del.includes('Warm and loud.') && dl1.ins.includes('Smoky.') && /rgba\(200, 60, 60/.test(dl1.dbg) && /rgba\(60, 160, 90/.test(dl1.ibg) && /Raw JSON/.test(dl1.raw), JSON.stringify(dl1));
     await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
     await card.locator('.wspf-op').first().waitFor({ timeout: 10000 });
     check('review card: Edit opens the change as a form (description textarea prefilled)', await card.locator('.wspf-text').first().inputValue() === 'Smoky.');
+    const pick = await card.evaluate(c => { const sel = c.querySelector('.wspf-op select.wspf-pick'); return sel ? sel.selectedOptions[0]?.textContent : null; });
+    check('review card: the place is a picker with a friendly name, not a raw address box', /^Common Room \(/.test(pick ?? ''), String(pick));
     await card.locator('.wspf-text').first().fill('');
     await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(800);
     check('review card: an empty description is refused inline, nothing stamped', /text/i.test(await card.innerText()) && await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId), await card.innerText());
     await card.locator('.wspf-text').first().fill('Charred beams and ash.');
+    await page.waitForFunction(id => document.querySelector(`#chat .mes[mesid="${id}"] .worldscrawl_patchcard .wsdiff-ins`)?.textContent.includes('Charred beams'), flagId, { timeout: 10000 }).catch(() => {});
+    const dl2 = { ...(await diffLook()), dbgBox: await card.evaluate(c => { const b = c.querySelector('.worldscrawl_diff'); return b ? [b.style.opacity, b.title, c.querySelector('.wspf-text')?.value, (window.__wsLive||[]).slice(-6)] : null; }) };
+    check('review card: the diff follows the form live, before Keep', dl2.ins.includes('Charred beams and ash.') && !dl2.ins.includes('Smoky.'), JSON.stringify(dl2));
     await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(1500);
     const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
     check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
