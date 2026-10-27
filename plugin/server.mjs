@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
+import { inspect, inspectIndex } from './inspect.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
@@ -272,6 +273,13 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 out.push({ address: a, name: loc.name, area: sub.name, display_name: World.place_label(loc.name, sub.name), summary: World.summary(loc), steps: d });
             }
             return { rooms: out.slice(0, limit) };
+        },
+        // Read-only inspector (Editor mode in the map window): never writes.
+        'GET /inspect/index': ({ q }) => { const lw = get_world(q('world')); return { world: lw.id, map_version: lw.version, ...inspectIndex(lw.world) }; },
+        'GET /inspect': ({ q }) => {
+            const lw = get_world(q('world')), r = inspect(lw.world, lw.raw, q('target') ?? 'world');
+            if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(q('target'))}.`);
+            return r;
         },
         'POST /doors': ({ q, body }) => { needBody(body); const doors = field(body, 'doors', 'strs'); return { exits: get_world(q('world')).world.door_reveals(doors) }; },
         'POST /travel': ({ q, body }) => {

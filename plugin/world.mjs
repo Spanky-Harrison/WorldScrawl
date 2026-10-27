@@ -157,6 +157,10 @@ export class Exit {
         this.barrier = null; // {closed_sight, closed_sound, openable, starts_open, locked, stays_open (null = inherit)} or null
         this.barrier_explicit = false; // set in the file ("barrier" or legacy "view": "closed"): shared with the return exit
         this.traversal = null; // narrator note for the move that uses this exit
+        this.barrier_from = null; // address of the room whose exit defines the shared barrier (the primary side)
+        this.barrier_own = false; // this exit's own entry has "barrier" (or legacy "view": "closed")
+        this.legacy_view = false; // the barrier came from the legacy "view": "closed"
+        this.raw = null; // the exit object as written in the region file (for the inspector)
     }
     get flagged() { return Boolean(this.flags.hidden || this.flags.obscured); }
     /** Legacy one-word view: "closed" if something can block it, "none" if nothing is seen through it, else "open". */
@@ -309,7 +313,7 @@ export function exitShape(e, ex, where) {
         e.barrier = out; e.barrier_explicit = true;
         e._barrier_given = Object.fromEntries(Object.keys(b).map(k => [k, b[k]]));
     } else if (e.view === 'closed') {
-        e.barrier = { ...BARRIER_DEFAULTS, stays_open: e.stays_open }; e.barrier_explicit = true; e._barrier_given = {};
+        e.barrier = { ...BARRIER_DEFAULTS, stays_open: e.stays_open }; e.barrier_explicit = true; e._barrier_given = {}; e.legacy_view = true;
     } else if (e.view === null && e.flagged) {
         e.barrier = { ...BARRIER_DEFAULTS, stays_open: e.stays_open }; // side-local, as hidden/obscured exits always were
     }
@@ -388,6 +392,9 @@ export function build_world(worldJson, rawRegions) {
         checkStart(worldJson.start_date, cal, 'world.json: start_date');
         weather = buildWeather(worldJson, rawRegions, cal);
     } catch (err) { throw new WorldError(err.message); }
+    const warnings = []; // [{message, refs: ['exit:<address>|<direction>', 'loc:<address>', ...]}] for the inspector
+    const warn = (message, refs, quiet = false) => { if (!quiet) log.warning(message); warnings.push({ message, refs }); };
+    const exitRef = (a, e) => `exit:${a}|${e.direction.toLowerCase()}`;
     const place = (o, where) => checkPlace(o, where, weather.unit, m => { throw new WorldError(m); });
     let anyExposure = false;
     const files = Object.keys(rawRegions).sort();
@@ -452,6 +459,7 @@ export function build_world(worldJson, rawRegions) {
                     const e = new Exit(direction, strip(requireStr(ex, 'to', ewhere)), requireStr(ex, 'description', ewhere, true), flags,
                         view, optionalBool(ex, 'stays_open', ewhere));
                     exitShape(e, ex, ewhere);
+                    e.raw = ex; e.barrier_own = e.barrier_explicit;
                     if (has(ex, 'travel_time')) {
                         try { e.travel_time = parseDuration(ex.travel_time); } catch (err) { throw new WorldError(`${ewhere}: ${err.message}`); }
                     }
@@ -503,17 +511,20 @@ export function build_world(worldJson, rawRegions) {
         for (const e of loc.exits) {
             if (!e.barrier_explicit || merged.has(e)) continue;
             merged.add(e);
+            e.barrier_from = loc.address;
             const back = locations.get(e.to).exits.find(b => b.to === loc.address) ?? null;
             if (!back) continue;
             merged.add(back);
             if (back.barrier_explicit) {
                 const diff = BARRIER_KEYS.filter(k => k !== 'stays_open' && e.barrier[k] !== back.barrier[k]);
-                if (diff.length) log.warning(`world: the barrier between ${loc.address} (${repr(e.direction)}) and ${e.to} (${repr(back.direction)}) is set on both sides and they disagree on ${diff.join(', ')}; using ${loc.address}'s`);
+                if (diff.length) warn(`world: the barrier between ${loc.address} (${repr(e.direction)}) and ${e.to} (${repr(back.direction)}) is set on both sides and they disagree on ${diff.join(', ')}; using ${loc.address}'s`, [exitRef(loc.address, e), exitRef(e.to, back), `loc:${loc.address}`, `loc:${e.to}`]);
+                else warn(`world: the barrier between ${loc.address} (${repr(e.direction)}) and ${e.to} (${repr(back.direction)}) is set on both sides; only one side needs it (the other inherits it)`, [exitRef(loc.address, e), exitRef(e.to, back)], true);
+                back.barrier_from = loc.address;
                 const so = back.barrier.stays_open;
                 back.barrier = { ...e.barrier, stays_open: so }; // stays_open: both sides' explicit values combine below
             } else {
                 back.barrier = { ...e.barrier, stays_open: back.stays_open };
-                back.barrier_explicit = true;
+                back.barrier_explicit = true; back.barrier_from = loc.address;
             }
         }
     }
@@ -524,7 +535,7 @@ export function build_world(worldJson, rawRegions) {
         const bad = [];
         if (e._sight_given !== null && e._sight_given !== 'none') bad.push(`"sight": ${repr(e._sight_given)}`);
         if (e.barrier && e._barrier_given && has(e._barrier_given, 'closed_sight') && e._barrier_given.closed_sight !== 'none') bad.push(`barrier "closed_sight": ${repr(e._barrier_given.closed_sight)}`);
-        if (bad.length) log.warning(`world: ${loc.address} exit ${repr(e.direction)} is obscured, so its sight is none; ignoring ${bad.join(' and ')}`);
+        if (bad.length) warn(`world: ${loc.address} exit ${repr(e.direction)} is obscured, so its sight is none; ignoring ${bad.join(' and ')}`, [exitRef(loc.address, e), `loc:${loc.address}`]);
         e.sight = 'none';
         if (e.barrier) e.barrier = { ...e.barrier, closed_sight: 'none' }; // this side only: the return exit keeps its own
     }
@@ -536,14 +547,18 @@ export function build_world(worldJson, rawRegions) {
             const back = locations.get(e.to).exits.find(b => b.to === loc.address) ?? null;
             const ends = [`${loc.address}|${e.direction.toLowerCase()}`, ...(back ? [`${e.to}|${back.direction.toLowerCase()}`] : [])].sort();
             e.door = 'door_' + sha1(ends.join('&')).slice(0, 10);
-            if (back === null) { if (!e.flags.one_way) log.warning(`world: ${loc.address} exit ${repr(e.direction)} is hidden/obscured but has no return exit (one-way door)`); }
+            if (back === null) { if (!e.flags.one_way) warn(`world: ${loc.address} exit ${repr(e.direction)} is hidden/obscured but has no return exit (one-way door)`, [exitRef(loc.address, e), `loc:${loc.address}`]); }
             else if (back.door === null) back.door = e.door;
         }
     }
 
     const w = new World(`${startRegion}:${regionStarts.get(startRegion)}`, regions, subregions, locations);
     w.weather = weather.config;
-    if (!anyExposure) log.warning('world: no region, subregion or room sets "exposure", so every room is outdoor (it will rain indoors)');
+    if (!anyExposure) warn('world: no region, subregion or room sets "exposure", so every room is outdoor (it will rain indoors)', ['world']);
+    for (const loc of locations.values()) for (const e of loc.exits) {
+        if (e.legacy_view) warn(`world: ${loc.address} exit ${repr(e.direction)} uses the old "view": "closed"; it is read as a door ("barrier": {})`, [exitRef(loc.address, e), `loc:${loc.address}`], true);
+    }
+    w.warnings = warnings;
     for (const loc of locations.values()) {
         for (const e of loc.exits) {
             if (!e.door || w.doors.has(e.door)) continue;
