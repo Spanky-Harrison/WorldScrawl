@@ -97,7 +97,37 @@ function sendLiveEdit(ops) {
         channel.postMessage({ type: 'patch', chatId: curState?.chatId, req, ops });
     });
 }
-const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length])) + `|${st.now ?? ''}` : ''; };
+/** Turn off / Turn on from the inspector's Changes tab: the SillyTavern tab runs it (same flow as its cards) and answers. */
+const pendingToggles = new Map();
+function sendToggle(msg, id, choice) {
+    const req = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    return new Promise(resolve => {
+        const t = setTimeout(() => { pendingToggles.delete(req); resolve({ ok: false, error: 'No answer from SillyTavern. Is the chat open in a tab?' }); }, 15000);
+        pendingToggles.set(req, r => { clearTimeout(t); pendingToggles.delete(req); resolve(r); });
+        channel.postMessage({ type: 'toggle_change', chatId: curState?.chatId, req, msg, id, ...(choice ? { choice } : {}) });
+    });
+}
+/** The small confirm before turning off a change others may need: resolves 'all', 'one' or 'cancel'. */
+function confirmOff(msg, deps) {
+    return new Promise(done => {
+        document.querySelector('.toggle-confirm')?.remove();
+        const desc = d => `#${d.msg}: ${(d.summary ?? []).join('; ') || d.note || d.id}`;
+        const box = $('div', { class: 'toggle-confirm', style: 'position:fixed;z-index:1000;left:50%;top:30%;transform:translateX(-50%);max-width:30em;padding:10px 14px;border:1px solid var(--SmartThemeBorderColor);border-radius:8px;background:var(--SmartThemeBlurTintColor,#222);color:var(--SmartThemeBodyColor);box-shadow:0 4px 18px rgba(0,0,0,.5)' },
+            $('div', {}, `Turn off the change from #${msg}?`),
+            ...(deps.hard.length ? [$('div', {}, 'These later changes need it and will stop applying:'), ...deps.hard.map(d => $('div', {}, `• ${desc(d)}`))] : []),
+            ...(deps.overlaps.length ? [$('div', {}, 'These touched the same places:'), ...deps.overlaps.map(d => $('div', {}, `• may depend on #${msg}: ${desc(d)}`))] : []));
+        const row = $('div', { style: 'margin-top:6px' });
+        for (const [label, v] of [['Turn off all', 'all'], ['Just this one', 'one'], ['Cancel', 'cancel']]) row.append($('button', { class: 'crumb', onclick: () => { box.remove(); done(v); } }, label));
+        box.append(row); document.body.append(box);
+    });
+}
+async function toggleFromInspector(c) {
+    let r = await sendToggle(c.msg, c.id);
+    if (r.confirm) r = await sendToggle(c.msg, c.id, await confirmOff(c.msg, r.confirm));
+    if (!r.ok && r.error) setStatus(r.error);
+    return r;
+}
+const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length, x.off ? 1 : 0])) + `|${st.now ?? ''}` : ''; };
 async function postJson(url, body) {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`map server answered ${r.status}`);
@@ -193,8 +223,13 @@ async function renderInspector(side, target, ctx) {
         addColResizer(tbl);
         return [tbl];
     };
-    const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Delete the message to undo one.' : 'Map changes from this chat that touch this. Delete the message to undo one.'),
-        $('ul', { class: 'warnings' }, ...changes.map(c => $('li', {}, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}`)))]
+    const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Turn one off to take it off the map for now, or delete its message to undo it.' : 'Map changes from this chat that touch this. Turn one off to take it off the map for now, or delete its message to undo it.'),
+        $('ul', { class: 'warnings' }, ...changes.map(c => {
+            const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}${c.off ? ' (turned off)' : ''}`);
+            if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
+            if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'));
+            return li;
+        }))]
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
     const live = !!(st?.on && st.chatId && !st.editorOnly);
@@ -495,7 +530,7 @@ function onState(st) {
     setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.last_wait?.recent ? ` (${st.last_wait.label})` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
-channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); });
+channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result') pendingToggles.get(ev.data.req)?.(ev.data); });
 
 buildTopBar();
 setEditor(editor);

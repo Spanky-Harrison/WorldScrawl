@@ -392,6 +392,18 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const lw = get_world(q('world'));
             const r = inspect(e.w, [e.worldJson, e.raw], target, e.info.patches, { w: lw.world, raw: lw.raw });
             if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(target)}.`);
+            // Turned-off changes and ones that can't apply never touched the map, but stay listed (so they can be turned on
+            // again): all of them on the 'changes' view, those whose ops name this place elsewhere.
+            const all = field(body, 'changes', 'list', []);
+            const names = c => (c?.ops ?? []).some(o => [o.loc, o.area, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].some(a => typeof a === 'string' && (a === target || target.startsWith(`${a}/`) || target.startsWith(`${a}:`) || a.startsWith(`${target}:`) || a.startsWith(`${target}/`))));
+            const extra = [];
+            for (const c of all) {
+                if (c?.type !== 'patch' || !(target === 'changes' || r.kind === 'world' || names(c))) continue;
+                const failed = (e.info.failed ?? []).find(f => f.msg === (c._msg ?? null) && f.id === (c.id ?? null));
+                if (c.off === true) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, off: true });
+                else if (failed) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, failed: failed.error });
+            }
+            if (extra.length) r.changes = [...(r.changes ?? []), ...extra].sort((a, b) => (a.msg ?? -1) - (b.msg ?? -1));
             return r;
         },
         'POST /doors': ({ q, body }) => { needBody(body); const doors = field(body, 'doors', 'strs'); return { exits: get_world(q('world')).world.door_reveals(doors) }; },

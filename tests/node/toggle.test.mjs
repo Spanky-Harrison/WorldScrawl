@@ -56,3 +56,11 @@ test('dependents: overlaps are later changes on the same room, listed as may-dep
     ch[1].off = true;
     assert.deepEqual(c.post('/changes/dependents', { json: { changes: ch, index: 0 } }).json().overlaps, []);
 });
+
+test('inspect lists turned-off and failing changes so they can be turned on again', () => {
+    const ch = chain(); ch[0].off = true;
+    const all = c.post('/inspect', { json: { target: 'changes', changes: ch } }).json().changes;
+    assert.deepEqual(all.map(x => [x.msg, !!x.off, !!x.failed]), [[3, true, false], [5, false, true], [7, false, false], [9, false, false]]);
+    const room = c.post('/inspect', { json: { target: TAVERN, changes: ch } }).json().changes;
+    assert.ok(room.some(x => x.msg === 3 && x.off));
+});
