@@ -1,6 +1,7 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
 import { placeWeather, fmtTemp } from './weather.mjs';
+import { buildPatchForm, liveOps } from './patchform.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -75,6 +76,25 @@ function setEditor(on) {
 const indexCache = new Map(); // world|version -> {addresses, doors}
 /** This chat's map patches (fire, collapse...): when there are any, map requests send the chat's changes. */
 const patchesOf = st => (st?.changes ?? []).filter(c => c?.type === 'patch');
+/** Rooms a chat change touched (for the small marker on the map). */
+export const patchedRooms = st => {
+    const out = new Set();
+    for (const p of patchesOf(st)) {
+        for (const o of p.ops ?? []) for (const a of [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])]) if (typeof a === 'string' && a.includes('/')) out.add(a);
+        for (const [a, b] of Object.entries(p.relocate ?? {})) { out.add(a); out.add(b); }
+    }
+    return out;
+};
+/** "Edit live": the map asks the SillyTavern tab to stamp the edit on a hidden message; it answers with patch_result. */
+const pendingEdits = new Map();
+function sendLiveEdit(ops) {
+    const req = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    return new Promise(resolve => {
+        const t = setTimeout(() => { pendingEdits.delete(req); resolve({ ok: false, errors: [{ i: null, error: 'No answer from SillyTavern. Is the chat open in a tab?' }] }); }, 15000);
+        pendingEdits.set(req, r => { clearTimeout(t); resolve(r); });
+        channel.postMessage({ type: 'patch', chatId: curState?.chatId, req, ops });
+    });
+}
 const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length])) + `|${st.now ?? ''}` : ''; };
 async function postJson(url, body) {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
@@ -132,7 +152,7 @@ async function renderInspector(side, target, ctx) {
     tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
     const resolvedPane = () => {
         const tbl = $('table', { class: 'resolved' });
-        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'own' ? ' own' : ''}` }, r.source))));
+        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'from file' ? ' own' : ''}` }, r.source))));
         addColResizer(tbl);
         const out = [tbl];
         if (d.kind === 'room' && ctx.room) {
@@ -175,7 +195,28 @@ async function renderInspector(side, target, ctx) {
         $('ul', { class: 'warnings' }, ...changes.map(c => $('li', {}, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}`)))]
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
-    side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · read-only`), bar, pane);
+    const live = !!(st?.on && st.chatId && !st.editorOnly);
+    const val = k => d.resolved.find(r => r.key === k)?.value;
+    const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this place in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit live', ...(live ? {} : { disabled: '' }), onclick: async () => {
+        let ids = [];
+        try { ids = (await worldIndex(st.world ?? '', st.map_version)).addresses ?? []; } catch { /* suggestions only */ }
+        const ops = liveOps(target, { description: val('description'), notes: val('notes') });
+        const loc = target.startsWith('exit:') ? target.slice(5).split('|')[0] : target.includes('/') ? target : '';
+        const exits = loc && ctx.room ? { [loc]: (ctx.room.exits ?? []).map(e => e.direction.toLowerCase()) } : {};
+        const form = buildPatchForm(document, { ops, rooms: ids, areas: [...new Set(ids.flatMap(a => [a.split('/')[0], a.split(':')[0]]))], exits, context: { loc, area: loc ? loc.split('/')[0] : target.replace(/^(sub|region):/, '') } });
+        const status = $('p', { class: 'muted' }, 'Saved changes go on a hidden message in the chat: delete it there to undo.');
+        const save = $('button', { class: 'crumb', onclick: async () => {
+            const o = form.getOps();
+            if (!o.length) { form.setErrors([{ i: null, error: 'Add a change first.' }]); return; }
+            save.disabled = true; status.textContent = 'Saving…';
+            const r = await sendLiveEdit(o);
+            save.disabled = false;
+            if (!r.ok) { form.setErrors(r.errors ?? []); status.textContent = 'Not saved: fix the marked fields.'; return; }
+            status.textContent = `Saved as message #${r.msg}: ${(r.summary ?? []).join('; ')}`;
+        } }, 'Save to chat');
+        pane.replaceChildren($('div', { class: 'editlive-pane' }, form.el, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
+    } }, 'Edit live');
+    side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · ${changes.length ? 'live (with this chat\'s changes)' : 'as in the file'} `, ...(d.kind === 'world' ? [] : [editLive])), bar, pane);
     show(Math.min(tab, tabs.length - 1));
 }
 
@@ -383,6 +424,7 @@ function createMapWindow(win) {
             label(e.direction, 0.3); if (e.back) label(e.back.direction, 0.7);
             world.append(g);
         }
+        const touched = patchedRooms(current.st ?? state);
         for (const n of graph.nodes) {
             const p = at(n.id), small = n.kind === 'stub' || n.kind === 'outside', hue = hueFor(n.subregion.id);
             const w = small ? 130 : NODE_W, h = small ? 30 : NODE_H;
@@ -396,6 +438,11 @@ function createMapWindow(win) {
             g.append(t);
             if (sub2) { const s2 = S('text', { 'text-anchor': 'middle', y: 15, style: 'font-size:10px;opacity:.7' }); s2.textContent = sub2.slice(0, 26); g.append(s2); }
             const title = S('title'); title.textContent = n.kind === 'stood' ? `${n.name} (been here)` : n.kind === 'seen' ? `${n.name} (seen, not visited)` : n.kind === 'outside' ? `${n.name} (double-click to open)` : `${n.name}: unexplored`; g.append(title);
+            if (touched.has(n.id) || (n.layer && (n.rooms ?? []).some(r => touched.has(r.address ?? r)))) {
+                g.classList.add('patched');
+                g.append(S('circle', { class: 'patchdot', cx: w / 2 - 7, cy: -h / 2 + 7, r: 4, fill: '#f0a030', stroke: '#222' }));
+                title.textContent += ' · changed in this chat';
+            }
             g.addEventListener('click', () => { if (!moved) showSide(n.id); });
             if (n.layer) g.addEventListener('dblclick', ev => { ev.stopPropagation(); setLayer(n.layer); });
             world.append(g);
@@ -436,7 +483,7 @@ function onState(st) {
     setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.last_wait?.recent ? ` (${st.last_wait.label})` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
-channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); });
+channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); });
 
 buildTopBar();
 setEditor(editor);

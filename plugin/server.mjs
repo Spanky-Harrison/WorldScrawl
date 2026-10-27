@@ -335,7 +335,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             needBody(body);
             const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
             const target = field(body, 'target', 'str', 'world');
-            const r = inspect(e.w, [e.worldJson, e.raw], target, e.info.patches);
+            const lw = get_world(q('world'));
+            const r = inspect(e.w, [e.worldJson, e.raw], target, e.info.patches, { w: lw.world, raw: lw.raw });
             if (!r) throw new HttpError(404, `Nothing to inspect at ${repr(target)}.`);
             return r;
         },

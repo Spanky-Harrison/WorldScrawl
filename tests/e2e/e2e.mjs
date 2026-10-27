@@ -1197,6 +1197,59 @@ try {
     await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
     check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
     check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning]')));
+    // ---- Editing a proposed map change before Keep, re-editing a kept one, and "Edit live" from the map window.
+    const CR = 'riverton:drowned_rat/common_room';
+    const wsMod = '/scripts/extensions/third-party/WorldScrawl/index.js';
+    const flagId = await page.evaluate(async ([CR, mod]) => {
+        const c = SillyTavern.getContext(), id = c.chat.findLastIndex(m => !m.is_system && !m.is_user);
+        c.chat[id].extra = c.chat[id].extra ?? {};
+        c.chat[id].extra.worldscrawl_flag = { status: 'review', start: id, swipe: c.chat[id].swipe_id ?? 0, note: 'fire', proposal: { ops: [{ op: 'set_description', loc: CR, text: 'Smoky.' }], summary: ['Common Room: description rewritten'], relocate: {}, before: {}, after: {} } };
+        (await import(mod)).renderPatchCards(); return id;
+    }, [CR, wsMod]);
+    const card = page.locator(`#chat .mes[mesid="${flagId}"] .worldscrawl_patchcard`);
+    await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    await card.locator('.wspf-op').first().waitFor({ timeout: 10000 });
+    check('review card: Edit opens the change as a form (description textarea prefilled)', await card.locator('.wspf-text').first().inputValue() === 'Smoky.');
+    await card.locator('.wspf-text').first().fill('');
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(800);
+    check('review card: an empty description is refused inline, nothing stamped', /text/i.test(await card.innerText()) && await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId), await card.innerText());
+    await card.locator('.wspf-text').first().fill('Charred beams and ash.');
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(1500);
+    const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
+    await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    await card.locator('.wspf-text').first().waitFor({ timeout: 10000 });
+    await card.locator('.wspf-text').first().fill('Rebuilt, smelling of fresh pine.');
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Save change' }).click(); await page.waitForTimeout(1500);
+    const kept2 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('kept change can be re-edited and re-stamped on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops[0].text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2));
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click(); await page.waitForTimeout(1000);
+    check('Undo removes the edited change', await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId));
+    // Edit live from the map window's inspector.
+    await ui.click('#editorToggle'); await ui.waitForTimeout(800);
+    await ui.click(`.node[data-id="${CR}"]`);
+    await ui.locator('.side .editlive').waitFor({ timeout: 10000 });
+    const descRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'description'); return tr ? [tr.querySelector('.val')?.textContent ?? '', tr.querySelector('.src')?.textContent ?? ''] : null; });
+    const dr0 = await descRow();
+    check('inspector Resolved shows the room\'s own description, from file', dr0 && dr0[0].length > 10 && /from file/.test(dr0[1] ?? dr0.join('')), JSON.stringify(dr0));
+    const nLiveEdit = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.click('.side .editlive');
+    await ui.locator('.side .wspf-text').first().waitFor({ timeout: 10000 });
+    await ui.locator('.side .wspf-text').first().fill('Burned to the rafters.');
+    await ui.click('.side button:has-text("Save to chat")');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const le = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, p: m.extra?.worldscrawl_patches }; }, nLiveEdit);
+    check('GUI Edit live: SillyTavern adds a hidden system message carrying the stamp', le.grew && le.sys === true && /^Map edit: /.test(le.mes) && le.p?.[0]?.ops?.[0]?.text === 'Burned to the rafters.', JSON.stringify(le));
+    try { await ui.waitForSelector(`.node.patched[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
+    check('map marks the patched room', await ui.locator(`.node.patched[data-id="${CR}"] .patchdot`).count() === 1);
+    await ui.click(`.node[data-id="${CR}"]`); await ui.waitForTimeout(1500);
+    const dr1 = await descRow();
+    check('Resolved is live: the new description, tagged with its message', dr1 && dr1[0] === 'Burned to the rafters.' && dr1.join(' ').includes(`from message #${nLiveEdit}`), JSON.stringify(dr1));
+    const told = await page.evaluate(async mod => (await import(mod)).chatElapsed !== undefined, wsMod);
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nLiveEdit); await page.waitForTimeout(1500);
+    try { await ui.waitForFunction(id => !document.querySelector(`.node.patched[data-id="${id}"]`), CR, { timeout: 10000 }); } catch {}
+    check('deleting the map-edit message undoes it (marker gone)', told && await ui.locator(`.node.patched[data-id="${CR}"]`).count() === 0 && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => m.extra?.worldscrawl_patches)));
+    await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);

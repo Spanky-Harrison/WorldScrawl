@@ -94,7 +94,7 @@ export function exitRows(w, loc, e) {
  * target: "world" | "region:<id>" | "sub:<region>:<sub>" | "<region>:<sub>/<loc>" (a room) | "exit:<address>|<direction>".
  * Returns {target, kind, title, raw, resolved: [{key, value, source}], warnings: [{message}]}, or null if not found.
  */
-export function inspect(w, raw, target, patches = []) {
+export function inspect(w, raw, target, patches = [], base = null) {
     const t = String(target ?? '');
     const list = (patches ?? []).map(p => ({ msg: p.msg, note: p.note, id: p.id, summary: p.summary, touched: [...new Set(p.touched ?? [])], relocate: p.relocate ?? {} }));
     if (t === 'changes') {
@@ -105,7 +105,24 @@ export function inspect(w, raw, target, patches = []) {
     if (!r) return r;
     const key = t.startsWith('exit:') ? t.slice(5).split('|')[0] : t.startsWith('region:') ? t.slice(7) : t.startsWith('sub:') ? t.slice(4) : t;
     const hit = a => a === key || (!t.includes('/') && !t.startsWith('exit:') && t !== 'world' && t !== '' && a.startsWith(key)) || t === 'world' || t === '';
-    return { ...r, changes: list.filter(p => p.touched.some(hit) || Object.values(p.relocate).includes(key)) };
+    const changes = list.filter(p => p.touched.some(hit) || Object.values(p.relocate).includes(key));
+    return { ...r, resolved: tagLive(r.resolved, base && list.length ? inspectBase(base.w, base.raw, t) : null, changes, key, !!(base && list.length)), changes };
+}
+/** "own" reads "from file"; a value a map change made differs from the base world's and reads "from message #N". */
+const SRC = src => (src === 'own' ? 'from file' : typeof src === 'string' ? src.replace(/^own\b/, 'from file') : src);
+function tagLive(rows, baseInfo, changes, key, patched) {
+    const baseRows = new Map((baseInfo?.resolved ?? []).map(x => [x.key, x.value]));
+    // The latest change that touched this place (or its area / region, for notes) is the one that set the value.
+    const area = key.includes('/') ? key.slice(0, key.indexOf('/')) : key, region = area.split(':')[0];
+    const last = [...changes].reverse()[0] ?? null;
+    const lastFor = k => [...changes].reverse().find(p => (k.includes('notes') ? p.touched.some(a => a === area || a === region || a === key) : true)) ?? last;
+    return rows.map(x => {
+        if (patched && (!baseInfo || (baseRows.has(x.key) ? JSON.stringify(baseRows.get(x.key)) !== JSON.stringify(x.value) : true)) && changes.length && !['display_name', 'address'].includes(x.key)) {
+            const p = lastFor(x.key);
+            if (p) return { ...x, source: p.msg === null || p.msg === undefined ? 'from a map change' : `from message #${p.msg}`, changed: true };
+        }
+        return { ...x, source: SRC(x.source) };
+    });
 }
 function inspectBase(w, raw, target) {
     const t = String(target ?? '');
@@ -149,9 +166,14 @@ function inspectBase(w, raw, target) {
     if (!loc) return null;
     const notes = w.effective_notes(loc), sub = w.sub_of(loc), region = w.regions.get(loc.region);
     const lv = rawLevels(raw, w, loc);
-    const rows = [row('name', loc.name, 'own'), row('display_name', World.place_label(loc.name, sub.name), 'derived'),
+    const own = lv[0][1] ?? {};
+    const rows = [row('address', loc.address, 'derived'), row('name', loc.name, 'own'), row('display_name', World.place_label(loc.name, sub.name), 'derived'),
+        row('description', loc.description, 'own'),
+        row('inherit_region_notes', loc.inherit_region_notes, has(own, 'inherit_region_notes') ? 'own' : 'default (from subregion inherit_notes)'),
+        row('inherit_subregion_notes', loc.inherit_subregion_notes, has(own, 'inherit_subregion_notes') ? 'own' : 'default'),
         row('region notes', notes.region, notes.region ? 'from region' : 'not inherited'), row('subregion notes', notes.subregion, notes.subregion ? 'from subregion' : 'not inherited'),
-        ...placeRows(raw, w, loc), stays(w, lv), row('exits', loc.exits.map(e => e.direction), 'own'), row('views', loc.views, loc.views.length ? 'own' : 'default')];
+        ...placeRows(raw, w, loc), stays(w, lv), row('exits', loc.exits.map(e => e.direction), 'own'), row('views', loc.views, loc.views.length ? 'own' : 'default'),
+        ...(loc.pos ? [row('pos', loc.pos, 'own')] : [])];
     void region;
     return out('room', World.place_label(loc.name, sub.name), lv[0][1], rows, [`loc:${loc.address}`, ...loc.exits.map(e => `exit:${loc.address}|${lc(e.direction)}`)]);
 }

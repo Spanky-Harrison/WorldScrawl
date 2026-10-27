@@ -2003,6 +2003,12 @@ function openMapChannel() {
     ch.addEventListener('message', ev => {
         if (ev.data?.type === 'hello') broadcastMapState();
         // The map's Wait button: only the tab showing that chat acts on it (the map never changes state itself).
+        if (ev.data?.type === 'patch') { // the map's "Edit live": this tab stamps it on a hidden message and answers
+            const c = ctx();
+            if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) liveEdit(Array.isArray(ev.data.ops) ? ev.data.ops : [], String(ev.data.note ?? ''))
+                .then(r => ch.postMessage({ type: 'patch_result', req: ev.data.req, ...r }))
+                .catch(e => ch.postMessage({ type: 'patch_result', req: ev.data.req, ok: false, errors: [{ i: null, error: e.message }] }));
+        }
         if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
     });
     return ch;
@@ -2079,6 +2085,79 @@ function patchSig() {
     let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return `p${h.toString(36)}|`;
 }
+let formLib = null;
+async function loadFormLib() { try { formLib ??= await import(`${baseUrl()}/ui/patchform.mjs`); } catch (e) { console.warn('[WorldScrawl] patch form unavailable:', e.message); } return formLib; }
+let formRooms = null;
+/** Addresses and area ids for the editor's suggestions (cached per map version). */
+async function formChoices() {
+    if (formRooms?.v === mapVersion && formRooms.list) return formRooms.list;
+    const r = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
+    const rooms = r.ok ? r.body.addresses ?? [] : [];
+    const areas = [...new Set(rooms.flatMap(a => { const ar = a.split('/')[0]; return [ar, ar.split(':')[0]]; }))];
+    formRooms = { v: mapVersion, list: { rooms, areas } };
+    return formRooms.list;
+}
+/** Check edited ops against the map (changes = the chat's changes the patch sits on). Returns {ok, preview} or {ok:false, error, at}. */
+export async function previewOps(ops, ctxOver = mapCtx()) {
+    const fl = await loadFormLib();
+    const local = fl ? fl.checkOps(ops) : [];
+    if (local.length) return { ok: false, errors: local };
+    const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...ctxOver }) });
+    if (r.ok) return { ok: true, preview: r.body };
+    const msg = r.body?.detail?.error ?? (typeof r.body?.detail === 'string' ? r.body.detail : `server error ${r.status}`);
+    return { ok: false, errors: [fl ? fl.errorsByOp(msg) : { i: null, error: msg }] };
+}
+/** Open editors on cards, kept across re-renders: key "<msg>|flag" or "<msg>|<patch id>". */
+const openForms = new Map();
+async function openEditor(key, ops, context = {}) {
+    const fl = await loadFormLib();
+    if (!fl) { toastr.error('WorldScrawl: the change editor could not load. Restart SillyTavern after updating.'); return; }
+    const ch = await formChoices();
+    openForms.set(key, fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, context }));
+    renderPatchCards();
+}
+/** Re-stamp a kept change with edited ops (same message, same id); the rest of the chat's changes must still fit. */
+async function saveKeptEdit(id, pid, form) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], p = (msg?.extra?.[PATCH_KEY] ?? []).find(x => x.id === pid);
+    if (!p) return;
+    const ops = form.getOps();
+    const before = chatChanges(chat.slice(0, id));
+    const r = await previewOps(ops, { changes: before, now: chatElapsed(chat.slice(0, id + 1)) });
+    if (!r.ok) { form.setErrors(r.errors); return; }
+    const old = { ops: p.ops, summary: p.summary, relocate: p.relocate };
+    Object.assign(p, { ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, edited: Date.now() });
+    const all = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
+    if (!all.ok) {
+        Object.assign(p, old);
+        form.setErrors([{ i: null, error: `A later change no longer fits with this edit: ${all.body?.detail?.error ?? all.status}` }]);
+        return;
+    }
+    syncSwipeExtra(msg);
+    openForms.delete(`${id}|${pid}`);
+    await c.saveChat?.();
+    exitsCache.clear();
+    toastr.success('WorldScrawl: change updated.');
+    await applyFacts();
+    renderAllExits();
+}
+/** A live edit from the map window (or anywhere): a hidden system message carrying the stamp. Returns {ok} or {ok:false, errors}. */
+export async function liveEdit(ops, note = '') {
+    if (!isOn()) return { ok: false, errors: [{ i: null, error: 'WorldScrawl is off in this chat.' }] };
+    const c = ctx(), chat = c.chat ?? [];
+    const r = await previewOps(ops);
+    if (!r.ok) return r;
+    const fl = await loadFormLib();
+    const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: note || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: chatElapsed(chat),
+        ops, relocate: r.preview.relocate ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
+    const text = fl ? fl.editLine(r.preview.summary) : `Map edit: ${(r.preview.summary ?? []).join('; ')}`;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'map_edit', [PATCH_KEY]: [p] } };
+    chat.push(msg); c.addOneMessage(msg); await c.saveChat?.();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+    return { ok: true, summary: r.preview.summary, msg: chat.length - 1 };
+}
+globalThis.worldscrawlLiveEdit = liveEdit;
 async function loadPatchLib() { try { patchLib ??= await import(`${baseUrl()}/ui/patches.mjs`); } catch (e) { console.warn('[WorldScrawl] patches lib unavailable:', e.message); } return patchLib; }
 
 /** Where the story range for a flag on message `end` starts: after the previous flag, or at the last move into or out of `loc`; at most ~10 messages back. */
@@ -2197,6 +2276,15 @@ globalThis.worldscrawlFlag = flagMessage;
 async function keepFlag(id, { quiet = false } = {}) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f?.proposal) return;
+    const form = openForms.get(`${id}|flag`);
+    if (form) {
+        const ops = form.getOps();
+        if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Discard.' }]); return; }
+        const r = await previewOps(ops, { changes: chatChanges(chat.slice(0, id + 1)), now: chatElapsed(chat.slice(0, id + 1)) });
+        if (!r.ok) { form.setErrors(r.errors); return; }
+        f.proposal = { ...f.proposal, ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {} };
+        openForms.delete(`${id}|flag`);
+    }
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
         ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
@@ -2365,7 +2453,7 @@ function cardButton(label, onClick, title = '') {
     return b;
 }
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
-function renderPatchCards() {
+export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
@@ -2413,13 +2501,21 @@ function renderPatchCards() {
                 const pre = document.createElement('pre'); pre.style.cssText = 'max-height:240px;overflow:auto;font-size:0.85em;white-space:pre-wrap;';
                 pre.textContent = `BEFORE\n${JSON.stringify(f.proposal.before ?? {}, null, 1)}\n\nAFTER\n${JSON.stringify(f.proposal.after ?? {}, null, 1)}\n\nOPS\n${JSON.stringify(f.proposal.ops, null, 1)}`;
                 det.append(pre); card.append(det);
-                card.append(startPicker(), cardButton('Check again', () => analyzeFlag(id), 'Ask again with this story range'), cardButton('Keep', () => keepFlag(id)), cardButton('Discard', () => discardFlag(id)));
+                const form = openForms.get(`${id}|flag`);
+                if (form) card.append(form.el);
+                card.append(startPicker(), cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
+                    form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
+                        : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before keeping it'),
+                    cardButton(form ? 'Keep edited' : 'Keep', () => keepFlag(id)), cardButton('Discard', () => { openForms.delete(`${id}|flag`); discardFlag(id); }));
             }
         }
         for (const p of kept) {
             const d = line(`🗺 Map changed here: ${(p.summary ?? []).join('; ') || p.note}`);
-            d.append(' ', cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
+            const key = `${id}|${p.id}`, form = openForms.get(key);
+            d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
+                cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
             card.append(d);
+            if (form) card.append(form.el, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
         }
         if (!card.childNodes.length) continue;
         (el.querySelector('.mes_block') ?? el).appendChild(card);
