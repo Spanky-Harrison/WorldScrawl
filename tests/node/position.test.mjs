@@ -53,3 +53,7 @@ test('resolver: redirects from before the stamp are ignored with since', () => {
     const ch = [{ ...merge(), _msg: 2 }];
     assert.equal(resolve(YARD, ch, { since: 5 }).how === 'merged', false);
 });
+test('resolver: swiping away the change that made the room walks back the move history', () => {
+    const r = resolve(MERGED, [], { history: ['riverton:gone/x', SQUARE, TAVERN] });
+    assert.deepEqual([r.address, r.how], [SQUARE, 'history']);
+});

@@ -323,6 +323,12 @@ export function getStoredLocation() {
     const st = storedStamp();
     return st ? relocateFrom(st.address, st.index, ctx().chat ?? []) : null;
 }
+/** Earlier stamped positions before message `before`, newest first, without repeats (the move history). */
+function stampHistory(before) {
+    const chat = ctx().chat ?? [], out = [];
+    for (let i = before - 1; i >= 0 && out.length < 200; i--) { const a = chat[i]?.extra?.[LOC_KEY]; if (a && !out.includes(a)) out.push(a); }
+    return out;
+}
 /** The raw location stamp (before merge redirects) and the message it is on. */
 function storedStamp() {
     const chat = ctx().chat ?? [];
@@ -355,7 +361,7 @@ async function currentLocation() {
  *  entrance, the world start). One short system notice carries the new location (delete it to undo) and the narrator is told once. */
 async function missingRoomFallback(stored) {
     const st = storedStamp();
-    const r = await api('/resolve', { method: 'POST', body: JSON.stringify({ address: st?.address ?? stored, since: st?.index ?? null, ...mapCtx() }) }).catch(() => null);
+    const r = await api('/resolve', { method: 'POST', body: JSON.stringify({ address: st?.address ?? stored, since: st?.index ?? null, history: stampHistory(st?.index ?? (ctx().chat ?? []).length), ...mapCtx() }) }).catch(() => null);
     let to = r?.ok && r.body?.address ? await fetchLocationCached(r.body.address) : null;
     if (!to) to = await fetchLocationCached(null);
     if (!to) throw new Error('WorldScrawl: /start failed.');

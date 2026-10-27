@@ -313,7 +313,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 for (let k = changes.length - 1; k >= 0; k--) { let pw; try { pw = changed_for(wid, changes.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
                 return null;
             };
-            const r = resolvePosition(e.w, address, { relocate: relocateMap(e.info.patches, since), allRelocate: relocateMap(all.info.patches), before });
+            const r = resolvePosition(e.w, address, { relocate: relocateMap(e.info.patches, since), allRelocate: relocateMap(all.info.patches), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
             const loc = e.w.locations.get(r.address);
             return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
         },
