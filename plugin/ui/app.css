@@ -117,3 +117,6 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .pf-exit-body { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
 .pf-door { margin-left: 1.5em; display: flex; flex-direction: column; gap: 4px; }
 .pf-errors li { color: #e55; }
+.pf-parent-notes { margin: -2px 0 8px; padding: 4px 8px; border-left: 2px solid #8884; font-size: 0.9em; }
+.pf-parent-note { opacity: 0.7; white-space: pre-wrap; }
+.pf-parent-note.off { text-decoration: line-through; opacity: 0.4; }

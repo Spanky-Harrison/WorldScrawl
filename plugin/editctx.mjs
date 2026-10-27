@@ -39,7 +39,9 @@ export function editContext(w, worldJson, raw, target) {
         // The entrance dropdown: a subregion's rooms (by id), or a region's subregions (by id).
         const entrances = sub ? Object.entries(rawS.locations ?? {}).map(([l, o]) => ({ value: l, label: o.name ?? l }))
             : Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ value: s, label: o.name ?? s }));
-        return { kind, area: sub ? `${rid}:${sid}` : rid, title: obj.name ?? t, own, inherited, entrances };
+        // Notes stack (they are additive, not overridden): a subregion's own notes sit under its region's.
+        const parent_notes = sub && rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_notes' }] : [];
+        return { kind, area: sub ? `${rid}:${sid}` : rid, title: obj.name ?? t, own, inherited, entrances, parent_notes };
     }
     const a = t.startsWith('loc:') ? t.slice(4) : t.startsWith('exit:') ? t.slice(5).split('|')[0] : t;
     const loc = w.get(a), r = getRoom(raw, a);
@@ -60,5 +62,10 @@ export function editContext(w, worldJson, raw, target) {
     });
     return { kind: 'room', address: a, area: `${rid}:${sid}`, title: r.name, own, inherited, exits,
         subregions: Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ area: `${rid}:${s}`, name: o.name ?? s })),
-        rooms: rooms.filter(x => x.address !== a) };
+        rooms: rooms.filter(x => x.address !== a),
+        // The parent notes stacked on top of this place's own description (each with its inherit toggle).
+        parent_notes: [
+            ...(rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_region_notes' }] : []),
+            ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
+        ] };
 }

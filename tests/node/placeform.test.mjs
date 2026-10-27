@@ -32,6 +32,9 @@ test('edit context: own values, inherited ones with their source, exits with the
     const r = ctxOf(c, 'region:riverton');
     assert.equal(r.kind, 'region'); assert.ok(r.entrances.some(e => e.value === 'streets'));
     assert.equal(c.post('/edit/context', { json: { target: 'riverton:nope/x' } }).status_code, 404);
+    // Notes stack: parent notes are listed (read-only) with the toggle that drops them, never as an inherited value.
+    assert.ok(!('description' in x.inherited));
+    for (const n of x.parent_notes) assert.ok(['inherit_region_notes', 'inherit_subregion_notes'].includes(n.toggle) && n.text);
 });
 
 test('edit form diff: an untouched form makes no ops; inherited values are never copied in', () => {

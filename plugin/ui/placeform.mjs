@@ -216,7 +216,21 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
     const root = el('div', { class: 'placeform', 'data-kind': ctx.kind });
     const specs = ctx.kind === 'room' ? ROOM_FIELDS : AREA_FIELDS[ctx.kind];
     const aiFor = fieldObj => (ai ? (k, text) => ai({ kind: ctx.kind, field: k, text, exit: fieldObj }) : null);
-    for (const s of specs) root.append(fieldRow(doc, s, state.own, { inh: ctx.inherited?.[s.k] ?? null, options: s.options === 'entrances' ? ctx.entrances : null, onChange: changed, ai: aiFor(null) }));
+    const textKey = ctx.kind === 'room' ? 'description' : 'notes';
+    for (const s of specs) {
+        // Descriptions and notes are additive: the own text is never inherited, so no placeholder or reset.
+        const inh = s.k === textKey ? null : ctx.inherited?.[s.k] ?? null;
+        root.append(fieldRow(doc, s, state.own, { inh, options: s.options === 'entrances' ? ctx.entrances : null, onChange: changed, ai: aiFor(null) }));
+        if (s.k === textKey && ctx.parent_notes?.length) {
+            const box = el('div', { class: 'pf-parent-notes', 'data-field': 'parent_notes' });
+            for (const n of ctx.parent_notes) box.append(el('div', { class: 'pf-parent-note muted', 'data-from': n.from, 'data-toggle': n.toggle },
+                el('span', { class: 'pf-from' }, `added from ${n.from} (${n.name})`), ' ', el('span', { class: 'pf-note-text' }, n.text)));
+            root.append(box);
+        }
+    }
+    // Greys out a parent note while its inherit toggle is off.
+    const syncNotes = () => { for (const d of root.querySelectorAll('.pf-parent-note')) { const k = d.dataset.toggle, v = has(state.own, k) ? state.own[k] : ctx.inherited?.[k]?.value ?? true; d.classList.toggle('off', v === false); } };
+    root.addEventListener('change', syncNotes); root.addEventListener('click', () => setTimeout(syncNotes)); syncNotes();
     if (ctx.kind === 'room') {
         const mv = el('select', { class: 'pf-input pf-move' }, ...(ctx.subregions ?? []).map(s => el('option', { value: s.area }, s.name)));
         mv.value = state.area;
