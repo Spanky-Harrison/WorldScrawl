@@ -1362,7 +1362,7 @@ try {
     try { await ui.waitForFunction(() => document.querySelector('.side .mapaction')?.dataset.action === 'delete_place', null, { timeout: 12000 }); } catch {}
     const mwCp = await mwLastMsg(mwNW);
     const mwBack = await ui.evaluate(() => ({ a: document.querySelector('.side .mapaction')?.dataset.action, casc: !!document.querySelector('.side .mw-cascade'), sub: !!document.querySelector('.side .mw-submit') }));
-    check('Add a place first: stamps create_place (with its exit) and returns to the delete, now without the cascade', mwCp.grew && mwCp.sys && mwCp.ops[0]?.op === 'create_place' && mwCp.ops[0]?.exits?.[0]?.to === mwFORGE && mwBack.a === 'delete_place' && !mwBack.mwCasc && mwBack.sub, JSON.stringify([mwCp, mwBack]));
+    check('Add a place first: stamps create_place (with its exit) and returns to the delete, now without the cascade', mwCp.grew && mwCp.sys && mwCp.ops[0]?.op === 'create_place' && mwCp.ops[0]?.exits?.[0]?.to === mwFORGE && mwBack.a === 'delete_place' && !mwBack.casc && mwBack.sub, JSON.stringify([mwCp, mwBack]));
     await ui.click('.side .mw-submit'); await mwSavedWait();
     const mwDp = await mwLastMsg(mwCp.n);
     check('Delete place: stamps remove_location', mwDp.grew && mwDp.ops[0]?.op === 'remove_location' && mwDp.ops[0]?.loc === mwFORGE, JSON.stringify(mwDp));

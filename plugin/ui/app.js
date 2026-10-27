@@ -543,7 +543,9 @@ function createMapWindow(win) {
         legend.replaceChildren(...[...subs.values()].map(s => $('span', {}, $('i', { style: `background:hsl(${s.hue} 55% 45%)` }), s.name)),
             $('span', {}, '▭ been · ⋯ seen · ┄ closed door · ✕ blocked'));
         const hereNode = graph.nodes.find(n => n.here)?.id;
-        showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
+        // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
+        if (side.querySelector('.mapaction')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
 
     async function update(st0) {
