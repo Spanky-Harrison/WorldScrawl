@@ -28,12 +28,25 @@
 //       travel_time and barrier (the door: an object, or null for no door).
 //   {op: "add_exit", loc, direction, to, return_direction?, travel_time?, description?, return_description?, door?}
 //       a new exit pair between two existing rooms (one way when return_direction is empty and one_way is true).
-//   {op: "move_location", loc, area}   a room moves to another subregion of its region; it keeps its id and exits.
+//   {op: "move_location", loc, area, id?}   a room moves to another subregion (any region); it keeps its exits, and its
+//       id unless "id" renames it. A taken id is refused with a suggested free one (PatchError.clash), never overwritten.
+//       The old address redirects to the new one (relocate), like a merge.
+//   {op: "move_area", area: "region:sub", region, id?}   a subregion (with all its places) moves to another region.
+//   {op: "create_place", area, name, description, id?, exits: [{direction, to, return_direction, travel_time?, door?,
+//       description?, return_description?}]}   a new place joined to at least one existing place.
+//   {op: "create_subregion", region, name, notes?, id?, place: {name, description, id?, exits: [...]}}   with its first place.
+//   {op: "create_region", name, notes?, id?, subregion: {name, notes?, id?, place: {...}}}   with its first subregion and
+//       starting place (exits optional here).
+//   {op: "remove_area", area, contents: "delete" | "move", into?, ids?: {oldId: newId}}   deletes a subregion ("region:sub")
+//       or region ("region"); its places (or subregions) are deleted, or moved into "into" (a subregion / region): that is
+//       also how two containers merge. Anyone inside a deleted place ends up in the nearest place that is left.
+//   Emptying a container deletes it too (the last place of a subregion, the last subregion of a region); the world's
+//   starting region and the last region are never deleted.
 
 import { parseDuration } from './calendar.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
     'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
-    'set_fields', 'set_exit', 'add_exit', 'move_location'];
+    'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
 /** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
 export const FIELD_KEYS = {
     room: ['inherit_region_notes', 'inherit_subregion_notes', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
@@ -137,6 +150,10 @@ export function normalizeOp(raw, op) {
     for (const k of ['loc', 'into']) if (typeof o[k] === 'string' && o[k].trim()) o[k] = resolveRoom(raw, o[k]);
     if (o.op === 'set_fields' && typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target);
     if (o.op === 'add_exit' && typeof o.to === 'string' && o.to.trim()) o.to = resolveRoom(raw, o.to);
+    const fixExits = p => (isObj(p) && Array.isArray(p.exits) ? { ...p, exits: p.exits.map(e => (isObj(e) && typeof e.to === 'string' ? { ...e, to: resolveRoom(raw, e.to) } : e)) } : p);
+    if (o.op === 'create_place') Object.assign(o, fixExits(o));
+    if (o.op === 'create_subregion') o.place = fixExits(o.place);
+    if (o.op === 'create_region' && isObj(o.subregion)) o.subregion = { ...o.subregion, place: fixExits(o.subregion.place) };
     if (o.op === 'set_expandable') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
     if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
     if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
@@ -277,7 +294,7 @@ function applyOp(raw, op, w, out, world = null) {
             out.touched.push(a, ex.to);
             return `${r.name} ${ex.direction} exit: travel time ${t} (both ways)`;
         }
-        case 'remove_location': return removeOp(raw, op, w, out);
+        case 'remove_location': return removeOp(raw, op, w, out, world);
         case 'merge': return mergeOp(raw, op, w, out);
         case 'discover': return discoverOp(raw, op, w, out, world);
         case 'set_expandable': {
@@ -293,14 +310,37 @@ function applyOp(raw, op, w, out, world = null) {
         case 'set_exit': return setExitOp(raw, op, w, out);
         case 'add_exit': return addExitOp(raw, op, w, out);
         case 'move_location': {
-            const a = str(op.loc), r = needRoom(raw, a, w), area = str(op.area), [rid] = split(a);
+            const a = str(op.loc), r = needRoom(raw, a, w), area = str(op.area);
             if (area === a.slice(0, a.indexOf('/'))) throw new PatchError(`${w}: ${r.name} is already in that subregion`);
-            const [arid, asid] = area.split(':'), sub = raw[arid]?.subregions?.[asid];
-            if (!asid || !isObj(sub)) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a subregion ("region:subregion")`);
-            if (arid !== rid) throw new PatchError(`${w}: a room can only move to a subregion of its own region`);
-            mergeOp(raw, { op: 'merge', locs: [a], into: a, area }, w, out);
-            return `${r.name} moved to ${sub.name ?? area}`;
+            const sub = needSub(raw, area, w);
+            const to = moveRoom(raw, a, area, op.id, w, out, world);
+            return `${r.name} moved to ${sub.name ?? area}${split(to)[2] !== split(a)[2] ? ` (as ${split(to)[2]})` : ''}`;
         }
+        case 'move_area': return moveAreaOp(raw, op, w, out, world);
+        case 'create_place': {
+            const sub = needSub(raw, str(op.area), w);
+            const a = createPlace(raw, str(op.area), op, w, out, true);
+            return `${getRoom(raw, a).name}: new place in ${sub.name ?? op.area}`;
+        }
+        case 'create_subregion': {
+            const rid = str(op.region);
+            if (!isObj(raw[rid])) throw new PatchError(`${w}: "region" ${JSON.stringify(op.region)} is not a region`);
+            const sid = createSub(raw, rid, op, w, out, true);
+            return `${raw[rid].subregions[sid].name}: new subregion in ${raw[rid].name ?? rid}`;
+        }
+        case 'create_region': {
+            const name = needText(op, w, 'name', MAX_PATCH_NAME), rid = newId(op.id, name, w);
+            if (has(raw, rid)) throw clashError(w, 'region', rid, suggestId(new Set(Object.keys(raw)), rid));
+            raw[rid] = { name, ...(str(op.notes) ? { notes: needText(op, w, 'notes') } : {}), start: '', subregions: {} };
+            if (!isObj(op.subregion)) throw new PatchError(`${w}: a new region needs its first "subregion" (with a "place")`);
+            try {
+                const sid = createSub(raw, rid, op.subregion, `${w}, subregion`, out, false);
+                raw[rid].start = `${sid}/${raw[rid].subregions[sid].entrance}`;
+            } catch (e) { delete raw[rid]; throw e; }
+            out.touched.push(rid);
+            return `${name}: new region`;
+        }
+        case 'remove_area': return removeAreaOp(raw, op, w, out, world);
     }
     throw new PatchError(`${w}: unknown op`);
 }
@@ -505,6 +545,7 @@ function fixEntrances(raw, gone, target) {
                 if (t && t[0] === rid && t[1] === sid) sub.entrance = t[2]; else delete sub.entrance;
             }
         }
+        if (!Object.keys(reg.subregions).length) continue; // emptied: dropEmpty deletes the region
         const valid = rel => { const [s, l] = String(rel).split('/'); return isObj(reg.subregions[s]) && (l === undefined || has(reg.subregions[s].locations, l)); };
         const fallback = () => { const t = split(target); if (t && t[0] === rid) return `${t[1]}/${t[2]}`; const [s, sub] = Object.entries(reg.subregions)[0]; return `${s}/${Object.keys(sub.locations)[0]}`; };
         if (typeof reg.start === 'string' && !valid(reg.start)) reg.start = fallback();
@@ -513,20 +554,185 @@ function fixEntrances(raw, gone, target) {
 }
 const roomsIn = (raw, rid) => Object.values(raw[rid]?.subregions ?? {}).reduce((n, s) => n + Object.keys(s?.locations ?? {}).length, 0);
 
-function removeOp(raw, op, w, out) {
+function removeOp(raw, op, w, out, world = null) {
     const a = str(op.loc), r = needRoom(raw, a, w), [rid, sid, lid] = split(a);
-    if (roomsIn(raw, rid) <= 1) throw new PatchError(`${w}: can't remove ${r.name}, the last room of its region`);
-    const sub = raw[rid].subregions[sid];
-    const near = (r.exits ?? []).map(e => e.to).find(t => t !== a && getRoom(raw, t) && split(t)[0] === rid)
-        ?? Object.keys(sub.locations).filter(l => l !== lid).map(l => `${rid}:${sid}/${l}`)[0]
-        ?? [...eachRoom(raw)].find(([x, , r2]) => r2 === rid && x !== a)[0];
-    delete sub.locations[lid];
-    const gone = new Set([a]);
+    const subName = raw[rid].subregions[sid].name ?? sid, regName = raw[rid].name ?? rid;
+    const lastSub = Object.keys(raw[rid].subregions[sid].locations).length <= 1, lastReg = roomsIn(raw, rid) <= 1;
+    if (lastReg) canDropRegion(raw, rid, world, w, `remove ${r.name}, the last place of ${regName}`);
+    const near = nearest(raw, new Set([a]), r.exits);
+    removeRooms(raw, [a], near, out);
+    dropEmpty(raw);
+    return `${r.name} removed (anyone there ends up in ${nameOf(raw, near)})${lastReg ? `; ${regName} deleted with it` : lastSub ? `; ${subName} deleted with it` : ''}`;
+}
+/** The place left over that is closest to the removed ones: through their exits first (same region preferred), else any. */
+function nearest(raw, gone, exits = null) {
+    const ex = exits ?? [...gone].flatMap(a => getRoom(raw, a)?.exits ?? []);
+    const tos = ex.filter(isObj).map(e => e.to).filter(t => !gone.has(t) && getRoom(raw, t));
+    const rids = new Set([...gone].map(a => split(a)[0]));
+    const all = [...eachRoom(raw)].map(x => x[0]).filter(x => !gone.has(x));
+    return tos.find(t => rids.has(split(t)[0])) ?? all.find(t => rids.has(split(t)[0]) && [...gone].some(g => g.slice(0, g.indexOf('/')) === t.slice(0, t.indexOf('/'))))
+        ?? all.find(t => rids.has(split(t)[0])) ?? tos[0] ?? all[0] ?? null;
+}
+function removeRooms(raw, addrs, near, out) {
+    if (!near) throw new PatchError('nothing would be left of the world');
+    const gone = new Set(addrs);
+    for (const a of addrs) { const [r, s, l] = split(a); delete raw[r].subregions[s].locations[l]; }
     rewire(raw, gone, null);
     fixEntrances(raw, gone, near);
-    relocateTo(out, a, near);
+    for (const a of addrs) relocateTo(out, a, near);
+    out.touched.push(...addrs);
+}
+/** A region may go only if another one is left and it isn't the world's starting region. */
+function canDropRegion(raw, rid, world, w, what) {
+    if (Object.keys(raw).length <= 1) throw new PatchError(`${w}: can't ${what}: it is the world's only region`);
+    if (isObj(world) && world.start_region === rid) throw new PatchError(`${w}: can't ${what}: it is the world's starting region`);
+}
+/** Regions emptied by a removal or move go too (their subregions already went in fixEntrances). */
+function dropEmpty(raw) {
+    for (const [rid, reg] of Object.entries(raw)) if (isObj(reg) && isObj(reg.subregions) && !Object.keys(reg.subregions).length) delete raw[rid];
+}
+function needSub(raw, area, w) {
+    const [rid, sid] = String(area ?? '').split(':'), sub = raw[rid]?.subregions?.[sid];
+    if (!sid || !isObj(sub)) throw new PatchError(`${w}: "area" ${JSON.stringify(area)} is not a subregion ("region:subregion")`);
+    return sub;
+}
+/** A free id in `taken`: id itself, else "<prefix>_<id>" (prefix: where it comes from), else id_2, id_3... */
+export function suggestId(taken, id, prefix = '') {
+    if (!taken.has(id)) return id;
+    if (prefix && !taken.has(`${prefix}_${id}`)) return `${prefix}_${id}`;
+    let n = 2;
+    while (taken.has(`${id}_${n}`)) n++;
+    return `${id}_${n}`;
+}
+/** Whether `id` is free for a place in subregion `container` ("region:sub"), a subregion in region `container`, or a region. */
+export function idClash(raw, kind, container, id, prefix = '') {
+    const taken = new Set(kind === 'room' ? Object.keys(needSub(raw, container, 'id check').locations ?? {}) : kind === 'subregion' ? Object.keys(raw[container]?.subregions ?? {}) : Object.keys(raw));
+    return taken.has(id) ? { id, taken: true, suggest: suggestId(taken, id, prefix) } : { id, taken: false, suggest: id };
+}
+function clashError(w, kind, id, suggest) {
+    const e = new PatchError(`${w}: a ${kind === 'room' ? 'place' : kind} with id "${id}" is already there; pick another id (suggested: "${suggest}")`);
+    e.clash = { kind, id, suggest };
+    return e;
+}
+function newId(id, name, w) {
+    const v = str(id) ? slugId(id) : newRoomId(name);
+    if (!SLUG.test(v)) throw new PatchError(`${w}: an id needs letters or digits (lowercase, "_" between words)`);
+    return v;
+}
+/** Every exit "to" / view that names an old address points at its new one. */
+function readdress(raw, map) {
+    for (const [, loc] of eachRoom(raw)) {
+        if (Array.isArray(loc.exits)) for (const e of loc.exits) if (isObj(e) && has(map, e.to)) e.to = map[e.to];
+        if (Array.isArray(loc.views)) loc.views = loc.views.map(v => (has(map, v) ? map[v] : v));
+    }
+}
+function moveRoom(raw, a, area, id, w, out, world = null) {
+    const [rid, sid, lid] = split(a), [arid, asid] = area.split(':'), dest = raw[arid].subregions[asid];
+    const nid = str(id) ? newId(id, '', w) : lid, to = `${arid}:${asid}/${nid}`;
+    if (has(dest.locations ?? {}, nid)) throw clashError(w, 'room', nid, suggestId(new Set(Object.keys(dest.locations)), nid, sid));
+    if (arid !== rid && roomsIn(raw, rid) <= 1) canDropRegion(raw, rid, world, w, `move ${getRoom(raw, a).name} out, the last place of ${raw[rid].name ?? rid}`);
+    const room = getRoom(raw, a);
+    delete raw[rid].subregions[sid].locations[lid];
+    (dest.locations ??= {})[nid] = room;
+    delete room.pos;
+    readdress(raw, { [a]: to });
+    fixEntrances(raw, new Set([a]), to);
+    dropEmpty(raw);
+    relocateTo(out, a, to);
+    out.touched.push(a, to);
+    return to;
+}
+function moveAreaOp(raw, op, w, out, world = null) {
+    const area = str(op.area), [rid, sid] = area.split(':'), sub = needSub(raw, area, w), dr = str(op.region);
+    if (!isObj(raw[dr])) throw new PatchError(`${w}: "region" ${JSON.stringify(op.region)} is not a region`);
+    if (dr === rid) throw new PatchError(`${w}: ${sub.name ?? sid} is already in that region`);
+    const nid = moveSub(raw, rid, sid, dr, op.id, w, out, world);
+    return `${sub.name ?? sid} moved to ${raw[dr].name ?? dr}${nid !== sid ? ` (as ${nid})` : ''}`;
+}
+function moveSub(raw, rid, sid, dr, id, w, out, world) {
+    const nid = str(id) ? newId(id, '', w) : sid, sub = raw[rid].subregions[sid];
+    if (has(raw[dr].subregions, nid)) throw clashError(w, 'subregion', nid, suggestId(new Set(Object.keys(raw[dr].subregions)), nid, rid));
+    if (Object.keys(raw[rid].subregions).length <= 1) canDropRegion(raw, rid, world, w, `move ${sub.name ?? sid} out, the last subregion of ${raw[rid].name ?? rid}`);
+    const map = Object.fromEntries(Object.keys(sub.locations ?? {}).map(l => [`${rid}:${sid}/${l}`, `${dr}:${nid}/${l}`]));
+    delete raw[rid].subregions[sid];
+    raw[dr].subregions[nid] = sub;
+    readdress(raw, map);
+    const reg = raw[rid];
+    if (typeof reg.entrance === 'string' && reg.entrance.split('/')[0] === sid) delete reg.entrance;
+    const first = Object.values(map)[0];
+    fixEntrances(raw, new Set(Object.keys(map)), first);
+    dropEmpty(raw);
+    for (const [k, v] of Object.entries(map)) relocateTo(out, k, v);
+    out.touched.push(`${rid}:${sid}`, `${dr}:${nid}`, ...Object.keys(map), ...Object.values(map));
+    return nid;
+}
+function removeAreaOp(raw, op, w, out, world = null) {
+    const area = str(op.area), contents = str(op.contents), ids = isObj(op.ids) ? op.ids : {};
+    if (!['delete', 'move'].includes(contents)) throw new PatchError(`${w}: "contents" must be "delete" or "move"`);
+    const into = str(op.into);
+    if (area.includes(':')) {
+        const [rid, sid] = area.split(':'), sub = needSub(raw, area, w), name = sub.name ?? sid, regName = raw[rid].name ?? rid;
+        const lastSub = Object.keys(raw[rid].subregions).length <= 1;
+        const addrs = Object.keys(sub.locations ?? {}).map(l => `${rid}:${sid}/${l}`);
+        if (contents === 'move') {
+            if (into === area) throw new PatchError(`${w}: can't move ${name}'s places into itself`);
+            const dest = needSub(raw, into, w), [irid] = into.split(':');
+            if (lastSub && irid !== rid) canDropRegion(raw, rid, world, w, `delete ${name}, the last subregion of ${regName}`);
+            for (const a of addrs) moveRoom(raw, a, into, ids[split(a)[2]], w, out, world);
+            if (isObj(raw[rid]?.subregions?.[sid])) { delete raw[rid].subregions[sid]; fixEntrances(raw, new Set(), into); dropEmpty(raw); }
+            out.touched.push(area);
+            return `${name} deleted; its ${addrs.length} place${addrs.length === 1 ? '' : 's'} moved to ${dest.name ?? into}`;
+        }
+        if (lastSub) canDropRegion(raw, rid, world, w, `delete ${name}, the last subregion of ${regName}`);
+        const near = nearest(raw, new Set(addrs));
+        removeRooms(raw, addrs, near, out);
+        if (isObj(raw[rid]?.subregions?.[sid])) delete raw[rid].subregions[sid];
+        fixEntrances(raw, new Set(), near); dropEmpty(raw);
+        out.touched.push(area);
+        return `${name} deleted with its ${addrs.length} place${addrs.length === 1 ? '' : 's'} (anyone there ends up in ${nameOf(raw, near)})${lastSub ? `; ${regName} deleted with it` : ''}`;
+    }
+    const rid = area, reg = raw[rid];
+    if (!isObj(reg)) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a region or subregion`);
+    canDropRegion(raw, rid, world, w, `delete ${reg.name ?? rid}`);
+    const sids = Object.keys(reg.subregions ?? {});
+    if (contents === 'move') {
+        if (!isObj(raw[into]) || into === rid) throw new PatchError(`${w}: "into" must be another region`);
+        for (const s of sids) moveSub(raw, rid, s, into, ids[s], w, out, world);
+        delete raw[rid];
+        out.touched.push(rid);
+        return `${reg.name ?? rid} deleted; its ${sids.length} subregion${sids.length === 1 ? '' : 's'} moved to ${raw[into].name ?? into}`;
+    }
+    const addrs = [...eachRoom(raw)].filter(x => x[2] === rid).map(x => x[0]);
+    const near = nearest(raw, new Set(addrs));
+    removeRooms(raw, addrs, near, out);
+    delete raw[rid];
+    out.touched.push(rid);
+    return `${reg.name ?? rid} deleted with everything in it (anyone there ends up in ${nameOf(raw, near)})`;
+}
+function createPlace(raw, area, p, w, out, needExit) {
+    if (!isObj(p)) throw new PatchError(`${w}: a new place needs a "name" and "description"`);
+    const sub = needSub(raw, area, w), name = needText(p, w, 'name', MAX_PATCH_NAME), description = needText(p, w, 'description');
+    const id = newId(p.id, name, w);
+    if (has(sub.locations ?? {}, id)) throw clashError(w, 'room', id, suggestId(new Set(Object.keys(sub.locations)), id));
+    const exits = Array.isArray(p.exits) ? p.exits.filter(e => isObj(e) && (str(e.to) || str(e.direction))) : [];
+    if (needExit && !exits.length) throw new PatchError(`${w}: a new place needs at least one exit to an existing place`);
+    const a = `${area}/${id}`;
+    (sub.locations ??= {})[id] = { name, description, exits: [] };
+    exits.forEach((e, i) => addExitOp(raw, { ...e, loc: a }, `${w}, exit #${i + 1}`, out));
     out.touched.push(a);
-    return `${r.name} removed (anyone there ends up in ${nameOf(raw, near)})`;
+    return a;
+}
+function createSub(raw, rid, p, w, out, needExit) {
+    if (!isObj(p)) throw new PatchError(`${w}: a new subregion needs a "name"`);
+    const name = needText(p, w, 'name', MAX_PATCH_NAME), sid = newId(p.id, name, w);
+    if (has(raw[rid].subregions, sid)) throw clashError(w, 'subregion', sid, suggestId(new Set(Object.keys(raw[rid].subregions)), sid));
+    raw[rid].subregions[sid] = { name, ...(str(p.notes) ? { notes: needText(p, w, 'notes') } : {}), locations: {} };
+    try {
+        const a = createPlace(raw, `${rid}:${sid}`, p.place, `${w}, place`, out, needExit);
+        raw[rid].subregions[sid].entrance = split(a)[2];
+    } catch (e) { delete raw[rid].subregions[sid]; throw e; }
+    out.touched.push(`${rid}:${sid}`);
+    return sid;
 }
 
 function mergeOp(raw, op, w, out) {

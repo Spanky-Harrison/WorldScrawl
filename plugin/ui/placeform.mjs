@@ -287,3 +287,18 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
     }
     return { el: root, state, getOps, problems: () => formProblems(ctx, state) };
 }
+
+/**
+ * The prompt for "Expand with AI" on a description or notes field. ctx is /edit/ai-context's answer: only the parent
+ * region / subregion notes and the names and first sentences of the places the exits lead to, never the whole world.
+ */
+export function expandPrompt(ctx, { field = 'description', text = '', name = '', kind = 'room' } = {}) {
+    const what = kind === 'room' ? 'place' : kind, L = [];
+    if (ctx?.region) L.push(`Region: ${ctx.region.name}${ctx.region.notes ? ` - ${ctx.region.notes}` : ''}`);
+    if (ctx?.subregion && kind === 'room') L.push(`Area: ${ctx.subregion.name}${ctx.subregion.notes ? ` - ${ctx.subregion.notes}` : ''}`);
+    if (ctx?.neighbors?.length) L.push('Connected places:', ...ctx.neighbors.map(n => `- ${n.name}${n.short ? `: ${n.short}` : ''}`));
+    L.push('', `Write the ${field === 'notes' ? 'notes (facts for the narrator: who is here, what goes on, secrets)' : 'description (what a visitor sees, hears and smells)'} for the ${what} "${name || 'new ' + what}".`);
+    if (String(text).trim()) L.push(`Expand on this draft, keeping everything in it: ${String(text).trim()}`);
+    L.push('Two to four sentences of plain prose, fitting the setting above. Reply with only the text.');
+    return L.join('\n');
+}

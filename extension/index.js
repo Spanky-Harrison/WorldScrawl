@@ -2032,6 +2032,7 @@ export function broadcastMapState() {
         try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
     }, 150);
 }
+const EXPAND_SYS = 'You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.';
 function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
@@ -2048,6 +2049,12 @@ function openMapChannel() {
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) toggleChange(Number(d.msg), String(d.id ?? ''), { choice: d.choice })
                 .then(r => ch.postMessage({ type: 'toggle_result', req: d.req, ...r }))
                 .catch(e => ch.postMessage({ type: 'toggle_result', req: d.req, ok: false, error: e.message }));
+        }
+        if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: EXPAND_SYS, responseLength: 300 })
+                .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
+                .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }
         if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
     });

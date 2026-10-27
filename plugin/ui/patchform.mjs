@@ -10,8 +10,11 @@ export const OP_LABELS = {
     set_notes: 'Rewrite area notes', update_area: 'Rename area / rewrite its notes', append_notes: 'Add to area notes',
     block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
     remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms',
-    set_fields: 'Change settings', set_exit: 'Exit: change settings', add_exit: 'Exit: add (with the way back)', move_location: 'Move place to another subregion',
+    set_fields: 'Change settings', set_exit: 'Exit: change settings', add_exit: 'Exit: add (with the way back)', move_location: 'Move place to another subregion', move_area: 'Move subregion to another region',
+    create_place: 'Create place', create_subregion: 'Create subregion', create_region: 'Create region', remove_area: 'Delete subregion / region',
 };
+/** Fields holding objects or lists (typed as JSON in the review card). */
+const JSON_KEYS = new Set(['fields', 'exits', 'place', 'subregion', 'ids']);
 /** The fields each op type has (besides "op" and "lasts"), and which are required. */
 export const OP_FIELDS = {
     set_description: [['loc', 1], ['text', 1]], append_description: [['loc', 1], ['text', 1]], set_name: [['loc', 1], ['text', 1]],
@@ -27,7 +30,12 @@ export const OP_FIELDS = {
     set_fields: [['target', 1], ['fields', 1]],
     set_exit: [['loc', 1], ['direction', 1], ['fields', 1]],
     add_exit: [['loc', 1], ['direction', 1], ['to', 1], ['return_direction', 0], ['travel_time', 0], ['description', 0], ['return_description', 0], ['door', 0]],
-    move_location: [['loc', 1], ['area', 1]],
+    move_location: [['loc', 1], ['area', 1], ['id', 0]],
+    move_area: [['area', 1], ['region', 1], ['id', 0]],
+    create_place: [['area', 1], ['name', 1], ['description', 1], ['exits', 1], ['id', 0]],
+    create_subregion: [['region', 1], ['name', 1], ['place', 1], ['notes', 0], ['id', 0]],
+    create_region: [['name', 1], ['subregion', 1], ['notes', 0], ['id', 0]],
+    remove_area: [['area', 1], ['contents', 1], ['into', 0], ['ids', 0]],
 };
 const s = v => (typeof v === 'string' ? v.trim() : v === null || v === undefined ? '' : String(v).trim());
 
@@ -36,10 +44,10 @@ export function cleanOp(op) {
     const type = s(op?.op), out = { op: type };
     for (const [k] of OP_FIELDS[type] ?? []) {
         if (k === 'locs') { out.locs = [...new Set((Array.isArray(op.locs) ? op.locs : s(op.locs).split(',')).map(s).filter(Boolean))]; continue; }
-        if (k === 'fields') { // an object of settings (the Edit forms); typed as JSON in the review card
-            let f = op?.fields;
-            if (typeof f === 'string') { try { f = JSON.parse(f); } catch { /* reported by the server */ } }
-            if (f !== undefined && f !== '') out.fields = f;
+        if (JSON_KEYS.has(k)) { // objects / lists (the Edit forms and wizards); typed as JSON in the review card
+            let f = op?.[k];
+            if (typeof f === 'string') { if (!f.trim()) continue; try { f = JSON.parse(f); } catch { /* reported by the server */ } }
+            if (f !== undefined && f !== null && f !== '') out[k] = f;
             continue;
         }
         if (k === 'door' && typeof op?.door === 'boolean') { out.door = op.door; continue; }
@@ -173,7 +181,7 @@ export function buildPatchForm(doc, opts = {}) {
                     const idNote = st(mk('span', { class: 'wspf-newid' }), 'font-size:0.8em;opacity:0.7;');
                     const show = v => { idNote.textContent = d.into || !s(v) ? '' : `new place id: ${newRoomId(v)} (from the name; _2 is added if taken)`; };
                     box.append(field(lab, input(d.name, v => { d.name = v; show(v); })), idNote); show(d.name);
-                } else if (k === 'fields') box.append(field(lab, area(typeof d.fields === 'string' ? d.fields : JSON.stringify(d.fields ?? {}), set('fields'))));
+                } else if (JSON_KEYS.has(k)) box.append(field(lab, area(typeof d[k] === 'string' ? d[k] : d[k] == null ? '' : JSON.stringify(d[k]), set(k))));
                 else box.append(field(lab, input(typeof d[k] === 'boolean' ? String(d[k]) : d[k], set(k))));
             }
             box.append(field('Lasts (optional, e.g. 3d, 12h; empty = permanent)', input(d.lasts, set('lasts'), { placeholder: 'permanent' })));

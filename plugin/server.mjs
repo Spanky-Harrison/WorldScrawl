@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
 import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
-import { editContext } from './editctx.mjs';
+import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -305,7 +305,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const raw = structuredClone(e.raw);
             let r;
             try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch', dropNoops: true, world: e.worldJson }); build_world(e.worldJson, raw); } catch (err) {
-                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message, ...(err.choices ? { choices: err.choices, key: err.key } : {}) });
+                if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message, ...(err.choices ? { choices: err.choices, key: err.key } : {}), ...(err.clash ? { clash: err.clash } : {}) });
                 throw err;
             }
             const before = structuredClone(e.raw); normalizeRefs(before);
@@ -406,6 +406,17 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const r = editContext(e.w, e.worldJson, raw, field(body, 'target', 'str', ''));
             if (!r) throw new HttpError(404, `Nothing to edit at ${repr(field(body, 'target', 'str', ''))}.`);
             return r;
+        },
+        'POST /edit/outline': ({ q, body }) => { // the wizards' and Move / Delete dialogs' lists, with this chat's changes
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            return { regions: outline(e.raw), start_region: e.worldJson?.start_region ?? null };
+        },
+        'POST /edit/ai-context': ({ q, body }) => { // "Expand with AI": parent notes and the exits' neighbors only
+            needBody(body);
+            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const raw = structuredClone(e.raw); normalizeRefs(raw);
+            return aiContext(raw, field(body, 'area', 'str', ''), field(body, 'rooms', 'list', []).filter(x => typeof x === 'string'));
         },
         'POST /inspect/index': ({ q, body }) => { needBody(body); const lw = get_world(q('world')), e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)); return { world: lw.id, map_version: lw.version, ...inspectIndex(e.w) }; },
         'POST /inspect': ({ q, body }) => { // with this chat's changes: patched rooms show which message changed them
