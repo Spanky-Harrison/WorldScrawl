@@ -1229,7 +1229,7 @@ try {
     await ui.click('#editorToggle'); await ui.waitForTimeout(800);
     await ui.click(`.node[data-id="${CR}"]`);
     await ui.locator('.side .editlive').waitFor({ timeout: 10000 });
-    const descRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'description'); return tr ? [...tr.querySelectorAll('td')].map(t => t.textContent) : null; });
+    const descRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'description'); return tr ? [tr.querySelector('.val')?.textContent ?? '', tr.querySelector('.src')?.textContent ?? ''] : null; });
     const dr0 = await descRow();
     check('inspector Resolved shows the room\'s own description, from file', dr0 && dr0[0].length > 10 && /from file/.test(dr0[1] ?? dr0.join('')), JSON.stringify(dr0));
     const nLiveEdit = await page.evaluate(() => SillyTavern.getContext().chat.length);

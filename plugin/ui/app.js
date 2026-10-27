@@ -152,7 +152,7 @@ async function renderInspector(side, target, ctx) {
     tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
     const resolvedPane = () => {
         const tbl = $('table', { class: 'resolved' });
-        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'own' ? ' own' : ''}` }, r.source))));
+        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'from file' ? ' own' : ''}` }, r.source))));
         addColResizer(tbl);
         const out = [tbl];
         if (d.kind === 'room' && ctx.room) {
