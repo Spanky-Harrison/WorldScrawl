@@ -1356,7 +1356,7 @@ try {
             const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-door .pf-row[data-field="closed_sight"]')); return b ? [...b.querySelectorAll('.pf-sense-head, .pf-row[data-field="sight"] .pf-label, .pf-row[data-field="sound"] .pf-label, .pf-door .pf-row[data-field^="closed_"] .pf-label')].map(r => r.textContent) : null; });
             check('Edit place: with a door, "Sense transparency – unblocked" on the exit and "– blocked" in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – blocked', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
             const plainHead = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit')].find(x => !x.querySelector('.pf-door .pf-row'))?.querySelector('.pf-sense-head')?.textContent ?? null);
-            check('Edit place: without a door the heading is just "Sense transparency"', plainHead === null || plainHead === 'Sense transparency', plainHead);
+            check('Edit place: without a door the heading is just "Sense transparency"', plainHead === null || plainHead === 'Sense transparency', plainHead); }
     }
     for (const [t, a] of [['world', 'create_region'], ['region:riverton', 'create_subregion'], ['sub:riverton:drowned_rat', 'create_place'], ['sub:riverton:drowned_rat', 'merge_places'],
         ['sub:riverton:drowned_rat', 'delete_subregion'], ['sub:riverton:drowned_rat', 'move_subregion'], ['riverton:drowned_rat/common_room', 'move_place']]) {
