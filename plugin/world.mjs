@@ -386,6 +386,7 @@ export const load_world = root => build_world(...read_world_raw(root));
 export function build_world(worldJson, rawRegions) {
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
+    const worldExpandable = optionalBool(worldJson, 'expandable', 'world.json');
     let weather;
     try {
         const cal = checkCalendar(worldJson.calendar, 'world.json: calendar');
@@ -408,7 +409,7 @@ export function build_world(worldJson, rawRegions) {
         checkSlug(rid, `${fname}: region id (file name)`);
         if (has(data, 'id') && data.id !== rid) throw new WorldError(`${fname}: region id ${repr(data.id)} must match the file name (${repr(rid)})`);
         const region = { id: rid, name: requireStr(data, 'name', fname), notes: requireStr(data, 'notes', fname, true), entrance: '',
-            stays_open: optionalBool(data, 'stays_open', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
+            stays_open: optionalBool(data, 'stays_open', fname), expandable: optionalBool(data, 'expandable', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
         if (region.place.exposure) anyExposure = true;
         regions.set(rid, region);
         const start = requireStr(data, 'start', fname);
@@ -433,6 +434,7 @@ export function build_world(worldJson, rawRegions) {
                 id: sid, name: requireStr(sub, 'name', swhere), notes: requireStr(sub, 'notes', swhere, true),
                 inherit_notes: inherit === null ? true : inherit, entrance: `${rid}:${sid}/${entrance}`,
                 label_rooms: Boolean(optionalBool(sub, 'label_rooms', swhere)), stays_open: optionalBool(sub, 'stays_open', swhere),
+                expandable: optionalBool(sub, 'expandable', swhere),
                 place: place(sub, swhere),
             });
             if (subregions.get(`${rid}:${sid}`).place.exposure) anyExposure = true;
@@ -473,7 +475,7 @@ export function build_world(worldJson, rawRegions) {
                 locations.set(address, {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), exits,
                     inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
-                    expandable: optionalBool(loc, 'expandable', where) !== false, views: [], pos: optionalPos(loc, where), place: place(loc, where),
+                    expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
                 if (locations.get(address).place.exposure) anyExposure = true;
             }

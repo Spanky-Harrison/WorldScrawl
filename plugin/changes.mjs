@@ -83,7 +83,7 @@ function applyStrict(worldJson, rawIn, changes, { now = null, info = null } = {}
         }
         if (ch.type === 'patch') {
             try {
-                const r = applyPatch(raw, ch, { now, where });
+                const r = applyPatch(raw, ch, { now, where, world: worldJson });
                 if (info) (info.patches ??= []).push({ index: i, id: ch.id ?? null, note: ch.note ?? '', msg: ch._msg ?? null, ...r });
             } catch (e) { if (e instanceof PatchError) throw new WorldError(e.message); throw e; }
             return;
