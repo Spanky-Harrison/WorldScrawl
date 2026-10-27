@@ -28,7 +28,7 @@
           "exposure": "outdoor",
           "description": "A cobbled courtyard behind the tavern, stacked with ale barrels and firewood. Steam and the smell of stew drift from the kitchen door; the stable stands across the yard.",
           "exits": [
-            { "direction": "in", "to": "common_room", "travel_time": "30s", "description": "The back door into the common room.", "barrier": {} },
+            { "direction": "in", "to": "common_room", "travel_time": "30s", "description": "The back door into the common room." },
             { "direction": "kitchen", "to": "kitchens", "travel_time": "30s", "description": "The kitchen door.", "barrier": {} },
             { "direction": "stable", "to": "stable", "travel_time": "30s", "description": "Across the yard to the stable." },
             { "direction": "trapdoor", "to": "cellar", "travel_time": "30s", "obscured": true, "description": "A heavy cellar door set into the flagstones, its iron ring worn smooth." }
@@ -48,7 +48,7 @@
           "indoor_temp": 78,
           "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
-            { "direction": "out", "to": "courtyard", "travel_time": "30s", "description": "Back out to the courtyard.", "barrier": {} }
+            { "direction": "out", "to": "courtyard", "travel_time": "30s", "description": "Back out to the courtyard." }
           ]
         },
         "stable": {
@@ -138,7 +138,7 @@
           "name": "Village Square",
           "description": "A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river, the temple hill, Market Lane and the open country.",
           "exits": [
-            { "direction": "in", "to": "drowned_rat/common_room", "travel_time": "1m", "description": "The Drowned Rat's swinging sign hangs over the door.", "barrier": {} },
+            { "direction": "in", "to": "drowned_rat/common_room", "travel_time": "1m", "description": "The Drowned Rat's swinging sign hangs over the door." },
             { "type": "open", "direction": "south", "to": "docks/piers", "travel_time": "3m", "description": "A muddy lane slopes down to the river." },
             { "direction": "north", "to": "temple/nave", "travel_time": "1m", "description": "Steps climb the hill to the temple.", "barrier": {} },
             { "type": "open", "direction": "east", "to": "east_road/road", "travel_time": "5m" },
@@ -150,10 +150,10 @@
           "description": "A narrow lane of timber-framed shops. The Gilded Goose's gilt sign gleams on one side, Marlow's bell jangles on the other, and the clang of Brask's forge echoes from the end.",
           "exits": [
             { "type": "open", "direction": "east", "to": "square", "travel_time": "3m" },
-            { "direction": "inn", "to": "gilded_goose/common_room", "travel_time": "1m", "description": "The Gilded Goose.", "barrier": {} },
+            { "direction": "inn", "to": "gilded_goose/common_room", "travel_time": "1m", "description": "The Gilded Goose." },
             { "direction": "store", "to": "general_store/shop", "travel_time": "1m", "description": "The door of Marlow's General Store, propped open for custom.", "barrier": { "starts_open": true } },
             { "direction": "smithy", "to": "smithy/forge", "travel_time": "1m", "description": "Brask's Smithy, its forge open to the lane." },
-            { "direction": "gate", "to": "drowned_rat/stable", "travel_time": "1m", "description": "The Drowned Rat's stable gate.", "barrier": {} }
+            { "direction": "gate", "to": "drowned_rat/stable", "travel_time": "1m", "description": "The Drowned Rat's stable gate." }
           ]
         }
       }
@@ -184,7 +184,7 @@
           "name": "Temple of the Tides",
           "description": "A small whitewashed temple on the hilltop. Inside, candles flicker before a carved statue of the river goddess, and the air smells of incense.",
           "exits": [
-            { "direction": "south", "to": "streets/square", "travel_time": "1m", "description": "The steps lead back down to the square.", "barrier": {} },
+            { "direction": "south", "to": "streets/square", "travel_time": "1m", "description": "The steps lead back down to the square." },
             { "direction": "grate", "to": "catacombs", "travel_time": "30s", "obscured": true, "description": "An iron grate beside the altar, over a worn stone stair that descends into darkness." }
           ]
         },

@@ -72,7 +72,7 @@
           "name": "Entrance Hall",
           "description": "A cool marble hall with a mosaic of leaping fish on the floor. Folded towels are stacked on shelves, and a pretty attendant takes coins at a desk beside a curtained archway.",
           "exits": [
-            { "direction": "out", "to": "green/bath_steps", "travel_time": "1m", "description": "The bronze-studded doors onto the Bathhouse Steps.", "barrier": {} },
+            { "direction": "out", "to": "green/bath_steps", "travel_time": "1m", "description": "The bronze-studded doors onto the Bathhouse Steps." },
             { "direction": "in", "to": "pool", "travel_time": "30s", "description": "Through the curtained archway to the baths." }
           ]
         },
@@ -91,7 +91,7 @@
           "indoor_temp": 110,
           "description": "A small, dim, tiled room so thick with herb-scented steam that faces blur at arm's length. Water hisses on hot stones in a copper brazier.",
           "exits": [
-            { "direction": "out", "to": "pool", "travel_time": "30s", "description": "The heavy oak door back to the Great Pool.", "barrier": {} }
+            { "direction": "out", "to": "pool", "travel_time": "30s", "description": "The heavy oak door back to the Great Pool." }
           ]
         },
         "boiler": {
@@ -100,7 +100,7 @@
           "indoor_temp": 95,
           "description": "A hot, cramped room of pipes, valves and a great copper tank that groans as spring water is pumped through it. Coal dust and steam hang in the air.",
           "exits": [
-            { "direction": "service door", "to": "pool", "travel_time": "30s", "description": "The staff door back to the Great Pool.", "barrier": {} },
+            { "direction": "service door", "to": "pool", "travel_time": "30s", "description": "The staff door back to the Great Pool." },
             { "direction": "loose grate", "to": "playhouse/under_stage", "travel_time": "5m", "hidden": true, "description": "A rusted grate low in the wall, where warm air whistles through from somewhere beyond.", "barrier": { "closed_sight": "partial", "closed_sound": "clear" }, "traversal": "Past the loose grate is a cramped duct, hot and black with soot; it is a slow belly-crawl toward the cooler air and the smell of greasepaint." }
           ]
         }
@@ -149,7 +149,7 @@
           "name": "Storehouse",
           "description": "A dim barn piled high with bales of raw wool, sacks of dried roots and barrels of alum. Finished bolts of dyed cloth are stacked in neat, bright towers.",
           "exits": [
-            { "direction": "out", "to": "yard", "travel_time": "30s", "description": "The barn door back to the yard.", "barrier": {} }
+            { "direction": "out", "to": "yard", "travel_time": "30s", "description": "The barn door back to the yard." }
           ]
         }
       }
@@ -164,7 +164,7 @@
           "name": "Sable's Bindery",
           "description": "A quiet shop smelling of leather and glue, with presses, racks of paper and a writing desk in the bow window. Shelves of bound books line every wall.",
           "exits": [
-            { "direction": "out", "to": "green/weavers_row", "travel_time": "1m", "description": "The door onto Weavers Row.", "barrier": {} }
+            { "direction": "out", "to": "green/weavers_row", "travel_time": "1m", "description": "The door onto Weavers Row." }
           ]
         }
       }
@@ -180,7 +180,7 @@
           "name": "Foyer",
           "description": "A small foyer papered with playbills, with a ticket window, faded red curtains and a painted ceiling of cherubs. Doors lead through to the auditorium.",
           "exits": [
-            { "direction": "out", "to": "green/green", "travel_time": "1m", "description": "The painted doors onto Larkspur Green.", "barrier": {} },
+            { "direction": "out", "to": "green/green", "travel_time": "1m", "description": "The painted doors onto Larkspur Green." },
             { "direction": "in", "to": "auditorium", "travel_time": "30s", "description": "Through to the auditorium." }
           ]
         },
@@ -197,7 +197,7 @@
           "name": "Dressing Rooms",
           "description": "A cramped warren of mirrors, costume racks and pots of greasepaint, littered with wigs, fans and love letters.",
           "exits": [
-            { "direction": "stage", "to": "auditorium", "travel_time": "30s", "description": "The narrow door back to the stage.", "barrier": {} }
+            { "direction": "stage", "to": "auditorium", "travel_time": "30s", "description": "The narrow door back to the stage." }
           ]
         },
         "under_stage": {

@@ -1,5 +1,6 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
+import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -51,6 +52,104 @@ function toggleWindow(def, force) {
 function buildTopBar() {
     const nav = document.getElementById('windowButtons');
     for (const def of WINDOWS) nav.append($('button', { class: 'topbutton', 'data-window': def.id, onclick: () => toggleWindow(def) }, def.title));
+    nav.append($('button', { class: 'topbutton editor-toggle', id: 'editorToggle', title: 'Editor mode: see the whole world and inspect its data (read-only)', onclick: () => setEditor(!editor) }, 'Editor'));
+}
+
+// ---- Editor mode (read-only inspector): the whole world is shown, and clicking anything shows its data.
+let editor = false;
+try { editor = localStorage.getItem('worldscrawl_editor') === '1'; } catch {}
+function setEditor(on) {
+    editor = on;
+    try { localStorage.setItem('worldscrawl_editor', on ? '1' : '0'); } catch {}
+    document.getElementById('editorToggle')?.classList.toggle('active', on);
+    document.body.classList.toggle('editor', on);
+    for (const fn of listeners) fn(state);
+}
+const indexCache = new Map(); // world|version -> {addresses, doors}
+async function worldIndex(world, version) {
+    const key = `${world}|${version}`;
+    if (!indexCache.has(key)) {
+        const r = await fetch(`${API}/inspect/index${world ? `?world=${encodeURIComponent(world)}` : ''}`);
+        if (!r.ok) throw new Error(`map server answered ${r.status}`);
+        indexCache.set(key, await r.json());
+    }
+    return indexCache.get(key);
+}
+async function inspectData(world, target) {
+    const r = await fetch(`${API}/inspect?target=${encodeURIComponent(target)}${world ? `&world=${encodeURIComponent(world)}` : ''}`);
+    if (!r.ok) throw new Error(`map server answered ${r.status}`);
+    return r.json();
+}
+let worldsInfo = null;
+async function worldInfo(world) {
+    try { worldsInfo ??= await (await fetch(`${API}/worlds`)).json(); } catch { return null; }
+    return worldsInfo.worlds?.find(x => x.id === (world || worldsInfo.default)) ?? null;
+}
+/** The state editor mode draws: every room "stood in" and every door revealed, so the whole map shows. */
+export async function editorState(st) {
+    const base = st?.on ? st : { type: 'state', on: true, world: '', location: null, stood: [], seen: [], doors_revealed: [], changes: [], editorOnly: true };
+    const idx = await worldIndex(base.world, base.map_version ?? idx0(base));
+    return { ...base, stood: [...new Set([...idx.addresses, ...(base.stood ?? [])])], seen: [], doors_revealed: [...new Set([...idx.doors, ...(base.doors_revealed ?? [])])], map_version: base.map_version ?? idx.map_version };
+}
+const idx0 = () => '';
+const fmtVal = v => v === null || v === undefined ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+const fmtSecs = s => s >= 3600 ? `${+(s / 3600).toFixed(2)}h` : s >= 60 ? `${+(s / 60).toFixed(2)}m` : `${s}s`;
+/** The inspector panel for one target, inside `side`. ctx: {st, room (server room dict, for rooms), exit (server exit dict), onExit(ref)}. */
+async function renderInspector(side, target, ctx) {
+    const st = ctx.st;
+    side.replaceChildren($('p', { class: 'muted' }, 'Loading…'));
+    let d;
+    try { d = await inspectData(st?.world ?? '', target); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not inspect: ${e.message}`)); return; }
+    if (ctx.stale?.()) return;
+    const tabs = ['Resolved', 'Raw', 'State', `Warnings${d.warnings.length ? ` (${d.warnings.length})` : ''}`];
+    let tab = renderInspector.lastTab ?? 0;
+    const bar = $('div', { class: 'tabs' }), pane = $('div', { class: 'tabpane' });
+    const show = i => {
+        tab = renderInspector.lastTab = i;
+        bar.querySelectorAll('button').forEach((b, j) => b.classList.toggle('active', j === i));
+        pane.replaceChildren(...[resolvedPane, rawPane, statePane, warnPane][i]());
+    };
+    tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
+    const resolvedPane = () => {
+        const tbl = $('table', { class: 'resolved' });
+        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('td', { class: `src${r.source === 'own' ? ' own' : ''}` }, r.source)));
+        const out = [tbl];
+        if (d.kind === 'room' && ctx.room) {
+            const ul = $('ul', { class: 'exitlinks' });
+            for (const e of ctx.room.exits ?? []) ul.append($('li', {}, $('button', { class: 'linkish', onclick: () => ctx.onExit(`exit:${ctx.room.address}|${e.direction.toLowerCase()}`) }, `${e.direction}${e.to_name ? ` → ${e.to_name}` : ''}`)));
+            out.push($('b', {}, 'Exits (click to inspect)'), ul);
+        }
+        return out;
+    };
+    const rawPane = () => [$('pre', { class: 'raw' }, JSON.stringify(d.raw, null, 2)), ...(d.kind === 'region' || d.kind === 'subregion' ? [$('p', { class: 'muted' }, 'Child areas/rooms are collapsed to "…"; click them to see theirs.')] : [])];
+    const statePane = () => {
+        const rows = [['Chat', st?.editorOnly ? 'none open (showing the default world)' : st?.chatName || '—'], ['Clock', st?.clock || '—']];
+        if (d.kind === 'room' && ctx.room) {
+            rows.push(['Party here', st?.location === ctx.room.address ? 'yes' : 'no']);
+            const w = ctx.info?.weather && st?.abs_seconds !== null && st?.abs_seconds !== undefined ? placeWeather(ctx.info.weather, ctx.room.weather, st.abs_seconds, ctx.info.calendar) : null;
+            const u = ctx.info?.weather?.unit ?? 'F';
+            if (w) {
+                rows.push(['Exposure', w.exposure]);
+                if (w.outside) rows.push(['Outside', `${w.outside.label}, ${fmtTemp(w.outside.temp, u)} (feels like ${fmtTemp(w.outside.feels, u)}), ${w.outside.humidity}% humidity`]);
+                if (w.inside_temp !== undefined && w.inside_temp !== null) rows.push(['Inside', fmtTemp(w.inside_temp, u)]);
+                rows.push(['Narrator line', w.line]);
+            } else rows.push(['Weather', st?.abs_seconds === undefined || st?.abs_seconds === null ? 'no clock yet (open a WorldScrawl chat)' : 'no weather here']);
+        }
+        if (d.kind === 'exit' && ctx.exit) {
+            const e = ctx.exit, b = e.barrier;
+            const open = (st?.doors_open ?? []).includes(e.door), shut = (st?.doors_closed ?? []).includes(e.door);
+            rows.push(['Door id', e.door ?? '—']);
+            if (b) rows.push(['Door now', shut ? 'closed (stamped)' : open ? 'open (stamped)' : b.starts_open ? 'open (as it starts)' : 'closed (as it starts)'], ['Locked', b.locked ? 'yes' : 'no'], ['Can be opened', b.openable ? 'yes' : 'no'], ['Stays open', b.stays_open ? 'yes' : 'no']);
+            else rows.push(['Door', 'no barrier']);
+            if (e.hidden || e.obscured) rows.push(['Found by this chat', (st?.doors_revealed ?? []).includes(e.door) && !st?.editorOnly ? 'yes' : 'no']);
+        }
+        const tbl = $('table', { class: 'resolved' });
+        for (const [k, v] of rows) tbl.append($('tr', {}, $('th', {}, k), $('td', { colspan: '2' }, v)));
+        return [tbl];
+    };
+    const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
+    side.replaceChildren($('h3', {}, d.title), $('div', { class: 'area' }, `${d.kind} · read-only`), bar, pane);
+    show(Math.min(tab, tabs.length - 1));
 }
 
 // ---- Room data, fetched in batches through the plugin API and remembered per world + map version.
@@ -145,8 +244,27 @@ function createMapWindow(win) {
     const up = ev => { pointers.delete(ev.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) view.classList.remove('dragging'); };
     view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
 
+    let inspectSeq = 0;
+    async function inspectTarget(target, ctx = {}) {
+        const seq = ++inspectSeq, st = current?.st ?? state;
+        const info = await worldInfo(st?.world ?? '');
+        renderInspector(side, target, { st, info, stale: () => seq !== inspectSeq, onExit: ref => inspectExit(ref), ...ctx });
+    }
+    function inspectExit(ref) {
+        const [addr, dir] = [ref.slice(5, ref.lastIndexOf('|')), ref.slice(ref.lastIndexOf('|') + 1)];
+        const room = roomCache.get(current?.st?.world ?? state?.world ?? '')?.get(addr);
+        const exit = room?.exits?.find(e => e.direction.toLowerCase() === dir) ?? null;
+        inspectTarget(ref, { exit });
+    }
+    function inspectNode(n) {
+        if (!n) return inspectTarget('world');
+        if (n.kind === 'stub') return inspectExit(`exit:${n.id.slice(5)}`);
+        if (n.layer) return inspectTarget(n.layer.level === 'region' ? `region:${n.layer.region}` : `sub:${n.layer.region}:${n.layer.subregion}`);
+        inspectTarget(n.id, { room: roomCache.get(current?.st?.world ?? '')?.get(n.id) });
+    }
     function showSide(id) {
         selected = id;
+        if (editor) { world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === id)); return inspectNode(current?.graph.nodes.find(x => x.id === id)); }
         world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === id));
         side.replaceChildren();
         const n = current?.graph.nodes.find(x => x.id === id);
@@ -178,15 +296,17 @@ function createMapWindow(win) {
         const graph = layerGraph(full, layer), key = `${worldId ?? ''}|${layerKey(layer)}`;
         const pos = layoutGraph(graph, { prev: savedLayout(key) });
         saveLayout(key, pos);
-        current = { graph, pos, here, full, world: worldId };
+        current = { graph, pos, here, full, world: worldId, st: current?.st ?? state };
         crumbs.replaceChildren(...breadcrumb(full, layer).flatMap((c, i, all) => [i ? $('span', { class: 'sep' }, '›') : '',
-            $('button', { class: `crumb${i === all.length - 1 ? ' active' : ''}`, 'data-level': c.layer.level, onclick: () => setLayer(c.layer) }, c.label)]));
+            $('button', { class: `crumb${i === all.length - 1 ? ' active' : ''}`, 'data-level': c.layer.level, onclick: () => setLayer(c.layer) }, c.label)]),
+            ...(editor ? [$('button', { class: 'crumb inspect', title: 'Inspect this layer (world, region or area)', onclick: () => inspectTarget(layer?.level === 'region' ? `region:${layer.region}` : layer?.level === 'subregion' ? `sub:${layer.region}:${layer.subregion}` : 'world') }, 'ⓘ')] : []));
         world.replaceChildren();
         const at = id => pos.get(id);
         const subs = new Map();
         for (const e of graph.edges) {
             const a = at(e.from), b = at(e.to), g = S('g', { class: `edge${e.blocked || e.back?.blocked ? ' blocked' : e.closed || e.back?.closed ? ' closed' : ''}` });
             if (!a || !b) continue;
+            g.addEventListener('click', ev => { if (!editor || moved || e.direction.includes(",")) return; ev.stopPropagation(); inspectExit(`exit:${e.from}|${e.direction.toLowerCase()}`); });
             g.append(S('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
             const label = (t, f) => { if (!t) return; const el = S('text', { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f - 4, 'text-anchor': 'middle' }); el.textContent = t; g.append(el); };
             label(e.direction, 0.3); if (e.back) label(e.back.direction, 0.7);
@@ -215,21 +335,25 @@ function createMapWindow(win) {
         showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
 
-    async function update(st) {
+    async function update(st0) {
+        let st = st0;
+        if (editor) { try { st = await editorState(st0); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the world: ${e.message}`)); return; } if (st0 !== state) return; }
         if (!st || !st.on) { world.replaceChildren(); legend.replaceChildren(); crumbs.replaceChildren(); current = null; layer = null; side.replaceChildren($('p', { class: 'empty' }, NO_CHAT)); lastHere = null; return; }
         let rooms;
         try { rooms = await knownRooms(st); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the map: ${e.message}`)); return; }
-        if (st !== state) return; // a newer state arrived meanwhile
+        if (st0 !== state) return; // a newer state arrived meanwhile
+        if (current) current.st = st; else current = { st };
         const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms);
-        const key = `${st.chatId}|${st.location}`, moved_ = key !== lastKey;
+        const key = `${editor ? 'E' : ''}${st.chatId}|${st.location}`, moved_ = key !== lastKey;
         if (moved_) layer = layerOf(graph, st.location); // follow the party: open the layer with the current room
+        current.st = st;
         render(graph, st.location, st.world);
         if (moved_) { centreOn(current.graph.nodes.find(n => n.here)?.id); lastKey = key; } // auto-centre when the location (or chat) changes
         lastHere = st.location;
     }
     const fn = st => update(st);
     listeners.add(fn);
-    if (state) update(state); else side.replaceChildren($('p', { class: 'empty' }, 'Waiting for SillyTavern…'));
+    if (state || editor) update(state); else side.replaceChildren($('p', { class: 'empty' }, 'Waiting for SillyTavern…'));
     return { update };
 }
 
@@ -243,6 +367,7 @@ function onState(st) {
 channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); });
 
 buildTopBar();
+setEditor(editor);
 toggleWindow(WINDOWS[0], true);
 themeFromSettings();
 channel.postMessage({ type: 'hello' });

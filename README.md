@@ -72,7 +72,7 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
   - `"locked"` (default `false`): can't be opened or passed until a later feature unlocks it; the map marks it locked.
   - `"starts_open"` (default `false`): open until someone closes it (a shop door propped open). Can't be combined with `openable: false`.
   - `"stays_open"`: same meaning as below, per barrier.
-  - There is one barrier per exit pair: set it on either side (it is copied to the return exit). If both sides set one and they differ, the loader warns and the first side read wins. Opening/closing is stamped on the chat message like any door; it is not written into the world file.
+  - There is one barrier per exit pair: **define it on one side only** (the "primary" side); the return exit inherits the same door (its state, lock and fields) automatically. The return exit still keeps its own `type`, `sight`, `sound`, `traversal`, `hidden`, `description` and `travel_time`. If both sides set one and they differ, the loader warns and the first side read wins; if both set the same barrier, the loader notes that only one side needs it. (A bolt or bar that only works from one side is not supported yet.) Opening/closing is stamped on the chat message like any door; it is not written into the world file.
 - **`"traversal"`** (optional string): what passing through this side is like ("a long, stooping crawl"). It is given to the narrator only on the move that uses this exit. A tight passage = a longer `travel_time` plus traversal text.
 - **`obscured` vs `sight: none`**: `"obscured": true` = it isn't clear where the exit goes (the destination's name and identity are hidden until the party passes through). Obscured implies sight none: the loader forces this side's `sight` and barrier `closed_sight` to `none` (and warns if the data sets them to anything else; the return exit keeps its own). `"sight": "none"` alone = the destination can't be seen from here, but it is still known where the exit goes; it does not imply obscured. Looking at or along either kind describes only the exit's own `description` (what is right at the threshold: "an iron grate over a stone stair that descends into darkness", "the road runs east out of sight"); for sight none the narrator may name the destination but not describe it, for obscured it is told the destination is unknown. So give such exits a good near-side `description`.
 - Long open exits that run out of sight (a road over the horizon) should set `"sight": "none", "sound": "none"` (not `obscured`, since everyone knows where the road goes).
@@ -438,3 +438,13 @@ Real-world Köppen climates. Use the id or the code.
 | `tropical_savanna_dry_summer` | As | Hot all year; the rains come in winter instead | Chennai, India; Mombasa, Kenya; Fortaleza, Brazil |
 | `tundra` | ET | Cold all year; a brief cool thaw | Nuuk; Barrow (Utqiaġvik); Svalbard |
 
+## Editor mode (read-only inspector)
+
+In the map window (WorldScrawl GUI), the **Editor** button in the top bar switches to editor mode. It shows the whole world (every room and door, not just what the party has discovered) and works even with no chat open (it then shows the default world). Click a room, an area box, an exit line/stub, an exit in a room's exit list, or the ⓘ button by the breadcrumb (the current world/region/area) to open the inspector beside the map:
+
+- **Resolved**: the effective value of every field, each with where it came from (`own`, `from subregion`, `from region`, `default`, `from type "portal"`, or for an inherited barrier `from <room> side (<direction>)`).
+- **Raw**: the JSON exactly as written in the world file.
+- **State**: the chat's clock, the weather at that room (temperature, feels-like, inside temperature) and, for an exit, whether its door is open, closed or locked right now.
+- **Warnings**: the loader warnings that concern the clicked item (served by `GET /api/plugins/worldscrawl/inspect?target=…`; `GET …/inspect/index` lists rooms, doors and the warning count).
+
+The inspector never changes anything. Click **Editor** again to return to the normal (play) map.

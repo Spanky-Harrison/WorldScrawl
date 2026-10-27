@@ -1913,6 +1913,7 @@ export async function mapState() {
     return { ...base, on: true, world: activeWorld || defaultWorldId || '', worldName: worldName(activeWorld), map_version: mapVersion,
         clock: (await loadCalendar()) && gameDate() ? calendarLib.shortDate(gameDate()) : '',
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
+        abs_seconds: (() => { try { const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(); return weatherLib && t && d ? weatherLib.absSeconds(d, t.calendar) : null; } catch { return null; } })(),
         location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), changes: chatChanges() };
 }
 let broadcastTimer = null;
