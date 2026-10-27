@@ -96,3 +96,6 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .splitter:hover, .splitter.active { background: var(--SmartThemeQuoteColor); opacity: .5; }
 @media (orientation: portrait) { .splitter { cursor: row-resize; } }
 .side.sized { flex-shrink: 0; width: auto !important; max-width: none !important; max-height: none !important; }
+
+/* A Resolved value a chat stamp changed: the same orange dot as patched rooms on the map. */
+.side table.resolved .patchmark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f0a030; border: 1px solid #222; margin-right: 4px; vertical-align: middle; }

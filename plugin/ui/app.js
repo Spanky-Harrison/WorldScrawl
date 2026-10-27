@@ -82,6 +82,7 @@ export const patchedRooms = st => {
     const out = new Set();
     for (const p of patchesOf(st)) {
         for (const o of p.ops ?? []) for (const a of [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])]) if (typeof a === 'string' && a.includes('/')) out.add(a);
+        for (const o of p.ops ?? []) if (typeof o.area === 'string' && o.area && !o.op?.startsWith('add')) out.add(`area:${o.area}`); // region / subregion edits
         for (const [a, b] of Object.entries(p.relocate ?? {})) { out.add(a); out.add(b); }
     }
     return out;
@@ -153,7 +154,7 @@ async function renderInspector(side, target, ctx) {
     tabs.forEach((t, i) => bar.append($('button', { class: 'tab', onclick: () => show(i) }, t)));
     const resolvedPane = () => {
         const tbl = $('table', { class: 'resolved' });
-        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'from file' ? ' own' : ''}` }, r.source))));
+        for (const r of d.resolved) tbl.append($('tr', {}, $('th', {}, r.key), $('td', {}, $('div', { class: 'val' }, r.key === 'travel_time' && typeof r.value === 'number' ? fmtSecs(r.value) : fmtVal(r.value)), $('div', { class: `src${r.source === 'from file' ? ' own' : ''}${r.changed ? ' changed' : ''}` }, ...(r.changed ? [$('span', { class: 'patchmark', title: 'changed in this chat' })] : []), r.source))));
         addColResizer(tbl);
         const out = [tbl];
         if (d.kind === 'room' && ctx.room) {
@@ -201,7 +202,7 @@ async function renderInspector(side, target, ctx) {
     const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this place in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit live', ...(live ? {} : { disabled: '' }), onclick: async () => {
         let ids = [], idx = {};
         try { idx = await worldIndex(st.world ?? '', st.map_version); ids = idx.addresses ?? []; } catch { /* suggestions only */ }
-        const ops = liveOps(target, { description: val('description'), notes: val('notes') });
+        const ops = liveOps(target, { description: val('description'), notes: val('notes'), name: val('name') });
         const loc = target.startsWith('exit:') ? target.slice(5).split('|')[0] : target.includes('/') ? target : '';
         const exits = loc && ctx.room ? { [loc]: (ctx.room.exits ?? []).map(e => e.direction.toLowerCase()) } : {};
         const diffBox = $('div', { class: 'editlive-diff' });
@@ -448,7 +449,8 @@ function createMapWindow(win) {
             g.append(t);
             if (sub2) { const s2 = S('text', { 'text-anchor': 'middle', y: 15, style: 'font-size:10px;opacity:.7' }); s2.textContent = sub2.slice(0, 26); g.append(s2); }
             const title = S('title'); title.textContent = n.kind === 'stood' ? `${n.name} (been here)` : n.kind === 'seen' ? `${n.name} (seen, not visited)` : n.kind === 'outside' ? `${n.name} (double-click to open)` : `${n.name}: unexplored`; g.append(title);
-            if (touched.has(n.id) || (n.layer && (n.rooms ?? []).some(r => touched.has(r.address ?? r)))) {
+            const layerKey = n.layer ? `area:${n.layer.level === 'region' ? n.layer.region : `${n.layer.region}:${n.layer.subregion}`}` : null;
+            if (touched.has(n.id) || (n.layer && (touched.has(layerKey) || (n.rooms ?? []).some(r => touched.has(r.address ?? r))))) {
                 g.classList.add('patched');
                 g.append(S('circle', { class: 'patchdot', cx: w / 2 - 7, cy: -h / 2 + 7, r: 4, fill: '#f0a030', stroke: '#222' }));
                 title.textContent += ' · changed in this chat';
