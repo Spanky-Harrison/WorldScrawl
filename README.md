@@ -94,6 +94,7 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
 - Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
   - Subregion `"inherit_notes": false` drops the region notes for all its rooms.
   - A location's `inherit_region_notes` / `inherit_subregion_notes` override that when present (true/false). Missing = follow the subregion.
+- Optional location `"expandable": false`: no discovery rooms may be added off this room (see Discovery rooms).
 - Ids are lowercase slugs (`old_mill`). No duplicate keys anywhere, no duplicate directions in one location. Otherwise the map server answers every request with an error saying what's wrong (in the SillyTavern console too); fix the file and restart SillyTavern.
 
 ## Setup on Windows (PowerShell)
@@ -482,3 +483,7 @@ Sometimes the story changes the map: a bridge collapses, a fire guts a room, or 
 **For creators:** you don't need to do anything. Changes are stored in the chat, never in `worlds/`. In the map's Inspect panel, the **Changes** tab lists them, and Resolved shows "Changed by" for anything that was patched.
 
 Patch ops (for the curious): `set_description`, `append_description`, `set_name`, `set_notes`, `append_notes`, `block_exit`, `open_exit`, `lock_exit`, `unlock_exit`, `break_exit`, `remove_exit`, `set_exit_description`, `update_area`, `remove_location`, `merge`. Any of them can take an optional `lasts`. Places are given as full addresses (`riverton:drowned_rat/common_room`), though a bare id that is unique is accepted and normalized. A brand-new place from a merge gets its id from its name (with `_2` and so on added if taken); you never type an id. `update_area` renames a region or subregion and/or rewrites its notes; ids never change. An exit pair shares its door state (block, open, lock, unlock, break, remove apply to both sides), while hidden, sight, sound and exit text are per side, and exit names are never renamed. Ops that change nothing (a rename to the same name) are dropped and shown greyed as "no change". The change call sees one step beyond the change (neighbors of the changed rooms or area) and may propose fixes to them on the same card.
+
+### Discovery rooms
+
+When the story opens a door that the room description only mentions (say, one of the four guest rooms off the Drowned Rat's upstairs hallway), the narrator flags it (`ws_flag` with `action: "discover"`, or `[ws_flag: discover | which door]` in non-tools mode). One small model call writes the room behind it, given the current room, its neighbours one step out, and the subregion and region notes. The engine adds it with a `discover` patch op: a new room (its id made from the name, e.g. `end_guest_room`) and one door pair to it, as if it had always been there. Nothing else changes: no notes, no rewrite of the hallway. It is stamped at once; tick **Ask before adding a discovered room** in the settings to get the Keep / Discard card instead. Like any change it can be turned off and on again; turning it off while standing in the room moves the party back out. Rooms with `"expandable": false` refuse discoveries.
