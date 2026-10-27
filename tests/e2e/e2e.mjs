@@ -712,9 +712,12 @@ try {
     await page.waitForTimeout(1000);
     const back = await M(m => ({ w: m.chatWorld()?.id, ch: m.chatChanges().map(c => c.type) }));
     check('deleting back past the rebase reverts to the previous world and its changes', back.w === 'riverton' && JSON.stringify(back.ch) === '["add_exit"]' && (await wsExits()).includes('east (') && (await wsExits()).includes('south ('), JSON.stringify(back) + (await wsExits()));
-    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'v', extra: { worldscrawl_location: 'riverton:nowhere/void', worldscrawl_intent_checked: true } }); await c.saveChat(); });
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.push({ name: 'User', is_user: true, mes: 'v', extra: { worldscrawl_location: 'atlantis:nowhere/void', worldscrawl_intent_checked: true } }); await c.saveChat(); });
     const exMissing = await wsExits();
     check('missing room: falls back to the start with a system notice', (await lastMes()).includes('no longer exists in this world') && (await stored()) === 'riverton:drowned_rat/common_room' && exMissing.startsWith('Exits: out'), exMissing + ' | ' + (await lastMes()));
+    await page.evaluate(() => document.getElementById('worldscrawl_who').dispatchEvent(new Event('input'))); // refresh the facts prompt
+    await page.waitForTimeout(800);
+    check('missing room: the narrator gets one "now in" note', /no longer exists in this world\. .* is now in /.test(await page.evaluate(() => SillyTavern.getContext().extensionPrompts?.worldscrawl_facts?.value ?? '')));
         // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
     await page.waitForTimeout(1000);

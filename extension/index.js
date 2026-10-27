@@ -320,10 +320,15 @@ async function api(path, options = {}) {
 
 /** Latest location stored on a message, or null if this chat has none yet. */
 export function getStoredLocation() {
+    const st = storedStamp();
+    return st ? relocateFrom(st.address, st.index, ctx().chat ?? []) : null;
+}
+/** The raw location stamp (before merge redirects) and the message it is on. */
+function storedStamp() {
     const chat = ctx().chat ?? [];
     for (let i = chat.length - 1; i >= 0; i--) {
         const loc = chat[i]?.extra?.[LOC_KEY];
-        if (loc) return relocateFrom(loc, i, chat);
+        if (loc) return { address: loc, index: i };
     }
     return null;
 }
@@ -345,17 +350,31 @@ async function currentLocation() {
     return start;
 }
 
-/** The saved room isn't in this chat's world (edited away?): back to the start, with a short system notice that carries the new location (delete it to undo). */
+/** The saved room isn't in this chat's effective map (removed, merged, swiped or deleted away, or a temporary change expired):
+ *  the server's blanket position resolver picks a real room (merge redirect, a surviving neighbour, the subregion/region
+ *  entrance, the world start). One short system notice carries the new location (delete it to undo) and the narrator is told once. */
 async function missingRoomFallback(stored) {
-    console.warn(`[WorldScrawl] location ${stored} is not in world ${activeWorld || '(default)'}; falling back to the start`);
-    const start = await fetchLocationCached(null);
-    if (!start) throw new Error('WorldScrawl: /start failed.');
+    const st = storedStamp();
+    const r = await api('/resolve', { method: 'POST', body: JSON.stringify({ address: st?.address ?? stored, since: st?.index ?? null, ...mapCtx() }) }).catch(() => null);
+    let to = r?.ok && r.body?.address ? await fetchLocationCached(r.body.address) : null;
+    if (!to) to = await fetchLocationCached(null);
+    if (!to) throw new Error('WorldScrawl: /start failed.');
+    console.warn(`[WorldScrawl] location ${stored} is not in world ${activeWorld || '(default)'}; resolved to ${to.address} (${r?.body?.how ?? 'start'})`);
     const c = ctx();
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: `[Engine: that place no longer exists in this world. You are at ${displayName(start)}.]`,
-        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', [LOC_KEY]: start.address } };
+        mes: `[Engine: that place no longer exists in this world. You're now in ${displayName(to)}.]`,
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: stored, [LOC_KEY]: to.address } };
     c.chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
-    return start;
+    return to;
+}
+/** The narrator's one "you're now in X" note: a resolver move not yet followed by a narrated reply. */
+export function relocationNote(chat, loc, who) {
+    for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (m?.extra?.worldscrawl_notice_kind === 'missing') return m.extra[LOC_KEY] === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
+        if (m && !m.is_system && !m.is_user) return '';
+    }
+    return '';
 }
 
 /** Every chat gets a location from turn one: stamp the start onto the greeting (message 0) if nothing is saved. */
@@ -1416,6 +1435,8 @@ async function applyFacts() {
         const d = gameDate();
         text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
         reminder = arrivalReminder(loc, move);
+        const rn = relocationNote(c.chat ?? [], loc, whoMoves());
+        if (rn) text = `${text}\n${rn}`;
         const wf = await waitFacts(c.chat ?? [], loc);
         if (wf) text = `${text}\n${wf}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
@@ -2069,7 +2090,10 @@ const swipeOf = m => m?.swipe_id ?? 0;
 export const patchesOn = m => (m?.extra?.[PATCH_KEY] ?? []).filter(p => (p?.swipe ?? 0) === swipeOf(m));
 /** A location stamped on message i, after any later patch merged or removed that room. */
 function relocateFrom(addr, i, chat) {
-    for (let j = i; j < chat.length; j++) for (const p of patchesOn(chat[j])) if (p?.relocate && Object.hasOwn(p.relocate, addr)) addr = p.relocate[addr];
+    // Expired temporary patches ("lasts") no longer redirect (#47); the resolver handles any room that is still missing.
+    const now = patchLib ? chatElapsed(chat) : null;
+    const live = p => !patchLib || patchLib.activeChanges([p], now).length > 0;
+    for (let j = i; j < chat.length; j++) for (const p of patchesOn(chat[j]).filter(live)) if (p?.relocate && Object.hasOwn(p.relocate, addr)) addr = p.relocate[addr];
     return addr;
 }
 /** Changes plus the game clock: every map request carries both (patch ops with "lasts" expire on the clock). */
