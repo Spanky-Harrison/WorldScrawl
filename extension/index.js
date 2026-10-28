@@ -2861,7 +2861,7 @@ const openCarriers = new WeakSet();
 (function carrierCss() {
     if (typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
     const st = document.createElement('style'); st.id = 'worldscrawl_carrier_css';
-    st.textContent = `#chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;font-size:0.82em;}
+    st.textContent = `#chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;overflow:hidden;font-size:0.82em;}
 #chat .mes.worldscrawl_carrier_mes .mes_text,#chat .mes.worldscrawl_carrier_mes .avatar,#chat .mes.worldscrawl_carrier_mes .mesIDDisplay,#chat .mes.worldscrawl_carrier_mes .mes_timer,#chat .mes.worldscrawl_carrier_mes .tokenCounterDisplay{display:none;}
 #chat .mes.worldscrawl_carrier_mes .worldscrawl_patchcard{margin-top:0!important;padding:2px 6px!important;font-size:1em!important;}
 .worldscrawl_carrier>summary{cursor:pointer;opacity:0.85;}
