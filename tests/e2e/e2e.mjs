@@ -3,6 +3,7 @@ const BASE = 'http://localhost:8767/';
 const FAKE = 'http://127.0.0.1:9098';
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} ${extra}`); if (!ok) failures++; };
+const pickSet = (loc, v) => loc.evaluate((el, x) => el.setValue(x), v); // a map pick field's value, as a pick sets it
 const queue = q => fetch(`${FAKE}/__queue`, { method: 'POST', body: JSON.stringify(q) });
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'], headless: true });
@@ -1269,9 +1270,9 @@ try {
     await descIn.waitFor({ timeout: 10000 });
     const pf0 = await ui.evaluate(() => { const f = document.querySelector('.side .placeform'), r = k => f.querySelector(`.pf-row[data-field="${k}"]`);
         return { name: r('name').querySelector('input').value, exp: r('exposure').classList.contains('inherited'), expTag: r('exposure').querySelector('.pf-from')?.textContent, expandable: r('expandable').querySelector('input').type,
-            radios: r('insulation').querySelectorAll('input[type=radio]').length, select: !!r('exposure').querySelector('select'), move: r('move').querySelector('select').value,
+            radios: r('insulation').querySelectorAll('input[type=radio]').length, select: !!r('exposure').querySelector('select'), move: r('move').querySelector('.wspick')?.value, movePath: r('move').querySelector('.wspick-value')?.textContent,
             exits: f.querySelectorAll('.pf-exit').length, collapsed: [...f.querySelectorAll('.pf-exit-body')].every(b => b.hidden), ops: !!document.querySelector('.side select.wspf-op') }; });
-    check('Edit place: a form with the place\'s data (inputs, checkbox, radios for 3 options, dropdown for 4+, move dropdown, collapsed exits)', pf0.name === 'Common Room' && pf0.expandable === 'checkbox' && pf0.radios === 3 && pf0.select && pf0.move === 'riverton:drowned_rat' && pf0.exits === 3 && pf0.collapsed && !pf0.ops, JSON.stringify(pf0));
+    check('Edit place: a form with the place\'s data (inputs, checkbox, radios for 3 options, dropdown for 4+, move dropdown, collapsed exits)', pf0.name === 'Common Room' && pf0.expandable === 'checkbox' && pf0.radios === 3 && pf0.select && pf0.move === 'riverton:drowned_rat' && / › /.test(pf0.movePath) && pf0.exits === 3 && pf0.collapsed && !pf0.ops, JSON.stringify(pf0));
     check('Edit place: inherited fields are greyed with a "from subregion" tag', pf0.exp && pf0.expTag === 'from subregion', JSON.stringify(pf0));
     await descIn.fill('Burned to the rafters.');
     try { await ui.waitForFunction(() => /Burned to the rafters/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
@@ -1315,7 +1316,7 @@ try {
     await ui.click('.side .pf-addexit');
     const newBlk = ui.locator('.side .pf-exit').first();
     await newBlk.locator('.pf-row[data-field="direction"] input').fill('side door');
-    await newBlk.locator('.pf-row[data-field="to"] select').selectOption('riverton:streets/market_lane');
+    await pickSet(newBlk.locator('.pf-row[data-field="to"] .wspick'), 'riverton:streets/market_lane');
     await newBlk.locator('.pf-row[data-field="return_direction"] input').fill('tavern');
     const nbTitle = await newBlk.locator('.pf-exit-title').textContent();
     await ui.click('.side button.pf-submit');
@@ -1393,7 +1394,15 @@ try {
     await ui.locator('.side .mapaction[data-action="create_place"]').waitFor({ timeout: 10000 });
     await ui.fill('.side .mw-row[data-field="place_name"] input', 'Coal Shed');
     await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'Sacks of coal.');
-    await ui.selectOption('.side .mw-exit select', mwFORGE);
+    // Choose… suspends the wizard for pick mode; Cancel brings it back with everything typed so far.
+    await ui.click('.side .mw-exit .wspick-choose');
+    await ui.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    const pkOn = await ui.evaluate(() => ({ t: document.querySelector('.wspick-banner')?.innerText ?? '', side: !!document.querySelector('.side .mapaction'), p: globalThis.wsPicking() }));
+    await ui.click('.wspick-cancel');
+    const pkOff = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), name: document.querySelector('.side .mw-row[data-field="place_name"] input')?.value, p: globalThis.wsPicking() }));
+    check('Pick mode: a big "Picking exit destination…" banner with Cancel; the wizard is suspended and comes back intact on Cancel',
+        /Picking exit destination/.test(pkOn.t) && /Cancel/.test(pkOn.t) && !pkOn.side && pkOn.p?.kind === 'room' && !pkOff.b && pkOff.name === 'Coal Shed' && pkOff.p === null, JSON.stringify([pkOn, pkOff]));
+    await pickSet(ui.locator('.side .mw-exit .wspick'), mwFORGE);
     await ui.fill('.side .mw-exit input >> nth=0', 'forge'); await ui.fill('.side .mw-exit input >> nth=1', 'shed');
     try { await ui.waitForFunction(() => /Coal Shed/.test(document.querySelector('.side .mw-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
     check('Create place wizard: the diff shows the new place before Submit', /Coal Shed/.test(await ui.evaluate(() => document.querySelector('.side .mw-diff')?.innerText ?? '')));
@@ -1409,7 +1418,20 @@ try {
     // Move with a clash: the rename box is prefilled with a suggested unique id; never overwritten.
     mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await mwAct('riverton:drowned_rat/common_room', 'move_place');
-    await ui.selectOption('.side .mw-row[data-field="dest"] select', 'riverton:gilded_goose');
+    // A real pick: search shows full paths, a result jumps the map there, double-click asks "Choose …?", Yes fills it.
+    await ui.click('.side .mw-row[data-field="dest"] .wspick-choose');
+    await ui.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    await ui.fill('.wspick-search', 'gilded');
+    const pkRes = await ui.evaluate(() => [...document.querySelectorAll('.wspick-results li')].map(li => li.textContent));
+    await ui.click('.wspick-results li[data-id="riverton:gilded_goose"]');
+    const pkMap = await ui.evaluate(() => ({ p: globalThis.wsPicking(), ok: !!document.querySelector('.node.pickable[data-id="sub:riverton:gilded_goose"]'), dim: !!document.querySelector('.node.pickdim[data-id="sub:riverton:drowned_rat"]') }));
+    await ui.dispatchEvent('.node[data-id="sub:riverton:gilded_goose"]', 'dblclick');
+    const pkQ = await ui.evaluate(() => document.querySelector('.wspick-confirm')?.innerText ?? '');
+    await ui.click('.wspick-yes');
+    const pkDone = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), v: document.querySelector('.side .mw-row[data-field="dest"] .wspick')?.value, shown: document.querySelector('.side .mw-row[data-field="dest"] .wspick-value')?.textContent }));
+    check('Pick mode: search results carry full paths; picking one opens its level with valid targets highlighted and the edited one dimmed',
+        pkRes.some(t => / › .*Gilded/.test(t)) && pkMap.p?.layer === 'riverton:' && pkMap.ok && pkMap.dim, JSON.stringify([pkRes, pkMap]));
+    check('Pick mode: double-click asks "Choose …?", Yes fills the field (full path) and restores the form', /^Choose .*Gilded.*\?/.test(pkQ) && !pkDone.b && pkDone.v === 'riverton:gilded_goose' && / › /.test(pkDone.shown), JSON.stringify([pkQ, pkDone]));
     await ui.locator('.side .mw-rename').waitFor({ timeout: 8000 });
     check('Move place onto a taken id: rename prompt prefilled with a suggested id', (await ui.inputValue('.side .mw-rename')) === 'drowned_rat_common_room');
     await ui.click('.side .mw-submit'); await mwSavedWait();
@@ -1419,7 +1441,7 @@ try {
     // Delete a subregion, moving its places into another (how two subregions merge), clashes renamed.
     await mwAct('sub:riverton:gilded_goose', 'delete_subregion');
     await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
-    await ui.selectOption('.side .mw-row[data-field="into"] select', 'riverton:drowned_rat');
+    await pickSet(ui.locator('.side .mw-row[data-field="into"] .wspick'), 'riverton:drowned_rat');
     const mwRen = await ui.evaluate(() => [...document.querySelectorAll('.side .mw-rename')].map(i => i.value));
     check('Delete subregion → move places: every clashing id gets a prefilled rename', JSON.stringify(mwRen) === JSON.stringify(['gilded_goose_common_room', 'gilded_goose_upstairs']), JSON.stringify(mwRen));
     await ui.click('.side .mw-submit'); await mwSavedWait();
@@ -1435,7 +1457,7 @@ try {
     await ui.fill('.side .mw-row[data-field="sub_name"] input', 'Reeds');
     await ui.fill('.side .mw-row[data-field="place_name"] input', 'Reed Hut');
     await ui.click('.side .mw-addexit');
-    await ui.selectOption('.side .mw-exit select', 'riverton:east_road/road');
+    await pickSet(ui.locator('.side .mw-exit .wspick'), 'riverton:east_road/road');
     await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'a hut');
     await queue([{ content: 'A hut on stilts above black water.' }]);
     const mwNReq = (await (await fetch(`${FAKE}/__requests`)).json()).length;
