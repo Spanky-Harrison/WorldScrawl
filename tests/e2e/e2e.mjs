@@ -1621,18 +1621,33 @@ try {
     check('carriers: undoing one change removes only it; the replay applies the rest in order', cr.undoOne && cr.desc === 'Carrier one.', JSON.stringify(cr));
     check('carriers: a message in between starts a new carrier', cr.newRun, JSON.stringify(cr));
     check('bulk delete: carriers swept up are reported with an Undo toast and restored with the same stamps', cr.lost === 2 && cr.toast && cr.restored && cr.descBack === 'Carrier four.', JSON.stringify(cr));
-    // Synthetic: someone standing in a moved place when its move is turned off goes back to the original address (reverse redirect).
-    const rv = await page.evaluate(async () => {
-        const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), n0 = c.chat.length;
-        const e = await globalThis.worldscrawlLiveEdit([{ op: 'remove_area', area: 'larkspur', contents: 'move', into: 'riverton' }]);
-        const mi = c.chat.length - 1, p = c.chat[mi].extra.worldscrawl_patches.at(-1), to = p.relocate?.['larkspur:west_road/road'];
-        const on = to ? await globalThis.worldscrawlResolve(to) : null;
-        await m.toggleChange(mi, p.id, { choice: 'one' });
-        const off = to ? await globalThis.worldscrawlResolve(to) : null;
-        await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1000));
-        return { ok: e.ok, to, on: on?.how, off: off && [off.address, off.how] };
+    // Bulk-move Larkspur into Riverton, walk to the Green (stamped at its new Riverton address), turn the move off:
+    // the party goes back to the Green in Larkspur (reverse redirect), and the map follows without a new chat message.
+    const hereOnMap = () => ui.evaluate(() => document.querySelector('.node.here')?.dataset.id ?? null);
+    const waitHere = async want => { for (let k = 0; k < 20 && (await hereOnMap()) !== want; k++) await ui.waitForTimeout(250); return hereOnMap(); };
+    const rv0 = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), n0 = c.chat.length;
+        const e = await globalThis.worldscrawlLiveEdit([{ op: 'remove_area', area: 'larkspur', contents: 'move', into: 'riverton' }], '', { separate: true });
+        const mi = c.chat.length - 1, p = c.chat[mi].extra.worldscrawl_patches.at(-1), to = p.relocate?.['larkspur:green/green'];
+        const walk = { name: 'User', is_user: true, send_date: Date.now(), mes: 'I walk to the green.', extra: { worldscrawl_location: to, worldscrawl_move: { from: null, to, via: [to] } } };
+        c.chat.push(walk); c.addOneMessage(walk); await c.saveChat();
+        await (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).broadcastMapState();
+        return { ok: e.ok, n0, mi, pid: p.id, to };
     });
-    check('reverse redirect: with the bulk move turned off, the moved address resolves back to the original place', rv.ok && rv.to === 'riverton:west_road/road' && rv.on === 'here' && JSON.stringify(rv.off) === JSON.stringify(['larkspur:west_road/road', 'restored']), JSON.stringify(rv));
+    const rvOnMap = await waitHere(rv0.to);
+    const rv = await page.evaluate(async ({ mi, pid }) => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), c = SillyTavern.getContext(), n = c.chat.length;
+        const t = await m.toggleChange(mi, pid, { choice: 'one' });
+        await new Promise(r => setTimeout(r, 1500));
+        return { ok: t.ok, stored: m.getStoredLocation(), userMsgs: c.chat.slice(n).filter(x => x.is_user).length };
+    }, rv0);
+    const rvOffMap = await waitHere('larkspur:green/green');
+    check('reverse redirect: with the bulk move turned off, the party at the moved Green goes back to the Green in Larkspur', rv0.ok && rv0.to === 'riverton:green/green' && rv.ok && rv.stored === 'larkspur:green/green', JSON.stringify([rv0, rv]));
+    check('map refresh: the map follows a toggle (no new chat message needed)', rvOnMap === rv0.to && rvOffMap === 'larkspur:green/green' && rv.userMsgs === 0, JSON.stringify([rvOnMap, rvOffMap]));
+    await page.evaluate(async ({ mi, pid }) => { await (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).toggleChange(mi, pid); }, rv0);
+    const rvOnAgain = await waitHere('riverton:green/green');
+    check('map refresh: turning the move on again moves the party (and the map) to the Green in Riverton', rvOnAgain === 'riverton:green/green', String(rvOnAgain));
+    await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await page.waitForTimeout(1500);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
