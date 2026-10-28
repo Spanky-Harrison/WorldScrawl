@@ -1544,7 +1544,7 @@ try {
     try { await page.waitForFunction(id => SillyTavern.getContext().chat[id]?.extra?.worldscrawl_patches?.length, nDisc, { timeout: 20000 }); } catch {}
     const disc = await page.evaluate(id => { const m = SillyTavern.getContext().chat[id]; return { mes: m.mes, f: m.extra.worldscrawl_flag, p: m.extra.worldscrawl_patches?.[0] }; }, nDisc);
     const DROOM = 'riverton:drowned_rat/end_guest_room';
-    check('discovery: the [ws_flag: discover] tag is stripped and the room is stamped at once (no review card)', !/ws_flag/.test(disc.mes) && disc.f?.status === 'kept' && disc.p?.ops?.[0]?.op === 'discover' && disc.p.ops[0].id === 'end_guest_room', JSON.stringify(disc));
+    check('discovery: the [ws_flag: discover] tag is stripped and the room is stamped at once (no review card)', !/ws_flag/.test(disc.mes) && disc.f?.status === 'kept' && disc.p?.ops?.[0]?.op === 'create_place' && disc.p.ops[0].id === 'end_guest_room', JSON.stringify(disc));
     const discCard = page.locator(`#chat .mes[mesid="${nDisc}"] .worldscrawl_patchcard`);
     check('discovery: no Keep / Discard buttons', await discCard.locator('.worldscrawl_card_btn', { hasText: 'Discard' }).count() === 0);
     const dReqs = await (await fetch(`${FAKE}/__requests`)).json();
@@ -1575,6 +1575,25 @@ try {
     }, [wsMod, UPST]);
     check('discovery review setting: a Keep / Discard card, nothing stamped yet', rev.status === 'review' && !rev.stamped, JSON.stringify(rev));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, rev.id); await page.waitForTimeout(1500);
+    // The change call: "can't express this" is shown plainly; three new rooms off a hub come back as one reviewable change.
+    const changeFlag = async (answers) => { await queue(answers); return page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext();
+        c.chat.push({ name: 'Narrator', is_user: false, mes: 'Magic reshapes the hallway.', extra: { worldscrawl_location: UPST } }); await c.saveChat();
+        const id = c.chat.length - 1; await m.flagMessage(id, { note: 'magic', source: 'button' });
+        for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
+        const f = c.chat[id].extra.worldscrawl_flag;
+        await new Promise(r => setTimeout(r, 300));
+        const card = document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '';
+        return { id, status: f?.status, error: f?.error, ops: f?.proposal?.ops, summary: f?.proposal?.summary, card };
+    }, [wsMod, UPST]); };
+    const cant = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ cant: 'The hallway now floats above the town.' }) }]);
+    check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /can't show this change/.test(cant.card), JSON.stringify(cant));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, cant.id); await page.waitForTimeout(1500);
+    const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
+    const hubR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Crystal Room', 'crystal arch'), mk('Ember Room', 'ember arch'), mk('Tide Room', 'tide arch')] }) }]);
+    check('change call: three new rooms off a hub in one change, engine-made ids', hubR.status === 'review' && hubR.ops?.length === 3 && hubR.ops.every(o => o.op === 'create_place' && o.id !== 'bogus' && o.story === true)
+        && JSON.stringify(hubR.ops.map(o => o.id)) === JSON.stringify(['crystal_room', 'ember_room', 'tide_room']), JSON.stringify(hubR).slice(0, 600));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, hubR.id); await page.waitForTimeout(1500);
     // A door no description mentions: "I open a door down the hall" in the upstairs hallway. The intent check offers
     // "try another door", the narrator is told to open it only if it fits, and its flag adds the room.
     const mode0 = await page.evaluate(async ([mod, UPST]) => {
@@ -1592,7 +1611,7 @@ try {
     check('undescribed door: the intent check offers "try another door"', lq.length >= 1 && promptOf(lq[0]).includes('try another door: the player opens or tries a door'), promptOf(lq[0] ?? {}).slice(-600));
     check('undescribed door: the message is marked and the narrator is told to open it only if it fits', lk.extra.worldscrawl_new_door === true && promptOf(lq[1] ?? {}).includes('tries a door that is not among the exits') && promptOf(lq[1] ?? {}).includes('If no such door fits'), promptOf(lq[1] ?? {}).slice(-700));
     const nd = await page.evaluate(() => { const m = SillyTavern.getContext().chat.at(-1); return { mes: m.mes, f: m.extra?.worldscrawl_flag, p: m.extra?.worldscrawl_patches?.[0] }; });
-    check('undescribed door: the flag adds the room behind it at once', nd.f?.kind === 'discover' && nd.f?.status === 'kept' && nd.p?.ops?.[0]?.op === 'discover' && !/ws_flag/.test(nd.mes), JSON.stringify(nd).slice(0, 600));
+    check('undescribed door: the flag adds the room behind it at once', nd.f?.kind === 'discover' && nd.f?.status === 'kept' && nd.p?.ops?.[0]?.op === 'create_place' && !/ws_flag/.test(nd.mes), JSON.stringify(nd).slice(0, 600));
     check('undescribed door: the discovery prompt allows a door the description does not mention', promptOf(lq[2] ?? {}).includes('does not mention but that plausibly fits'), promptOf(lq[2] ?? {}).slice(0, 400));
     await page.evaluate(async ([mod, n, was]) => { const m = await import(mod), c = SillyTavern.getContext(); m.settings().moveMode = was; c.chat.splice(n - 2); await c.saveChat(); await c.reloadCurrentChat(); }, [wsMod, mode0.n, mode0.was]);
     await page.waitForTimeout(1500);

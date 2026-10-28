@@ -162,12 +162,30 @@ export function normalizeOp(raw, op) {
         if (m && !str(o.area) && !o.into && isObj(raw[m[1]]?.subregions?.[m[2]])) o.area = `${m[1]}:${m[2]}`;
         o.id = slugId(o.id);
     }
-    if (o.op === 'discover') {
-        // The engine picks the new room's id once (from its name) and it is stamped with the op, so replays agree.
-        const p = split(o.loc);
-        o.id = typeof o.id === 'string' && o.id.trim() ? slugId(o.id) : (p && str(o.name) ? split(freeAddress(raw, `${p[0]}:${p[1]}`, newRoomId(o.name) || 'room'))[2] : o.id);
+    if (o.op === 'discover') Object.assign(o, discoverToCreate(o)); // old chats: a discovery is a story-made create_place
+    if (o.op === 'create_place' && o.story === true) {
+        for (const k of ['loc', 'direction', 'return_direction', 'exit_description', 'return_description', 'travel_time', 'door']) delete o[k];
+        // Made by the story (a change call or a discovery): the area defaults to the first exit's room's, and the engine
+        // picks the id once (from the name, never clashing) and stamps it with the op, so replays agree.
+        if (!str(o.area)) { const t = split(o.exits?.find(e => isObj(e) && split(e.to))?.to); if (t) o.area = `${t[0]}:${t[1]}`; }
+        if (!str(o.id) && str(o.area) && str(o.name) && isObj(getArea(raw, o.area))) o.id = split(freeAddress(raw, o.area, newRoomId(o.name) || 'room'))[2];
+        else if (str(o.id)) o.id = slugId(o.id);
     }
     return o;
+}
+const getArea = (raw, area) => { const [r, s] = String(area ?? '').split(':'); return s ? raw[r]?.subregions?.[s] : null; };
+/**
+ * The old "discover" op as the create_place it always meant: a new room in loc's subregion, joined to loc by one exit
+ * pair (a door unless door: false). `story: true` makes the engine pick the id and respect "expandable".
+ */
+export function discoverToCreate(o) {
+    const p = split(o.loc);
+    const c = { op: 'create_place', story: true, ...(p ? { area: `${p[0]}:${p[1]}` } : {}), name: o.name, description: o.description,
+        ...(str(o.id) ? { id: slugId(o.id) } : {}),
+        exits: [{ to: o.loc, direction: str(o.return_direction) || 'out', return_direction: o.direction, travel_time: str(o.travel_time) || '10s',
+            door: o.door !== false, description: str(o.return_description) || undefined, return_description: str(o.exit_description) || undefined }] };
+    if (has(o, 'lasts')) c.lasts = o.lasts;
+    return c;
 }
 /** Every exit "to" and view written as a full address, so rooms can move between subregions safely. */
 export function normalizeRefs(raw) {
@@ -296,7 +314,6 @@ function applyOp(raw, op, w, out, world = null) {
         }
         case 'remove_location': return removeOp(raw, op, w, out, world);
         case 'merge': return mergeOp(raw, op, w, out);
-        case 'discover': return discoverOp(raw, op, w, out, world);
         case 'set_expandable': {
             const t = str(op.target), p = split(t), [rid, sid] = p ?? t.split(':');
             const obj = p ? getRoom(raw, t) : sid ? raw[rid]?.subregions?.[sid] : raw[rid];
@@ -319,8 +336,13 @@ function applyOp(raw, op, w, out, world = null) {
         case 'move_area': return moveAreaOp(raw, op, w, out, world);
         case 'create_place': {
             const sub = needSub(raw, str(op.area), w);
-            const a = createPlace(raw, str(op.area), op, w, out, true);
-            return `${getRoom(raw, a).name}: new place in ${sub.name ?? op.area}`;
+            if (op.story === true) for (const e of (Array.isArray(op.exits) ? op.exits : [])) {
+                const t = isObj(e) && typeof e.to === 'string' ? getRoom(raw, e.to) : null;
+                if (t && !expandableOf(raw, e.to, world)) throw new PatchError(`${w}: ${t.name} can't be expanded ("expandable" is false for it or its area)`);
+            }
+            const a = createPlace(raw, str(op.area), op, w, out, true), r = getRoom(raw, a), ex = op.exits?.length === 1 ? op.exits[0] : null;
+            if (op.story === true && ex) return `${getRoom(raw, ex.to)?.name ?? ex.to} ${ex.return_direction}: leads to ${r.name} (a newly found room)`;
+            return `${r.name}: new place in ${sub.name ?? op.area}`;
         }
         case 'create_subregion': {
             const rid = str(op.region);
@@ -459,28 +481,6 @@ function expandValue(v, w) {
     if (t === '' || t === 'null' || t === 'inherit') return null;
     throw new PatchError(`${w}: "value" must be true, false or inherit`);
 }
-function discoverOp(raw, op, w, out, world = null) {
-    const a = str(op.loc), r = needRoom(raw, a, w), [rid, sid] = split(a);
-    if (!expandableOf(raw, a, world)) throw new PatchError(`${w}: ${r.name} can't be expanded ("expandable" is false for it or its area)`);
-    const name = needText(op, w, 'name', MAX_PATCH_NAME), desc = needText(op, w, 'description');
-    const dir = needText(op, w, 'direction', 60), back = str(op.return_direction) || 'out';
-    if (back.length > 60) throw new PatchError(`${w}: "return_direction" is too long (at most 60 characters)`);
-    if ((r.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(dir))) throw new PatchError(`${w}: ${r.name} already has an exit ${JSON.stringify(dir)}`);
-    const id = str(op.id);
-    if (!SLUG.test(id)) throw new PatchError(`${w}: "id" ${JSON.stringify(op.id)} must be lowercase letters, digits and _`);
-    const to = `${rid}:${sid}/${id}`;
-    if (getRoom(raw, to)) throw new PatchError(`${w}: a room ${to} already exists`);
-    const time = str(op.travel_time) || '10s';
-    try { parseDuration(time); } catch (err) { throw new PatchError(`${w}: "travel_time": ${err.message}`); }
-    const ex = { direction: dir, to, travel_time: time, description: str(op.exit_description).slice(0, 400) || `A door leads to ${name}.` };
-    if (op.door !== false) ex.barrier = {}; // one door, shared with the way back
-    r.exits = [...(Array.isArray(r.exits) ? r.exits : []), ex];
-    raw[rid].subregions[sid].locations[id] = { name, description: desc,
-        exits: [{ direction: back, to: a, travel_time: time, description: str(op.return_description).slice(0, 400) || `The way back to ${r.name}.` }] };
-    out.touched.push(a, to);
-    return `${r.name} ${dir}: leads to ${name} (a newly found room)`;
-}
-
 function findExit(raw, a, d, w) {
     const r = needRoom(raw, a, w);
     const dir = needText({ d }, w, 'd', 60);
@@ -860,4 +860,58 @@ export function mentionsOf(raw, names, skip = new Set()) {
         }
     }
     return out;
+}
+
+/**
+ * What the model is told about each op, generated into the change call's prompt from OPS, so anything the editor can do
+ * the model can propose. ADDR is a room address, AREA a subregion ("region:sub") or region ("region"). Ops the model
+ * never writes itself (discover: old chats only) have no entry. New ops in OPS need a line here (a test checks).
+ */
+export const OP_DOCS = {
+    set_description: '{"op":"set_description","loc":ADDR,"text":"..."}',
+    append_description: '{"op":"append_description","loc":ADDR,"text":"..."}',
+    set_name: '{"op":"set_name","loc":ADDR,"text":"New display name"} (the address stays the same)',
+    set_notes: '{"op":"set_notes","area":AREA,"text":"..."}',
+    append_notes: '{"op":"append_notes","area":AREA,"text":"..."}',
+    update_area: '{"op":"update_area","area":AREA,"name":"New display name","notes":"..."} (rename a whole building/area and/or rewrite its notes; give name, notes or both)',
+    block_exit: '{"op":"block_exit","loc":ADDR,"direction":"exit name"} (door state, both sides)',
+    open_exit: '{"op":"open_exit","loc":ADDR,"direction":"exit name"}',
+    lock_exit: '{"op":"lock_exit","loc":ADDR,"direction":"exit name"}',
+    unlock_exit: '{"op":"unlock_exit","loc":ADDR,"direction":"exit name"}',
+    break_exit: '{"op":"break_exit","loc":ADDR,"direction":"exit name"} (the door is gone; the way stays)',
+    remove_exit: '{"op":"remove_exit","loc":ADDR,"direction":"exit name"} (both sides: the way is gone)',
+    set_exit_description: '{"op":"set_exit_description","loc":ADDR,"direction":"exit name","text":"..."} (that side\'s exit text only)',
+    set_travel_time: '{"op":"set_travel_time","loc":ADDR,"direction":"exit name","time":"10m"} (both ways)',
+    remove_location: '{"op":"remove_location","loc":ADDR} (the place is gone)',
+    merge: '{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (existing rooms become one; never for making new rooms)',
+    set_expandable: '{"op":"set_expandable","target":ADDR or AREA,"value":true|false|"inherit"} (whether new rooms can be found there)',
+    set_fields: '{"op":"set_fields","target":ADDR or AREA,"fields":{"exposure":"outdoor|sheltered|enclosed|fixed","insulation":"drafty|normal|cozy","indoor_temp":20,...}} (plain settings; null drops one)',
+    set_exit: '{"op":"set_exit","loc":ADDR,"direction":"exit name","fields":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))',
+    add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two existing rooms)',
+    move_location: '{"op":"move_location","loc":ADDR,"area":"region:sub"} (a room moves to another subregion, keeping its exits)',
+    move_area: '{"op":"move_area","area":"region:sub","region":"region"} (a subregion moves to another region)',
+    create_place: '{"op":"create_place","name":"...","description":"...","exits":[{"to":ADDR,"direction":"exit name from the new place","return_direction":"exit name from ADDR to the new place","door":true|false}]} (a NEW room; the engine makes its id and puts it in the area of its first exit\'s room unless you give "area"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; a later exit may point "to" an earlier new room by its name in snake_case)',
+    create_subregion: '{"op":"create_subregion","region":"region","name":"...","notes":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room)',
+    create_region: '{"op":"create_region","name":"...","notes":"...","subregion":{"name":"...","place":{...}}} (a whole new region)',
+    remove_area: '{"op":"remove_area","area":AREA,"contents":"delete"|"move","into":AREA} (delete a subregion or region, or move its contents into another)',
+};
+/** The op list for the change call's prompt, one line per op in OPS (in that order). */
+export const opDocs = () => OPS.filter(o => OP_DOCS[o]).map(o => OP_DOCS[o]).join('\n');
+/**
+ * The model's answer to the change call, normalized: {ops} to preview, {nothing: true}, or {cant: "why"} when the story
+ * changed the map in a way no op can express (shown to the player plainly instead of forcing a wrong edit). Ops made by
+ * the story get story: true on create_place (engine-made id, "expandable" respected) and lose any id the model wrote.
+ */
+export function readChangeAnswer(ans) {
+    if (!isObj(ans)) return null;
+    const cant = str(ans.cant ?? ans.cannot ?? ans.cant_express);
+    if (cant) return { cant: cant.slice(0, 300) };
+    if (!Array.isArray(ans.ops)) return null;
+    if (!ans.ops.length) return { nothing: true };
+    const ops = ans.ops.map(o => {
+        if (!isObj(o)) return o;
+        if (o.op === 'create_place') { const { id, ...rest } = o; return { ...rest, story: true }; }
+        return o;
+    });
+    return { ops };
 }
