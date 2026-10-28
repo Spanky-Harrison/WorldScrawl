@@ -427,9 +427,9 @@ function createMapWindow(win) {
     const svg = S('svg'), world = S('g');
     svg.append(world);
     const legend = $('div', { class: 'legend' });
-    const centre = $('button', { class: 'topbutton', title: 'Centre on where you are', onclick: () => { if (current) { setLayer(layerOf(current.full, current.here)); } } }, 'Centre');
-    view.append(svg, legend, $('div', { class: 'mapbuttons' }, centre));
-    let tf = { x: 0, y: 0, k: 1 }, current = null, selected = null, lastHere = null, lastKey = null, layer = null;
+    const centreOnPlayer = () => { if (current) setLayer(layerOf(current.full, current.here)); };
+    view.append(svg, legend);
+    let crumbPick = null, tf = { x: 0, y: 0, k: 1 }, current = null, selected = null, lastHere = null, lastKey = null, layer = null;
     const crumbs = document.getElementById('breadcrumb');
     const apply = () => world.setAttribute('transform', `translate(${tf.x},${tf.y}) scale(${tf.k})`);
     function centreOn(id) {
@@ -437,6 +437,14 @@ function createMapWindow(win) {
         if (!p) return;
         const r = view.getBoundingClientRect();
         tf.x = r.width / 2 - p.x * tf.k; tf.y = r.height / 2 - p.y * tf.k; apply();
+    }
+    const layerTarget = l => l?.level === 'region' ? `region:${l.region}` : l?.level === 'subregion' ? `sub:${l.region}:${l.subregion}` : 'world';
+    /** A breadcrumb: show the level holding that entity's contents and select the entity itself (not the player's child of it). */
+    function pickCrumb(c) { crumbPick = { target: layerTarget(c.layer), label: c.label, level: c.layer.level }; setLayer(c.layer); }
+    function showCrumbEntity(p) {
+        selected = null; world.querySelectorAll('.node').forEach(n => n.classList.remove('selected'));
+        if (editor) return inspectTarget(p.target);
+        side.replaceChildren($('h3', {}, p.label), $('div', { class: 'area' }, p.level === 'world' ? 'World' : p.level === 'region' ? 'Region' : 'Area'), $('p', { class: 'muted' }, 'Click a place on the map to see its details.'));
     }
     function setLayer(l) {
         layer = l; selected = null;
@@ -518,8 +526,8 @@ function createMapWindow(win) {
         saveLayout(key, pos);
         current = { graph, pos, here, full, world: worldId, st: current?.st ?? state };
         crumbs.replaceChildren(...breadcrumb(full, layer).flatMap((c, i, all) => [i ? $('span', { class: 'sep' }, '›') : '',
-            $('button', { class: `crumb${i === all.length - 1 ? ' active' : ''}`, 'data-level': c.layer.level, onclick: () => setLayer(c.layer) }, c.label)]),
-            ...(editor ? [$('button', { class: 'crumb inspect', title: 'Inspect this layer (world, region or area)', onclick: () => inspectTarget(layer?.level === 'region' ? `region:${layer.region}` : layer?.level === 'subregion' ? `sub:${layer.region}:${layer.subregion}` : 'world') }, 'ⓘ')] : []));
+            $('button', { class: `crumb${i === all.length - 1 ? ' active' : ''}`, 'data-level': c.layer.level, 'data-target': layerTarget(c.layer), title: `Show ${c.label} and select it`, onclick: () => pickCrumb(c) }, c.label)]),
+            $('button', { class: 'centerbtn', title: 'Center the map on where you are', onclick: centreOnPlayer }, $('span', { class: 'icon', 'aria-hidden': 'true' }, '⌖'), ' Center'));
         world.replaceChildren();
         const at = id => pos.get(id);
         const subs = new Map();
@@ -561,6 +569,7 @@ function createMapWindow(win) {
         const hereNode = graph.nodes.find(n => n.here)?.id;
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
         if (side.querySelector('.mapaction')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
         else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
 

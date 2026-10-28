@@ -295,6 +295,8 @@ By default the model never touches the map:
 
 Put `[ws-start]` anywhere in a character's greeting (or alternate greetings). WorldScrawl shows a **Start your adventure** button there instead of the marker; clicking it sends "I look around" as your first message, so the model only runs when you choose to start. The greeting's stored text isn't changed, and the button disappears once the chat has more than the greeting.
 
+`/ws-reveal all` marks every place in the world as visited, so the map shows it and `/ws-go` / clicking a place can travel there. `/ws-reveal region` and `/ws-reveal subregion` do the same for the region or subregion you're in; `/ws-reveal <id>` takes a place (`riverton:streets/market_lane`), subregion (`riverton:streets`) or region (`riverton`) id. It's stamped on a small message like other knowledge (no review card): delete that message, or type `/ws-reveal off` to turn the latest reveal off. Moves redirect revealed places like any other stamped address.
+
 `/ws-known` lists the places this chat knows, in two groups: "Been there" and "Seen" (places spotted through exits or windows but never visited). It never names hidden-exit destinations.
 
 **Looking at closed doors.** When you look at a closed door, the engine asks which of four things you did: listen (only faint sounds), peek (you glimpse the room beyond, but the door stays shut and the peek is recorded on the message as `worldscrawl_peek`), open (the door opens), or just look (you're told the door is closed). The narrator is told to mention every exit only when you arrive somewhere or explicitly look around. Exits whose destination is obscured are named only by their label.

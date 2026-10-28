@@ -671,6 +671,8 @@ function chatAddresses() {
         if (loc) add(loc);
         for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) add(a);
         if (m?.extra?.worldscrawl_notice_loc) add(m.extra.worldscrawl_notice_loc);
+        const rv = m?.extra?.[REVEAL_KEY]; // /ws-reveal: places marked as been-there (unless turned off)
+        if (rv && rv.off !== true) for (const a of rv.addresses ?? []) add(a);
     });
     return [...new Set(out)];
 }
@@ -1763,11 +1765,51 @@ function registerSlashCommands() {
         helpString: 'WorldScrawl: show the exits from the current location.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-reveal',
+        callback: whenOn(async (_args, what) => { try { const t = await revealPlaces(String(what ?? '').trim()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'all | region | subregion | <place, subregion or region id> | off', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: mark places as visited so you can travel there: all (the whole world), region or subregion (the current one), or an id. "off" turns the latest reveal off. Stamped on a small message (delete it to undo).',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-known',
         callback: whenOn(async () => { try { const t = await knownText(); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
         helpString: 'WorldScrawl: list the places this chat knows: where you have been, and places seen but not visited.',
     }));
 }
+
+const REVEAL_KEY = 'worldscrawl_reveal';
+/** Which addresses a /ws-reveal scope covers, out of the effective map's addresses. */
+export function revealScope(what, addresses, here) {
+    const w = String(what ?? '').trim();
+    if (!w) throw new Error('Say what to reveal: all, region, subregion, or an id.');
+    const [reg, rest = ''] = String(here ?? '').split(':'), sub = rest.split('/')[0];
+    if (w === 'all') return [...addresses];
+    if (w === 'region') return addresses.filter(a => a.startsWith(`${reg}:`));
+    if (w === 'subregion') return addresses.filter(a => a.startsWith(`${reg}:${sub}/`));
+    if (addresses.includes(w)) return [w];
+    const pre = w.includes(':') ? `${w}/` : `${w}:`;
+    return addresses.filter(a => a.startsWith(pre));
+}
+/** /ws-reveal: stamp places as been-there (stateless; delete the message or "/ws-reveal off" to undo). */
+export async function revealPlaces(what) {
+    const c = ctx(), chat = c.chat ?? [];
+    if (what === 'off') {
+        for (let i = chat.length - 1; i >= 0; i--) { const rv = chat[i]?.extra?.[REVEAL_KEY]; if (rv && rv.off !== true) { rv.off = true; syncSwipeExtra?.(chat[i]); await c.saveChat?.(); await afterReveal(); return `WorldScrawl: turned off the reveal from #${i}.`; } }
+        return 'WorldScrawl: no reveal to turn off.';
+    }
+    const idx = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
+    if (!idx.ok) throw new Error(`WorldScrawl: couldn't read the map (${idx.status}).`);
+    const here = (await currentLocation().catch(() => null))?.address ?? getStoredLocation();
+    const addresses = revealScope(what, idx.body.addresses ?? [], here);
+    if (!addresses.length) throw new Error(`WorldScrawl: nothing matches "${what}".`);
+    const text = `Map: revealed ${addresses.length} place${addresses.length === 1 ? '' : 's'} (${what}).`;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'reveal', [REVEAL_KEY]: { scope: what, addresses } } };
+    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    await afterReveal();
+    return text;
+}
+async function afterReveal() { renderAllExits?.(); broadcastMapState(); }
+globalThis.worldscrawlReveal = revealPlaces;
 
 /** Read-only summary of this chat's knowledge (hidden-exit destinations never included: discoveredPlaces filters them). */
 export async function knownText() {
