@@ -2,6 +2,7 @@
 // file, plus this chat's changes, says), what each unset field inherits and from where, its exits with their pair's
 // shared door, and the lists the dropdowns offer. Read-only; the form's Submit becomes patch ops (plugin/ui/placeform.mjs).
 import { inspect } from './inspect.mjs';
+import { flipBar } from './ui/doorbar.mjs';
 import { FIELD_KEYS, EXIT_SIDE_KEYS, getRoom } from './ui/patches.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -57,7 +58,7 @@ export function editContext(w, worldJson, raw, target) {
     if (!has(own, 'expandable')) inherited.expandable = expandInherit([['subregion', rawS], ['region', rawR], ['world', worldJson]]);
     const exits = (r.exits ?? []).filter(isObj).map(e => {
         const backRoom = getRoom(raw, e.to), back = backRoom ? (backRoom.exits ?? []).find(x => isObj(x) && x.to === a) ?? null : null;
-        const barrier = isObj(e.barrier) ? e.barrier : isObj(back?.barrier) ? back.barrier : null;
+        const barrier = isObj(e.barrier) ? e.barrier : isObj(back?.barrier) ? flipBar(back.barrier) : null; // shown from this side
         return { direction: e.direction, to: e.to, to_name: backRoom?.name ?? e.to, side: pick(e, EXIT_SIDE_KEYS), travel_time: e.travel_time ?? null,
             barrier: barrier ? structuredClone(barrier) : null, back_direction: back?.direction ?? null, back_side: back ? pick(back, EXIT_SIDE_KEYS) : null };
     });

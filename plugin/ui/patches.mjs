@@ -44,6 +44,7 @@
 //   starting region and the last region are never deleted.
 
 import { parseDuration } from './calendar.mjs';
+import { flipBar } from './doorbar.mjs';
 import { render as P } from './prompts.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
     'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
@@ -411,8 +412,9 @@ function barrierValue(b, w) {
     if (!isObj(b)) throw new PatchError(`${w}: "barrier" must be an object (the door) or null (no door)`);
     const o = {};
     for (const [k, v] of Object.entries(b)) {
-        if (!['closed_sight', 'closed_sound', 'openable', 'locked', 'starts_open', 'stays_open'].includes(k)) throw new PatchError(`${w}: a door has no setting "${k}"`);
+        if (!['closed_sight', 'closed_sound', 'openable', 'locked', 'starts_open', 'stays_open', 'barred_from'].includes(k)) throw new PatchError(`${w}: a door has no setting "${k}"`);
         if (v === null || v === undefined) continue;
+        if (k === 'barred_from') { if (!['this_side', 'other_side'].includes(v)) throw new PatchError(`${w}: "barred_from" must be "this_side" or "other_side" (or null for no bar)`); o[k] = v; continue; }
         o[k] = k === 'stays_open' ? (typeof v === 'boolean' ? v : (() => { throw new PatchError(`${w}: "stays_open" must be true or false`); })()) : fieldValue(k, v, w);
     }
     return o;
@@ -500,7 +502,7 @@ function exitOp(raw, op, w, out) {
         if (back) backRoom.exits = backRoom.exits.filter(e => e !== back);
         return `${label} removed`;
     }
-    const own = isObj(ex.barrier) ? ex.barrier : isObj(back?.barrier) ? back.barrier : {};
+    const own = isObj(ex.barrier) ? ex.barrier : isObj(back?.barrier) ? flipBar(back.barrier) : {}; // moved to this side: barred_from flips
     const clearBack = () => { if (back) { delete back.barrier; if (back.view === 'closed') delete back.view; } };
     if (ex.view === 'closed') delete ex.view;
     if (op.op === 'break_exit') {

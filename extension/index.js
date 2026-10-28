@@ -269,8 +269,23 @@ export function isOpenNow(e, open = doorOverrides()) {
 /** How much passes through an exit now: its sight/sound when unblocked, else its barrier's closed_sight/closed_sound. */
 export const sightOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sight ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sight ?? 'none');
 export const soundOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sound ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sound ?? 'partial');
-/** A closed barrier that can't be opened now (rubble, a barricade, or locked). */
-export const isStuck = (e, open = doorOverrides()) => { const b = barrierOf(e); return !!b && !isOpenNow(e, open) && (b.openable === false || !!b.locked); };
+// One-sided bars: door.barred_from ("this_side" / "other_side", already measured from the exit's own side by the
+// server). A door with a bar starts barred; bar_door / unbar_door changes on messages (shared door id) change that,
+// and stay as they were left (a bar doesn't drop by itself). Only the bar side can bar or unbar it.
+/** door id -> the last bar_door / unbar_door change in `chat`. */
+export function barStates(chat = ctx().chat ?? []) {
+    const st = new Map();
+    for (const m of chat) for (const c of changesOf(m)) if ((c.type === 'bar_door' || c.type === 'unbar_door') && c.door) st.set(c.door, c);
+    return st;
+}
+/** Is this door barred right now (from either side)? */
+export const isBarredNow = (e, bars = barStates()) => { const b = barrierOf(e); if (!b || !['this_side', 'other_side'].includes(b.barred_from)) return false; const c = e.door ? bars.get(e.door) : null; return c ? c.type === 'bar_door' : true; };
+/** Barred, with the bar on the far side: it won't open from here. */
+export const isBarredAway = (e, bars = barStates()) => barrierOf(e)?.barred_from === 'other_side' && isBarredNow(e, bars);
+/** The bar is on this side (it can be barred / unbarred from here). */
+export const barHere = e => barrierOf(e)?.barred_from === 'this_side';
+/** A closed barrier that can't be opened now (rubble, a barricade, locked, or barred from the other side). */
+export const isStuck = (e, open = doorOverrides(), bars = barStates()) => { const b = barrierOf(e); return !!b && !isOpenNow(e, open) && (b.openable === false || !!b.locked || isBarredAway(e, bars)); };
 /** What can be seen through an exit now (legacy one word): "closed" (a closed barrier), "none" or "open". */
 export const viewOf = (e, open = doorOverrides()) => (!isOpenNow(e, open) ? 'closed' : sightOf(e, open) === 'none' ? 'none' : 'open');
 const barrierWord = e => (barrierOf(e)?.openable === false ? 'way' : 'door');
@@ -285,7 +300,24 @@ export function doorCandidates(here, open = doorOverrides()) {
     const openable = e => barrierOf(e).openable !== false;
     return { toOpen: vis.filter(e => !isOpenNow(e, open) && !isStuck(e, open)), toClose: vis.filter(e => isOpenNow(e, open) && openable(e)), stuck: vis.filter(e => isStuck(e, open)) };
 }
-const stuckWhy = e => (barrierOf(e).openable === false ? 'is blocked and can\'t be opened' : 'is locked');
+const stuckWhy = e => (barrierOf(e).openable === false ? 'is blocked and can\'t be opened' : barrierOf(e).locked ? 'is locked' : isBarredAway(e) ? 'is barred from the other side and won\'t budge (a bar on the far side holds it shut; it is not locked and has no keyhole)' : 'is stuck');
+/** The changes that open a door: lifting the bar first when it is barred on this side. */
+export const openChanges = (here, e) => [...(barHere(e) && isBarredNow(e) ? [doorChange('unbar_door', here, e)] : []), doorChange('open_door', here, e)];
+/** /ws-bar <dir>, /ws-unbar <dir>: only from the side the bar is on. Barring an open door closes it first. */
+export async function barAction(kind, arg) {
+    const here = await currentLocation();
+    const want = String(arg ?? '').trim().toLowerCase();
+    const vis = here.exits.filter(e => e.door && barrierOf(e)?.barred_from && (!e.hidden || revealsDestination(e)));
+    const mine = vis.filter(barHere);
+    const e = vis.find(x => x.direction.toLowerCase() === want) ?? (!want && mine.length === 1 ? mine[0] : null);
+    if (!e) { toastr.warning(mine.length ? `Doors you can ${kind} here: ${mine.map(x => x.direction).join(', ')}` : `No door with a bar on this side here.`); return ''; }
+    if (!barHere(e)) { toastr.warning(`The bar on the ${e.direction} door is on the other side.`); return ''; }
+    const barred = isBarredNow(e);
+    if ((kind === 'bar') === barred) { toastr.info(`The ${e.direction} door is already ${barred ? 'barred' : 'unbarred'}.`); return ''; }
+    const ch = kind === 'bar' ? [...(isOpenNow(e) ? [doorChange('close_door', here, e)] : []), doorChange('bar_door', here, e)] : [doorChange('unbar_door', here, e)];
+    await addChangeMessage(`[Engine: the ${e.direction} door is now ${kind === 'bar' ? 'barred' : 'unbarred'}.]`, ch);
+    return '';
+}
 /** /ws-open <dir>, /ws-close <dir> */
 export async function doorAction(kind, arg) {
     const here = await currentLocation();
@@ -296,7 +328,7 @@ export async function doorAction(kind, arg) {
     if (s) { toastr.warning(`The ${s.direction} ${stuckWhy(s)}.`); return ''; }
     const e = list.find(x => x.direction.toLowerCase() === want);
     if (!e) { toastr.warning(list.length ? `Doors you can ${kind} here: ${list.map(x => x.direction).join(', ')}` : `No door to ${kind} here.`); return ''; }
-    await addChangeMessage(`[Engine: the ${e.direction} door ${kind === 'open' ? 'is now open' : 'is now closed'}.]`, doorChange(kind === 'open' ? 'open_door' : 'close_door', here, e));
+    await addChangeMessage(`[Engine: the ${e.direction} door ${kind === 'open' ? 'is now open' : 'is now closed'}.]`, kind === 'open' ? openChanges(here, e) : doorChange('close_door', here, e));
     return '';
 }
 export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
@@ -1202,7 +1234,7 @@ async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
             const act = forcedAct ?? await askValid('closed door', closedDoorPrompt(said, e), a => matchKey(a, DOOR_LOOK)) ?? 'look'; // unreadable: just looking (never opens a door by accident)
             if (act === 'listen') v = 'listen';
             else if (act === 'open' && isStuck(e, open)) { v = 'shut'; stuck = true; }
-            else if (act === 'open') { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
+            else if (act === 'open') { openChanges(loc, e).forEach(stampChange); opened = true; v = 'open'; }
             else if (act === 'peek' && barrierOf(e).openable === false) v = 'shut'; // rubble: no crack to peek through
             else if (act === 'peek') { msg.extra.worldscrawl_peek = { type: 'peek', door: e.direction, from: loc.address }; v = 'peek'; } // no effect on door state (for a later stealth mechanic)
             else v = 'shut';
@@ -1241,7 +1273,7 @@ async function narrativeDoor(msg, loc, list, type) {
     }
     if (!e) return { kind: STAY, loc };
     if (type === 'open_door' && isStuck(e)) { msg.extra.worldscrawl_door = { type: 'stuck', direction: e.direction, why: stuckWhy(e) }; return { kind: 'door', loc }; }
-    msg.extra[CHANGE_KEY] = [...changesOf(msg), doorChange(type, loc, e)];
+    msg.extra[CHANGE_KEY] = [...changesOf(msg), ...(type === 'open_door' ? openChanges(loc, e) : [doorChange(type, loc, e)])];
     msg.extra.worldscrawl_door = { type, direction: e.direction };
     return { kind: 'door', loc };
 }
@@ -1915,6 +1947,11 @@ function registerSlashCommands() {
         name: `ws-${kind}`, callback: whenOn((_a, v) => doorAction(kind, String(v ?? ''))),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
         helpString: `WorldScrawl: ${kind} a door here (both sides; delete the system message to undo).`,
+    }));
+    for (const kind of ['bar', 'unbar']) SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: `ws-${kind}`, callback: whenOn((_a, v) => barAction(kind, String(v ?? ''))),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'exit direction (optional when there is one barred door here)', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
+        helpString: `WorldScrawl: ${kind} a door from the side its bar is on (delete the system message to undo).`,
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-removeexit', callback: whenOn((_a, v) => removeExitAction(String(v ?? ''))),
