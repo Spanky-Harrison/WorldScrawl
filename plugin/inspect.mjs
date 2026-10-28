@@ -100,7 +100,7 @@ export function exitRows(w, loc, e) {
  */
 export function inspect(w, raw, target, patches = [], base = null) {
     const t = String(target ?? '');
-    const list = (patches ?? []).map(p => ({ msg: p.msg, note: p.note, id: p.id, summary: p.summary, touched: [...new Set(p.touched ?? [])], relocate: p.relocate ?? {} }));
+    const list = (patches ?? []).map(p => ({ msg: p.msg, note: p.note, id: p.id, summary: p.summary, touched: [...new Set(p.touched ?? [])], relocate: p.relocate ?? {}, ops: Array.isArray(p.ops) ? p.ops : [], inherit: p.inherit ?? {}, names: p.names ?? {} }));
     if (t === 'changes') {
         const rows = list.length ? list.map(p => row(p.msg === null || p.msg === undefined ? 'patch' : `message #${p.msg}`, `${p.note ? `${p.note}: ` : ''}${p.summary.join('; ')}`, 'patch')) : [row('changes', 'none: this chat has not changed the map', 'derived')];
         return { target: t, kind: 'changes', title: 'Map changes in this chat', raw: list, resolved: rows, warnings: [], changes: list };

@@ -106,6 +106,12 @@ export function editLine(summary = [], fallback = 'map changed') {
     return `Map edit: ${t.length > 200 ? `${t.slice(0, 199)}…` : t}`;
 }
 
+/** The visible line of a map-edit carrier message: one edit reads as its summary, several as "Map update (N changes)". */
+export function carrierText(patches = []) {
+    const list = (patches ?? []).filter(Boolean);
+    return list.length === 1 ? editLine(list[0].summary, list[0].note || 'map changed') : `Map update (${list.length} changes)`;
+}
+
 /**
  * The editor. opts: {ops, rooms: [address], areas: [area id], exits: {address: [direction]}, context: {loc, area}}.
  * Returns {el, getOps(), setErrors([{i, error}]), setOps(ops)}. Inline styles only, so it fits SillyTavern and the map window.

@@ -1338,7 +1338,7 @@ try {
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
     // ---- Map wizards (PR B): cascade on the last place (Confirm / Cancel / Add a place first), Move with an id clash
     // (rename prefilled), Delete subregion moving its places (= merge), Create region with Expand with AI, start region.
-    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length > n, sys: m.is_system, ops: m.extra?.worldscrawl_patches?.[0]?.ops ?? [], n: c.chat.length }; }, n);
+    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; const ps = m.extra?.worldscrawl_patches ?? []; return { grew: c.chat.length > n || ps.length > 1, sys: m.is_system, ops: ps.at(-1)?.ops ?? [], n: c.chat.length }; }, n); // a run of edits shares one carrier
     const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
     const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
     const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action]`).first().waitFor({ timeout: 10000 }); };
@@ -1435,13 +1435,14 @@ try {
     const nTog = await page.evaluate(() => SillyTavern.getContext().chat.length);
     const stamped = await page.evaluate(async ([mod, CR, YARD, BURNT]) => {
         const m = await import(mod);
-        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire');
-        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot');
+        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire', { separate: true });
+        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot', { separate: true }); // its own message: this block toggles across messages
         m.renderPatchCards(); return [a, b];
     }, [wsMod, CR, YARD, BURNT]);
     check('toggle setup: two stamped changes, the second built on the first', stamped.every(r => r.ok) && stamped[0].msg === nTog && stamped[1].msg === nTog + 1, JSON.stringify(stamped));
     const tA = nTog, tB = nTog + 1;
     const cardA = page.locator(`#chat .mes[mesid="${tA}"] .worldscrawl_patchcard`), cardB = page.locator(`#chat .mes[mesid="${tB}"] .worldscrawl_patchcard`);
+    for (const k of [tA, tB]) { const d = page.locator(`#chat .mes[mesid="${k}"] details.worldscrawl_carrier`); await d.waitFor({ timeout: 10000 }); if (!(await d.evaluate(e => e.open))) await d.locator('summary').first().click(); } // carriers start collapsed
     await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).waitFor({ timeout: 10000 });
     check('kept change cards have a Turn off button', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 1);
     await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
@@ -1555,7 +1556,113 @@ try {
     check('undescribed door: the discovery prompt allows a door the description does not mention', promptOf(lq[2] ?? {}).includes('does not mention but that plausibly fits'), promptOf(lq[2] ?? {}).slice(0, 400));
     await page.evaluate(async ([mod, n, was]) => { const m = await import(mod), c = SillyTavern.getContext(); m.settings().moveMode = was; c.chat.splice(n - 2); await c.saveChat(); await c.reloadCurrentChat(); }, [wsMod, mode0.n, mode0.was]);
     await page.waitForTimeout(1500);
+    // Bulk move: places stood in before Larkspur moves into Riverton stay on the map at their new addresses (stamped
+    // locations go through the move's redirects), without visiting any of them first.
+    const bmN = await page.evaluate(async () => { const c = SillyTavern.getContext(); const m = c.chat[1] ?? c.chat[0];
+        m.extra = { ...(m.extra ?? {}), worldscrawl_move: { ...(m.extra?.worldscrawl_move ?? {}), via: [...(m.extra?.worldscrawl_move?.via ?? []), 'larkspur:west_road/road', 'larkspur:green/green', 'larkspur:playhouse/foyer'] } };
+        await c.saveChat(); return c.chat.length; });
+    await mwAct('region:larkspur', 'delete_region');
+    await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
+    await ui.selectOption('.side .mw-row[data-field="into"] select', 'riverton');
+    await ui.locator('.side .wsdiff-move-group').first().waitFor({ timeout: 10000 }).catch(() => {});
+    const bmDiff = await ui.evaluate(() => { const g = [...document.querySelectorAll('.side .wsdiff-move-group')]; return { groups: g.length, head: g[0]?.querySelector('.wsdiff-move-head')?.textContent, subs: [...(g[0]?.querySelectorAll(':scope > .wsdiff-move[data-kind="subregion"]') ?? [])].map(x => x.dataset.old), details: g[0]?.querySelectorAll('details').length ?? 0, note: g[0]?.querySelector(':scope > .wsdiff-note')?.textContent ?? '', places: document.querySelectorAll('.side .wsdiff-place').length }; });
+    check('bulk move diff: one group "Larkspur → into Riverton", one collapsible line per subregion, one inheritance note, no per-field place dump', bmDiff.groups === 1 && /Larkspur → into Riverton/.test(bmDiff.head) && bmDiff.subs.length === 7 && bmDiff.details === 7 && /^now inherits Riverton's .* instead of Larkspur's$/.test(bmDiff.note) && bmDiff.places === 0, JSON.stringify(bmDiff));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    await ui.click('#editorToggle'); await ui.waitForTimeout(1500);
+    await ui.click('#breadcrumb .crumb[data-level="world"]').catch(() => {}); await ui.waitForTimeout(300);
+    await ui.dblclick('.node[data-id="region:riverton"]').catch(() => {}); await ui.waitForTimeout(500);
+    const bmIds = await nodeIds();
+    check('bulk move: the destination region map shows every moved subregion that was stood in, without visiting them', ['west_road', 'green', 'playhouse'].every(s => bmIds.includes(`sub:riverton:${s}`)) && !bmIds.some(i => i.includes('larkspur')), JSON.stringify(bmIds));
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
+    // The Changes tab lists the move the same way (one group, a line per subregion).
+    await ui.evaluate(() => globalThis.wsInspect('world')); await ui.waitForTimeout(1200);
+    await ui.click('.side .tabs button:has-text("Changes")').catch(() => {}); await ui.waitForTimeout(500);
+    const bmHist = await ui.evaluate(() => ({ groups: document.querySelectorAll('.side .wsdiff-move-group').length, subs: document.querySelectorAll('.side .wsdiff-move-group .wsdiff-move[data-kind="subregion"]').length, note: document.querySelector('.side .wsdiff-move-group .wsdiff-note')?.textContent ?? '' }));
+    check('Changes tab: the bulk move is one group with a line per subregion and the inheritance note', bmHist.groups >= 1 && bmHist.subs === 7 && /now inherits Riverton's/.test(bmHist.note), JSON.stringify(bmHist));
+    await mwCut(bmN);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(), m = c.chat[1] ?? c.chat[0]; m.extra.worldscrawl_move.via = m.extra.worldscrawl_move.via.filter(a => !a.startsWith('larkspur:')); await c.saveChat(); });
+    await ui.click('#editorToggle'); await ui.waitForTimeout(300);
+    // Carriers: consecutive editor edits condense into one visible compact message; one change can be undone or turned off alone;
+    // a bulk delete that sweeps the carrier up warns and can put it back.
+    const cr = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), R = 'riverton:drowned_rat/common_room';
+        const n0 = c.chat.length, w = c.extensionSettings.worldscrawl.world || '';
+        const descNow = async () => (await (await fetch(`/api/plugins/worldscrawl/rooms${w ? `?world=${encodeURIComponent(w)}` : ''}`, { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify({ addresses: [R], changes: m.chatChanges(), now: m.chatElapsed() }) })).json()).rooms?.[0]?.description; // the chat's patched map
+        const a = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier one.' }], '', { separate: true });
+        const b = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier two.' }]);
+        const d3 = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: 'riverton:drowned_rat/stable', text: 'Carrier three.' }]);
+        await new Promise(r => setTimeout(r, 1200));
+        const msg = c.chat[c.chat.length - 1], ids = (msg.extra?.worldscrawl_patches ?? []).map(p => p.id);
+        const el = document.querySelector(`#chat .mes[mesid="${c.chat.length - 1}"]`);
+        const out = { ok: [a.ok, b.ok, d3.ok], added: c.chat.length - n0, n: ids.length, unique: new Set(ids).size, mes: msg.mes, hidden: !!msg.extra?.isSmallSys && false,
+            visible: !!el && getComputedStyle(el).display !== 'none', compact: el?.classList.contains('worldscrawl_carrier_mes'), collapsed: el?.querySelector('details.worldscrawl_carrier')?.open === false,
+            summary: el?.querySelector('details.worldscrawl_carrier > summary')?.textContent ?? '', undoBtns: el?.querySelectorAll('details.worldscrawl_carrier .menu_button, details.worldscrawl_carrier button').length ?? 0 };
+        const mi = c.chat.length - 1;
+        const t = await m.toggleChange(mi, ids[2], { choice: 'one' });
+        out.offOne = t.ok && c.chat[mi].extra.worldscrawl_patches.filter(p => p.off).length === 1;
+        await m.toggleChange(mi, ids[2]); // back on (toggle posts a notice, which ends the run)
+        const u = await m.removeChange(mi, ids[1], { choice: 'one' });
+        out.undoOne = u.ok && c.chat[mi].extra.worldscrawl_patches.map(p => p.id).join() === [ids[0], ids[2]].join() && /\(2 changes\)/.test(c.chat[mi].mes);
+        out.desc = await descNow();
+        // A new edit after the toggle notice starts a new carrier.
+        const n1 = c.chat.length; await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier four.' }]); out.newRun = c.chat.length === n1 + 1;
+        // Bulk delete from the first carrier: the warning remembers both carriers; restore puts them back with the same ids.
+        await c.executeSlashCommandsWithOptions(`/cut ${mi}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1500));
+        out.lost = globalThis.worldscrawlLostCarriers();
+        out.toast = [...document.querySelectorAll('#toast-container .toast')].some(x => /map edits were deleted/.test(x.textContent));
+        const n2 = c.chat.length; await globalThis.worldscrawlRestoreCarriers();
+        const back = c.chat.slice(n2).flatMap(x => (x.extra?.worldscrawl_patches ?? []).map(p => p.id));
+        out.restored = back.includes(ids[0]) && back.includes(ids[2]) && !back.includes(ids[1]);
+        out.descBack = await descNow();
+        await c.executeSlashCommandsWithOptions(`/cut ${n2}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1000));
+        out.cutStart = n0; return out;
+    });
+    check('carriers: three consecutive edits share one message with three patches (own ids)', cr.ok.every(Boolean) && cr.added === 1 && cr.n === 3 && cr.unique === 3 && /Map update \(3 changes\)/.test(cr.mes), JSON.stringify(cr));
+    check('carriers: the message is visible, compact and collapsed, expandable with per-change buttons', cr.visible && cr.compact && cr.collapsed && /Map update \(3 changes\)/.test(cr.summary) && cr.undoBtns >= 9, JSON.stringify(cr));
+    check('carriers: turning off one change inside the carrier leaves the others on', cr.offOne, JSON.stringify(cr));
+    check('carriers: undoing one change removes only it; the replay applies the rest in order', cr.undoOne && cr.desc === 'Carrier one.', JSON.stringify(cr));
+    check('carriers: a message in between starts a new carrier', cr.newRun, JSON.stringify(cr));
+    check('bulk delete: carriers swept up are reported with an Undo toast and restored with the same stamps', cr.lost === 2 && cr.toast && cr.restored && cr.descBack === 'Carrier four.', JSON.stringify(cr));
+    // Bulk-move Larkspur into Riverton, walk to the Green (stamped at its new Riverton address), turn the move off:
+    // the party goes back to the Green in Larkspur (reverse redirect), and the map follows without a new chat message.
+    const hereOnMap = () => ui.evaluate(() => document.querySelector('.node.here')?.dataset.id ?? null);
+    const waitHere = async want => { for (let k = 0; k < 20 && (await hereOnMap()) !== want; k++) await ui.waitForTimeout(250); return hereOnMap(); };
+    const rv0 = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), n0 = c.chat.length;
+        const e = await globalThis.worldscrawlLiveEdit([{ op: 'remove_area', area: 'larkspur', contents: 'move', into: 'riverton' }], '', { separate: true });
+        const mi = c.chat.length - 1, p = c.chat[mi].extra.worldscrawl_patches.at(-1), to = p.relocate?.['larkspur:green/green'];
+        const walk = { name: 'User', is_user: true, send_date: Date.now(), mes: 'I walk to the green.', extra: { worldscrawl_location: to, worldscrawl_move: { from: null, to, via: [to] } } };
+        c.chat.push(walk); c.addOneMessage(walk); await c.saveChat();
+        await (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).broadcastMapState();
+        return { ok: e.ok, n0, mi, pid: p.id, to };
+    });
+    const rvOnMap = await waitHere(rv0.to);
+    const rv = await page.evaluate(async ({ mi, pid }) => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), c = SillyTavern.getContext(), n = c.chat.length;
+        const t = await m.toggleChange(mi, pid, { choice: 'one' });
+        await new Promise(r => setTimeout(r, 1500));
+        return { ok: t.ok, stored: m.getStoredLocation(), userMsgs: c.chat.slice(n).filter(x => x.is_user).length };
+    }, rv0);
+    const rvOffMap = await waitHere('larkspur:green/green');
+    check('reverse redirect: with the bulk move turned off, the party at the moved Green goes back to the Green in Larkspur', rv0.ok && rv0.to === 'riverton:green/green' && rv.ok && rv.stored === 'larkspur:green/green', JSON.stringify([rv0, rv]));
+    check('map refresh: the map follows a toggle (no new chat message needed)', rvOnMap === rv0.to && rvOffMap === 'larkspur:green/green' && rv.userMsgs === 0, JSON.stringify([rvOnMap, rvOffMap]));
+    await page.evaluate(async ({ mi, pid }) => { await (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).toggleChange(mi, pid); }, rv0);
+    const rvOnAgain = await waitHere('riverton:green/green');
+    check('map refresh: turning the move on again moves the party (and the map) to the Green in Riverton', rvOnAgain === 'riverton:green/green', String(rvOnAgain));
+    // Off → walk to the Green at its Larkspur address → on: the forward redirect applies to a position stamped while the move was off.
+    const owo = await page.evaluate(async ({ mi, pid }) => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), c = SillyTavern.getContext(), wait = () => new Promise(r => setTimeout(r, 1500));
+        const s0 = m.getStoredLocation();
+        await m.toggleChange(mi, pid, { choice: 'one' }); await wait(); const off = m.getStoredLocation();
+        const to = 'larkspur:green/green', walk = { name: 'User', is_user: true, send_date: Date.now(), mes: 'I walk to the green.', extra: { worldscrawl_location: to, worldscrawl_move: { from: off, to, via: [to] } } };
+        c.chat.push(walk); c.addOneMessage(walk); await c.saveChat();
+        await m.toggleChange(mi, pid); await wait();
+        return { s0, off, on: m.getStoredLocation() };
+    }, rv0);
+    const owoMap = await waitHere('riverton:green/green');
+    check('round trip on → walk → off → on keeps the party on the Green (never relocated by a toggle)', owo.s0 === 'riverton:green/green' && owo.off === 'larkspur:green/green', JSON.stringify(owo));
+    check('off → walk to the Green → on: the move redirects the party forward to the Green in Riverton (map follows)', owo.on === 'riverton:green/green' && owoMap === 'riverton:green/green', JSON.stringify([owo, owoMap]));
+    await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await page.waitForTimeout(1500);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
