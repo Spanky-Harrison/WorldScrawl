@@ -1338,7 +1338,7 @@ try {
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
     // ---- Map wizards (PR B): cascade on the last place (Confirm / Cancel / Add a place first), Move with an id clash
     // (rename prefilled), Delete subregion moving its places (= merge), Create region with Expand with AI, start region.
-    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length > n, sys: m.is_system, ops: m.extra?.worldscrawl_patches?.[0]?.ops ?? [], n: c.chat.length }; }, n);
+    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; const ps = m.extra?.worldscrawl_patches ?? []; return { grew: c.chat.length > n || ps.length > 1, sys: m.is_system, ops: ps.at(-1)?.ops ?? [], n: c.chat.length }; }, n); // a run of edits shares one carrier
     const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
     const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
     const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action]`).first().waitFor({ timeout: 10000 }); };
@@ -1435,8 +1435,8 @@ try {
     const nTog = await page.evaluate(() => SillyTavern.getContext().chat.length);
     const stamped = await page.evaluate(async ([mod, CR, YARD, BURNT]) => {
         const m = await import(mod);
-        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire');
-        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot');
+        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire', { separate: true });
+        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot', { separate: true }); // its own message: this block toggles across messages
         m.renderPatchCards(); return [a, b];
     }, [wsMod, CR, YARD, BURNT]);
     check('toggle setup: two stamped changes, the second built on the first', stamped.every(r => r.ok) && stamped[0].msg === nTog && stamped[1].msg === nTog + 1, JSON.stringify(stamped));
@@ -1586,7 +1586,7 @@ try {
     const cr = await page.evaluate(async () => {
         const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), R = 'riverton:drowned_rat/common_room';
         const n0 = c.chat.length;
-        const a = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier one.' }]);
+        const a = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier one.' }], '', { separate: true });
         const b = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier two.' }]);
         const d3 = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: 'riverton:drowned_rat/stable', text: 'Carrier three.' }]);
         await new Promise(r => setTimeout(r, 1200));

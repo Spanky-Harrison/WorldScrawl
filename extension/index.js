@@ -2307,7 +2307,7 @@ async function toggleFromCard(mi, pid) {
     if (!r.ok && r.error) toastr.error(`WorldScrawl: ${r.error}`);
 }
 /** A live edit from the map window (or anywhere): a hidden system message carrying the stamp. Returns {ok} or {ok:false, errors}. */
-export async function liveEdit(ops, note = '') {
+export async function liveEdit(ops, note = '', { separate = false } = {}) {
     if (!isOn()) return { ok: false, errors: [{ i: null, error: 'WorldScrawl is off in this chat.' }] };
     const c = ctx(), chat = c.chat ?? [];
     const r = await previewOps(ops);
@@ -2317,7 +2317,7 @@ export async function liveEdit(ops, note = '') {
         ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
     // Consecutive editor edits share one carrier message (each patch keeps its id); any other message in between starts a new one.
     const last = chat[chat.length - 1];
-    if (isCarrier(last)) {
+    if (!separate && isCarrier(last)) {
         last.extra[PATCH_KEY].push(p);
         last.mes = carrierLine(fl, last.extra[PATCH_KEY]);
         syncSwipeExtra(last);
