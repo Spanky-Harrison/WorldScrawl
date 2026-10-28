@@ -303,6 +303,8 @@ export function doorCandidates(here, open = doorOverrides()) {
 const stuckWhy = e => (barrierOf(e).openable === false ? 'is blocked and can\'t be opened' : barrierOf(e).locked ? 'is locked' : isBarredAway(e) ? 'is barred from the other side and won\'t budge (a bar on the far side holds it shut; it is not locked and has no keyhole)' : 'is stuck');
 /** The changes that open a door: lifting the bar first when it is barred on this side. */
 export const openChanges = (here, e) => [...(barHere(e) && isBarredNow(e) ? [doorChange('unbar_door', here, e)] : []), doorChange('open_door', here, e)];
+/** A single change stays a plain object (the usual stamp shape); several become a list. */
+const oneOrList = l => (l.length === 1 ? l[0] : l);
 /** /ws-bar <dir>, /ws-unbar <dir>: only from the side the bar is on. Barring an open door closes it first. */
 export async function barAction(kind, arg) {
     const here = await currentLocation();
@@ -328,7 +330,7 @@ export async function doorAction(kind, arg) {
     if (s) { toastr.warning(`The ${s.direction} ${stuckWhy(s)}.`); return ''; }
     const e = list.find(x => x.direction.toLowerCase() === want);
     if (!e) { toastr.warning(list.length ? `Doors you can ${kind} here: ${list.map(x => x.direction).join(', ')}` : `No door to ${kind} here.`); return ''; }
-    await addChangeMessage(`[Engine: the ${e.direction} door ${kind === 'open' ? 'is now open' : 'is now closed'}.]`, kind === 'open' ? openChanges(here, e) : doorChange('close_door', here, e));
+    await addChangeMessage(`[Engine: the ${e.direction} door ${kind === 'open' ? 'is now open' : 'is now closed'}.]`, kind === 'open' ? oneOrList(openChanges(here, e)) : doorChange('close_door', here, e));
     return '';
 }
 export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
