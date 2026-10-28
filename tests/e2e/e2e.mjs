@@ -1581,6 +1581,46 @@ try {
     await mwCut(bmN);
     await page.evaluate(async () => { const c = SillyTavern.getContext(), m = c.chat[1] ?? c.chat[0]; m.extra.worldscrawl_move.via = m.extra.worldscrawl_move.via.filter(a => !a.startsWith('larkspur:')); await c.saveChat(); });
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
+    // Carriers: consecutive editor edits condense into one visible compact message; one change can be undone or turned off alone;
+    // a bulk delete that sweeps the carrier up warns and can put it back.
+    const cr = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), R = 'riverton:drowned_rat/common_room';
+        const n0 = c.chat.length;
+        const a = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier one.' }]);
+        const b = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier two.' }]);
+        const d3 = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: 'riverton:drowned_rat/stable', text: 'Carrier three.' }]);
+        await new Promise(r => setTimeout(r, 1200));
+        const msg = c.chat[c.chat.length - 1], ids = (msg.extra?.worldscrawl_patches ?? []).map(p => p.id);
+        const el = document.querySelector(`#chat .mes[mesid="${c.chat.length - 1}"]`);
+        const out = { ok: [a.ok, b.ok, d3.ok], added: c.chat.length - n0, n: ids.length, unique: new Set(ids).size, mes: msg.mes, hidden: !!msg.extra?.isSmallSys && false,
+            visible: !!el && getComputedStyle(el).display !== 'none', compact: el?.classList.contains('worldscrawl_carrier_mes'), collapsed: el?.querySelector('details.worldscrawl_carrier')?.open === false,
+            summary: el?.querySelector('details.worldscrawl_carrier > summary')?.textContent ?? '', undoBtns: el?.querySelectorAll('details.worldscrawl_carrier .menu_button, details.worldscrawl_carrier button').length ?? 0 };
+        const mi = c.chat.length - 1;
+        const t = await m.toggleChange(mi, ids[2], { choice: 'one' });
+        out.offOne = t.ok && c.chat[mi].extra.worldscrawl_patches.filter(p => p.off).length === 1;
+        await m.toggleChange(mi, ids[2]); // back on (toggle posts a notice, which ends the run)
+        const u = await m.removeChange(mi, ids[1], { choice: 'one' });
+        out.undoOne = u.ok && c.chat[mi].extra.worldscrawl_patches.map(p => p.id).join() === [ids[0], ids[2]].join() && /\(2 changes\)/.test(c.chat[mi].mes);
+        out.desc = (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(R))).json()).description;
+        // A new edit after the toggle notice starts a new carrier.
+        const n1 = c.chat.length; await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier four.' }]); out.newRun = c.chat.length === n1 + 1;
+        // Bulk delete from the first carrier: the warning remembers both carriers; restore puts them back with the same ids.
+        await c.executeSlashCommandsWithOptions(`/cut ${mi}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1500));
+        out.lost = globalThis.worldscrawlLostCarriers();
+        out.toast = [...document.querySelectorAll('#toast-container .toast')].some(x => /map edits were deleted/.test(x.textContent));
+        const n2 = c.chat.length; await globalThis.worldscrawlRestoreCarriers();
+        const back = c.chat.slice(n2).flatMap(x => (x.extra?.worldscrawl_patches ?? []).map(p => p.id));
+        out.restored = back.includes(ids[0]) && back.includes(ids[2]) && !back.includes(ids[1]);
+        out.descBack = (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(R))).json()).description;
+        await c.executeSlashCommandsWithOptions(`/cut ${n2}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1000));
+        out.cutStart = n0; return out;
+    });
+    check('carriers: three consecutive edits share one message with three patches (own ids)', cr.ok.every(Boolean) && cr.added === 1 && cr.n === 3 && cr.unique === 3 && /Map update \(3 changes\)/.test(cr.mes), JSON.stringify(cr));
+    check('carriers: the message is visible, compact and collapsed, expandable with per-change buttons', cr.visible && cr.compact && cr.collapsed && /Map update \(3 changes\)/.test(cr.summary) && cr.undoBtns >= 9, JSON.stringify(cr));
+    check('carriers: turning off one change inside the carrier leaves the others on', cr.offOne, JSON.stringify(cr));
+    check('carriers: undoing one change removes only it; the replay applies the rest in order', cr.undoOne && cr.desc === 'Carrier one.', JSON.stringify(cr));
+    check('carriers: a message in between starts a new carrier', cr.newRun, JSON.stringify(cr));
+    check('bulk delete: carriers swept up are reported with an Undo toast and restored with the same stamps', cr.lost === 2 && cr.toast && cr.restored && cr.descBack === 'Carrier four.', JSON.stringify(cr));
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
