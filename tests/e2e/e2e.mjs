@@ -1555,6 +1555,31 @@ try {
     check('undescribed door: the discovery prompt allows a door the description does not mention', promptOf(lq[2] ?? {}).includes('does not mention but that plausibly fits'), promptOf(lq[2] ?? {}).slice(0, 400));
     await page.evaluate(async ([mod, n, was]) => { const m = await import(mod), c = SillyTavern.getContext(); m.settings().moveMode = was; c.chat.splice(n - 2); await c.saveChat(); await c.reloadCurrentChat(); }, [wsMod, mode0.n, mode0.was]);
     await page.waitForTimeout(1500);
+    // Bulk move: places stood in before Larkspur moves into Riverton stay on the map at their new addresses (stamped
+    // locations go through the move's redirects), without visiting any of them first.
+    const bmN = await page.evaluate(async () => { const c = SillyTavern.getContext(); const m = c.chat[1] ?? c.chat[0];
+        m.extra = { ...(m.extra ?? {}), worldscrawl_move: { ...(m.extra?.worldscrawl_move ?? {}), via: [...(m.extra?.worldscrawl_move?.via ?? []), 'larkspur:west_road/road', 'larkspur:green/green', 'larkspur:playhouse/foyer'] } };
+        await c.saveChat(); return c.chat.length; });
+    await mwAct('region:larkspur', 'delete_region');
+    await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
+    await ui.selectOption('.side .mw-row[data-field="into"] select', 'riverton');
+    await ui.locator('.side .wsdiff-move-group').first().waitFor({ timeout: 10000 }).catch(() => {});
+    const bmDiff = await ui.evaluate(() => { const g = [...document.querySelectorAll('.side .wsdiff-move-group')]; return { groups: g.length, head: g[0]?.querySelector('.wsdiff-move-head')?.textContent, subs: [...(g[0]?.querySelectorAll(':scope > .wsdiff-move[data-kind="subregion"]') ?? [])].map(x => x.dataset.old), details: g[0]?.querySelectorAll('details').length ?? 0, note: g[0]?.querySelector(':scope > .wsdiff-note')?.textContent ?? '', places: document.querySelectorAll('.side .wsdiff-place').length }; });
+    check('bulk move diff: one group "Larkspur → into Riverton", one collapsible line per subregion, one inheritance note, no per-field place dump', bmDiff.groups === 1 && /Larkspur → into Riverton/.test(bmDiff.head) && bmDiff.subs.length === 7 && bmDiff.details === 7 && /^now inherits Riverton's .* instead of Larkspur's$/.test(bmDiff.note) && bmDiff.places === 0, JSON.stringify(bmDiff));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    await ui.click('#editorToggle'); await ui.waitForTimeout(1500);
+    await ui.click('#breadcrumb .crumb[data-level="world"]').catch(() => {}); await ui.waitForTimeout(300);
+    await ui.dblclick('.node[data-id="region:riverton"]').catch(() => {}); await ui.waitForTimeout(500);
+    const bmIds = await nodeIds();
+    check('bulk move: the destination region map shows every moved subregion that was stood in, without visiting them', ['west_road', 'green', 'playhouse'].every(s => bmIds.includes(`sub:riverton:${s}`)) && !bmIds.some(i => i.includes('larkspur')), JSON.stringify(bmIds));
+    await ui.click('#editorToggle'); await ui.waitForTimeout(300);
+    // The Changes tab lists the move the same way (one group, a line per subregion).
+    await ui.evaluate(() => globalThis.wsInspect('world')); await ui.waitForTimeout(1200);
+    await ui.click('.side .tabs button:has-text("Changes")').catch(() => {}); await ui.waitForTimeout(500);
+    const bmHist = await ui.evaluate(() => ({ groups: document.querySelectorAll('.side .wsdiff-move-group').length, subs: document.querySelectorAll('.side .wsdiff-move-group .wsdiff-move[data-kind="subregion"]').length, note: document.querySelector('.side .wsdiff-move-group .wsdiff-note')?.textContent ?? '' }));
+    check('Changes tab: the bulk move is one group with a line per subregion and the inheritance note', bmHist.groups >= 1 && bmHist.subs === 7 && /now inherits Riverton's/.test(bmHist.note), JSON.stringify(bmHist));
+    await mwCut(bmN);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(), m = c.chat[1] ?? c.chat[0]; m.extra.worldscrawl_move.via = m.extra.worldscrawl_move.via.filter(a => !a.startsWith('larkspur:')); await c.saveChat(); });
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();

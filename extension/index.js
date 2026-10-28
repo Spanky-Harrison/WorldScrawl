@@ -657,18 +657,20 @@ async function stoodInAddresses() {
     const start = await fetchLocationCached(null);
     if (start) set.add(start.address);
     for (const a of saved) set.add(a);
-    for (const a of worldSeed()?.stood ?? []) if ((await fetchRaw(a))) set.add(a); // seeded knowledge + stamps
+    for (const a0 of worldSeed()?.stood ?? []) { const a = relocateFrom(a0, 0, ctx().chat ?? []); if ((await fetchRaw(a))) set.add(a); } // seeded knowledge + stamps
     return set;
 }
 /** Every address saved on this chat's messages (locations and route steps), in order. */
 function chatAddresses() {
-    const out = [];
-    for (const m of ctx().chat ?? []) {
+    // Through any later move/merge redirects, so places stood in before a move stay known at their new address.
+    const out = [], chat = ctx().chat ?? [];
+    chat.forEach((m, i) => {
+        const add = a => out.push(relocateFrom(a, i, chat));
         const loc = m?.extra?.[LOC_KEY];
-        if (loc) out.push(loc);
-        for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) out.push(a);
-        if (m?.extra?.worldscrawl_notice_loc) out.push(m.extra.worldscrawl_notice_loc);
-    }
+        if (loc) add(loc);
+        for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) add(a);
+        if (m?.extra?.worldscrawl_notice_loc) add(m.extra.worldscrawl_notice_loc);
+    });
     return [...new Set(out)];
 }
 
@@ -702,7 +704,8 @@ async function discoveredPlaces() {
     for (const a of stood) for (const v of (await fetchLocationCached(a))?.views ?? []) {
         if (!known.has(v.address)) { const l = await fetchRaw(v.address) ?? await newRoom(v.address); if (l) known.set(v.address, { address: v.address, name: l.name, display_name: displayName(l), subregion: l.subregion, region: l.region }); }
     }
-    for (const a of worldSeed()?.seen ?? []) {
+    for (const a0 of worldSeed()?.seen ?? []) {
+        const a = relocateFrom(a0, 0, ctx().chat ?? []);
         const l = known.has(a) ? null : await fetchRaw(a);
         if (l) known.set(a, { address: a, name: l.name, display_name: displayName(l), subregion: l.subregion, region: l.region });
     }
