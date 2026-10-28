@@ -1565,8 +1565,9 @@ try {
     const off1 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off ?? false, kept: c.chat[a].extra.worldscrawl_patches[0].ops.length, mes: m.mes, sys: m.is_system, notice: m.extra?.worldscrawl_notice }; }, [tA, tB]);
     check('Just this one: only it is turned off, still stored on its message', off1.a === true && off1.b === false && off1.kept === 1, JSON.stringify(off1));
     check('a hidden note says what was turned off', off1.mes === `Map edit: turned off the change from #${tA}` && off1.sys === true && off1.notice === true, JSON.stringify(off1));
-    try { await cardB.locator('.worldscrawl_cant_apply').waitFor({ timeout: 10000 }); } catch {}
-    check('the later change that needed it shows a red can\'t apply note', /can't apply/.test(await cardB.innerText()), await cardB.innerText());
+    try { await cardB.locator('.worldscrawl_inactive').waitFor({ timeout: 10000 }); } catch {}
+    check('the later change that needed it shows a greyed Inactive note naming why', (await cardB.innerText()).includes(`Inactive: depends on message #${tA}, which is turned off`), await cardB.innerText());
+    check('the inactive card hides Turn off and keeps Undo', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 0 && await cardB.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).count() === 1, await cardB.innerText());
     check('turned-off card offers Turn on', await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).count() === 1);
     const mapCtxNow = await page.evaluate(async mod => { const m = await import(mod); return { changes: m.chatChanges(), now: m.chatElapsed(), world: SillyTavern.getContext().extensionSettings.worldscrawl.world || '' }; }, wsMod);
     const mapRes = await stFetch(`/rooms${mapCtxNow.world ? `?world=${encodeURIComponent(mapCtxNow.world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addresses: [CR], changes: mapCtxNow.changes, now: mapCtxNow.now }) });
@@ -1962,7 +1963,7 @@ try {
     await pop?.close();
     const cacheRes = await (await stFetch('/cache/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
     const cacheStats = await (await stFetch('/cache')).json();
-    check('map cache: Debug clear empties it', typeof cacheRes.cleared === 'number' && cacheStats.checkpoints === 0 && cacheStats.built === 0, JSON.stringify([cacheRes, cacheStats]));
+    check('map cache: Debug clear empties it', cacheRes.cleared === true && cacheRes.checkpoints > 0 && cacheStats.checkpoints === 0 && cacheStats.built === 0, JSON.stringify([cacheRes, cacheStats]));
     check('settings panel has an Open map window button', await page.locator('#worldscrawl_open_map').count() === 1);
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
