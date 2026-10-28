@@ -109,7 +109,8 @@
     "what": "what change was flagged, in the narrator's words",
     "where": "where the party is now, for the narrator",
     "why": "why the door would not move (e.g. it is locked)",
-    "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game."
+    "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game.",
+    "amount": "The wait amount as the player wrote it, e.g. \"a bit over an hour\"."
   },
   "prompts": [
     {
@@ -576,6 +577,33 @@
       ]
     },
     {
+      "id": "intent.wait_amount_system",
+      "title": "Waits: reading a loose amount",
+      "description": "Alongside bracket commands and /ws-wait: used only when a wait amount ([wait], [sleep], /ws-wait or the narrator's wait tag) is not in a form the game reads itself. The game reads the JSON answer.",
+      "group": "intent",
+      "locked": "The game reads the JSON answer.",
+      "text": "You turn a player's description of how long to wait into a number. {{reply}}: {\"seconds\": N} for an amount of time, {\"until\": \"dawn|morning|noon|dusk|evening|night|midnight|HH:MM\"} for a time of day, or {\"unknown\": true} if it says no amount.",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.wait_amount",
+      "title": "Waits: the amount to read",
+      "description": "Alongside bracket commands and /ws-wait: the loose wait amount itself.",
+      "group": "intent",
+      "locked": "The game reads the JSON answer.",
+      "text": "How long is this wait? \"{{amount}}\"",
+      "placeholders": [
+        {
+          "name": "amount"
+        }
+      ]
+    },
+    {
       "id": "narration.header",
       "title": "Narration: first line",
       "description": "Step 1 of 5: the first line. First line of the world state given to the narrator each turn.",
@@ -720,7 +748,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): breaking through failed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tried to break through, but nothing gave way. No new opening exists. {{party}} is still at {{place}}. Narrate the attempt failing.",
+      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way. No new opening or passage exists, and none appears in this reply. {{party}} is still at {{place}}. Narrate the attempt failing (the wall, floor or window holds), and do not flag a map change or a new room for it.",
       "placeholders": [
         {
           "name": "party"
@@ -892,10 +920,10 @@
     {
       "id": "narration.flag_hint",
       "title": "Narration: how to flag map changes",
-      "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag lasting changes and door discoveries. Tells the narrator to tag lasting changes and door discoveries.",
+      "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries.",
       "group": "narration",
       "locked": "The exact [ws_flag: …] tag format the game looks for.",
-      "text": "If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.",
       "placeholders": []
     },
     {
@@ -1019,7 +1047,7 @@
       "description": "Step 1 of 2: the system prompt for 'which places changed'. First of the two calls that turn a flagged story change into a map change. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON answer.",
-      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). {{reply}}.",
+      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story really changed on the map, for good or for a while (burned, collapsed, flooded, filled with smoke, doors smashed or barricaded, walls knocked through, rooms destroyed, a portal or passage opened for an hour). Moment-to-moment action that leaves no trace (walking, talking, fighting, a door simply opened and shut) is not a map change. {{reply}}.",
       "placeholders": [
         {
           "name": "reply",
@@ -1033,7 +1061,7 @@
       "description": "Step 1 of 2: which places changed (JSON answer). The game reads the JSON answer, so keep the reply format.",
       "group": "change",
       "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
-      "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change in a lasting way? Reply {\"rooms\": [addresses], \"areas\": [area ids changed as a whole (renamed, or general notes changed), e.g. \"{{area}}\"]}, or {\"rooms\": []} if nothing lasting changed.",
+      "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change on the map, for good or for a while? Reply {\"rooms\": [addresses], \"areas\": [area ids changed as a whole (renamed, or general notes changed), e.g. \"{{area}}\"]}, or {\"rooms\": []} if nothing on the map changed.",
       "placeholders": [
         {
           "name": "area_name"
@@ -1068,7 +1096,7 @@
       "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON edits in this exact format.",
-      "text": "You turn a lasting change in a story into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
+      "text": "You turn a real change to places in a story, permanent or temporary, into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nA temporary but real change (a portal open for 1 hour, a room filled with smoke, a tunnel blocked for a day) counts: give its ops \"lasts\" with how long it holds, e.g. \"1h\", \"12h\", \"3d\". Any op may add \"lasts\". Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. Moment-to-moment action that leaves no trace on a place is not a change. If nothing on the map changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
       "placeholders": [
         {
           "name": "edit_types",

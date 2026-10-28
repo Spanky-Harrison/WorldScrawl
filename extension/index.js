@@ -1136,10 +1136,24 @@ export function readDigAnswer(a, { loc, opts, canNew, target = null }) {
     if (hasExit(loc, direction)) return { ok: false, error: `there is already an exit "${direction}" here` };
     const back = digWord(a.return_direction) || returnName(direction);
     if (!okWord(back)) return { ok: false, error: '"return_direction" must be a short exit name (1-2 words)' };
-    if (target && hasExit(target, back)) return { ok: false, error: `${roomLabel(target)} already has an exit "${back}"` };
+    let backName = back;
+    if (target && hasExit(target, backName)) { // e.g. "in" when the courtyard already has an "in": pick a free name instead of failing
+        backName = [direction, `broken ${direction}`.slice(0, 20), 'hole', 'breach', 'gap'].find(n => okWord(n) && !hasExit(target, n));
+        if (!backName) return { ok: false, error: `${roomLabel(target)} already has an exit "${back}"` };
+    }
     const stay = matchKey(String(a.then ?? ''), ['stay', 'go_through']) === 'stay'; // biased toward moving: only a clear "stay" stays
-    return { ok: true, dest, direction, back, stay };
+    return { ok: true, dest, direction, back: backName, stay };
 }
+const nameRe = n => new RegExp(`(^|[^a-z])(?:the\\s+)?${String(n).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}(?![a-z])`, 'i');
+/** The nearby place the player's own words name ("...a passage to the courtyard"): the longest name, then the nearest. Null if none. */
+export function namedPlace(text, opts) {
+    const t = String(text ?? '');
+    const hits = opts.filter(o => o.room?.name && nameRe(o.room.name).test(t));
+    hits.sort((a, b) => b.room.name.length - a.room.name.length || (a.room.steps ?? 9) - (b.room.steps ?? 9));
+    return hits[0] ?? null;
+}
+/** The exit word the player's text suggests for an opening they named a place for. */
+export const digWordFrom = text => (String(text ?? '').match(/\b(window|hole|trapdoor|hatch|skylight|wall|floor|ceiling|crack|breach)\b/i)?.[1].toLowerCase() ?? 'opening');
 /** Make the opening: an existing place gets the linked exit pair (a 'dig' change); a new one the shared create_place edit (a 'patch' change). */
 async function makeDig(loc, r) {
     const desc = 'A freshly broken opening.';
@@ -1164,12 +1178,15 @@ async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
     const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
-    const canNew = loc.expandable !== false;
+    const named = namedPlace(msg.mes, opts);
+    if (named) { opts.splice(opts.indexOf(named), 1); opts.unshift(named); } // the place the player named comes first...
+    const canNew = loc.expandable !== false && !named; // ...and is used: never a new place when the player named an existing one
     if (!opts.length && !canNew) return fail('nowhere to lead');
+    const saidAll = named ? `${said}\nThe player names ${named.room.name}: the opening leads there (key "${named.key}").` : said;
     const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
     let err = '', made = null, r = null;
     for (let i = 0; i < DIG_TRIES && !made; i++) {
-        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, said, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
+        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, saidAll, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
         const a = parseJsonAnswer(raw);
         const pre = readDigAnswer(a, { loc, opts, canNew });
         const target = pre.ok && pre.dest.room ? await fetchLocationCached(pre.dest.room.address) : null;
@@ -1177,6 +1194,13 @@ async function narrativeDig(msg, loc) {
         if (r.ok) { const m = await makeDig(loc, r); if (m.ok) made = m; else r = { ok: false, error: m.error }; }
         console.log(`[WorldScrawl] dig (try ${i + 1}): ${JSON.stringify(String(raw).slice(0, 120))} -> ${r.ok ? JSON.stringify({ to: made.to, direction: r.direction, back: r.back, stay: r.stay }) : r.error}`);
         if (!made) err = r.error;
+    }
+    if (!made && named && !hasExit(loc, digWordFrom(msg.mes))) { // the model's answers didn't fit, but the player said where: link it directly
+        const target = await fetchLocationCached(named.room.address);
+        if (target) {
+            const fb = readDigAnswer({ existing: named.key, direction: digWordFrom(msg.mes), then: 'go_through' }, { loc, opts, canNew: false, target });
+            if (fb.ok) { const m = await makeDig(loc, fb); if (m.ok) { made = m; r = fb; console.log(`[WorldScrawl] dig: linked the named place ${named.room.address} directly`); } }
+        }
     }
     if (!made) return fail(err);
     msg.extra[CHANGE_KEY] = made.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
@@ -1627,12 +1651,12 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { party: who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
     else if (move?.path?.length > 2) lines.push(P('narration.travel', { party: who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
     else if (move) lines.push(P('narration.move', { party: who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
+    else if (extra.digFailed && !extra.dig) lines.push(P('narration.dig_failed', { party: who, place })); // a failure outranks any other note on the turn
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
     else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
     else if (extra.newDoor) lines.push(newDoorLine(who, place, toolsOn));
     else if (extra.door) lines.push(P('narration.door', { party: who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
-    else if (extra.digFailed) lines.push(P('narration.dig_failed', { party: who, place }));
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));
     if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
@@ -2728,8 +2752,32 @@ const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_
 
 export const scopePrompt = (c1, { start, id, story, what }) => P('change.scope', { area_name: c1.area_name, area: c1.area, region_name: c1.region_name, outline: outlineText(c1), start, end: id, story, what });
 /** The two small model calls (which rooms; then the patch), checked by the server. Leaves the result on the flag. */
+/** Debug > Show map edit messages: log each map-edit model call (prompt and raw answer) to the console. */
+export function logEditCall(label, prompt, answer) {
+    if (!settings().showEditMessages) return;
+    console.info(`[WorldScrawl] map edit call: ${label}`, { prompt, answer });
+}
+async function askModel(c, label, args) {
+    const raw = await c.generateRaw(args);
+    logEditCall(label, args.prompt, raw);
+    return raw;
+}
+/** How a flag's result is shown: every status ends in a visible line (never an empty card). */
+export function flagCardView(f, id) {
+    const range = `messages #${f.start}–#${id}`;
+    switch (f.status) {
+        case 'user': return { text: `🗺 ${USER_FLAG_NOTE}`, buttons: ['Dismiss'] };
+        case 'working': return { text: `🗺 Checking what changed on the map (${range})…`, buttons: [] };
+        case 'nothing': return { text: `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`, buttons: ['Retry', 'Dismiss'] };
+        case 'cant': return { text: `🗺 Can't show this on the map: ${f.error || 'no reason given'}`, buttons: ['Retry', 'Dismiss'] };
+        case 'review': if (f.proposal) return { text: '🗺 Proposed map change:', buttons: ['review'] }; break;
+        case 'error': return { text: `🗺 Map change failed: ${f.error || 'something went wrong.'}`, buttons: ['Retry', 'Dismiss'] };
+    }
+    if (f.status === 'kept' || f.status === 'discarded') return null;
+    return { text: `🗺 Map change failed: unexpected state "${f.status}".`, buttons: ['Retry', 'Dismiss'] };
+}
+export const USER_FLAG_NOTE = "That's your own message: flag the narrator's reply instead.";
 async function analyzeFlag(id) {
-    await ensurePrompts();
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f) return;
     if (f.kind === 'discover') return analyzeDiscovery(id);
@@ -2737,24 +2785,28 @@ async function analyzeFlag(id) {
     f.status = 'working'; f.error = ''; delete f.proposal;
     renderPatchCards();
     try {
+        await ensurePrompts();
+        if (!f.loc) throw new Error('could not tell where the party is for this message');
         const story = storyText(chat, f.start, id);
         const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
         const c1 = await flagContext(f);
         const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
-        const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
+        const a1 = parseJsonAnswer(await askModel(c, 'which rooms', { prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
+        if (!a1 || typeof a1 !== 'object') throw new Error("the model's answer about which rooms changed was not JSON");
         const known = [...new Set(c1.outline.map(o => o.address))];
         const toKnown = a => { a = String(a).trim().toLowerCase(); if (known.includes(a)) return a; const t = a.slice(a.indexOf(':') + 1), hit = known.filter(k => k.endsWith(t.includes('/') ? `:${t}` : `/${t}`)); return hit.length === 1 ? hit[0] : null; };
         const areas = [...new Set((a1?.areas ?? []).map(x => String(x).trim().toLowerCase().replace(/\/.*$/, '')))].filter(a => /^[a-z0-9_]+(:[a-z0-9_]+)?$/.test(a)).slice(0, 3);
         // A place changed as a whole (a subregion named in areas): every room in it goes to the patch call too.
         const whole = known.filter(k => areas.some(ar => ar.includes(':') && k.startsWith(`${ar}/`)));
         const rooms = [...new Set([...(a1?.rooms ?? []).map(toKnown).filter(Boolean), ...whole])].slice(0, 20);
-        if (!rooms.length && !areas.length) { f.status = 'nothing'; return; }
+        if (!rooms.length && !areas.length) { f.status = 'nothing'; f.error = 'no known room was named'; return; }
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
         const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
         let ops = null, err = '', preview = null;
         for (let tries = 0; tries < 2; tries++) {
-            const ans = pl.readChangeAnswer(parseJsonAnswer(await c.generateRaw({ prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
+            if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
+            const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
             if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
             if (ans?.nothing) { f.status = 'nothing'; return; }
             ops = ans?.ops ?? null;
@@ -2763,14 +2815,20 @@ async function analyzeFlag(id) {
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
-        if (!preview) { f.status = 'error'; f.error = `The suggested change didn't fit the map: ${err}`; return; }
+        if (!preview) {
+            f.error = `The suggested change didn't fit the map: ${err}`;
+            if (Array.isArray(ops) && ops.length) { f.status = 'review'; f.proposal = { ops, invalid: true, summary: [`⚠ ${f.error}`], relocate: {}, inherit: {}, names: {}, before: {}, after: {} }; }
+            else f.status = 'error';
+            return;
+        }
         f.proposal = { ops, summary: preview.summary, relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
         if (settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
-        f.status = 'error'; f.error = e.message;
+        console.error('[WorldScrawl] map flag', e);
+        f.status = 'error'; f.error = e?.message || String(e);
     } finally {
-        await c.saveChat?.();
+        try { await c.saveChat?.(); } catch (e) { console.error('[WorldScrawl] save', e); }
         renderPatchCards();
     }
 }
@@ -2810,7 +2868,7 @@ async function analyzeDiscovery(id) {
         const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err, existing });
         let preview = null, ops = null, err = '';
         for (let tries = 0; tries < 2 && !preview; tries++) {
-            const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
+            const a = parseJsonAnswer(await askModel(c, 'discovery', { prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
             const ex = existingDiscovery(a, existing, k.location);
             if (ex?.error) { err = ex.error; continue; }
@@ -2843,12 +2901,18 @@ export async function flagMessage(id, { note = '', hint = '', start = null, sour
     id = Number(id);
     const msg = chat[id];
     if (!msg || (msg.is_system && !msg.extra?.worldscrawl_notice)) return 'Pick a story message to flag.';
-    await loadPatchLib();
-    const loc = locationAt(id) ?? (await currentLocation()).address;
     msg.extra = msg.extra ?? {};
-    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: 'working', ...(kind === 'discover' ? { kind } : {}) };
-    await c.saveChat?.();
-    analyzeFlag(id);
+    if (msg.is_user && source === 'button') { // the change call reads the story up to the narrator's reply: a player line alone gives it nothing
+        msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc: locationAt(id) ?? null, source, start: id, status: 'user' };
+        renderPatchCards();
+        return USER_FLAG_NOTE;
+    }
+    let loc = null, err = '';
+    try { await loadPatchLib(); loc = locationAt(id) ?? (await currentLocation())?.address ?? null; } catch (e) { console.error('[WorldScrawl] map flag', e); err = e?.message || String(e); }
+    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: err ? 'error' : 'working', ...(err ? { error: err } : {}), ...(kind === 'discover' ? { kind } : {}) };
+    try { await c.saveChat?.(); } catch (e) { console.error('[WorldScrawl] save', e); }
+    if (err) { renderPatchCards(); return `Map change failed: ${err}`; }
+    analyzeFlag(id).catch(e => { const f = msg.extra?.[FLAG_KEY]; if (f) { f.status = 'error'; f.error = e?.message || String(e); } console.error('[WorldScrawl] map flag', e); renderPatchCards(); });
     return kind === 'discover' ? 'Adding the room behind that door…' : 'Checking what changed on the map…';
 }
 globalThis.worldscrawlFlag = flagMessage;
@@ -2858,6 +2922,7 @@ async function keepFlag(id, { quiet = false } = {}) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f?.proposal) return;
     const form = openForms.get(`${id}|flag`);
+    if (f.proposal.invalid && !form) { openEditor(`${id}|flag`, f.proposal.ops, { loc: f.loc ?? getStoredLocation() ?? '' }); return; } // fix it in the editor first
     if (form) {
         const ops = form.getOps();
         if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Discard.' }]); return; }
@@ -2940,7 +3005,13 @@ export async function onReplyForFlags(id) {
         else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
         else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
+    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); flag = null; }
     if (flag) await flagMessage(id, flag);
+}
+/** Did the player's turn just before reply `id` fail to break through? Then the reply must not add a room or passage. */
+export function digFailedBefore(chat, id) {
+    for (let i = id - 1; i >= 0; i--) { const m = chat[i]; if (m?.is_user) return !!m.extra?.worldscrawl_dig_failed; if (m && !m.is_system) return false; }
+    return false;
 }
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
@@ -2953,13 +3024,28 @@ function sunFor(loc) {
     if (!weatherLib?.weatherAt || !t?.weather || !loc?.weather?.weather_region) return null;
     return e => { const d = calendarLib.dateAt(e, t.start_date, t.calendar); const w = weatherLib.weatherAt(t.weather, loc.weather.weather_region, weatherLib.absSeconds(d, t.calendar), t.calendar); return { sunrise: w.sunrise, sunset: w.sunset }; };
 }
+/** A loose wait amount read by a small model call: {seconds} or {until}, or null. Checked by the same parser. */
+export async function modelWait(amount, cal = null, lib = calendarLib) {
+    try {
+        if (!lib) return null;
+        await ensurePrompts();
+        const a = parseJsonAnswer(await ctx().generateRaw({ prompt: P('intent.wait_amount', { amount: clip(String(amount), 120) }), systemPrompt: P('intent.wait_amount_system', { reply: baseReply('json') }), responseLength: 40 }));
+        const c = cal ? lib.checkCalendar(cal) : undefined;
+        if (Number.isFinite(Number(a?.seconds)) && Number(a.seconds) > 0) return { seconds: Math.min(Math.round(Number(a.seconds)), 30 * 86400) };
+        if (typeof a?.until === 'string' && a.until.trim()) return lib.parseWait(`until ${a.until.trim()}`, c);
+    } catch (e) { console.warn('[WorldScrawl] wait amount', e.message); }
+    return null;
+}
 /** Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped. */
 export async function planWait(args, sleep = false) {
     if (!(await loadCalendar())) return { error: 'the game clock is unavailable' };
     const t = worldTimes.get(activeWorld || defaultWorldId), cal = t?.calendar ?? null;
     args = String(args ?? '').trim();
     let p;
-    try { p = args ? calendarLib.parseWait(args, cal ? calendarLib.checkCalendar(cal) : undefined) : sleep ? { seconds: calendarLib.SLEEP_DEFAULT } : null; } catch (e) { return { error: e.message }; }
+    try { p = args ? calendarLib.parseWait(args, cal ? calendarLib.checkCalendar(cal) : undefined) : sleep ? { seconds: calendarLib.SLEEP_DEFAULT } : null; } catch (e) {
+        p = await modelWait(args, cal); // a loose amount the parser can't read: one small model call before failing
+        if (!p) return { error: e.message };
+    }
     if (!p) return { error: 'say how long, e.g. "/ws-wait 2h" or "/ws-wait until morning"' };
     const now = chatElapsed();
     let seconds = p.seconds;
@@ -3091,7 +3177,7 @@ export function renderPatchCards() {
             const b = document.createElement('div');
             b.className = 'mes_button worldscrawl_flag_btn fa-solid fa-flag';
             b.title = 'WorldScrawl: the map changed here (fire, collapse, smashed door...)';
-            b.addEventListener('click', e => { e.stopPropagation(); flagMessage(Number(el.getAttribute('mesid'))).then(t => t && toastr.info(`WorldScrawl: ${t}`)); });
+            b.addEventListener('click', e => { e.stopPropagation(); flagMessage(Number(el.getAttribute('mesid'))).then(t => t && toastr.info(`WorldScrawl: ${t}`), err => { console.error('[WorldScrawl] map flag', err); toastr.error(`WorldScrawl: map change failed: ${err?.message || err}`); }); });
             bar.prepend(b);
         }
         if (!isOn()) { el.querySelector('.worldscrawl_flag_btn')?.remove(); continue; }
@@ -3118,12 +3204,13 @@ export function renderPatchCards() {
             return wrap;
         };
         if (f && (f.swipe ?? 0) === swipeOf(msg)) {
-            if (f.status === 'working') card.append(line(`🗺 Checking what changed on the map (messages #${f.start}–#${id})…`));
-            else if (f.status === 'nothing') card.append(line(`🗺 No lasting map change found in messages #${f.start}–#${id}.`), startPicker(), cardButton('Check again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
-            else if (f.status === 'cant') card.append(line(`🗺 The map can't show this change yet: ${f.error}`), startPicker(), cardButton('Try again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
-            else if (f.status === 'error') card.append(line(`🗺 ${f.error || 'Something went wrong.'}`), startPicker(), cardButton('Try again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
-            else if (f.status === 'review' && f.proposal) {
-                card.append(line('🗺 Proposed map change:'));
+            const view = flagCardView(f, id);
+            if (view && view.buttons[0] !== 'review') {
+                const t = line(view.text); t.className = `worldscrawl_flag_${f.status}`; card.append(t);
+                if (view.buttons.includes('Retry')) card.append(startPicker(), cardButton('Retry', () => analyzeFlag(id)));
+                if (view.buttons.includes('Dismiss')) card.append(cardButton('Dismiss', () => discardFlag(id)));
+            } else if (f.status === 'review' && f.proposal) {
+                card.append(line(f.proposal.invalid ? "🗺 The suggested change didn't fit the map. Press Edit to fix it (Keep opens the editor):" : '🗺 Proposed map change:'));
                 const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
                 for (const s of f.proposal.summary ?? []) { const li = document.createElement('li'); li.textContent = s; ul.append(li); }
                 card.append(ul);

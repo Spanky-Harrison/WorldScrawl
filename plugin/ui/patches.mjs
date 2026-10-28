@@ -145,6 +145,35 @@ export function freeAddress(raw, area, id, except = []) {
     while (getRoom(raw, a) && !except.includes(a)) a = `${area}/${id}_${n++}`;
     return a;
 }
+/**
+ * A place made earlier in the same patch, by a reference: "new:<ref>" (the "ref" label a create_place or create_subregion
+ * gave it), or a guessed address that is not a room but whose last part, or the whole thing slugged, is the new place's id
+ * or slugged name (e.g. "riverton:secret_mind_dimension/secret_mind_dimension" for a new "Secret Mind Dimension").
+ * Returns the address, '' for an unknown "new:" label, or null when the reference is not about a new place.
+ */
+export function madeRef(raw, ref, made) {
+    const a = String(ref ?? '').trim();
+    if (!a) return null;
+    const m = /^new:\s*(.+)$/i.exec(a);
+    if (m) { const k = m[1].trim().toLowerCase(), hit = made.find(x => x.ref && x.ref === k) ?? made.find(x => x.id === slugId(k) || newRoomId(x.name) === newRoomId(k)); return hit ? hit.address : ''; }
+    if (!made.length || getRoom(raw, a) || getRoom(raw, a.toLowerCase())) return null;
+    const last = slugId(a.toLowerCase().split(/[/:]/).pop()), whole = newRoomId(a);
+    const hits = made.filter(x => x.id === last || newRoomId(x.name) === last || x.id === whole || newRoomId(x.name) === whole);
+    return hits.length === 1 ? hits[0].address : null;
+}
+/** Every room reference in an op that points at a place made earlier in this patch, written as its real address. */
+export function madeRefs(raw, op, made, w = 'patch') {
+    if (!isObj(op)) return op;
+    const fix = v => { if (typeof v !== 'string') return v; const r = madeRef(raw, v, made); if (r === '') throw new PatchError(`${w}: ${JSON.stringify(v)} names no place made earlier in this patch (give the create_place a "ref")`); return r ?? v; };
+    const o = { ...op };
+    for (const k of ['loc', 'into', 'to', 'target']) if (k in o) o[k] = fix(o[k]);
+    if (Array.isArray(o.locs)) o.locs = o.locs.map(fix);
+    const fixExits = p => (isObj(p) && Array.isArray(p.exits) ? { ...p, exits: p.exits.map(e => (isObj(e) ? { ...e, to: fix(e.to) } : e)) } : p);
+    if (Array.isArray(o.exits)) Object.assign(o, fixExits(o));
+    if (isObj(o.place)) o.place = fixExits(o.place);
+    if (isObj(o.subregion) && isObj(o.subregion.place)) o.subregion = { ...o.subregion, place: fixExits(o.subregion.place) };
+    return o;
+}
 /** One op with its room references written as full addresses and a merge's new "id" as a bare id (the area taken from a full address). */
 export function normalizeOp(raw, op) {
     if (!isObj(op)) return op;
@@ -215,7 +244,7 @@ export function applyPatch(raw, patch, { now = null, where = 'patch', dropNoops 
     normalizeRefs(raw);
     const out = { summary: [], relocate: {}, touched: [], ops: [], noops: [] };
     patch.ops.forEach((op0, i) => {
-        const op = normalizeOp(raw, op0);
+        const op = normalizeOp(raw, madeRefs(raw, op0, out.made ?? [], `${where}, op #${i + 1}`));
         const why = dropNoops ? noopOf(raw, op) : '';
         if (why) { out.noops.push({ i, why }); return; } // e.g. a rename to the same name: dropped, nothing stamped
         out.ops.push(op);
@@ -342,7 +371,9 @@ function applyOp(raw, op, w, out, world = null) {
                 const t = isObj(e) && typeof e.to === 'string' ? getRoom(raw, e.to) : null;
                 if (t && !expandableOf(raw, e.to, world)) throw new PatchError(`${w}: ${t.name} can't be expanded ("expandable" is false for it or its area)`);
             }
-            const a = createPlace(raw, str(op.area), op, w, out, true), r = getRoom(raw, a), ex = op.exits?.length === 1 ? op.exits[0] : null;
+            const a = createPlace(raw, str(op.area), op, w, out, true), r = getRoom(raw, a);
+            (out.created ??= new Set()).add(a);
+            const ex = op.exits?.length === 1 ? op.exits[0] : null;
             if (op.story === true && ex) return `${getRoom(raw, ex.to)?.name ?? ex.to} ${ex.return_direction}: leads to ${r.name} (a newly found room)`;
             return `${r.name}: new place in ${sub.name ?? op.area}`;
         }
@@ -448,12 +479,31 @@ function setExitOp(raw, op, w, out) {
     out.touched.push(a, ex.to);
     return `${label}: ${bits.join(', ')}`;
 }
+/**
+ * An add_exit that repeats a door pair made earlier in this patch (create_place already joins its new room): dropped,
+ * with its extra fields (description, door, travel_time) merged in where the made exit has none of its own. null when not a repeat.
+ */
+function dupExit(raw, op, a, r, to, t, dir, back, out) {
+    if (!out.created || !(out.created.has(a) || out.created.has(to))) return null;
+    const fw = (r.exits ?? []).find(e => isObj(e) && e.to === to), bw = (t.exits ?? []).find(e => isObj(e) && e.to === a);
+    if (!fw || (back && !bw)) return null;
+    const desc = str(op.description).slice(0, 400), rdesc = str(op.return_description).slice(0, 400);
+    const plain = d => !d || /^The way (back )?to .*\.$/.test(d);
+    if (desc && plain(fw.description)) fw.description = desc;
+    if (rdesc && bw && plain(bw.description)) bw.description = rdesc;
+    if (op.door === true && !fw.barrier) fw.barrier = {};
+    if (str(op.travel_time) && !fw.travel_time) { try { parseDuration(str(op.travel_time)); fw.travel_time = str(op.travel_time); if (bw) bw.travel_time ??= fw.travel_time; } catch { /* keep the made one */ } }
+    out.touched.push(a, to);
+    return `${r.name} ${fw.direction}: same exit as the new room's, merged`;
+}
 function addExitOp(raw, op, w, out) {
     const a = str(op.loc), r = needRoom(raw, a, w), to = str(op.to), t = needRoom(raw, to, w, 'to');
     if (to === a) throw new PatchError(`${w}: an exit can't lead back into the same room`);
     const dir = needText(op, w, 'direction', 60), back = str(op.return_direction);
     if (back.length > 60) throw new PatchError(`${w}: "return_direction" is too long (at most 60 characters)`);
     if (!back && op.one_way !== true) throw new PatchError(`${w}: the way back needs a "return_direction" (or one_way: true)`);
+    const dup = dupExit(raw, op, a, r, to, t, dir, back, out);
+    if (dup) return dup;
     if ((r.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(dir))) throw new PatchError(`${w}: ${r.name} already has an exit ${JSON.stringify(dir)}`);
     if ((r.exits ?? []).some(e => isObj(e) && e.to === to)) throw new PatchError(`${w}: ${r.name} already has an exit to ${t.name}`);
     if (back && (t.exits ?? []).some(e => isObj(e) && lc(e.direction) === lc(back))) throw new PatchError(`${w}: ${t.name} already has an exit ${JSON.stringify(back)}`);
@@ -723,6 +773,7 @@ function createPlace(raw, area, p, w, out, needExit) {
     (sub.locations ??= {})[id] = { name, description, exits: [] };
     exits.forEach((e, i) => addExitOp(raw, { ...e, loc: a }, `${w}, exit #${i + 1}`, out));
     out.touched.push(a);
+    (out.made ??= []).push({ address: a, id, name, ref: str(p.ref).toLowerCase() });
     return a;
 }
 function createSub(raw, rid, p, w, out, needExit) {
@@ -731,7 +782,7 @@ function createSub(raw, rid, p, w, out, needExit) {
     if (has(raw[rid].subregions, sid)) throw clashError(w, 'subregion', sid, suggestId(new Set(Object.keys(raw[rid].subregions)), sid));
     raw[rid].subregions[sid] = { name, ...(str(p.notes) ? { notes: needText(p, w, 'notes') } : {}), locations: {} };
     try {
-        const a = createPlace(raw, `${rid}:${sid}`, p.place, `${w}, place`, out, needExit);
+        const a = createPlace(raw, `${rid}:${sid}`, isObj(p.place) && str(p.ref) && !str(p.place.ref) ? { ...p.place, ref: p.ref } : p.place, `${w}, place`, out, needExit);
         raw[rid].subregions[sid].entrance = split(a)[2];
     } catch (e) { delete raw[rid].subregions[sid]; throw e; }
     out.touched.push(`${rid}:${sid}`);
@@ -891,11 +942,11 @@ export const OP_DOCS = {
     set_expandable: '{"op":"set_expandable","target":ADDR or AREA,"value":true|false|"inherit"} (whether new rooms can be found there)',
     set_fields: '{"op":"set_fields","target":ADDR or AREA,"fields":{"exposure":"outdoor|sheltered|enclosed|fixed","insulation":"drafty|normal|cozy","indoor_temp":20,...}} (plain settings; null drops one)',
     set_exit: '{"op":"set_exit","loc":ADDR,"direction":"exit name","fields":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))',
-    add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two existing rooms)',
+    add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two rooms that already exist before this patch; not for a room made by create_place, whose exits already join it)',
     move_location: '{"op":"move_location","loc":ADDR,"area":"region:sub"} (a room moves to another subregion, keeping its exits)',
     move_area: '{"op":"move_area","area":"region:sub","region":"region"} (a subregion moves to another region)',
-    create_place: '{"op":"create_place","name":"...","description":"...","exits":[{"to":ADDR,"direction":"exit name from the new place","return_direction":"exit name from ADDR to the new place","door":true|false}]} (a NEW room; the engine makes its id and puts it in the area of its first exit\'s room unless you give "area"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; a later exit may point "to" an earlier new room by its name in snake_case)',
-    create_subregion: '{"op":"create_subregion","region":"region","name":"...","notes":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room)',
+    create_place: '{"op":"create_place","name":"...","description":"...","exits":[{"to":ADDR,"direction":"exit name from the new place","return_direction":"exit name from ADDR to the new place","door":true|false}]} (a NEW room; each of its exits already makes the door pair both ways, so never add a separate add_exit for it; the engine makes its id and puts it in the area of its first exit\'s room unless you give "area"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; give it "ref":"label" and later ops in the same patch point at it with "new:label" wherever an address goes, e.g. {"op":"set_fields","target":"new:portal_room",...} or an add_exit "to":"new:portal_room"; never guess the engine-made address)',
+    create_subregion: '{"op":"create_subregion","region":"region","name":"...","notes":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room; "ref":"label" lets later ops use "new:label" for that room)',
     create_region: '{"op":"create_region","name":"...","notes":"...","subregion":{"name":"...","place":{...}}} (a whole new region)',
     remove_area: '{"op":"remove_area","area":AREA,"contents":"delete"|"move","into":AREA} (delete a subregion or region, or move its contents into another)',
 };
