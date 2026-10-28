@@ -4,6 +4,7 @@ import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff } from './diffview.mjs';
+import { pickSearch, pickValid, pathOf } from './picker.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -257,6 +258,7 @@ async function renderInspector(side, target, ctx) {
         const q = st.world ? `?world=${encodeURIComponent(st.world)}` : '';
         let ectx;
         try { ectx = await postJson(`${API}/edit/context${q}`, { target, changes: st.changes ?? [], now: st.now ?? null }); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't edit this: ${e.message}`)); return; }
+        try { ectx.outline = await postJson(`${API}/edit/outline${q}`, { changes: st.changes ?? [], now: st.now ?? null }); } catch { /* plain dropdowns then */ }
         const expand = target.startsWith('exit:') ? target.split('|')[1] : null;
         const diffBox = $('div', { class: 'editlive-diff' });
         const errBox = $('ul', { class: 'pf-errors warnings' });
@@ -413,6 +415,7 @@ function createMapWindow(win) {
     const legend = $('div', { class: 'legend' });
     const centreOnPlayer = () => { if (current) setLayer(layerOf(current.full, current.here)); };
     view.append(svg, legend);
+    let pick = null; // map pick mode: {spec, resolve, saved (the suspended side pane), layer, banner}
     let crumbPick = null, tf = { x: 0, y: 0, k: 1 }, current = null, selected = null, lastHere = null, lastKey = null, layer = null;
     const crumbs = document.getElementById('breadcrumb');
     const apply = () => world.setAttribute('transform', `translate(${tf.x},${tf.y}) scale(${tf.k})`);
@@ -454,6 +457,77 @@ function createMapWindow(win) {
     });
     const up = ev => { pointers.delete(ev.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) view.classList.remove('dragging'); };
     view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
+
+    // ---- Pick mode: a form's "Choose…" (picker.mjs) suspends the form and picks a place / subregion / region here.
+    const entityOf = n => (n.layer ? (n.layer.level === 'region' ? n.layer.region : `${n.layer.region}:${n.layer.subregion}`) : n.kind === 'stub' ? null : n.id);
+    const kindOf = n => (n.layer ? n.layer.level : n.kind === 'stub' ? null : 'room');
+    const PICK_LEVEL = { room: 'subregion', subregion: 'region', region: 'world' };
+    const NOUN = { room: 'place', subregion: 'subregion', region: 'region' };
+    /** The layer showing an entity of a kind (a place's subregion, a subregion's region, the world for a region). */
+    const layerFor = (kind, id) => {
+        if (!id) return null;
+        if (kind === 'region') return { level: 'world' };
+        const [rid, rest = ''] = String(id).split(':'), sid = rest.split('/')[0];
+        if (kind === 'subregion') return rid ? { level: 'region', region: rid } : null;
+        return rid && sid ? { level: 'subregion', region: rid, subregion: sid } : null;
+    };
+    function finishPick(v) {
+        const p = pick; if (!p) return;
+        pick = null;
+        p.banner.remove(); win.querySelector('.wspick-confirm')?.remove();
+        document.removeEventListener('keydown', p.onKey);
+        side.replaceChildren(...p.saved); // the form, untouched
+        layer = p.layer; lastKey = p.lastKey;
+        p.resolve(v ?? null);
+        update(state);
+    }
+    function confirmPick(id) {
+        const p = pick; if (!p || !pickValid(p.spec, id)) return;
+        win.querySelector('.wspick-confirm')?.remove();
+        const name = pathOf(p.spec.outline, p.spec.kind, id) ?? id;
+        const box = $('div', { class: 'wspick-confirm', role: 'dialog' }, $('div', { class: 'wspick-q' }, `Choose ${name}?`),
+            $('button', { class: 'crumb wspick-yes', onclick: () => finishPick(id) }, 'Yes'),
+            $('button', { class: 'crumb wspick-no', onclick: () => box.remove() }, 'No'));
+        win.append(box); box.querySelector('.wspick-yes').focus();
+    }
+    function jumpTo(kind, id) {
+        const l = layerFor(kind, id); if (!l || !current) return;
+        layer = l; selected = null; render(current.full, current.here, current.world);
+        const n = current.graph.nodes.find(x => entityOf(x) === id && kindOf(x) === kind);
+        if (n) { centreOn(n.id); world.querySelectorAll('.node').forEach(g => g.classList.toggle('selected', g.dataset.id === n.id)); pickSide(n); }
+        else if (pick && pickValid(pick.spec, id)) confirmPick(id); // not on the map (an empty subregion): ask right away
+    }
+    function pickSide(n) {
+        const p = pick; if (!p) return;
+        const noun = NOUN[p.spec.kind];
+        side.replaceChildren($('h3', {}, `Pick the ${p.spec.title ?? noun}`),
+            $('p', { class: 'muted' }, `Double-click a highlighted ${noun} to choose it. Double-click an area to open it.`));
+        if (!n) return;
+        const id = entityOf(n), ok = kindOf(n) === p.spec.kind && pickValid(p.spec, id);
+        side.append($('b', {}, pathOf(p.spec.outline, kindOf(n), id) ?? n.name),
+            ok ? $('div', {}, $('button', { class: 'crumb wspick-this', onclick: () => confirmPick(id) }, `Choose this ${noun}`))
+                : $('p', { class: 'muted' }, kindOf(n) !== p.spec.kind ? `Not a ${noun}${n.layer ? ': double-click to open it' : ''}.` : (p.spec.exclude ?? []).includes(id) ? "That's the one being edited." : "Can't be chosen here."));
+    }
+    globalThis.wsPick = spec => new Promise(resolve => {
+        if (pick) finishPick(null);
+        const noun = NOUN[spec.kind] ?? spec.kind;
+        const q = $('input', { type: 'search', class: 'wspick-search', placeholder: `Search ${noun}s…`, autocomplete: 'off' });
+        const results = $('ul', { class: 'wspick-results' });
+        q.addEventListener('input', () => results.replaceChildren(...pickSearch(spec, q.value, 12).map(r => $('li', { class: r.valid ? 'ok' : 'dim', 'data-id': r.id, onclick: () => { results.replaceChildren(); jumpTo(spec.kind, r.id); } }, r.path))));
+        const banner = $('div', { class: 'wspick-banner' }, $('span', { class: 'wspick-title' }, `Picking ${spec.title ?? noun}…`),
+            $('span', { class: 'wspick-find' }, q, results), $('button', { class: 'crumb wspick-cancel', onclick: () => finishPick(null) }, 'Cancel'));
+        const onKey = ev => { if (ev.key === 'Escape') { if (win.querySelector('.wspick-confirm')) win.querySelector('.wspick-confirm').remove(); else finishPick(null); } };
+        pick = { spec, resolve, saved: [...side.childNodes], layer, lastKey, banner, onKey };
+        document.addEventListener('keydown', onKey);
+        win.insertBefore(banner, body);
+        side.replaceChildren();
+        // Open at the field's value, else where the party is; the full map (no fog) loads in update().
+        const here = current?.here ?? state?.location;
+        const at = spec.value ? layerFor(spec.kind, spec.value) : here ? layerFor(spec.kind, spec.kind === 'region' ? here.split(':')[0] : spec.kind === 'subregion' ? here.split('/')[0] : here) : null;
+        pick.open = { layer: at ?? { level: 'world' }, focus: spec.value || null };
+        update(state);
+    });
+    globalThis.wsPicking = () => (pick ? { kind: pick.spec.kind, title: pick.spec.title, layer: layerKey(layer) } : null); // for the e2e tests
 
     let inspectSeq = 0;
     globalThis.wsInspect = (t, c) => inspectTarget(t, c); // for the e2e tests and the console
@@ -544,13 +618,22 @@ function createMapWindow(win) {
                 g.append(S('circle', { class: 'patchdot', cx: w / 2 - 7, cy: -h / 2 + 7, r: 4, fill: '#f0a030', stroke: '#222' }));
                 title.textContent += ' · changed in this chat';
             }
-            g.addEventListener('click', () => { if (!moved) showSide(n.id); });
-            if (n.layer) g.addEventListener('dblclick', ev => { ev.stopPropagation(); setLayer(n.layer); });
+            const ent = entityOf(n), pk = pick && kindOf(n) === pick.spec.kind ? (pickValid(pick.spec, ent) ? 'pickable' : 'pickdim') : null;
+            if (pk) g.classList.add(pk);
+            g.addEventListener('click', () => { if (moved) return; if (pick) { world.querySelectorAll('.node').forEach(x => x.classList.toggle('selected', x === g)); return pickSide(n); } showSide(n.id); });
+            g.addEventListener('dblclick', ev => {
+                ev.stopPropagation();
+                // In pick mode, at the field's level: a highlighted target asks "Choose …?"; above it, areas open as usual.
+                if (pick && pk === 'pickable' && layer?.level === PICK_LEVEL[pick.spec.kind]) return confirmPick(ent);
+                if (n.layer) setLayer(n.layer);
+            });
             world.append(g);
         }
         legend.replaceChildren(...[...subs.values()].map(s => $('span', {}, $('i', { style: `background:hsl(${s.hue} 55% 45%)` }), s.name)),
             $('span', {}, '▭ been · ⋯ seen · ┄ closed door · ✕ blocked'));
         const hereNode = graph.nodes.find(n => n.here)?.id;
+        if (pick) { svg.classList.add('picking'); if (!side.childNodes.length) pickSide(null); return; }
+        svg.classList.remove('picking');
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
         if (side.querySelector('.mapaction')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
         else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
@@ -559,14 +642,22 @@ function createMapWindow(win) {
 
     async function update(st0) {
         let st = st0;
-        if (editor) { try { st = await editorState(st0); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the world: ${e.message}`)); return; } if (st0 !== state) return; }
+        if (editor || pick) { try { st = await editorState(st0); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the world: ${e.message}`)); return; } if (st0 !== state) return; }
         if (!st || !st.on) { world.replaceChildren(); legend.replaceChildren(); crumbs.replaceChildren(); current = null; layer = null; side.replaceChildren($('p', { class: 'empty' }, NO_CHAT)); lastHere = null; return; }
         let rooms;
         try { rooms = await knownRooms(st); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the map: ${e.message}`)); return; }
         if (st0 !== state) return; // a newer state arrived meanwhile
         if (current) current.st = st; else current = { st };
         const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms);
-        const key = `${editor ? 'E' : ''}${st.chatId}|${st.location}`, moved_ = key !== lastKey;
+        const key = `${editor ? 'E' : ''}${pick ? 'P' : ''}${st.chatId}|${st.location}`, moved_ = key !== lastKey;
+        if (pick?.open) { // entering pick mode
+            const o = pick.open; pick.open = null; layer = o.layer; current.st = st; lastKey = key;
+            render(graph, st.location, st.world);
+            const n = o.focus && current.graph.nodes.find(x => entityOf(x) === o.focus);
+            centreOn(n?.id ?? current.graph.nodes.find(x => x.here)?.id ?? current.graph.nodes[0]?.id);
+            if (n) { world.querySelectorAll('.node').forEach(g => g.classList.toggle('selected', g.dataset.id === n.id)); pickSide(n); }
+            return;
+        }
         if (moved_) layer = layerOf(graph, st.location); // follow the party: open the layer with the current room
         current.st = st;
         render(graph, st.location, st.world);
