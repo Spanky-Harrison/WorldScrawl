@@ -31,6 +31,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'dig.question': ext.digPrompt(loc, said, ext.digOptions(rooms), ['north', 'east'], true),
     'dig.question.existing_only': ext.digPrompt({ ...loc, description: undefined }, said, ext.digOptions(rooms), [], false),
     'dig.question.retry': ext.digPrompt(loc, said, [], [], true, 'there is already an exit "north" here'),
+    'intent.bracket_target': ext.bracketTargetPrompt(loc, { word: 'move', target: 'up the stairs' }, [{ key: 'north', label: 'north to the Hall' }, { key: 'village_square', label: 'Village Square' }]),
     'look.target': ext.lookTargetPrompt(loc, said, [exitA], true),
     'look.target.nowindow': ext.lookTargetPrompt(loc, said, [exitA, exitB], false),
     'look.closed_door': ext.closedDoorPrompt(said, exitA),
