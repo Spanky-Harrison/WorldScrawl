@@ -1603,7 +1603,7 @@ try {
         await c.saveChat(); return c.chat.length; });
     await mwAct('region:larkspur', 'delete_region');
     await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
-    await ui.selectOption('.side .mw-row[data-field="into"] select', 'riverton');
+    await pickSet(ui.locator('.side .mw-row[data-field="into"] .wspick'), 'riverton');
     await ui.locator('.side .wsdiff-move-group').first().waitFor({ timeout: 10000 }).catch(() => {});
     const bmDiff = await ui.evaluate(() => { const g = [...document.querySelectorAll('.side .wsdiff-move-group')]; return { groups: g.length, head: g[0]?.querySelector('.wsdiff-move-head')?.textContent, subs: [...(g[0]?.querySelectorAll(':scope > .wsdiff-move[data-kind="subregion"]') ?? [])].map(x => x.dataset.old), details: g[0]?.querySelectorAll('details').length ?? 0, note: g[0]?.querySelector(':scope > .wsdiff-note')?.textContent ?? '', places: document.querySelectorAll('.side .wsdiff-place').length }; });
     check('bulk move diff: one group "Larkspur → into Riverton", one collapsible line per subregion, one inheritance note, no per-field place dump', bmDiff.groups === 1 && /Larkspur → into Riverton/.test(bmDiff.head) && bmDiff.subs.length === 7 && bmDiff.details === 7 && /^now inherits Riverton's .* instead of Larkspur's$/.test(bmDiff.note) && bmDiff.places === 0, JSON.stringify(bmDiff));
