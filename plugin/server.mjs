@@ -187,7 +187,10 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         try {
             const s = snapshots.build(`${lw.id}\u0000${lw.version}`, ...lw.raw, changes, now);
             e = changedCache.get(s.key);
-            if (e === undefined) e = { w: build_world(s.wj, s.raw), worldJson: s.wj, raw: s.raw, info: s.info, key: s.key, expires: s.expires };
+            if (e === undefined) {
+                e = { w: build_world(s.wj, s.raw), worldJson: s.wj, raw: s.raw, info: s.info, key: s.key, expires: s.expires };
+                if (now !== null && s.info.failed?.length) markExpiredDependencies(wid, changesIn, s.info);
+            }
             changedCache.delete(s.key);
             changedCache.set(s.key, e);
         } catch (err) {
@@ -196,6 +199,15 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         }
         while (changedCache.size > 32) changedCache.delete(changedCache.keys().next().value);
         return e;
+    }
+    /** Changes that fail only because a temporary change they built on ran out (they apply with no clock): flag them and
+     *  say so in the "can't apply" note. Rewinding the clock (or deleting the later message) brings them back. */
+    function markExpiredDependencies(wid, changesIn, info) {
+        let ok;
+        try { ok = changed_for(wid, changesIn, null).info; } catch { return; }
+        const failedNoClock = new Set((ok.failed ?? []).map(f => `${f.msg}\u0000${f.id}`));
+        info.failed = info.failed.map(f => (failedNoClock.has(`${f.msg}\u0000${f.id}`) ? f
+            : { ...f, expired_dependency: true, error: `${f.error} (a temporary change it built on ran out)` }));
     }
     const world_for = (wid, changes, now = null) => changed_for(wid, changes, now).w;
 
@@ -354,6 +366,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const e = changed_for(wid, changes, now);
             const all = changed_for(wid, changes, null);
             const before = a => {
+                if (now !== null && all.w.locations.has(a)) return all.w; // a temporary change ran out: the room as it was before
                 // Turned-off changes count here: a room made by a change that is now off (a discovery) still had real exits.
                 const onAgain = changes.map(c => (c?.off ? { ...c, off: false } : c));
                 for (let k = changes.length - (changes.some(c => c?.off) ? 0 : 1); k >= 0; k--) { let pw; try { pw = changed_for(wid, onAgain.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
@@ -362,6 +375,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const r = resolvePosition(e.w, address, { relocate: { ...relocateMap(e.info.patches), ...relocateMap(e.info.patches, since) }, // every active move applies forward, whenever the position was stamped (a moved place is the same place)
                  allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
             const loc = e.w.locations.get(r.address);
+            // A temporary change ran out under the party (the room exists with no clock): "the passage seals behind you".
+            if (r.moved && now !== null && all.w.locations.has(address)) r.expired = true;
             return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
         },
         'POST /move': ({ q, body }) => {

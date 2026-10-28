@@ -36,7 +36,7 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
     // Reverse: rooms that were folded into the missing address (or into where it leads).
     for (const target of new Set([address, fwd])) {
         const back = Object.keys(allRelocate).filter(k => follow(k, allRelocate) === target || allRelocate[k] === target).sort();
-        const hit = back.find(ok);
+        const hit = (history ?? []).find(h => back.includes(h) && ok(h)) ?? back.find(ok); // the piece the party came from first
         if (hit) return done(hit, 'restored');
     }
     // Exits of the room in the last state where it existed.
@@ -44,9 +44,14 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
         const prev = typeof before === 'function' ? before(a) : null;
         const loc = prev?.locations.get(a);
         if (!loc) continue;
+        // Back out through the exit the party came in by: the newest earlier position that one of its exits led to.
+        for (const h of history ?? []) {
+            const x = ok(h) && loc.exits.find(e => e.to === h);
+            if (x) return { ...done(h, 'came_from'), via: x.direction };
+        }
         for (const x of loc.exits) {
             const t = ok(x.to) ? x.to : follow(x.to, relocate);
-            if (ok(t)) return done(t, 'neighbor');
+            if (ok(t)) return { ...done(t, 'neighbor'), via: x.direction };
         }
     }
     for (const h of history ?? []) { const t = ok(h) ? h : follow(h, relocate); if (ok(t)) return done(t, 'history'); }

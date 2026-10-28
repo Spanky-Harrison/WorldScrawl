@@ -421,15 +421,18 @@ async function missingRoomFallback(stored) {
     console.warn(`[WorldScrawl] location ${stored} is not in world ${activeWorld || '(default)'}; resolved to ${to.address} (${r?.body?.how ?? 'start'})`);
     const c = ctx();
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: `[Engine: that place no longer exists in this world. You're now in ${displayName(to)}.]`,
-        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: stored, [LOC_KEY]: to.address } };
+        mes: r?.body?.expired ? expiredNotice(to, r.body.via) : `[Engine: that place no longer exists in this world. You're now in ${displayName(to)}.]`,
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: stored, ...(r?.body?.expired ? { worldscrawl_notice_expired: true } : {}), [LOC_KEY]: to.address } };
     c.chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
     return to;
 }
+/** A temporary change ran out with the party inside: they go back out the way they came in. */
+export const expiredNotice = (to, via) => `[Engine: the passage seals behind you. You're back in ${displayName(to)}${via ? ` (out through the ${via})` : ''}.]`;
 /** The narrator's one "you're now in X" note: a resolver move not yet followed by a narrated reply. */
 export function relocationNote(chat, loc, who) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
         const m = chat[i];
+        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return m.extra[LOC_KEY] === loc?.address ? `Note: the temporary place ${who} was in is gone (its time ran out); the passage sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
         if (m?.extra?.worldscrawl_notice_kind === 'missing') return m.extra[LOC_KEY] === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
         if (m && !m.is_system && !m.is_user) return '';
     }
