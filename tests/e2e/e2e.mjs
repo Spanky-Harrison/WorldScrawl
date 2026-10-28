@@ -1582,7 +1582,7 @@ try {
         const id = c.chat.length - 1; await m.flagMessage(id, { note: 'magic', source: 'button' });
         for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
         const f = c.chat[id].extra.worldscrawl_flag;
-        await new Promise(r => setTimeout(r, 300));
+        await c.reloadCurrentChat(); await new Promise(r => setTimeout(r, 1500)); m.renderPatchCards();
         const card = document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '';
         return { id, status: f?.status, error: f?.error, ops: f?.proposal?.ops, summary: f?.proposal?.summary, card };
     }, [wsMod, UPST]); };
