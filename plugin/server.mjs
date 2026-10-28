@@ -405,6 +405,37 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const overlaps = changes.map((c, i) => [c, i]).filter(([c, i]) => i > index && c?.off !== true && !hardIdx.has(i) && [...keysOf(c)].some(k => mine.has(k))).map(([c, i]) => ref(c, i));
             return { hard, overlaps };
         },
+        'POST /aftermath': ({ q, body }) => {
+            // The one-time "what just happened" line: the room the narrator last described (the map as it saw it) against
+            // the map now. Empty when nothing changed around the party without narration. Derived, never stored.
+            needBody(body);
+            const wid = q('world'), then = isObj(body.then) ? body.then : {};
+            const thenChanges = Array.isArray(then.changes) ? then.changes : [], thenNow = typeof then.now === 'number' ? then.now : null;
+            const was = typeof then.address === 'string' ? then.address : null, at = field(body, 'address', 'str');
+            const now = nowOf(body), changes = field(body, 'changes', 'list', []);
+            if (!was) return { note: '' };
+            let wThen, wNow;
+            try { wThen = changed_for(wid, thenChanges, thenNow, false).w; wNow = changed_for(wid, changes, now).w; } catch { return { note: '' }; }
+            const old = wThen.locations.get(was), here = wNow.locations.get(at);
+            if (!old || !here) return { note: '' };
+            const label = (w, l) => World.place_label(l.name, w.sub_of(l).name);
+            let why = 'a map change was turned off or undone';
+            try { if (now !== null && changed_for(wid, changes, null, false).w.locations.has(was) && !wNow.locations.has(was)) why = 'a temporary change ended'; } catch { /* keep */ }
+            const nowRoom = wNow.locations.get(was);
+            if (!nowRoom) {
+                if (now !== null) try { if (changed_for(wid, changes, null, false).w.locations.has(was)) why = 'a temporary change ended'; } catch { /* keep */ }
+                const keep = new Set(here.exits.map(x => x.direction.toLowerCase()));
+                const only = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
+                const name = label(wThen, old);
+                return { note: `${name} is gone (${why}); the party is now in ${label(wNow, here)}.${only.length ? ` Anything only in ${name}, such as the ${only.slice(0, 4).join(', the ')}, no longer exists.` : ''} Do not describe or add it to the map.`, gone: was };
+            }
+            if (was !== at) return { note: '' };
+            const keep = new Set(nowRoom.exits.map(x => x.direction.toLowerCase()));
+            const lost = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
+            if (!lost.length) return { note: '' };
+            if (now !== null) try { const nc = changed_for(wid, changes, null, false).w.locations.get(was); if (nc && lost.every(d => nc.exits.some(x => x.direction.toLowerCase() === d.toLowerCase()))) why = 'a temporary change ended'; } catch { /* keep */ }
+            return { note: `The map changed around the party without narration (${why}): the ${lost.join(', the ')} in ${label(wNow, nowRoom)} no longer ${lost.length === 1 ? 'exists' : 'exist'}. Do not describe or add ${lost.length === 1 ? 'it' : 'them'} to the map.` };
+        },
         'POST /resolve': ({ q, body }) => {
             // Blanket position resolver: any stored location -> a real room of the effective map.
             needBody(body);
@@ -425,6 +456,19 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const loc = e.w.locations.get(r.address);
             // A temporary change ran out under the party (the room exists with no clock): "the passage seals behind you".
             if (r.moved && now !== null && all.w.locations.has(address)) r.expired = true;
+            if (r.expired) {
+                // For the narrated exit: the room that ran out (name, description), the change that made it, and the places
+                // its exits still reach now (the way they came in first: the default).
+                const old = all.w.locations.get(address);
+                const made = changes.map((c, i) => [c, i]).reverse().find(([c]) => c?.type === 'patch' && Array.isArray(c.ops) && c.ops.some(o => !opActive(o, c, now)
+                    && (o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address))));
+                r.expired_room = { address, name: old ? World.place_label(old.name, all.w.sub_of(old).name) : address, description: old?.description ?? '',
+                    ...(made ? { change: { msg: made[0]._msg ?? null, note: made[0].note ?? '', summary: made[0].summary ?? (all.info.patches ?? []).filter(p => p.msg === (made[0]._msg ?? null) && p.id === (made[0].id ?? null)).flatMap(p => p.summary ?? []), ...(expiredText(wid, made[0], now) ? { ended: expiredText(wid, made[0], now) } : {}) } } : {}) };
+                const seen = new Set();
+                r.options = (old?.exits ?? []).filter(x => e.w.locations.has(x.to) && !seen.has(x.to) && seen.add(x.to))
+                    .map(x => { const l = e.w.locations.get(x.to); return { address: x.to, direction: x.direction, name: World.place_label(l.name, e.w.sub_of(l).name) }; })
+                    .sort((x, y) => (x.address === r.address ? -1 : y.address === r.address ? 1 : 0));
+            }
             return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
         },
         'POST /move': ({ q, body }) => {

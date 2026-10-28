@@ -110,7 +110,11 @@
     "where": "where the party is now, for the narrator",
     "why": "why the door would not move (e.g. it is locked)",
     "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game.",
-    "amount": "The wait amount as the player wrote it, e.g. \"a bit over an hour\"."
+    "amount": "The wait amount as the player wrote it, e.g. \"a bit over an hour\".",
+    "ended": "how a temporary change ran out, e.g. \"Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)\"",
+    "change": "the summary of the map change that made the place",
+    "excerpt": "a short excerpt of the chat message that made the place",
+    "default": "the key to use when unsure (the way the party came in)"
   },
   "prompts": [
     {
@@ -883,6 +887,44 @@
       "placeholders": []
     },
     {
+      "id": "narration.expired",
+      "title": "Narration: a temporary place ends",
+      "description": "Used by Narration. Step 2 of 2 when a temporary place runs out with the party inside (setting \"Narrate expiries\"): the game has already picked where the party ends up and moved them; this line, sent with one automatic narrator reply, lets the narrator decide why and how the place ends.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{place}} has come to an end; {{ended}}. About it: {{description}}\nIt was made by this change: {{change}}\nFrom the message that made it: \"{{excerpt}}\"\n{{party}} has to leave it and ends up in {{to}}{{via}}. You are free to decide why and how it ends (it fades, collapses, they are shown out or thrown out, the spell breaks...), in keeping with what made it. Do not change where {{party}} ends up. Describe leaving and arriving in {{to}}.",
+      "placeholders": [
+        {
+          "name": "place"
+        },
+        {
+          "name": "ended",
+          "generated": true
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "change",
+          "generated": true
+        },
+        {
+          "name": "excerpt",
+          "generated": true
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "to"
+        },
+        {
+          "name": "via",
+          "generated": true
+        }
+      ]
+    },
+    {
       "id": "narration.rules_tools",
       "title": "Narration: last line (tools on)",
       "description": "Step 5 of 5 (map tools on): the last line.",
@@ -943,6 +985,37 @@
       "locked": "Names the ws_wait tool's duration and until arguments, which the game reads.",
       "placeholders": [],
       "text": "Call this whenever a meaningful amount of time (about 15 minutes or more) passes in the scene without travelling, not just long waits or sleep: a long meal or conversation, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or a time skip. Give your best guess at how long. Do not use it for moment-to-moment action or for travel (moves already count their own time). The player can adjust or discard it, so when in doubt, propose it. Give a duration (\"45m\", \"2h\", \"1h30m\", \"2d\") or a time to wait until (\"morning\", \"dusk\", \"14:00\"). The game clock moves on once the player keeps it; the result says the new time."
+    },
+    {
+      "id": "narration.expiry_pick",
+      "title": "Expiry: where the party ends up",
+      "description": "Step 1 of 2 when a temporary place runs out with the party inside (setting \"Narrate expiries\"): which nearby place they end up in. The options are the places its exits still reach; the way they came in is the default. Step 2 is the narrator reply (Narration: a temporary place ends).",
+      "group": "narration",
+      "locked": "The game reads the chosen place key back; changing this can break expiries.",
+      "text": "{{party}} is in {{place}}, which is coming to an end: {{ended}}.\n{{description}}\n\nWhere does {{party}} end up?\n{{options}}\n\nReply with just the key. If unsure: {{default}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "ended",
+          "generated": true
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "options",
+          "generated": true
+        },
+        {
+          "name": "default",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "expand.system",

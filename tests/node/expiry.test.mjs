@@ -137,3 +137,33 @@ test('change text: a note that repeats a summary line is shown once', async () =
     assert.equal(t, ': Stable window: new exit to Courtyard (back: Broken Window)');
     assert.equal(changeText({ note: 'fire', summary: ['Square: description changed'] }), ' · fire: Square: description changed');
 });
+
+test('expiry: /resolve tells the narrated exit what ran out (room, its change, how it ended) and where they can go, the way in first', () => {
+    const ch = [stall()];
+    const r = resolve(BOOTH, ch, H, [LANE]);
+    assert.equal(r.expired_room.name.includes('Pop-up Stall'), true, r.expired_room.name);
+    assert.equal(r.expired_room.description, 'Canvas and crates.');
+    assert.equal(r.expired_room.change.msg, 2);
+    assert.ok(r.expired_room.change.summary.length > 0);
+    assert.match(r.expired_room.change.ended, /Pop-up Stall expired at .+ \(lasted 1h, from message #2\)/);
+    assert.deepEqual(r.options.map(o => o.address), [LANE, SQUARE]);
+    assert.deepEqual(r.options.map(o => o.direction), ['lane', 'stall']);
+});
+
+test('aftermath: a one-time line when the room the narrator last saw is gone or lost exits without narration', () => {
+    const ch = [stall()];
+    const am = body => c.post('/aftermath', { json: body }).json();
+    // Narrated in the stall at 0; now the stall expired and the party was moved to the lane.
+    const gone = am({ then: { changes: ch, now: 0, address: BOOTH }, changes: ch, now: H, address: LANE });
+    assert.match(gone.note, /^Pop-up Stall.* is gone \(a temporary change ended\); the party is now in Market Lane/);
+    assert.match(gone.note, /Anything only in Pop-up Stall.*such as the .*no longer exists/);
+    // In the square: the stall's exit from the square is gone (expiry) — a lost-exit line.
+    const lost = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: H, address: SQUARE });
+    assert.match(lost.note, /\(a temporary change ended\): the square in Village Square.*no longer exists/);
+    // Turned off instead: says so.
+    const off = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: [{ ...ch[0], off: true }], now: 0, address: SQUARE });
+    assert.match(off.note, /turned off or undone/);
+    // Nothing changed (or already narrated): no line.
+    assert.equal(am({ then: { changes: ch, now: H, address: LANE }, changes: ch, now: H, address: LANE }).note, '');
+    assert.equal(am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: 10, address: SQUARE }).note, '');
+});
