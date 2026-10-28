@@ -141,27 +141,51 @@ try {
     const reqs2 = await (await fetch(`${FAKE}/__requests`)).json();
     check('bad move returns valid directions', JSON.stringify(reqs2[reqs2.length - 1].messages).includes('valid_directions'));
 
-    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - stamped at once, no review.
+    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - each waits on a Keep / Adjust / Discard card.
     const waits = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_wait).filter(Boolean));
+    const waitCards = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_waitcard).filter(Boolean));
+    const cardClick = (label, amount) => page.evaluate(async ({ label, amount }) => {
+        const card = [...document.querySelectorAll('.worldscrawl_waitcard')].pop(); if (!card) return false;
+        if (amount != null) card.querySelector('.worldscrawl_wait_amount').value = amount;
+        const b = [...card.querySelectorAll('.menu_button, button, div')].find(x => x.textContent.trim() === label); if (!b) return false;
+        b.click(); await new Promise(r => setTimeout(r, 800)); return true; }, { label, amount });
     check('ws_wait tool sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_wait'));
+    check('Auto-keep waits is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.autoKeepWaits === false && !document.getElementById('worldscrawl_auto_keep_waits').checked));
+    check('ws_wait tool description comes from the prompt file (about 15 minutes, lean to propose)', JSON.stringify(reqs[0].tools ?? []).includes('about 15 minutes or more'));
     await queue([{ tool_calls: [{ name: 'ws_wait', arguments: { duration: '3h' } }] }, { content: 'You wait by the well.' }]);
     await send('I wait three hours.');
     let ws = await waits();
-    check('ws_wait tool stamps 3h', ws.length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep, JSON.stringify(ws));
+    check('ws_wait tool: a card, nothing stamped yet', ws.length === 0 && (await waitCards()).length === 1 && await page.evaluate(() => /swipe/.test(document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')), JSON.stringify(await waitCards()));
     check('ws_wait keeps location', (await stored()) === 'riverton:streets/square');
     check('ws_wait tool result tells model the time', JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-1).messages).includes('Time passes'));
+    check('Keep on the card stamps 3h', await cardClick('Keep') && (ws = await waits()).length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep && (await waitCards()).length === 0, JSON.stringify(ws));
     await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning]' }]);
     await send('I sleep.', 1);
-    ws = await waits();
-    check('[ws_wait] tag stamps sleep until morning', ws.length === 2 && ws[1].sleep && ws[1].until === 'morning' && ws[1].seconds > 0, JSON.stringify(ws));
+    check('[ws_wait] tag: a card with the amount', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 1, JSON.stringify(await waitCards()));
     check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
+    check('Adjust stamps the edited amount (6h sleep)', await cardClick('Adjust', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600, JSON.stringify(ws));
     await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
     await send('I wait an hour.');
+    check('ws_flag wait alias: a card', (await waitCards()).length === 1 && (await waits()).length === 2);
+    check('Discard: no time passes', await cardClick('Discard') && (await waitCards()).length === 0 && (await waits()).length === 2, JSON.stringify(await waits()));
+    await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
+    await send('I wait an hour.');
+    await cardClick('Keep');
     ws = await waits();
-    check('ws_flag wait alias still stamps', ws.length === 3 && ws[2].seconds === 3600, JSON.stringify(ws));
-    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 8'); });
+    check('ws_flag wait alias kept stamps 1h', ws.length === 3 && ws[2].seconds === 3600, JSON.stringify(ws));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 11'); });
     await page.waitForTimeout(1500);
     check('deleting wait messages undoes them', (await waits()).length === 0, JSON.stringify(await waits()));
+    await queue([{ content: 'You pause briefly. [ws_wait: 10m]' }]);
+    await send('I catch my breath.', 1);
+    check('narrator wait under 15 minutes: no card, no clock change', (await waitCards()).length === 0 && (await waits()).length === 0, JSON.stringify(await waitCards()));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 2'); }); await page.waitForTimeout(1000);
+    await queue([{ content: 'Two hours drag by. [ws_wait: 1h]' }]);
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2h'); }); expected += 1; for (let i = 0; i < 60 && (await (await fetch(`${FAKE}/__requests`)).json()).length < expected; i++) await page.waitForTimeout(500); await page.waitForTimeout(2000);
+    ws = await waits();
+    check('explicit /ws-wait applies directly; the narrator\'s wait on that turn gets no card', ws.length === 1 && ws[0].seconds === 7200 && (await waitCards()).length === 0, JSON.stringify([ws, await waitCards()]));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 2'); }); await page.waitForTimeout(1500);
+    check('explicit wait removed again', (await waits()).length === 0, JSON.stringify(await waits()));
 
     await queue([{ tool_calls: [{ name: 'ws_move', arguments: { direction: 'north' } }] }, { content: 'The temple.' }]);
     await send('Up to the temple.');
