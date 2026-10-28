@@ -1457,7 +1457,7 @@ try {
     await ui.fill('.side .mw-row[data-field="sub_name"] input', 'Reeds');
     await ui.fill('.side .mw-row[data-field="place_name"] input', 'Reed Hut');
     await ui.click('.side .mw-addexit');
-    await pickSet(ui.locator('.side .mw-exit .wspick'), 'riverton:east_road/road');
+    await pickSet(ui.locator('.side .mw-exit .wspick').first(), 'riverton:east_road/road');
     await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'a hut');
     await queue([{ content: 'A hut on stilts above black water.' }]);
     const mwNReq = (await (await fetch(`${FAKE}/__requests`)).json()).length;
