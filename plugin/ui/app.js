@@ -251,7 +251,7 @@ async function renderInspector(side, target, ctx) {
             const e = ctx.exit, b = e.barrier;
             const open = (st?.doors_open ?? []).includes(e.door), shut = (st?.doors_closed ?? []).includes(e.door);
             rows.push(['Door id', e.door ?? '—']);
-            if (b) rows.push(['Door now', shut ? 'closed (stamped)' : open ? 'open (stamped)' : b.starts_open ? 'open (as it starts)' : 'closed (as it starts)'], ['Locked', b.locked ? 'yes' : 'no'], ['Can be opened', b.openable ? 'yes' : 'no'], ['Stays open', b.stays_open ? 'yes' : 'no']);
+            if (b) rows.push(['Door now', shut ? 'closed (stamped)' : open ? 'open (stamped)' : b.starts_open ? 'open (as it starts)' : 'closed (as it starts)'], ['Locked', b.locked ? 'yes' : 'no'], ['Can be opened', b.openable ? 'yes' : 'no'], ['Stays open', b.stays_open ? 'yes' : 'no'], ['Barred from', b.barred_from === 'this_side' ? 'this side' : b.barred_from === 'other_side' ? 'the other side' : 'no bar']);
             else rows.push(['Door', 'no barrier']);
             if (e.hidden || e.obscured) rows.push(['Found by this chat', (st?.doors_revealed ?? []).includes(e.door) && !st?.editorOnly ? 'yes' : 'no']);
         }

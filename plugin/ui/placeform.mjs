@@ -79,6 +79,8 @@ export const DOOR_FIELDS = [
     { k: 'starts_open', type: 'bool', label: 'Starts open', dflt: false },
     { k: 'closed_sight', type: 'choice', label: 'See destination', options: ENUMS.closed_sight, dflt: 'none' },
     { k: 'closed_sound', type: 'choice', label: 'Hear destination', options: ENUMS.closed_sound, dflt: 'partial' },
+    // One-sided bar, measured from the side being edited; "(not set)" = no bar.
+    { k: 'barred_from', type: 'choice', select: true, label: 'Barred from', options: [{ value: 'this_side', label: 'this side (can bar and unbar it here)' }, { value: 'other_side', label: 'the other side (won\'t open from here while barred)' }] },
 ];
 
 /** What an exit's unset sight/sound comes to while open (or with no door), and why (obscured, exit type), from the form's live state. */
@@ -250,7 +252,7 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
             ctl = pickField(doc, { ...pick, value: set ? pick.toFull(cur) : '', empty: fb ? `(${fb})` : '(not set)' });
             ctl.classList.add('pf-input');
             ctl.addEventListener('change', () => change(ctl.value === '' ? undefined : pick.toLocal(ctl.value)));
-        } else if (spec.type === 'choice' && opts.length <= 3) {
+        } else if (spec.type === 'choice' && opts.length <= 3 && !spec.select) {
             const name = `pf_${spec.k}_${Math.random().toString(36).slice(2, 8)}`;
             ctl = el('span', { class: 'pf-radios' }, ...opts.map(o => {
                 const r = el('input', { type: 'radio', name, value: o.value, class: 'pf-input' });

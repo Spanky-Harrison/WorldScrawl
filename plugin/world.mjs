@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { checkCalendar, checkStart, defaultTravel, parseDuration } from './ui/calendar.mjs';
 import { buildWeather, checkPlace } from './weather-config.mjs';
+import { BAR_SIDES, flipBar } from './ui/doorbar.mjs';
+export { BAR_SIDES, flipBar };
 
 export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 export const VIEWS = ['open', 'closed', 'none']; // legacy exit "view" (read as sight/sound/barrier; see exitShape)
@@ -21,7 +23,7 @@ export const LEVELS = ['clear', 'partial', 'none']; // exit "sight" / "sound", a
 export const EXIT_TYPES = Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(new URL('./exit_types.json', import.meta.url), 'utf8'))).filter(([k]) => !k.startsWith('_')));
 export const DEFAULT_EXIT_TYPE = 'portal';
 export const BARRIER_DEFAULTS = { closed_sight: 'none', closed_sound: 'partial', openable: true, starts_open: false, locked: false };
-const BARRIER_KEYS = [...Object.keys(BARRIER_DEFAULTS), 'stays_open'];
+const BARRIER_KEYS = [...Object.keys(BARRIER_DEFAULTS), 'stays_open', 'barred_from'];
 
 /** Where log lines go (the plugin points this at SillyTavern's console; tests capture it). */
 export const log = {
@@ -309,6 +311,7 @@ export function exitShape(e, ex, where) {
         for (const k of ['closed_sight', 'closed_sound']) if (has(b, k)) { if (!LEVELS.includes(b[k])) throw new WorldError(`${bw}: "${k}" must be one of ${LEVELS.join(', ')}`); out[k] = b[k]; }
         for (const k of ['openable', 'starts_open', 'locked']) { const v = optionalBool(b, k, bw); if (v !== null) out[k] = v; }
         out.stays_open = optionalBool(b, 'stays_open', bw) ?? e.stays_open;
+        if (has(b, 'barred_from') && b.barred_from !== null) { if (!BAR_SIDES.includes(b.barred_from)) throw new WorldError(`${bw}: "barred_from" must be "this_side" or "other_side" (or left out for no bar)`); out.barred_from = b.barred_from; }
         if (!out.openable && out.starts_open) throw new WorldError(`${bw}: a barrier that can't be opened ("openable": false) can't start open`);
         e.barrier = out; e.barrier_explicit = true;
         e._barrier_given = Object.fromEntries(Object.keys(b).map(k => [k, b[k]]));
@@ -518,14 +521,15 @@ export function build_world(worldJson, rawRegions) {
             if (!back) continue;
             merged.add(back);
             if (back.barrier_explicit) {
-                const diff = BARRIER_KEYS.filter(k => k !== 'stays_open' && e.barrier[k] !== back.barrier[k]);
+                const backSeen = flipBar(back.barrier); // the back side's barred_from is measured from the back side
+                const diff = BARRIER_KEYS.filter(k => k !== 'stays_open' && e.barrier[k] !== backSeen[k]);
                 if (diff.length) warn(`world: the barrier between ${loc.address} (${repr(e.direction)}) and ${e.to} (${repr(back.direction)}) is set on both sides and they disagree on ${diff.join(', ')}; using ${loc.address}'s`, [exitRef(loc.address, e), exitRef(e.to, back), `loc:${loc.address}`, `loc:${e.to}`]);
                 else warn(`world: the barrier between ${loc.address} (${repr(e.direction)}) and ${e.to} (${repr(back.direction)}) is set on both sides; only one side needs it (the other inherits it)`, [exitRef(loc.address, e), exitRef(e.to, back)], true);
                 back.barrier_from = loc.address;
                 const so = back.barrier.stays_open;
-                back.barrier = { ...e.barrier, stays_open: so }; // stays_open: both sides' explicit values combine below
+                back.barrier = { ...flipBar(e.barrier), stays_open: so }; // stays_open: both sides' explicit values combine below
             } else {
-                back.barrier = { ...e.barrier, stays_open: back.stays_open };
+                back.barrier = { ...flipBar(e.barrier), stays_open: back.stays_open };
                 back.barrier_explicit = true; back.barrier_from = loc.address;
             }
         }
