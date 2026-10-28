@@ -2379,13 +2379,18 @@ async function removeFromCard(mi, pid) {
 let carrierSnap = [], ownDelete = false;
 export function snapCarriers() { carrierSnap = (ctx().chat ?? []).filter(isCarrier); }
 export let lastLostCarriers = [];
+let lastLostAt = 0, lastLostToast = null;
 async function onMessagesDeleted() {
     const now = new Set(ctx().chat ?? []), lost = carrierSnap.filter(m => !now.has(m));
     snapCarriers();
     if (!lost.length || ownDelete) return;
+    // A range delete (/cut a-b, /del N) can fire one event per message: gather everything lost in one burst into one toast.
+    const now2 = Date.now();
+    if (now2 - lastLostAt < 3000) { lost.unshift(...lastLostCarriers); try { lastLostToast?.remove?.(); } catch {} }
+    lastLostAt = now2;
     lastLostCarriers = lost;
     const n = lost.reduce((a, m) => a + (m.extra?.[PATCH_KEY]?.length ?? 0), 0);
-    try { toastr.warning(`${n} map edit${n === 1 ? ' was' : 's were'} deleted along with those messages. Click to undo.`, 'WorldScrawl: Undo?', { timeOut: 20000, extendedTimeOut: 10000, closeButton: true, onclick: () => restoreCarriers(lost) }); } catch {}
+    try { lastLostToast = toastr.warning(`${n} map edit${n === 1 ? ' was' : 's were'} deleted along with those messages. Click to undo.`, 'WorldScrawl: Undo?', { timeOut: 20000, extendedTimeOut: 10000, closeButton: true, onclick: () => restoreCarriers(lost) }); } catch {}
 }
 /** Put deleted carriers back (same stamps, same patch ids) at the end of the chat. */
 export async function restoreCarriers(lost = lastLostCarriers) {
