@@ -1442,6 +1442,7 @@ try {
     check('toggle setup: two stamped changes, the second built on the first', stamped.every(r => r.ok) && stamped[0].msg === nTog && stamped[1].msg === nTog + 1, JSON.stringify(stamped));
     const tA = nTog, tB = nTog + 1;
     const cardA = page.locator(`#chat .mes[mesid="${tA}"] .worldscrawl_patchcard`), cardB = page.locator(`#chat .mes[mesid="${tB}"] .worldscrawl_patchcard`);
+    for (const k of [tA, tB]) { const d = page.locator(`#chat .mes[mesid="${k}"] details.worldscrawl_carrier`); await d.waitFor({ timeout: 10000 }); if (!(await d.evaluate(e => e.open))) await d.locator('summary').first().click(); } // carriers start collapsed
     await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).waitFor({ timeout: 10000 });
     check('kept change cards have a Turn off button', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 1);
     await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
