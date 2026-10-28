@@ -998,7 +998,7 @@ export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(an
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
 
 // ---- Narrative digging: "I smash a hole in the wall". Small sequential questions, each validated and retried alone.
-const DIG_SYS = 'You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.';
+export const DIG_SYS = 'You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.';
 export const DIG_TRIES = 2;
 export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
 async function askValid(label, prompt, validate) {
@@ -1153,12 +1153,13 @@ async function narrativeLook(msg, loc) {
     console.log(`[WorldScrawl] look: ${JSON.stringify(look).slice(0, 160)}`);
     return { kind: 'look', loc };
 }
+export const doorPickPrompt = (loc, said, list, type) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhich door does the player ${type === 'open_door' ? 'open' : 'close'}?\n` + list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') + '\n\nReply with just the number.';
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     let e = list.length === 1 ? list[0] : null;
     if (!e) {
-        const k = await askValid('door', `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhich door does the player ${type === 'open_door' ? 'open' : 'close'}?\n` + list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') + '\n\nReply with just the number.', pickNumber(list.length));
+        const k = await askValid('door', doorPickPrompt(loc, said, list, type), pickNumber(list.length));
         e = k ? list[k - 1] : null;
     }
     if (!e) return { kind: STAY, loc };
@@ -1169,13 +1170,30 @@ async function narrativeDoor(msg, loc, list, type) {
 }
 export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
-const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
+export const TRAVEL_YN_SYS = 'Reply with exactly one word: yes or no.';
+export const travelYesNoPrompt = (loc, said) => `${whoMoves()} is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`;
+export const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
 
 /**
  * Ask the model one multiple-choice question about the player's message.
  * Returns {kind:'move'|'stay'|'elsewhere', loc}. An unreadable answer gets a yes/no follow-up
  * ("trying to travel?"): a clear yes is 'elsewhere', anything else is 'stay'.
  */
+export function intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options }) {
+    return `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
+        + `${said}\n\nAnswer with one option:\n`
+        + moveDirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
+        + movePlaces.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
+        + (canOpen ? `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n` : '')
+        + (canLook ? `- ${LOOK}: the player looks, peers, peeks or listens at something from here, without going anywhere\n` : '')
+        + (canOpenDoor ? `- ${OPEN_DOOR}: the player opens a closed door here, without going through it\n` : '')
+        + (canCloseDoor ? `- ${CLOSE_DOOR}: the player closes an open door here\n` : '')
+        + (canNewDoor ? `- ${NEW_DOOR}: the player opens or tries a door, hatch or stair that is none of the exits listed above (e.g. another door along a hallway)\n` : '')
+        + `- ${STAY}: the player is not trying to travel anywhere\n`
+        + (onlyLook ? '\n' : `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
+        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`)
+        + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
+}
 async function parseIntent(msg) {
     const c = ctx();
     msg.extra = msg.extra ?? {};
@@ -1201,19 +1219,7 @@ async function parseIntent(msg) {
         const nm = lbl.length > e.direction.length ? lbl.slice(e.direction.length) : destLabel(e); // same label as the footer: room, or building (+ room / region)
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
-    const prompt = `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
-        + `${said}\n\nAnswer with one option:\n`
-        + moveDirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
-        + movePlaces.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
-        + (canOpen ? `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n` : '')
-        + (canLook ? `- ${LOOK}: the player looks, peers, peeks or listens at something from here, without going anywhere\n` : '')
-        + (canOpenDoor ? `- ${OPEN_DOOR}: the player opens a closed door here, without going through it\n` : '')
-        + (canCloseDoor ? `- ${CLOSE_DOOR}: the player closes an open door here\n` : '')
-        + (canNewDoor ? `- ${NEW_DOOR}: the player opens or tries a door, hatch or stair that is none of the exits listed above (e.g. another door along a hallway)\n` : '')
-        + `- ${STAY}: the player is not trying to travel anywhere\n`
-        + (onlyLook ? '\n' : `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
-        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`)
-        + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
+    const prompt = intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options });
     const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
     const cands = await travelCandidates(loc);
     // Without the word check passing, "new opening" is not an option: such an answer falls through to the normal handling.
@@ -1232,7 +1238,7 @@ async function parseIntent(msg) {
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
     }
     if (!choice) {
-        const yn = await c.generateRaw({ prompt: `${whoMoves()} is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`, systemPrompt: 'Reply with exactly one word: yes or no.', responseLength: 48 });
+        const yn = await c.generateRaw({ prompt: travelYesNoPrompt(loc, said), systemPrompt: TRAVEL_YN_SYS, responseLength: 48 });
         choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
         console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
     }
@@ -2078,7 +2084,7 @@ export function broadcastMapState() {
         try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
     }, 150);
 }
-const EXPAND_SYS = 'You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.';
+export const EXPAND_SYS = 'You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.';
 function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
@@ -2156,8 +2162,8 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.';
-const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
+export const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.';
+export const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
@@ -2488,8 +2494,8 @@ export function parseJsonAnswer(text) {
     }
     return null;
 }
-const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
-const patchSys = pl => `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
+export const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
+export const patchSys = pl => `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
 ADDR is a room's full address copied exactly from the map, e.g. "riverton:drowned_rat/common_room". AREA is a region id ("riverton") or subregion id ("riverton:drowned_rat"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.
 Allowed ops (exactly what the map editor can do):
 ${pl.opDocs()}
@@ -2507,6 +2513,7 @@ async function flagContext(f, rooms = []) {
 }
 const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${o.exits.map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
 
+export const scopePrompt = (c1, { start, id, story, what }) => `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids changed as a whole (renamed, or general notes changed), e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
 /** The two small model calls (which rooms; then the patch), checked by the server. Leaves the result on the flag. */
 async function analyzeFlag(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
@@ -2519,7 +2526,7 @@ async function analyzeFlag(id) {
         const story = storyText(chat, f.start, id);
         const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
         const c1 = await flagContext(f);
-        const scopeQ = `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids changed as a whole (renamed, or general notes changed), e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
+        const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
         const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: SCOPE_SYS, responseLength: 200 }));
         const known = [...new Set(c1.outline.map(o => o.address))];
         const toKnown = a => { a = String(a).trim().toLowerCase(); if (known.includes(a)) return a; const t = a.slice(a.indexOf(':') + 1), hit = known.filter(k => k.endsWith(t.includes('/') ? `:${t}` : `/${t}`)); return hit.length === 1 ? hit[0] : null; };
@@ -2557,9 +2564,10 @@ async function analyzeFlag(id) {
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
-const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:
+export const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:
 {"name": "...", "description": "...", "direction": "exit name from the current room", "return_direction": "exit name back", "exit_description": "...", "return_description": "..."}
 name: short display name (e.g. "Guest Room"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. "east guest room", "green door"). return_direction: usually "out" or "hallway". exit_description / return_description: one sentence each about the door from each side.`;
+export const discoverPrompt = (k, { exits, near, story, start, id, note, err }) => `Region: ${k.region_name}. ${k.region_notes}\nArea: ${k.area_name}. ${k.area_notes}\n\nCurrent room: ${k.name} (${k.location})\n${k.description}\nIts exits:\n${exits}\n\nRooms one step away:\n${near}\n\nStory (messages #${start}-#${id}):\n${story}\n\n${note ? `The door: "${clip(note, 200)}".\n` : ''}${err ? `Your last answer did not fit: ${err}. Fix it.\n` : ''}Describe the room behind the door that was opened.`;
 async function analyzeDiscovery(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
@@ -2573,7 +2581,7 @@ async function analyzeDiscovery(id) {
         const exits = k.exits.map(x => `${x.direction} -> ${x.to}${x.description ? `: ${x.description}` : ''}`).join('\n') || 'none';
         const near = k.neighbors.map(n => `${n.name} (${n.address}): ${clip(n.description, 300)}`).join('\n') || 'none';
         const story = clip(storyText(chat, f.start, id), 4000);
-        const q = err => `Region: ${k.region_name}. ${k.region_notes}\nArea: ${k.area_name}. ${k.area_notes}\n\nCurrent room: ${k.name} (${k.location})\n${k.description}\nIts exits:\n${exits}\n\nRooms one step away:\n${near}\n\nStory (messages #${f.start}-#${id}):\n${story}\n\n${f.note ? `The door: "${clip(f.note, 200)}".\n` : ''}${err ? `Your last answer did not fit: ${err}. Fix it.\n` : ''}Describe the room behind the door that was opened.`;
+        const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err });
         let preview = null, ops = null, err = '';
         for (let tries = 0; tries < 2 && !preview; tries++) {
             const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: DISCOVER_SYS, responseLength: 500 }));
