@@ -302,6 +302,21 @@ export async function doorAction(kind, arg) {
 export const cacheInfo = () => ({ size: exitsCache.size, mapVersion });
 export const cacheKeys = () => [...exitsCache.keys()];
 
+/** Load the prompts in use (default + the selected profile) from the plugin, once, and again after the editor saves. */
+let promptsLoading = null;
+export function ensurePrompts(force = false) {
+    if (hasPrompts() && !force) return Promise.resolve();
+    promptsLoading = (async () => {
+        const res = await fetch(`${baseUrl()}/prompts/active`, { headers: csrfHeaders() });
+        if (!res.ok) throw new Error(`WorldScrawl could not load its prompts (server answered ${res.status}). ${NOT_RUNNING()}`);
+        const { prompts } = await res.json();
+        setPrompts(prompts);
+        try { (await import(`${baseUrl()}/ui/prompts.mjs`)).setPrompts(prompts); } catch (e) { console.warn('[WorldScrawl] prompt module unavailable:', e.message); }
+        applyNudge();
+    })().finally(() => { promptsLoading = null; });
+    return promptsLoading;
+}
+
 async function api(path, options = {}) {
     let res;
     try {
@@ -529,6 +544,7 @@ function registerTools() {
 function applyNudge() {
     const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    if (!hasPrompts()) { ensurePrompts().catch(e => console.warn('[WorldScrawl]', e.message)); return; }
     ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? `${flagHint()}\n${waitHint()}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
@@ -1185,6 +1201,7 @@ export function intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOp
     return P('intent.question', { who: whoMoves(), place: displayName(loc), exits: exitLines.join('\n') || P('intent.no_exits'), said, option_lines: lines, options: options.join(', ') });
 }
 async function parseIntent(msg) {
+    await ensurePrompts();
     const c = ctx();
     msg.extra = msg.extra ?? {};
     msg.extra.worldscrawl_intent_checked = true;
@@ -1436,6 +1453,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
 }
 
 async function applyFacts() {
+    await ensurePrompts();
     const c = ctx();
     if (!isOn()) { c.setExtensionPrompt(FACTS_KEY, '', 1, 1, false, 0); c.setExtensionPrompt(REMINDER_KEY, '', 1, 0, false, 0); return; }
     let text = '', reminder = '';
@@ -2077,6 +2095,7 @@ function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
         if (ev.data?.type === 'hello') broadcastMapState();
+        if (ev.data?.type === 'prompts_changed') ensurePrompts(true).catch(e => console.warn('[WorldScrawl]', e.message)); // the Prompt Editor saved
         // The map's Wait button: only the tab showing that chat acts on it (the map never changes state itself).
         if (ev.data?.type === 'patch') { // the map's "Edit live": this tab stamps it on a hidden message and answers
             const c = ctx();
@@ -2098,7 +2117,7 @@ function openMapChannel() {
         }
         if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
             const c = ctx(), d = ev.data;
-            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 })
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }))
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }
@@ -2495,6 +2514,7 @@ const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_
 export const scopePrompt = (c1, { start, id, story, what }) => P('change.scope', { area_name: c1.area_name, area: c1.area, region_name: c1.region_name, outline: outlineText(c1), start, end: id, story, what });
 /** The two small model calls (which rooms; then the patch), checked by the server. Leaves the result on the flag. */
 async function analyzeFlag(id) {
+    await ensurePrompts();
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f) return;
     if (f.kind === 'discover') return analyzeDiscovery(id);
@@ -2547,6 +2567,7 @@ export const discoverSys = () => P('discover.system');
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err }) => P('discover.question', { region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
 async function analyzeDiscovery(id) {
+    await ensurePrompts();
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
     f.status = 'working'; f.error = ''; delete f.proposal;

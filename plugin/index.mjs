@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from './server.mjs';
 import { log } from './world.mjs';
 import { uiFile } from './ui.mjs';
+import { handlePrompts } from './prompts.mjs';
 
 const here = (() => { const d = path.dirname(fileURLToPath(import.meta.url)); try { return fs.realpathSync(d); } catch { return d; } })();
 
@@ -31,6 +32,13 @@ export function worldsDir(env = process.env, dir = here) {
     return path.resolve(dir, '..', 'worlds');
 }
 
+/** Where a user's WorldScrawl settings (prompt profiles) live: their SillyTavern data folder, else next to the plugin. */
+export function userRoot(req, env = process.env, dir = here) {
+    if (env.WORLDSCRAWL_USER_DIR) return path.resolve(env.WORLDSCRAWL_USER_DIR);
+    const r = req?.user?.directories?.root;
+    return typeof r === 'string' && r ? r : path.resolve(dir, '..', 'data');
+}
+
 /** Express adapter: hand every request under the mount point to the framework-free handler. */
 export function mount(router, server) {
     router.use((req, res) => {
@@ -43,7 +51,10 @@ export function mount(router, server) {
             return res.send(fs.readFileSync(ui.file));
         }
         const body = req.is('application/json') ? req.body : undefined;
-        const r = server.handle(req.method, req.url, body);
+        let r;
+        try { r = handlePrompts(req.method, req.url, body, userRoot(req)); } catch (e) { r = { status: 500, body: { detail: `prompts: ${e.message}` } }; }
+        if (r) return res.status(r.status).json(r.body);
+        r = server.handle(req.method, req.url, body);
         for (const [k, v] of Object.entries(r.headers)) res.setHeader(k, v);
         res.status(r.status).json(r.body);
     });

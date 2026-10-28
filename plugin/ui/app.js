@@ -2,6 +2,7 @@
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
+import { loadPrompts } from './prompts.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
 import { pickSearch, pickValid, pathOf } from './picker.mjs';
@@ -165,6 +166,7 @@ function sendExpand(prompt) {
 async function aiText(st, { field, kind, name, area, rooms = [], text = '' }) {
     const q = st?.world ? `?world=${encodeURIComponent(st.world)}` : '';
     const c = await postJson(`${API}/edit/ai-context${q}`, { area: area ?? '', rooms, changes: st?.changes ?? [], now: st?.now ?? null });
+    await loadPrompts(API); // the selected profile may have changed since the window opened
     return sendExpand(expandPrompt(c, { field, text, name, kind }));
 }
 let curState = null; // the latest state message (its changes go with inspector requests)

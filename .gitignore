@@ -3,3 +3,4 @@ worlds/*
 !worlds/riverton/
 .backups/
 plugin/config.json
+/data/
