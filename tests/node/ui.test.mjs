@@ -320,3 +320,44 @@ test('Riverton world: East Road leads to Larkspur and back; the world map shows 
     assert.equal(w.nodes.find(n => n.id === 'region:larkspur').here, true);
     assert.deepEqual(breadcrumb(g2, layerOf(g2, after[3])).map(x => x.label), ['World', 'Larkspur', 'Larkspur Streets']);
 });
+
+test('buildGraph: an obscured exit pair is one line once both rooms are known; the editor marks the obscured end', () => {
+    const A = 'r:s/a', B = 'r:s/b';
+    const room = (address, name, exits) => ({ address, name, description: `${name}.`, subregion: { id: 'r:s', name: 'S' }, region: { id: 'r', name: 'R' }, exits });
+    const rooms = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1' }])], [B, room(B, 'Cellar', [{ direction: 'up', to: A, door: 'd1' }])]]);
+    // Only the Common Room seen from the inside: the trapdoor is a "?" stub.
+    const g0 = buildGraph({ location: A, stood: [A], seen: [], doors_open: [] }, rooms);
+    assert.ok(g0.nodes.some(n => n.kind === 'stub') && !g0.nodes.some(n => n.id === B));
+    // Been to the Cellar: one line, both labels, no stub.
+    const g1 = buildGraph({ location: A, stood: [A, B], seen: [], doors_open: [] }, rooms);
+    assert.equal(g1.edges.length, 1); assert.ok(!g1.nodes.some(n => n.kind === 'stub'));
+    assert.deepEqual([g1.edges[0].direction, g1.edges[0].back?.direction].sort(), ['trapdoor', 'up']);
+    // The editor sees the real link, with the obscured end marked.
+    const rv = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1', to: B, revealed: true }])], [B, rooms.get(B)]]);
+    const g2 = buildGraph({ location: A, stood: [A, B], seen: [], doors_open: [] }, rv, { mark: true });
+    assert.equal(g2.edges.length, 1);
+    const ends = [g2.edges[0], g2.edges[0].back], t = ends.find(e => e.direction === 'trapdoor'), u = ends.find(e => e.direction === 'up');
+    assert.equal(t.obscured, true); assert.ok(!u.obscured);
+    assert.ok(!buildGraph({ location: A, stood: [A, B], seen: [], doors_open: [] }, rv).edges[0].obscured, 'the player view never marks');
+});
+
+test('buildGraph: an unevenly obscured pair from the source side is one "?" stub, not a stub plus a real line', () => {
+    const A = 'r:s/a', B = 'r:s/b';
+    const room = (address, name, exits) => ({ address, name, description: `${name}.`, subregion: { id: 'r:s', name: 'S' }, region: { id: 'r', name: 'R' }, exits });
+    // The trapdoor is obscured from the Common Room; the way back up is plain.
+    const rooms = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1' }])], [B, room(B, 'Cellar', [{ direction: 'up', to: A, door: 'd1' }])]]);
+    const g = buildGraph({ location: A, stood: [A], seen: [], doors_open: [] }, rooms);
+    assert.equal(g.edges.length, 1, 'one line');
+    assert.equal(g.nodes.filter(n => n.kind === 'stub').length, 1);
+    assert.ok(!g.nodes.some(n => n.id === B), 'the plain return side does not give away the destination');
+    // Came back up through it (door revealed): the real link, never marked in the player view.
+    const rv = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1', to: B, revealed: true }])], [B, rooms.get(B)]]);
+    const g2 = buildGraph({ location: A, stood: [A], seen: [], doors_open: [] }, rv);
+    assert.equal(g2.edges.length, 1); assert.equal(g2.edges[0].to, B); assert.ok(!g2.nodes.some(n => n.kind === 'stub')); assert.ok(!g2.edges[0].obscured);
+});
+
+test('app.css: text boxes resize vertically only; Expand with AI sits on its own line under its box', async () => {
+    const css = (await import('node:fs')).readFileSync(new URL('../../plugin/ui/app.css', import.meta.url), 'utf8');
+    assert.match(css, /textarea[^{]*\{\s*resize:\s*vertical/);
+    assert.match(css, /\.pf-row \.pf-ai\s*\{[^}]*grid-column:\s*2\s*\/\s*-1/);
+});

@@ -128,7 +128,7 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .mapaction .mw-row { display: flex; flex-direction: column; gap: 2px; }
 .mapaction .mw-row[hidden] { display: none; }
 .mapaction textarea, .mapaction input[type=text], .mapaction select { width: 100%; box-sizing: border-box; }
-.mapaction .mw-exit { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 4px; }
+.mapaction .mw-exit { display: flex; flex-direction: column; gap: 4px; border-left: 2px solid #444; padding-left: 6px; }
 .mapaction .mw-cascade, .mapaction .mw-blocked { color: #e9a23b; font-weight: bold; }
 .mapaction .mw-clash, .editlive-pane .mw-clash { color: #e9a23b; }
 .mapaction .mw-picks { display: flex; flex-direction: column; }
@@ -153,3 +153,12 @@ svg.picking .node.pickable { cursor: pointer; }
 svg.picking .node.pickdim { opacity: .3; }
 .wspick-confirm { position: fixed; top: 30%; left: 50%; transform: translateX(-50%); padding: 16px 20px; background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #ddd); border: 2px solid var(--SmartThemeQuoteColor); border-radius: 10px; box-shadow: 0 4px 24px #000a; z-index: 10; display: flex; gap: 10px; align-items: center; }
 .wspick-q { font-weight: bold; margin-right: 8px; }
+/* Text boxes grow only downwards; "Expand with AI" sits on its own line under its text box. */
+textarea, .placeform textarea, .mapaction textarea, .patchform textarea { resize: vertical; }
+.pf-row .pf-ai { grid-column: 2 / -1; justify-self: start; }
+.mapaction .mw-ai, .mapaction .pf-ai { align-self: flex-start; display: block; margin-top: 2px; }
+.pf-side { border-left: 2px solid #444; padding: 2px 0 4px 8px; margin: 4px 0; display: flex; flex-direction: column; gap: 4px; }
+.pf-side-head { font-size: 13px; }
+.pf-side-head .pf-dir { width: 9em; margin: 0 4px; }
+.mw-side { font-size: 13px; }
+.mw-side input { width: 9em !important; margin: 0 4px; }

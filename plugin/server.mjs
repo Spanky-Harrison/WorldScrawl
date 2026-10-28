@@ -442,7 +442,11 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             if (extra.length) r.changes = [...(r.changes ?? []), ...extra].sort((a, b) => (a.msg ?? -1) - (b.msg ?? -1));
             return r;
         },
-        'POST /doors': ({ q, body }) => { needBody(body); const doors = field(body, 'doors', 'strs'); return { exits: get_world(q('world')).world.door_reveals(doors) }; },
+        'POST /doors': ({ q, body }) => { // with this chat's changes, so doors on places a change made are found too
+            needBody(body); const doors = field(body, 'doors', 'strs'), changes = field(body, 'changes', 'list', []);
+            const w = changes.length ? world_for(q('world'), changes, nowOf(body)) : get_world(q('world')).world;
+            return { exits: w.door_reveals(doors) };
+        },
         'POST /travel': ({ q, body }) => {
             needBody(body);
             const from = field(body, 'from', 'str'), steps = field(body, 'steps', 'strs'), changes = field(body, 'changes', 'list', []);

@@ -8,6 +8,7 @@
 // outline (a rename box prefilled with a suggested id) and again from the server's 400 {clash}. Nothing is overwritten.
 import { suggestId, slugId } from './patches.mjs';
 import { pickField } from './picker.mjs';
+import { opposite, sideLabels } from './placeform.mjs';
 
 const ACTIONS = {
     world: [['create_region', 'Create region']],
@@ -115,20 +116,29 @@ export function openAction(doc, pane, action, ctx, io) {
     }
     const addFirstFor = cas => () => openAction(doc, pane, cas.kind === 'subregion' ? 'create_place' : 'create_subregion',
         { ...ctx, target: cas.area, kind: cas.kind, done: async () => { await new Promise(r => setTimeout(r, 900)); openAction(doc, pane, action, { ...ctx, outline: await io.outline() }, io); }, cancel: () => openAction(doc, pane, action, ctx, io) }, io);
-    const exitsEditor = (from, min) => {
+    const exitsEditor = (from, min, hereName = () => '') => {
         const list = $('div', { class: 'mw-exits' }), rows = [];
+        const roomName = a => allRooms(o).find(r => r.address === a)?.name ?? '';
         const add = () => {
-            const to = pickField(doc, { kind: 'room', title: 'exit destination', exclude: from ? [from] : [], outline: o, value: '' }), dir = input('', 'direction from here (e.g. north)'), back = input('', 'way back (e.g. south)');
-            const r = $('div', { class: 'mw-exit' }, to, dir, back, $('button', { type: 'button', class: 'crumb', onclick: () => { r.remove(); rows.splice(rows.indexOf(x), 1); refresh(); } }, '×'));
-            const x = { to, dir, back }; rows.push(x); list.append(r); refresh();
+            const to = pickField(doc, { kind: 'room', title: 'exit destination', exclude: from ? [from] : [], outline: o, value: '' }), dir = input('', 'e.g. north'), back = input('', 'e.g. south');
+            dir.classList.add('mw-dir'); back.classList.add('mw-back');
+            const s1 = $('div', { class: 'mw-side', 'data-side': 'there' }), s2 = $('div', { class: 'mw-side', 'data-side': 'back' });
+            const label = () => { const L = sideLabels(hereName().trim() || 'the new place', roomName(to.value) || '?'), [a1, b1] = L.there.split('___'), [a2, b2] = L.back.split('___'); s1.replaceChildren(a1, dir, b1); s2.replaceChildren(a2, back, b2); };
+            let auto = true;
+            dir.addEventListener('input', () => { if (auto) back.value = opposite(dir.value); });
+            back.addEventListener('input', () => { auto = false; });
+            to.addEventListener('change', label);
+            const r = $('div', { class: 'mw-exit' }, to, s1, s2, $('button', { type: 'button', class: 'crumb', onclick: () => { r.remove(); rows.splice(rows.indexOf(x), 1); refresh(); } }, '×'));
+            const x = { to, dir, back, label }; rows.push(x); label(); list.append(r); refresh();
         };
         if (min) add();
         return { el: $('div', {}, $('b', {}, min ? 'Exits (at least one, to an existing place)' : 'Exits (optional)'), list, $('button', { type: 'button', class: 'crumb mw-addexit', onclick: add }, 'Add exit')),
             get: () => rows.filter(x => x.to.value).map(x => ({ to: x.to.value, direction: x.dir.value.trim() || `to ${allRooms(o).find(r => r.address === x.to.value)?.name ?? 'there'}`, ...(x.back.value.trim() ? { return_direction: x.back.value.trim() } : {}) })),
-            rooms: () => rows.map(x => x.to.value).filter(Boolean) };
+            rooms: () => rows.map(x => x.to.value).filter(Boolean), relabel: () => rows.forEach(x => x.label()) };
     };
     const placeFields = (areaRef, needExit, title = 'Place') => {
-        const name = input(), desc = area(), ex = exitsEditor(null, needExit);
+        const name = input(), desc = area(), ex = exitsEditor(null, needExit, () => name.value);
+        name.addEventListener('input', () => ex.relabel());
         return { els: [row(`${title} name`, name, { 'data-field': 'place_name' }), row(`${title} description`, desc, { 'data-field': 'place_description' }),
             aiBtn(desc, () => ({ field: 'description', kind: 'room', name: name.value, area: areaRef(), rooms: ex.rooms() })), ex.el],
         get() { if (!name.value.trim()) throw new Error(`${title} name is required.`); if (!desc.value.trim()) throw new Error(`${title} description is required.`); const exits = ex.get().map(e => e.return_direction ? e : { ...e, return_direction: `to ${name.value.trim()}` }); if (needExit && !exits.length) throw new Error('A new place needs at least one exit to an existing place.'); return { name: name.value.trim(), description: desc.value.trim(), ...(exits.length ? { exits } : {}) }; } };
@@ -151,6 +161,8 @@ export function openAction(doc, pane, action, ctx, io) {
             break;
         }
         case 'create_place': {
+            // The map's Create place is the Edit place form, empty (all its fields, both sides of each exit, the door).
+            if (io.createPlace) { io.createPlace(t, { heading: findSub(o, t)?.name ?? t, ...(ctx.done ? { done: ctx.done } : {}), ...(ctx.cancel ? { cancel: ctx.cancel } : {}) }); return box; }
             const p = placeFields(() => t, true);
             build = () => [{ op: 'create_place', area: t, ...p.get() }];
             header(`Create place in ${findSub(o, t)?.name ?? t}`, ...p.els);

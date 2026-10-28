@@ -270,19 +270,21 @@ async function renderInspector(side, target, ctx) {
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
     const live = !!(st?.on && st.chatId && !st.editorOnly);
     const editLabel = { room: 'Edit place', exit: 'Edit place', subregion: 'Edit subregion', region: 'Edit region' }[d.kind] ?? 'Edit';
-    const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit', ...(live ? {} : { disabled: '' }), onclick: async () => {
-        const q = st.world ? `?world=${encodeURIComponent(st.world)}` : '';
+    // The Edit place form: also, with target new:<subregion>, the Create place form (the same form, empty).
+    const openEditForm = async (tgt, { label = editLabel, heading = null, done = null, cancel = () => show(tab) } = {}) => {
+        const S = now();
+        const q = S.world ? `?world=${encodeURIComponent(S.world)}` : '';
         let ectx;
-        try { ectx = await postJson(`${API}/edit/context${q}`, { target, changes: st.changes ?? [], now: st.now ?? null }); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't edit this: ${e.message}`)); return; }
-        try { ectx.outline = await postJson(`${API}/edit/outline${q}`, { changes: st.changes ?? [], now: st.now ?? null }); } catch { /* plain dropdowns then */ }
-        const expand = target.startsWith('exit:') ? target.split('|')[1] : null;
+        try { ectx = await postJson(`${API}/edit/context${q}`, { target: tgt, changes: S.changes ?? [], now: S.now ?? null }); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't edit this: ${e.message}`)); return; }
+        try { ectx.outline = await postJson(`${API}/edit/outline${q}`, { changes: S.changes ?? [], now: S.now ?? null }); } catch { /* plain dropdowns then */ }
+        const expand = tgt.startsWith('exit:') ? tgt.split('|')[1] : null;
         const diffBox = $('div', { class: 'editlive-diff' });
         const errBox = $('ul', { class: 'pf-errors warnings' });
         let tmr = null;
         const redraw = o => { clearTimeout(tmr); tmr = setTimeout(async () => {
             if (!o.length) { diffBox.replaceChildren($('p', { class: 'muted' }, 'No changes yet.')); return; }
             try {
-                const pv = await postJson(`${API}/patch/preview${q}`, { patch: { ops: withId(o) }, changes: st.changes ?? [], now: st.now ?? null });
+                const pv = await postJson(`${API}/patch/preview${q}`, { patch: { ops: withId(o) }, changes: S.changes ?? [], now: S.now ?? null });
                 diffBox.style.opacity = ''; if (!moveId) errBox.replaceChildren(); diffBox.replaceChildren(renderDiff(document, pv));
             } catch (e) {
                 diffBox.style.opacity = '0.5'; errBox.replaceChildren($('li', {}, e.message));
@@ -296,7 +298,7 @@ async function renderInspector(side, target, ctx) {
         }, 350); };
         let moveId = null; // a clashing Move gets a rename box prefilled with the suggested id
         const withId = o => o.map(x => (x.op === 'move_location' && moveId ? { ...x, id: moveId } : x));
-        const ai = ({ kind, field, text, exit }) => aiText(st, { field, kind, text, name: ectx.title, area: ectx.area ?? target, rooms: exit ? [exit.to] : (ectx.exits ?? []).map(x => x.to).filter(Boolean) });
+        const ai = ({ kind, field, text, exit }) => aiText(S, { field, kind, text, name: ectx.create ? (form.state.own.name ?? '') : ectx.title, area: ectx.area ?? tgt, rooms: exit ? [exit.to] : (ectx.exits ?? []).map(x => x.to).filter(Boolean) });
         const form = buildEditForm(document, ectx, { onChange: o => redraw(o), expand, ai });
         const status = $('p', { class: 'muted' }, 'Submitted changes go on a hidden message in the chat: delete it there to undo.');
         const save = $('button', { class: 'crumb pf-submit', onclick: async () => {
@@ -307,11 +309,14 @@ async function renderInspector(side, target, ctx) {
             const r = await sendLiveEdit(o);
             save.disabled = false;
             if (!r.ok) { errBox.replaceChildren(...(r.errors ?? []).map(e => $('li', {}, e.error))); status.textContent = 'Not saved.'; return; }
+            if (!done) save.closest('.editlive-pane')?.classList.add('saved'); // a wizard's done() takes the pane back
             status.textContent = `Saved as message #${r.msg}: ${(r.summary ?? []).join('; ')}`;
+            if (done) await done();
         } }, 'Submit');
         redraw([]);
-        pane.replaceChildren($('div', { class: 'editlive-pane' }, $('h4', {}, `${editLabel}: ${ectx.title}`), form.el, errBox, $('b', {}, 'Changes'), diffBox, save, $('button', { class: 'crumb', onclick: () => show(tab) }, 'Cancel'), status));
-    } }, editLabel);
+        pane.replaceChildren($('div', { class: 'editlive-pane', 'data-mode': ectx.create ? 'create' : 'edit' }, $('h4', {}, ectx.create ? `Create place in ${heading ?? ectx.area}` : `${label}: ${ectx.title}`), form.el, errBox, $('b', {}, 'Changes'), diffBox, save, $('button', { class: 'crumb pf-cancel', onclick: () => cancel() }, 'Cancel'), status));
+    };
+    const editLive = $('button', { class: 'crumb editlive', title: live ? 'Change this in this chat only: SillyTavern stamps it on a hidden message (delete that message to undo). World files are never written.' : 'Open a WorldScrawl chat in SillyTavern to edit', ...(live ? {} : { disabled: '' }), onclick: () => openEditForm(target) }, editLabel);
     // Create / Move / Delete wizards for this level (they stamp changes like Edit; delete the message to undo).
     const now = () => (state?.chatId && state.chatId === st?.chatId ? state : st); // the latest changes (a wizard may stamp several)
     const wq = () => (now()?.world ? `?world=${encodeURIComponent(now().world)}` : '');
@@ -319,6 +324,7 @@ async function renderInspector(side, target, ctx) {
         outline: () => postJson(`${API}/edit/outline${wq()}`, { changes: now()?.changes ?? [], now: now()?.now ?? null }),
         preview: ops => postJson(`${API}/patch/preview${wq()}`, { patch: { ops }, changes: now()?.changes ?? [], now: now()?.now ?? null }),
         submit: ops => sendLiveEdit(ops), aiText: spec => aiText(now(), spec), renderDiff, back: () => show(tab),
+        createPlace: (area, opts) => openEditForm(`new:${area}`, opts),
     };
     const actionBtns = actionsFor(d.kind).map(([a, label]) => $('button', { class: 'crumb mapact', 'data-action': a, ...(live ? {} : { disabled: '' }), title: live ? label : 'Open a WorldScrawl chat in SillyTavern to change the map', onclick: async () => {
         let outline; try { outline = await io.outline(); } catch (e) { pane.replaceChildren($('p', { class: 'muted' }, `Can't load the map outline: ${e.message}`)); return; }
@@ -352,11 +358,13 @@ async function fetchRooms(world, addresses, st = null) {
     }
     return cache;
 }
-async function fetchReveals(world, doors) {
-    if (!revealCache.has(world)) revealCache.set(world, new Map());
-    const cache = revealCache.get(world), missing = doors.filter(d => !cache.has(d));
+async function fetchReveals(world, doors, st = curState) {
+    // Keyed by the chat's map changes too: a door on a place a change made only exists with those changes.
+    const pc = patchesOf(st), key = `${world}|${pc.length ? JSON.stringify(pc) : ''}`;
+    if (!revealCache.has(key)) revealCache.set(key, new Map());
+    const cache = revealCache.get(key), missing = doors.filter(d => !cache.has(d));
     if (missing.length) {
-        const r = await fetch(`${API}/doors${world ? `?world=${encodeURIComponent(world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify({ doors: missing }) });
+        const r = await fetch(`${API}/doors${world ? `?world=${encodeURIComponent(world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify({ doors: missing, ...(pc.length ? { changes: st.changes, now: st.now ?? null } : {}) }) });
         if (r.ok) { const b = await r.json(); for (const d of missing) cache.set(d, (b.exits ?? []).filter(x => x.door === d)); }
     }
     return doors.flatMap(d => cache.get(d) ?? []);
@@ -375,7 +383,7 @@ export async function knownRooms(st) {
     const raw = new Map(await fetchRooms(st.world, [...st.stood, ...st.seen, st.location, ...dugTo], st));
     for (const [a, v] of [...raw]) if (v === null) raw.delete(a);
     for (const [a, r] of newRooms(changes, raw)) raw.set(a, r);
-    const reveals = await fetchReveals(st.world, st.doors_revealed ?? []);
+    const reveals = await fetchReveals(st.world, st.doors_revealed ?? [], st);
     const out = new Map();
     for (const [a, r] of raw) out.set(a, knownRoom(r, { changes, reveals, rooms: raw }));
     return out;
@@ -611,7 +619,7 @@ function createMapWindow(win) {
             g.addEventListener('click', ev => { if (!editor || moved || e.direction.includes(",")) return; ev.stopPropagation(); inspectExit(`exit:${e.from}|${e.direction.toLowerCase()}`); });
             g.append(S('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
             const label = (t, f) => { if (!t) return; const el = S('text', { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f - 4, 'text-anchor': 'middle' }); el.textContent = t; g.append(el); };
-            label(e.direction, 0.3); if (e.back) label(e.back.direction, 0.7);
+            label(`${e.direction}${e.obscured ? ' ?' : ''}`, 0.3); if (e.back) label(`${e.back.direction}${e.back.obscured ? ' ?' : ''}`, 0.7); // ? = a hidden or obscured side (editor and pick mode)
             world.append(g);
         }
         const touched = patchedRooms(current.st ?? state);
@@ -651,7 +659,8 @@ function createMapWindow(win) {
         if (pick) { svg.classList.add('picking'); if (!side.childNodes.length) pickSide(null); return; }
         svg.classList.remove('picking');
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
-        if (side.querySelector('.mapaction')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        // So does an unsaved Edit / Create place form (a "Choose…" pick comes back to it intact).
+        if (side.querySelector('.mapaction, .editlive-pane:not(.saved)')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
         else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
         else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
@@ -664,7 +673,7 @@ function createMapWindow(win) {
         try { rooms = await knownRooms(st); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the map: ${e.message}`)); return; }
         if (st0 !== state) return; // a newer state arrived meanwhile
         if (current) current.st = st; else current = { st };
-        const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms);
+        const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms, { mark: !!(editor || pick) });
         const key = `${editor ? 'E' : ''}${pick ? 'P' : ''}${st.chatId}|${st.location}`, moved_ = key !== lastKey;
         if (pick?.open) { // entering pick mode
             const o = pick.open; pick.open = null; layer = o.layer; current.st = st; lastKey = key;
