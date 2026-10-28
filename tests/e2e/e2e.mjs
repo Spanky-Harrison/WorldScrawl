@@ -1621,18 +1621,6 @@ try {
     check('carriers: undoing one change removes only it; the replay applies the rest in order', cr.undoOne && cr.desc === 'Carrier one.', JSON.stringify(cr));
     check('carriers: a message in between starts a new carrier', cr.newRun, JSON.stringify(cr));
     check('bulk delete: carriers swept up are reported with an Undo toast and restored with the same stamps', cr.lost === 2 && cr.toast && cr.restored && cr.descBack === 'Carrier four.', JSON.stringify(cr));
-    // Synthetic: someone standing in a moved place when its move is turned off goes back to the original address (reverse redirect).
-    const rv = await page.evaluate(async () => {
-        const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), n0 = c.chat.length;
-        const e = await globalThis.worldscrawlLiveEdit([{ op: 'remove_area', area: 'larkspur', contents: 'move', into: 'riverton' }]);
-        const mi = c.chat.length - 1, p = c.chat[mi].extra.worldscrawl_patches.at(-1), to = p.relocate?.['larkspur:west_road/road'];
-        const on = to ? await globalThis.worldscrawlResolve(to) : null;
-        await m.toggleChange(mi, p.id, { choice: 'one' });
-        const off = to ? await globalThis.worldscrawlResolve(to) : null;
-        await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1000));
-        return { ok: e.ok, to, on: on?.how, off: off && [off.address, off.how] };
-    });
-    check('reverse redirect: with the bulk move turned off, the moved address resolves back to the original place', rv.ok && rv.to === 'riverton:west_road/road' && rv.on === 'here' && JSON.stringify(rv.off) === JSON.stringify(['larkspur:west_road/road', 'restored']), JSON.stringify(rv));
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);

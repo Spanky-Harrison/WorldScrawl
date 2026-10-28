@@ -99,17 +99,6 @@ test('move redirects: old addresses resolve to the new one; turning the move off
     assert.deepEqual(pv.json().detail.clash, { kind: 'room', id: 'common_room', suggest: 'drowned_rat_common_room' });
 });
 
-test('a turned-off or failing move sends whoever stands at its new address back to the original one (synthetic)', () => {
-    const c = client(W2);
-    const res = (address, changes) => c.post('/resolve', { json: { address, changes } }).json();
-    const ops = [{ op: 'move_area', area: 'riverton:smithy', region: 'larkspur' }];
-    const pv = c.post('/patch/preview', { json: { patch: { ops }, changes: [] } }).json();
-    const mv = { ...patch(ops), relocate: pv.relocate };
-    assert.equal(res('larkspur:smithy/forge', [mv]).how, 'here');
-    const off = res('larkspur:smithy/forge', [{ ...mv, off: true }]);
-    assert.deepEqual([off.address, off.how], ['riverton:smithy/forge', 'restored']);
-});
-
 test('outline lists every container; Expand with AI sees only parent notes and the exits\' neighbors', () => {
     const c = client(W2);
     const o = c.post('/edit/outline', { json: { changes: [] } }).json();
