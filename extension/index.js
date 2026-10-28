@@ -1136,10 +1136,24 @@ export function readDigAnswer(a, { loc, opts, canNew, target = null }) {
     if (hasExit(loc, direction)) return { ok: false, error: `there is already an exit "${direction}" here` };
     const back = digWord(a.return_direction) || returnName(direction);
     if (!okWord(back)) return { ok: false, error: '"return_direction" must be a short exit name (1-2 words)' };
-    if (target && hasExit(target, back)) return { ok: false, error: `${roomLabel(target)} already has an exit "${back}"` };
+    let backName = back;
+    if (target && hasExit(target, backName)) { // e.g. "in" when the courtyard already has an "in": pick a free name instead of failing
+        backName = [direction, `broken ${direction}`.slice(0, 20), 'hole', 'breach', 'gap'].find(n => okWord(n) && !hasExit(target, n));
+        if (!backName) return { ok: false, error: `${roomLabel(target)} already has an exit "${back}"` };
+    }
     const stay = matchKey(String(a.then ?? ''), ['stay', 'go_through']) === 'stay'; // biased toward moving: only a clear "stay" stays
-    return { ok: true, dest, direction, back, stay };
+    return { ok: true, dest, direction, back: backName, stay };
 }
+const nameRe = n => new RegExp(`(^|[^a-z])(?:the\\s+)?${String(n).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}(?![a-z])`, 'i');
+/** The nearby place the player's own words name ("...a passage to the courtyard"): the longest name, then the nearest. Null if none. */
+export function namedPlace(text, opts) {
+    const t = String(text ?? '');
+    const hits = opts.filter(o => o.room?.name && nameRe(o.room.name).test(t));
+    hits.sort((a, b) => b.room.name.length - a.room.name.length || (a.room.steps ?? 9) - (b.room.steps ?? 9));
+    return hits[0] ?? null;
+}
+/** The exit word the player's text suggests for an opening they named a place for. */
+export const digWordFrom = text => (String(text ?? '').match(/\b(window|hole|trapdoor|hatch|skylight|wall|floor|ceiling|crack|breach)\b/i)?.[1].toLowerCase() ?? 'opening');
 /** Make the opening: an existing place gets the linked exit pair (a 'dig' change); a new one the shared create_place edit (a 'patch' change). */
 async function makeDig(loc, r) {
     const desc = 'A freshly broken opening.';
@@ -1164,12 +1178,15 @@ async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
     const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
-    const canNew = loc.expandable !== false;
+    const named = namedPlace(msg.mes, opts);
+    if (named) { opts.splice(opts.indexOf(named), 1); opts.unshift(named); } // the place the player named comes first...
+    const canNew = loc.expandable !== false && !named; // ...and is used: never a new place when the player named an existing one
     if (!opts.length && !canNew) return fail('nowhere to lead');
+    const saidAll = named ? `${said}\nThe player names ${named.room.name}: the opening leads there (key "${named.key}").` : said;
     const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
     let err = '', made = null, r = null;
     for (let i = 0; i < DIG_TRIES && !made; i++) {
-        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, said, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
+        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, saidAll, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
         const a = parseJsonAnswer(raw);
         const pre = readDigAnswer(a, { loc, opts, canNew });
         const target = pre.ok && pre.dest.room ? await fetchLocationCached(pre.dest.room.address) : null;
@@ -1177,6 +1194,13 @@ async function narrativeDig(msg, loc) {
         if (r.ok) { const m = await makeDig(loc, r); if (m.ok) made = m; else r = { ok: false, error: m.error }; }
         console.log(`[WorldScrawl] dig (try ${i + 1}): ${JSON.stringify(String(raw).slice(0, 120))} -> ${r.ok ? JSON.stringify({ to: made.to, direction: r.direction, back: r.back, stay: r.stay }) : r.error}`);
         if (!made) err = r.error;
+    }
+    if (!made && named && !hasExit(loc, digWordFrom(msg.mes))) { // the model's answers didn't fit, but the player said where: link it directly
+        const target = await fetchLocationCached(named.room.address);
+        if (target) {
+            const fb = readDigAnswer({ existing: named.key, direction: digWordFrom(msg.mes), then: 'go_through' }, { loc, opts, canNew: false, target });
+            if (fb.ok) { const m = await makeDig(loc, fb); if (m.ok) { made = m; r = fb; console.log(`[WorldScrawl] dig: linked the named place ${named.room.address} directly`); } }
+        }
     }
     if (!made) return fail(err);
     msg.extra[CHANGE_KEY] = made.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
@@ -1627,12 +1651,12 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { party: who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
     else if (move?.path?.length > 2) lines.push(P('narration.travel', { party: who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
     else if (move) lines.push(P('narration.move', { party: who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
+    else if (extra.digFailed && !extra.dig) lines.push(P('narration.dig_failed', { party: who, place })); // a failure outranks any other note on the turn
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
     else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
     else if (extra.newDoor) lines.push(newDoorLine(who, place, toolsOn));
     else if (extra.door) lines.push(P('narration.door', { party: who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
-    else if (extra.digFailed) lines.push(P('narration.dig_failed', { party: who, place }));
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));
     if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
@@ -2981,7 +3005,13 @@ export async function onReplyForFlags(id) {
         else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
         else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
+    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); flag = null; }
     if (flag) await flagMessage(id, flag);
+}
+/** Did the player's turn just before reply `id` fail to break through? Then the reply must not add a room or passage. */
+export function digFailedBefore(chat, id) {
+    for (let i = id - 1; i >= 0; i--) { const m = chat[i]; if (m?.is_user) return !!m.extra?.worldscrawl_dig_failed; if (m && !m.is_system) return false; }
+    return false;
 }
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like

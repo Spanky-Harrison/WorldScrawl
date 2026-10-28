@@ -748,7 +748,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): breaking through failed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tried to break through, but nothing gave way. No new opening exists. {{party}} is still at {{place}}. Narrate the attempt failing.",
+      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way. No new opening or passage exists, and none appears in this reply. {{party}} is still at {{place}}. Narrate the attempt failing (the wall, floor or window holds), and do not flag a map change or a new room for it.",
       "placeholders": [
         {
           "name": "party"
