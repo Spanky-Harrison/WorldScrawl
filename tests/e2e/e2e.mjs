@@ -1764,6 +1764,13 @@ try {
         const lk = await ui.evaluate(() => { const c = document.querySelector('.pe-card[data-id="intent.system"]'); return { lock: !!c.querySelector('.pe-lock'), why: c.querySelector('.pe-locked')?.textContent, ro: c.querySelector('.pe-text').readOnly, shown: c.offsetHeight > 0 }; });
         check('locked prompts show a padlock, the reason and a read-only box', lk.lock && lk.why && lk.ro && lk.shown, JSON.stringify(lk));
         const card = id => ui.locator(`.pe-card[data-id="${id}"]`);
+        // Debug > Unlock locked prompts (off by default) makes them editable; left on for the edit checks below.
+        await ui.click('#menu-debug .menu-title');
+        const u0 = await ui.locator('#menu-debug [data-item="unlock-prompts"]').getAttribute('aria-checked');
+        await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
+        const ro1 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
+        check('Debug > Unlock locked prompts (off by default) makes locked prompts editable', u0 !== 'true' && ro1 === false, JSON.stringify({ u0, ro1 }));
+        await ui.keyboard.press('Escape').catch(() => {});
         const orig = await card('expand.system').locator('.pe-text').inputValue();
         answers.push(true, 'E2E');
         await card('expand.system').locator('.pe-text').focus();
@@ -1785,15 +1792,6 @@ try {
         await card('dig.stay').locator('.pe-undo').click();
         const ec = await ui.locator('details.pe-group[data-group="expand"] .pe-edited-count').textContent();
         check('a group shows how many of its prompts are edited', /1 edited/.test(ec), ec);
-        // Debug > Unlock locked prompts makes them editable (off by default).
-        await ui.click('#menu-debug .menu-title');
-        const u0 = await ui.locator('#menu-debug [data-item="unlock-prompts"]').getAttribute('aria-checked');
-        await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
-        const ro1 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
-        await ui.click('#menu-debug .menu-title'); await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
-        const ro2 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
-        check('Debug > Unlock locked prompts (off by default) makes locked prompts editable, and back', u0 !== 'true' && ro1 === false && ro2 === true, JSON.stringify({ u0, ro1, ro2 }));
-        await ui.keyboard.press('Escape').catch(() => {});
         // An older default under the override: the editor shows "default changed" with a diff.
         const fs = await import('node:fs'), f = '/tmp/st-ws/default-user/worldscrawl/prompts.json';
         const store = JSON.parse(fs.readFileSync(f, 'utf8')); const o = store.profiles.E2E.overrides['expand.system'];
@@ -1818,6 +1816,11 @@ try {
         await ui.waitForFunction(() => document.querySelector('.pe-profile')?.value === 'Default', null, { timeout: 10000 }).catch(() => {});
         const left = await ui.evaluate(() => [...document.querySelectorAll('.pe-profile option')].map(o => o.value));
         check('Rename and Delete a profile (back on Default)', JSON.stringify(left) === '["Default"]', JSON.stringify(left));
+        await ui.click('#menu-debug .menu-title'); await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
+        await openAll();
+        const ro2 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
+        check('turning Unlock locked prompts off makes them read-only again', ro2 === true);
+        await ui.keyboard.press('Escape').catch(() => {});
         await ui.click('.toolview-close');
         // Debug menu.
         const st = () => page.evaluate(() => !!SillyTavern.getContext().extensionSettings.worldscrawl.showEditMessages);

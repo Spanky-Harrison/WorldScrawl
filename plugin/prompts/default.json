@@ -114,6 +114,7 @@
       "title": "Breaking through: where does it lead",
       "description": "Step 1 of 5: where the opening leads. Asks which nearby place a newly broken opening leads to.",
       "group": "dig",
+      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
       "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. Places nearby:\n{{places}}\n{{new_number}}. {{new_place}}: a new space nobody has seen yet\n\nWhere does this opening most likely lead? Reply with just the number.",
       "placeholders": [
         {
@@ -148,6 +149,7 @@
       "title": "Breaking through: exit name",
       "description": "Step 2 of 5: what the opening is called from this side. Asks what the new opening is called from this side.",
       "group": "dig",
+      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe player has made a new opening from here to {{destination}}.\nWhat is the opening called from this side? Use one of: {{compass}}, or a short new word (1-2 words) such as hole, crack, window, breach.\nAlready used here (do not use): {{used}}.\nReply with just the word.",
       "placeholders": [
         {
@@ -177,6 +179,7 @@
       "title": "Breaking through: new room name",
       "description": "Step 3 of 5 (somewhere new only): a name for the new room. Asks for a name for the new room behind the opening.",
       "group": "dig",
+      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.",
       "placeholders": [
         {
@@ -195,6 +198,7 @@
       "title": "Breaking through: new room description",
       "description": "Step 4 of 5 (somewhere new only): a one-sentence description of the new room. Asks for a one-sentence description of the new room.",
       "group": "dig",
+      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room called {{name}}. Describe it in one short sentence. Reply with just the sentence.",
       "placeholders": [
         {
@@ -216,6 +220,7 @@
       "title": "Breaking through: stay or go through",
       "description": "Step 5 of 5: does the player stay on this side. Asks whether the player stays on this side of the new opening. Must be answered yes or no.",
       "group": "dig",
+      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
       "text": "{{said}}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.",
       "placeholders": [
         {
@@ -228,6 +233,7 @@
       "title": "Looking: at what",
       "description": "Step 1 of 2: what the player is looking at. Asks what the player is looking at or listening to. The numbered options are made by the game.",
       "group": "look",
+      "locked": "The game reads the chosen option back; changing this can break looking.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the number.",
       "placeholders": [
         {
@@ -266,6 +272,7 @@
       "title": "Looking: out a window",
       "description": "Step 2 of 2 (a window with no view yet): which nearby place can be seen. Asks which nearby place can be seen out of a window or opening.",
       "group": "look",
+      "locked": "The game reads the chosen option back; changing this can break looking.",
       "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the number.",
       "placeholders": [
         {
@@ -292,6 +299,7 @@
       "title": "Doors: which door",
       "description": "Step 1 of 1 (only when several doors fit): which door. Asks which door the player opens or closes.",
       "group": "door",
+      "locked": "The game reads the chosen door number back; changing this can break doors.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the number.",
       "placeholders": [
         {
@@ -327,6 +335,7 @@
       "title": "Player intent: the question",
       "description": "Step 1 of 2: the question itself. {{option_lines}} is built from the option pieces below. The multiple-choice question about the player's message. The option lines come from the \"Player intent: option\" prompts below.",
       "group": "intent",
+      "locked": "The game reads the model's answer as one of a fixed set of words; changing this can break how moves are understood.",
       "text": "{{party}} is at {{place}}. Its exits are:\n{{exits}}\n\n{{said}}\n\nAnswer with one option:\n{{option_lines}}Which option: {{options}}? Reply with exactly one option from that list.",
       "placeholders": [
         {
@@ -514,6 +523,7 @@
       "title": "Travel check: the question",
       "description": "Step 2 of 2 (only if step 1's answer can't be read): asks whether the player is trying to travel. Must be answered yes or no. Asked when the intent answer could not be read. Must be answered yes or no.",
       "group": "intent",
+      "locked": "The game reads the model's answer as one of a fixed set of words; changing this can break how moves are understood.",
       "text": "{{party}} is at {{place}}.\n{{said}}\n\nIs the player trying to travel to a different place? Answer yes or no.",
       "placeholders": [
         {
@@ -838,6 +848,7 @@
       "title": "Expand with AI: system prompt",
       "description": "Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields.",
       "group": "expand",
+      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.",
       "placeholders": []
     },
@@ -846,6 +857,7 @@
       "title": "Expand with AI: the request",
       "description": "Step 1 of 1: the request. {{context}} is the region, area and connected places, made by the game.",
       "group": "expand",
+      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "{{context}}\nWrite the {{field}} for the {{kind}} \"{{name}}\".{{draft}}\nTwo to four sentences of plain prose, fitting the setting above. Reply with only the text.",
       "placeholders": [
         {
@@ -875,6 +887,7 @@
       "description": "Piece: Fills {{field}} for a description.",
       "group": "expand",
       "piece": true,
+      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "description (what a visitor sees, hears and smells)",
       "placeholders": []
     },
@@ -884,6 +897,7 @@
       "description": "Piece: Fills {{field}} for notes.",
       "group": "expand",
       "piece": true,
+      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "notes (facts for the narrator: who is here, what goes on, secrets)",
       "placeholders": []
     },
@@ -893,6 +907,7 @@
       "description": "Piece: Added when the field already has text.",
       "group": "expand",
       "piece": true,
+      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "Expand on this draft, keeping everything in it: {{text}}",
       "placeholders": [
         {
@@ -914,6 +929,7 @@
       "title": "Map changes: which places",
       "description": "Step 1 of 2: which places changed (JSON answer). The game reads the JSON answer, so keep the reply format.",
       "group": "change",
+      "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
       "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change in a lasting way? Reply {\"rooms\": [addresses], \"areas\": [area ids changed as a whole (renamed, or general notes changed), e.g. \"{{area}}\"]}, or {\"rooms\": []} if nothing lasting changed.",
       "placeholders": [
         {
@@ -962,6 +978,7 @@
       "title": "Map changes: the patch",
       "description": "Step 2 of 2: write the edits (JSON answer). The game reads the JSON answer, so keep the reply format.",
       "group": "change",
+      "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
       "text": "Places that changed (their current JSON):\n{{rooms}}\n{{areas}}{{neighbors}}{{mentions}}Neighbouring map (for exits and merges):\n{{outline}}\n\nStory (messages {{range}}):\n{{story}}\n\n{{what}}\n{{retry}}Write the patch JSON.",
       "placeholders": [
         {
@@ -1005,6 +1022,7 @@
       "description": "Piece: Fills {{areas}} when areas are involved.",
       "group": "change",
       "piece": true,
+      "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
       "text": "Areas (current notes): {{areas}}",
       "placeholders": [
         {
@@ -1019,6 +1037,7 @@
       "description": "Piece: Fills {{neighbors}}.",
       "group": "change",
       "piece": true,
+      "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
       "text": "One step beyond the change (neighbors: name: description | exits \"exit text\"). If a neighbor's description or exit text names or describes a changed place the old way, you may patch it too (set_description, or set_exit_description for that side's exit text); leaving them alone is fine:\n{{neighbors}}",
       "placeholders": [
         {
@@ -1033,6 +1052,7 @@
       "description": "Piece: Fills {{mentions}}.",
       "group": "change",
       "piece": true,
+      "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
       "text": "Other world text that names a changed place (where.field: text). Patch it only if it now reads wrong: set_description for a room, set_exit_description for an exit, update_area/set_notes for a region or subregion's notes:\n{{mentions}}",
       "placeholders": [
         {
@@ -1070,6 +1090,7 @@
       "title": "New room behind a door",
       "description": "Step 1 of 1: describe the room behind the door.",
       "group": "discover",
+      "locked": "The game reads the reply as a new room in a fixed format; changing this can break new rooms.",
       "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{door}}{{retry}}Describe the room behind the door that was opened.",
       "placeholders": [
         {
@@ -1126,6 +1147,7 @@
       "description": "Piece: Fills {{door}}.",
       "group": "discover",
       "piece": true,
+      "locked": "The game reads the reply as a new room in a fixed format; changing this can break new rooms.",
       "text": "The door: \"{{note}}\".",
       "placeholders": [
         {

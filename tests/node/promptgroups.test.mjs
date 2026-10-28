@@ -33,7 +33,8 @@ test('format-critical prompts are locked with a one-line reason; creative ones a
         ...def.prompts.filter(e => e.id.startsWith('intent.option.')).map(e => e.id)]) {
         assert.equal(typeof byId[id].locked, 'string', id); assert.ok(byId[id].locked.length > 5 && !byId[id].locked.includes('\n'), id);
     }
-    for (const e of def.prompts.filter(e => /^(narration\.(move|travel|header|rules|look_around|door)|expand\.|dig\.(name|description))/.test(e.id))) assert.ok(!e.locked, e.id);
+    for (const e of def.prompts.filter(e => e.group !== 'narration')) assert.ok(e.locked, `${e.id}: everything outside Narration is locked`);
+    for (const id of ['narration.move', 'narration.travel', 'narration.rules', 'narration.travel_cut_short']) assert.ok(!byId[id].locked, id);
 });
 test('isLocked: only locked prompts, and only while not unlocked', () => {
     assert.equal(isLocked(byId['intent.system']), true);
