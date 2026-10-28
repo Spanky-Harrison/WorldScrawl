@@ -44,6 +44,7 @@
 //   starting region and the last region are never deleted.
 
 import { parseDuration } from './calendar.mjs';
+import { render as P } from './prompts.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
     'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
     'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
@@ -815,11 +816,12 @@ export function relocated(address, changes = []) {
 export function patchPrompt(c, { story = '', what = '', err = '', range = '' } = {}) {
     const outline = (c.outline ?? []).map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${(o.exits ?? []).map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
     const nb = (c.neighbors ?? []).map(n => `${n.address} = ${n.name}: ${n.description ?? ''} | exits: ${(n.exits ?? []).map(x => `${x.direction}->${x.to}${x.description ? ` "${x.description}"` : ''}`).join('; ') || 'none'}`).join('\n');
-    const areas = Object.keys(c.areas ?? {}).length ? `Areas (current notes): ${JSON.stringify(c.areas)}\n` : '';
-    return `Places that changed (their current JSON):\n${JSON.stringify(c.rooms ?? {}, null, 1)}\n${areas}`
-        + (nb ? `One step beyond the change (neighbors: name: description | exits "exit text"). If a neighbor's description or exit text names or describes a changed place the old way, you may patch it too (set_description, or set_exit_description for that side's exit text); leaving them alone is fine:\n${nb}\n` : '')
-        + ((c.mentions ?? []).length ? `Other world text that names a changed place (where.field: text). Patch it only if it now reads wrong: set_description for a room, set_exit_description for an exit, update_area/set_notes for a region or subregion's notes:\n${c.mentions.map(m => `${m.where}${m.field ? `.${m.field}` : ''}: ${m.text}`).join('\n')}\n` : '')
-        + `Neighbouring map (for exits and merges):\n${outline}\n\nStory (messages ${range}):\n${story}\n\n${what}\n${err ? `Your last patch was rejected: ${err}\nFix it.\n` : ''}Write the patch JSON.`;
+    const ments = (c.mentions ?? []).map(m => `${m.where}${m.field ? `.${m.field}` : ''}: ${m.text}`).join('\n');
+    return P('change.patch', { rooms: JSON.stringify(c.rooms ?? {}, null, 1),
+        areas: Object.keys(c.areas ?? {}).length ? P('change.patch_areas', { areas: JSON.stringify(c.areas) }) + '\n' : '',
+        neighbors: nb ? P('change.patch_neighbors', { neighbors: nb }) + '\n' : '',
+        mentions: (c.mentions ?? []).length ? P('change.patch_mentions', { mentions: ments }) + '\n' : '',
+        outline, range, story, what, retry: err ? P('change.patch_retry', { error: err }) + '\n' : '' });
 }
 
 /** Rooms one exit away from any affected room (either direction), outside the affected set. `w` is a built World. */

@@ -4,6 +4,7 @@
 // changed become ops, so submitting an untouched form never copies inherited values into the place.
 import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS, newRoomId } from './patches.mjs';
 import { pickField, pathOf } from './picker.mjs';
+import { render as P } from './prompts.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
@@ -421,8 +422,6 @@ export function expandPrompt(ctx, { field = 'description', text = '', name = '',
     if (ctx?.region) L.push(`Region: ${ctx.region.name}${ctx.region.notes ? ` - ${ctx.region.notes}` : ''}`);
     if (ctx?.subregion && kind === 'room') L.push(`Area: ${ctx.subregion.name}${ctx.subregion.notes ? ` - ${ctx.subregion.notes}` : ''}`);
     if (ctx?.neighbors?.length) L.push('Connected places:', ...ctx.neighbors.map(n => `- ${n.name}${n.short ? `: ${n.short}` : ''}`));
-    L.push('', `Write the ${field === 'notes' ? 'notes (facts for the narrator: who is here, what goes on, secrets)' : 'description (what a visitor sees, hears and smells)'} for the ${what} "${name || 'new ' + what}".`);
-    if (String(text).trim()) L.push(`Expand on this draft, keeping everything in it: ${String(text).trim()}`);
-    L.push('Two to four sentences of plain prose, fitting the setting above. Reply with only the text.');
-    return L.join('\n');
+    const draft = String(text).trim() ? '\n' + P('expand.draft', { text: String(text).trim() }) : '';
+    return P('expand.question', { context: L.length ? L.join('\n') + '\n' : '', field: P(field === 'notes' ? 'expand.field_notes' : 'expand.field_description'), kind: what, name: name || 'new ' + what, draft });
 }

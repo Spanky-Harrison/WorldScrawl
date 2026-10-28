@@ -224,6 +224,40 @@ The window only reads. It never changes the chat or the world files. Room data c
 `/rooms` and `/doors` endpoints, so it follows the same rules as the extension. Plugin files changed, so
 **restart SillyTavern** after updating to get the window.
 
+## Prompts and the Prompt Editor
+
+Every prompt WorldScrawl sends to the model lives in `plugin/prompts/default.json` (64 entries). Each has an `id`, a `title`, a `description`, the `text` (a plain string; `\n` is a line break) and its `placeholders`. A placeholder is written `{{name}}` and is filled in by the game when the prompt is used; `generated` ones (like `{{edit_types}}`, the list of map edit types) are built by the game and can't be edited, and `optional` ones may be left out. Filling is done once: text that goes into a placeholder is never filled again. A test checks that the built-in prompts give exactly the same text as before they were moved into the file.
+
+**Tools > Prompt Editor** (in the map window) edits them:
+
+- **Profiles.** The picker at the top chooses the profile in use; New, Duplicate, Rename and Delete manage them. **Default** is the built-in text and is read-only: start typing on it and you're asked to make a profile first. A profile keeps only the prompts you changed (its overrides), so it picks up later improvements to every other prompt. Profiles are saved per SillyTavern user in `<user folder>/worldscrawl/prompts.json`, so they survive restarts and updates.
+- **Each prompt** shows its title, what it's for, the text (drag the corner to make it taller), and its placeholders. **Submit** saves; **Undo edits** goes back to the last saved text; **Reset to default** drops your change. Changed prompts are marked "● edited". If your text drops a placeholder the game needs, you're warned and asked before it saves.
+- **"Default changed since you edited this".** Each saved change remembers the default text it was based on. When an update changes that default, the prompt shows this badge; open it to see a diff of the old and new default, so you can carry the change over.
+- Saving takes effect right away in SillyTavern (no reload).
+
+Server routes (under `/api/plugins/worldscrawl`): `GET /prompts/active` (`{profile, prompts: {id: text}}`), `GET /prompts` (everything the editor needs), `POST /prompts/select {profile}`, `POST /prompts/profile {action: new|duplicate|rename|delete, name, from}`, `POST /prompts/override {profile, id, text}` (saving the default text removes the override), `POST /prompts/reset {profile, id}`.
+
+## Menus: Tools and Debug (adding a tool)
+
+The map window's top bar has a **Tools** menu right after "WorldScrawl" and a **Debug** menu at the far right. Both are built from lists in `plugin/ui/app.js`:
+
+```js
+export const TOOLS = [
+    { id: 'prompts', label: 'Prompt Editor', open: () => openToolView('prompts', 'Prompt Editor', body => promptEditor(body, io)) },
+];
+export const DEBUG = [
+    { id: 'show-edit-messages', label: 'Show map edit messages', toggle: true, checked: () => ..., set: on => ... },
+    { id: 'reveal-map', label: 'Reveal map', open: () => ... },
+];
+```
+
+An item is an action `{id, label, open()}` or a toggle `{id, label, toggle: true, checked(), set(on)}` (shown with a checkmark when on). To add a tool, add one entry to `TOOLS` whose `open()` calls `openToolView(id, title, build)` from `plugin/ui/menus.mjs`: `build(body)` fills the view, which takes over the whole window under the top bar with the same title and **Close** button as every tool. `build` may return `{onClose}`; returning `false` from it keeps the tool open (the Prompt Editor uses this to ask about unsaved edits).
+
+Debug items:
+
+- **Show map edit messages** (setting `showEditMessages`, off by default). Off: the hidden chat messages that carry map edits are shown as a thin collapsed bar. On: they're shown as full messages with their list of changes open.
+- **Reveal map** asks first, then does the same as `/ws-reveal all` in the chat open in SillyTavern.
+
 ## On/off per chat
 
 WorldScrawl is switched on or off **per chat**, so WorldScrawl chats and normal chats can sit side by side. The choice is saved in the chat's metadata (with the chat; swipes don't change it). Use **Enabled in this chat** at the top of the settings panel, the **Enable/Disable WorldScrawl for this chat** entry in the Extensions (wand) menu next to the chat input, (it follows the current chat when you switch chats) or `/ws-on` / `/ws-off` (these work even while it's off). A chat with no saved choice is on if it already has WorldScrawl stamps (older chats), otherwise it follows **Enable in new chats** (global, default off).

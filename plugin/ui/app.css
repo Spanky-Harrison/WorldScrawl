@@ -162,3 +162,36 @@ textarea, .placeform textarea, .mapaction textarea, .patchform textarea { resize
 .pf-side-head .pf-dir { width: 9em; margin: 0 4px; }
 .mw-side { font-size: 13px; }
 .mw-side input { width: 9em !important; margin: 0 4px; }
+/* Top-bar menus (Tools, Debug): classic File-menu dropdowns. */
+.menu { position: relative; }
+.menu-title { cursor: pointer; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: inherit; font: inherit; }
+.menu-title:hover, .menu.open .menu-title { border-color: var(--SmartThemeBorderColor); background: rgba(255,255,255,.07); }
+.menu-list { display: none; position: absolute; top: 100%; left: 0; z-index: 50; min-width: 200px; padding: 4px 0; background: var(--ws-bg);
+  border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; box-shadow: 0 4px 12px var(--SmartThemeShadowColor); }
+#menu-debug .menu-list { left: auto; right: 0; }
+.menu.open .menu-list { display: block; }
+.menu-item { display: flex; gap: 6px; width: 100%; text-align: left; padding: 5px 12px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.menu-item:hover { background: rgba(255,255,255,.1); }
+.menu-check { width: 1em; display: inline-block; }
+/* A full-view tool takes the space below the top bar. */
+.toolview { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 6px; background: var(--SmartThemeBlurTintColor); border: 1px solid var(--SmartThemeBorderColor); border-radius: 10px; overflow: hidden; }
+.toolview-head { display: flex; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--SmartThemeBorderColor); }
+.toolview-head h2 { margin: 0; font-size: 1em; flex: 1; }
+.toolview-body { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+/* Prompt Editor */
+.pe-profiles, .pe-tools, .pe-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.pe-ro-note, .pe-desc, .pe-status, .pe-id { color: var(--SmartThemeEmColor); font-size: .9em; }
+.pe-search { flex: 0 1 260px; }
+.pe-card { border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+.pe-card.dirty { border-color: var(--SmartThemeQuoteColor); }
+.pe-card-head { display: flex; gap: 8px; align-items: baseline; }
+.pe-overridden { color: var(--SmartThemeQuoteColor); font-size: .85em; }
+.pe-text { display: block; width: 100%; resize: vertical; margin: 6px 0; font-family: ui-monospace, monospace; font-size: .9em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; padding: 6px; }
+.pe-warn { color: #e8a33d; font-size: .9em; }
+.pe-warn:empty { display: none; }
+.pe-phs { font-size: .85em; margin: 4px 0; }
+.pe-ph { margin-right: 4px; padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,.08); }
+.pe-ph.generated { outline: 1px dashed var(--SmartThemeEmColor); }
+.pe-changed summary { color: #e8a33d; cursor: pointer; }
+.pe-diff { white-space: pre-wrap; font-size: .85em; } .pe-diff .add { color: #6c6; } .pe-diff .del { color: #e66; }
+[hidden] { display: none !important; }

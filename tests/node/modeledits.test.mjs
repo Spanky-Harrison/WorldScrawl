@@ -1,5 +1,6 @@
 // The change call (the model's map edits): its op list comes from the engine's OPS, story-made places get engine ids,
 // several new places work in one change, and "can't express this" is a plain answer.
+import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -15,9 +16,9 @@ test('change prompt: every editor op is documented, generated from OPS (create_p
     const d = opDocs();
     for (const o of ['create_place', 'create_subregion', 'create_region', 'add_exit', 'move_location', 'remove_area', 'set_exit']) assert.match(d, new RegExp(`"op":"${o}"`));
     assert.doesNotMatch(d, /"op":"discover"/);
-    assert.match(src, /\$\{pl\.opDocs\(\)\}/, 'the extension prompt uses the generated list');
+    assert.match(src, /edit_types: pl\.opDocs\(\)/, 'the extension prompt uses the generated list');
     assert.doesNotMatch(src, /\{"op":"block_exit"\|"open_exit"/, 'no hand-written op list left');
-    assert.match(src, /"cant"/);
+    assert.match(readFileSync(new URL("../../plugin/prompts/default.json", import.meta.url), "utf8"), /\\"cant\\"/);
 });
 
 test('change answer: ops, nothing, or cant; model-written create_place ids are dropped', () => {
