@@ -208,3 +208,7 @@ textarea, .placeform textarea, .mapaction textarea, .patchform textarea { resize
 .pe-phtable { margin: 4px 0; font-size: 0.9em; }
 .pe-phtable summary { cursor: pointer; opacity: 0.8; }
 .pe-phtable td { padding: 2px 8px 2px 0; vertical-align: top; }
+
+.ws-choose-back { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.ws-choose { background: var(--bg, #222); color: inherit; border: 1px solid #666; border-radius: 6px; padding: 14px 18px; min-width: 260px; }
+.ws-choose-buttons { display: flex; gap: 8px; justify-content: flex-end; }

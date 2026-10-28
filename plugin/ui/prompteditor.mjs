@@ -55,7 +55,7 @@ const h = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag)
  * Returns {onClose, refresh}: call refresh() when the unlock setting changes.
  */
 export function promptEditor(root, io, ui = {}) {
-    ui = { ask: (q, d) => prompt(q, d), confirm: t => confirm(t), unlocked: () => false, ...ui };
+    ui = { ask: (q, d) => prompt(q, d), confirm: t => confirm(t), unlocked: () => false, choose: async m => (confirm(m) ? 'Discard' : 'Stay'), ...ui };
     let st = null, dirty = new Map(); // id -> unsaved text
     const opened = new Set(); // group ids (and 'pieces:<group id>') the user opened; groups start collapsed unless the file says open: true
     let seeded = false;
@@ -152,5 +152,15 @@ export function promptEditor(root, io, ui = {}) {
         }));
     }
     io.get('/prompts').then(s => { st = s; draw(); }).catch(e => say(`Couldn't load the prompts: ${e.message}`));
-    return { onClose: () => !dirty.size || ui.confirm('You have unsaved edits. Close and lose them?'), refresh: () => draw() };
+    /** Leaving with unsubmitted edits: Save (submit them all, then go), Discard (go) or Stay. Resolves false to stay. */
+    const onClose = async () => {
+        if (!dirty.size) return true;
+        const c = await ui.choose('Discard unsaved changes?', ['Save', 'Discard', 'Stay']);
+        if (c === 'Discard') return true;
+        if (c !== 'Save') return false;
+        try { for (const [id, text] of [...dirty]) { st = await io.post('/prompts/override', { profile: st.selected, id, text }); dirty.delete(id); } }
+        catch (e) { draw(); say(`Couldn't save: ${e.message}`); return false; }
+        io.changed(); return true;
+    };
+    return { onClose, refresh: () => draw() };
 }

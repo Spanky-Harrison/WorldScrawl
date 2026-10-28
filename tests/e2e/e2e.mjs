@@ -1784,6 +1784,27 @@ try {
         await card('expand.system').locator('.pe-text').fill('scratch');
         await card('expand.system').locator('.pe-undo').click();
         check('Undo edits goes back to the last saved text', (await card('expand.system').locator('.pe-text').inputValue()) === orig + '\nE2E-MARK');
+        // One tool at a time: the map button (or another view / Tools item) closes the editor, asking about unsaved edits.
+        const reopen = async () => { await ui.click('#menu-tools .menu-title'); await ui.click('#menu-tools [data-item="prompts"]'); await ui.waitForSelector('.pe-card', { timeout: 10000 }); await openAll(); await ui.waitForTimeout(200); };
+        const mapBtn = '#windowButtons [data-window]';
+        await card('expand.system').locator('.pe-text').fill(orig + '\nE2E-MARK\nSAVED');
+        await ui.click(mapBtn);
+        await ui.waitForSelector('.ws-choose', { timeout: 5000 }).catch(() => {});
+        const choices = await ui.locator('.ws-choose button').allTextContents();
+        await ui.click('.ws-choose [data-choice="Stay"]');
+        const stayed = await ui.evaluate(() => !!document.querySelector('.toolview') && document.querySelector('.pe-card[data-id="expand.system"] .pe-text').value.endsWith('SAVED'));
+        await ui.click(mapBtn); await ui.click('.ws-choose [data-choice="Save"]');
+        await ui.waitForFunction(() => !document.querySelector('.toolview'), null, { timeout: 10000 }).catch(() => {});
+        const closed = await ui.evaluate(() => !document.querySelector('.toolview') && !document.getElementById('windows').hidden);
+        await reopen();
+        const saved = (await card('expand.system').locator('.pe-text').inputValue()).endsWith('SAVED');
+        await card('expand.system').locator('.pe-text').fill('discard me');
+        await ui.click('#menu-tools .menu-title'); await ui.click('#menu-tools [data-item="prompts"]');
+        await ui.click('.ws-choose [data-choice="Discard"]');
+        await ui.waitForSelector('.pe-card', { timeout: 10000 }); await openAll(); await ui.waitForTimeout(200);
+        const discarded = (await card('expand.system').locator('.pe-text').inputValue()).endsWith('SAVED') && await ui.locator('.toolview').count() === 1;
+        check('leaving the editor with unsaved edits asks Save / Discard / Stay (Stay keeps it, Save submits then switches, Discard drops them); one tool at a time',
+            JSON.stringify(choices) === '["Save","Discard","Stay"]' && stayed && closed && saved && discarded, JSON.stringify({ choices, stayed, closed, saved, discarded }));
         await card('dig.stay').locator('.pe-text').fill('no placeholders here');
         const warn = await card('dig.stay').locator('.pe-warn').textContent();
         answers.push(false);

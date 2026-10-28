@@ -3,7 +3,7 @@
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
-import { buildMenu, openToolView } from './menus.mjs';
+import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
 import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
@@ -718,7 +718,7 @@ let promptView = null;
 export const TOOLS = [
     { id: 'prompts', label: 'Prompt Editor', open: () => openToolView('prompts', 'Prompt Editor', body => (promptView = promptEditor(body, {
         get: getJson, post: (path, b) => postJson(`${API}${path}`, b), changed: () => channel.postMessage({ type: 'prompts_changed' }),
-    }, { unlocked: () => unlockPrompts }))) },
+    }, { unlocked: () => unlockPrompts, choose }))) },
 ];
 const pendingReveals = new Map();
 export const DEBUG = [
@@ -744,6 +744,7 @@ channel.addEventListener('message', ev => { if (ev.data?.type === 'reveal_result
 
 buildMenus();
 buildTopBar();
+guardViewButtons(document.getElementById('windowButtons'));
 setEditor(editor);
 toggleWindow(WINDOWS[0], true);
 themeFromSettings();
