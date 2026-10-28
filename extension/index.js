@@ -2400,6 +2400,7 @@ export async function restoreCarriers(lost = lastLostCarriers) {
     return lost.length;
 }
 globalThis.worldscrawlRestoreCarriers = restoreCarriers;
+globalThis.worldscrawlResolve = address => api('/resolve', { method: 'POST', body: JSON.stringify({ address, ...mapCtx() }) }).then(r => r.body); // e2e / console
 globalThis.worldscrawlLostCarriers = () => lastLostCarriers.length;
 async function loadPatchLib() { try { patchLib ??= await import(`${baseUrl()}/ui/patches.mjs`); } catch (e) { console.warn('[WorldScrawl] patches lib unavailable:', e.message); } return patchLib; }
 
