@@ -1311,13 +1311,13 @@ try {
     const block = dir => ui.locator('.side .pf-exit', { has: ui.locator(`.pf-exit-title:text-matches("^${dir} →")`) });
     await block('up').locator('.pf-x').click();
     await block('out').locator('.pf-toggle').click();
-    await block('out').locator('.pf-row[data-field="sight"] input[value="clear"]').check();
+    await block('out').locator('.pf-side[data-side="there"] .pf-row[data-field="sight"] input[value="clear"]').check();
     const outDoor = await block('out').locator('.pf-row[data-field="door"] input').isChecked();
     await ui.click('.side .pf-addexit');
     const newBlk = ui.locator('.side .pf-exit').first();
-    await newBlk.locator('.pf-row[data-field="direction"] input').fill('side door');
+    await newBlk.locator('.pf-dir[data-field="direction"]').fill('side door');
     await pickSet(newBlk.locator('.pf-row[data-field="to"] .wspick'), 'riverton:streets/market_lane');
-    await newBlk.locator('.pf-row[data-field="return_direction"] input').fill('tavern');
+    await newBlk.locator('.pf-dir[data-field="back_direction"]').fill('tavern');
     const nbTitle = await newBlk.locator('.pf-exit-title').textContent();
     await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
@@ -1360,7 +1360,7 @@ try {
     const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; const ps = m.extra?.worldscrawl_patches ?? []; return { grew: c.chat.length > n || ps.length > 1, sys: m.is_system, ops: ps.at(-1)?.ops ?? [], n: c.chat.length }; }, n); // a run of edits shares one carrier
     const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
     const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
-    const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action]`).first().waitFor({ timeout: 10000 }); };
+    const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action], .side .editlive-pane`).first().waitFor({ timeout: 10000 }); };
     // No form or wizard prints "null" for a missing tag, reset or button (Edit region/subregion/place and every wizard).
     const nullHits = [];
     const sideText = () => ui.evaluate(() => document.querySelector('.side')?.innerText ?? '');
@@ -1373,7 +1373,7 @@ try {
             const why = await ui.evaluate(() => document.querySelector('.side .pf-exit .pf-row[data-field="sight"] .pf-from')?.textContent ?? '');
             check('Edit place: See destination shows a default/set-here tag', why === 'default' || why === 'set here', why);
             const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-door .pf-row[data-field="closed_sight"]')); return b ? [...b.querySelectorAll('.pf-sense-head, .pf-row[data-field="sight"] .pf-label, .pf-row[data-field="sound"] .pf-label, .pf-door .pf-row[data-field^="closed_"] .pf-label')].map(r => r.textContent) : null; });
-            check('Edit place: with a door, "Sense transparency – unblocked" on the exit and "– blocked" in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – blocked', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
+            check('Edit place: with a door, "Sense transparency – unblocked" on each side and "– blocked" in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – blocked', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
             const plainHead = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit')].find(x => !x.querySelector('.pf-door .pf-row'))?.querySelector('.pf-sense-head')?.textContent ?? null);
             check('Edit place: without a door the heading is just "Sense transparency"', plainHead === null || plainHead === 'Sense transparency', plainHead); }
     }
@@ -1391,22 +1391,28 @@ try {
     const mwCasc = await ui.evaluate(() => ({ t: document.querySelector('.side .mw-cascade')?.textContent ?? '', b: [...document.querySelectorAll('.side .mapaction button')].map(b => b.textContent) }));
     check('Delete the last place: required cascade warning with Confirm / Cancel / Add a place first', /Deleting the last place in Brask's Smithy will also delete Brask's Smithy/.test(mwCasc.t) && ['Confirm', 'Cancel', 'Add a place first'].every(x => mwCasc.b.includes(x)), JSON.stringify(mwCasc));
     await ui.click('.side .mw-addfirst');
-    await ui.locator('.side .mapaction[data-action="create_place"]').waitFor({ timeout: 10000 });
-    await ui.fill('.side .mw-row[data-field="place_name"] input', 'Coal Shed');
-    await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'Sacks of coal.');
-    // Choose… suspends the wizard for pick mode; Cancel brings it back with everything typed so far.
-    await ui.click('.side .mw-exit .wspick-choose');
+    // Create place is the Edit place form, empty: every field, both sides of each exit named, one Door block.
+    await ui.locator('.side .editlive-pane[data-mode="create"]').waitFor({ timeout: 10000 });
+    const cpForm = await ui.evaluate(() => { const p = document.querySelector('.side .editlive-pane'); return { h: p.querySelector('h4')?.textContent, fields: [...p.querySelectorAll('.placeform > .pf-row')].map(r => r.dataset.field), sides: [...p.querySelectorAll('.pf-exit .pf-side')].map(s => s.dataset.side), doors: p.querySelectorAll('.pf-exit .pf-door').length, rz: getComputedStyle(p.querySelector('textarea')).resize }; });
+    check('Create place: the Edit place form, empty, with both exit sides, one Door block and vertical-only text boxes',
+        /Create place in Brask's Smithy/.test(cpForm.h) && ['name', 'description', 'exposure'].every(f => cpForm.fields.includes(f)) && JSON.stringify(cpForm.sides) === '["there","back"]' && cpForm.doors === 1 && cpForm.rz === 'vertical', JSON.stringify(cpForm));
+    await ui.fill('.side .placeform > .pf-row[data-field="name"] input', 'Coal Shed');
+    await ui.fill('.side .placeform > .pf-row[data-field="description"] textarea', 'Sacks of coal.');
+    await ui.click('.side .pf-exit .wspick-choose');
     await ui.locator('.wspick-banner').waitFor({ timeout: 10000 });
-    const pkOn = await ui.evaluate(() => ({ t: document.querySelector('.wspick-banner')?.innerText ?? '', side: !!document.querySelector('.side .mapaction'), p: globalThis.wsPicking() }));
+    const pkOn = await ui.evaluate(() => ({ t: document.querySelector('.wspick-banner')?.innerText ?? '', p: globalThis.wsPicking() }));
     await ui.click('.wspick-cancel');
-    const pkOff = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), name: document.querySelector('.side .mw-row[data-field="place_name"] input')?.value, p: globalThis.wsPicking() }));
-    check('Pick mode: a big "Picking exit destination…" banner with Cancel; the wizard is suspended and comes back intact on Cancel',
-        /Picking exit destination/.test(pkOn.t) && /Cancel/.test(pkOn.t) && !pkOn.side && pkOn.p?.kind === 'room' && !pkOff.b && pkOff.name === 'Coal Shed' && pkOff.p === null, JSON.stringify([pkOn, pkOff]));
-    await pickSet(ui.locator('.side .mw-exit .wspick'), mwFORGE);
-    await ui.fill('.side .mw-exit input >> nth=0', 'forge'); await ui.fill('.side .mw-exit input >> nth=1', 'shed');
-    try { await ui.waitForFunction(() => /Coal Shed/.test(document.querySelector('.side .mw-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
-    check('Create place wizard: the diff shows the new place before Submit', /Coal Shed/.test(await ui.evaluate(() => document.querySelector('.side .mw-diff')?.innerText ?? '')));
-    await ui.click('.side .mw-submit');
+    const pkOff = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), name: document.querySelector('.side .placeform > .pf-row[data-field="name"] input')?.value, p: globalThis.wsPicking() }));
+    check('Pick mode: a big "Picking exit destination…" banner with Cancel; the form comes back intact on Cancel',
+        /Picking exit destination/.test(pkOn.t) && /Cancel/.test(pkOn.t) && pkOn.p?.kind === 'room' && !pkOff.b && pkOff.name === 'Coal Shed' && pkOff.p === null, JSON.stringify([pkOn, pkOff]));
+    await pickSet(ui.locator('.side .pf-exit .wspick'), mwFORGE);
+    await ui.fill('.side .pf-exit .pf-dir[data-field="direction"]', 'north');
+    const cpSides = await ui.evaluate(() => ({ heads: [...document.querySelectorAll('.side .pf-exit .pf-side-head')].map(h => h.textContent), back: document.querySelector('.side .pf-exit .pf-dir[data-field="back_direction"]')?.value }));
+    check('Create place: exit sides read "From Coal Shed, go ___ to reach …" / "From …, go ___ to get back", the way back filled in',
+        /^From Coal Shed, go\s*to reach Brask.s Smithy$/.test(cpSides.heads[0] ?? '') && /^From Brask.s Smithy, go\s*to get back$/.test(cpSides.heads[1] ?? '') && cpSides.back === 'south', JSON.stringify(cpSides));
+    try { await ui.waitForFunction(() => /Coal Shed/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('Create place: the diff shows the new place before Submit', /Coal Shed/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => document.querySelector('.side .mapaction')?.dataset.action === 'delete_place', null, { timeout: 12000 }); } catch {}
     const mwCp = await mwLastMsg(mwNW);
     const mwBack = await ui.evaluate(() => ({ a: document.querySelector('.side .mapaction')?.dataset.action, casc: !!document.querySelector('.side .mw-cascade'), sub: !!document.querySelector('.side .mw-submit') }));

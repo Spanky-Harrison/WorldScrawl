@@ -340,3 +340,24 @@ test('buildGraph: an obscured exit pair is one line once both rooms are known; t
     assert.equal(t.obscured, true); assert.ok(!u.obscured);
     assert.ok(!buildGraph({ location: A, stood: [A, B], seen: [], doors_open: [] }, rv).edges[0].obscured, 'the player view never marks');
 });
+
+test('buildGraph: an unevenly obscured pair from the source side is one "?" stub, not a stub plus a real line', () => {
+    const A = 'r:s/a', B = 'r:s/b';
+    const room = (address, name, exits) => ({ address, name, description: `${name}.`, subregion: { id: 'r:s', name: 'S' }, region: { id: 'r', name: 'R' }, exits });
+    // The trapdoor is obscured from the Common Room; the way back up is plain.
+    const rooms = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1' }])], [B, room(B, 'Cellar', [{ direction: 'up', to: A, door: 'd1' }])]]);
+    const g = buildGraph({ location: A, stood: [A], seen: [], doors_open: [] }, rooms);
+    assert.equal(g.edges.length, 1, 'one line');
+    assert.equal(g.nodes.filter(n => n.kind === 'stub').length, 1);
+    assert.ok(!g.nodes.some(n => n.id === B), 'the plain return side does not give away the destination');
+    // Came back up through it (door revealed): the real link, never marked in the player view.
+    const rv = new Map([[A, room(A, 'Common Room', [{ direction: 'trapdoor', obscured: true, door: 'd1', to: B, revealed: true }])], [B, rooms.get(B)]]);
+    const g2 = buildGraph({ location: A, stood: [A], seen: [], doors_open: [] }, rv);
+    assert.equal(g2.edges.length, 1); assert.equal(g2.edges[0].to, B); assert.ok(!g2.nodes.some(n => n.kind === 'stub')); assert.ok(!g2.edges[0].obscured);
+});
+
+test('app.css: text boxes resize vertically only; Expand with AI sits on its own line under its box', async () => {
+    const css = (await import('node:fs')).readFileSync(new URL('../../plugin/ui/app.css', import.meta.url), 'utf8');
+    assert.match(css, /textarea[^{]*\{\s*resize:\s*vertical/);
+    assert.match(css, /\.pf-row \.pf-ai\s*\{[^}]*grid-column:\s*2\s*\/\s*-1/);
+});

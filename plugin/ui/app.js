@@ -309,6 +309,7 @@ async function renderInspector(side, target, ctx) {
             const r = await sendLiveEdit(o);
             save.disabled = false;
             if (!r.ok) { errBox.replaceChildren(...(r.errors ?? []).map(e => $('li', {}, e.error))); status.textContent = 'Not saved.'; return; }
+            if (!done) save.closest('.editlive-pane')?.classList.add('saved'); // a wizard's done() takes the pane back
             status.textContent = `Saved as message #${r.msg}: ${(r.summary ?? []).join('; ')}`;
             if (done) await done();
         } }, 'Submit');
@@ -658,7 +659,8 @@ function createMapWindow(win) {
         if (pick) { svg.classList.add('picking'); if (!side.childNodes.length) pickSide(null); return; }
         svg.classList.remove('picking');
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
-        if (side.querySelector('.mapaction')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        // So does an unsaved Edit / Create place form (a "Choose…" pick comes back to it intact).
+        if (side.querySelector('.mapaction, .editlive-pane:not(.saved)')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
         else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
         else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
