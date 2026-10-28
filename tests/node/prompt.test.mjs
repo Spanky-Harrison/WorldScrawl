@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
 import { opDocs as opDocs0 } from '../../plugin/ui/patches.mjs';
-const sys = DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.system').text.replace('{{edit_types}}', opDocs0());
+const sys = DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.system').text.replace('{{edit_types}}', opDocs0()).replace('{{style}}', DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.style').text);
 
 test('patch prompt: descriptions say what a place is now, traces allowed, the change itself never narrated, history in notes', () => {
     assert.match(sys, /only what the place IS now/);

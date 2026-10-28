@@ -927,19 +927,19 @@ try {
     let lu = await lastU();
     check('dig narrative: hitting a wall is not a breakthrough (no change, no follow-up questions)', !lu.extra.worldscrawl_change && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', JSON.stringify(lu.extra));
     const r0 = (await reqsNow()).length;
-    // Window -> Village Square; the first direction answer is taken ("down") and only that question is asked again.
-    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'down' }, { content: 'Window' }, { content: 'no' }, { content: 'You land in the square in a shower of glass.' }]);
-    await send('I run down the hall and leap through the window, breaking through the glass', 6);
+    // Window -> Village Square in ONE JSON call; the first answer reuses "down" (taken) and the call is retried once with the error.
+    // The second answer names the place loosely ("Village Square") and says "go through": lenient key matching.
+    await queue([{ content: 'new opening' }, { content: '{"existing":"village_square","direction":"down","then":"go_through"}' }, { content: 'Sure: {"existing":"Village Square","direction":"Window","then":"go through"}' }, { content: 'You land in the square in a shower of glass.' }]);
+    await send('I run down the hall and leap through the window, breaking through the glass', 4);
     lu = await lastU();
     const rq = (await reqsNow()).slice(r0);
     const ch1 = lu.extra.worldscrawl_change;
     check('dig narrative: intent prompt offers the new opening choice', promptOf(rq[0]).includes('new opening: the player clearly breaks through'), promptOf(rq[0]).slice(0, 300));
-    check('dig narrative: destination question is a numbered list of nearby places + somewhere new', promptOf(rq[1]).includes('Where does this opening most likely lead? Reply with just the number.') && promptOf(rq[1]).includes(`${sqN}. Village Square`) && promptOf(rq[1]).includes(`${near.length + 1}. somewhere new`), promptOf(rq[1]).slice(0, 600));
-    check('dig narrative: invalid direction retried alone', promptOf(rq[2]).includes('What is the opening called from this side?') && promptOf(rq[3]).includes('What is the opening called from this side?') && rq.length === 6, String(rq.length));
-    check('dig narrative: stay-on-this-side question asked', promptOf(rq[4]).includes('Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.'), promptOf(rq[4]).slice(-300));
-    check('dig narrative: two-way change stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
+    check('dig narrative: one JSON question listing nearby places as keys + a new place (no numbers)', promptOf(rq[1]).includes('- village_square: Village Square') && promptOf(rq[1]).includes('Or it can lead to a new space nobody has seen yet') && promptOf(rq[1]).includes('Reply with JSON only') && !promptOf(rq[1]).includes('just the number'), promptOf(rq[1]).slice(0, 900));
+    check('dig narrative: a bad answer is retried once with the error, then narration', rq.length === 4 && promptOf(rq[2]).includes('Your last answer did not fit: there is already an exit') && promptOf(rq[2]).includes('down'), String(rq.length) + promptOf(rq[2]).slice(-300));
+    check('dig narrative: connect to an existing place = the linked exit pair stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
     check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
-    check('dig narrative: narration told about breaking through and arriving', promptOf(rq[5]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[5]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[5]).slice(-800));
+    check('dig narrative: narration told about breaking through and arriving', promptOf(rq[3]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[3]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[3]).slice(-800));
     const back1 = await (await stFetch('/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
     check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
     // Swipe the reply: the change stays (it lives on the player's message, like a move).
@@ -950,55 +950,42 @@ try {
     // Delete the player's message: the change is gone.
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     check('dig narrative: deleting the message undoes the dig and the move', (await stored()) === 'riverton:drowned_rat/upstairs' && !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
-    // "...and peer through": the go-through answer is no -> dig only, the party stays.
-    await queue([{ content: 'new opening' }, { content: String(sqN) }, { content: 'hole' }, { content: 'yes' }, { content: 'You peer through.' }]);
-    await send('I smash a hole in the wall and peer through', 5);
+    // "...and peer through": then "stay" -> dig only, the party stays.
+    await queue([{ content: 'new opening' }, { content: '{"existing":"village_square","direction":"hole","return_direction":"hole","then":"stay"}' }, { content: 'You peer through.' }]);
+    await send('I smash a hole in the wall and peer through', 3);
     lu = await lastU();
-    check('dig narrative: "peer through" (clean yes to staying) -> dig, no move', lu.extra.worldscrawl_change?.direction === 'hole' && !lu.extra.worldscrawl_move && (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('hole (Village Square') && promptOf(await lastReq()).includes('broke through, making a new opening (hole) from here'), await wsExits());
+    check('dig narrative: "peer through" ("stay") -> dig, no move', lu.extra.worldscrawl_change?.direction === 'hole' && lu.extra.worldscrawl_change?.return_direction === 'hole' && !lu.extra.worldscrawl_move && (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('hole (Village Square') && promptOf(await lastReq()).includes('broke through, making a new opening (hole) from here'), await wsExits());
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
-    // Somewhere new: name + description questions, new room in this building, walkable both ways.
-    await queue([{ content: 'new opening' }, { content: String(near.length + 1) }, { content: 'the hole' }, { content: 'dusty crawl space' }, { content: 'A cramped crawlspace full of cobwebs' }, { content: 'maybe' }, { content: 'You climb down.' }]);
-    await send('I bash a hole through the floorboards', 7);
+    // Somewhere new: the same create_place edit discovery uses, in this building, walkable both ways; an unclear "then" goes through.
+    await queue([{ content: 'new opening' }, { content: '```json\n{"new":{"name":"dusty crawl space","description":"A cramped crawlspace full of cobwebs"},"direction":"the hole","then":"maybe"}\n```' }, { content: 'You climb down.' }]);
+    await send('I bash a hole through the floorboards', 3);
     lu = await lastU();
-    const ch2 = lu.extra.worldscrawl_change;
-    check('dig narrative: new room change (add_room + dig) in the current subregion', Array.isArray(ch2) && ch2[0].type === 'add_room' && ch2[0].address.startsWith('riverton:drowned_rat/dusty_crawl_space_') && ch2[0].name === 'Dusty Crawl Space' && ch2[0].description === 'A cramped crawlspace full of cobwebs.' && ch2[1].type === 'dig' && ch2[1].direction === 'hole' && ch2[1].return_direction === 'back', JSON.stringify(ch2));
-    check('dig narrative: unclear stay answer -> goes through, party ends in the new room; narration gets its description', (await stored()) === ch2?.[0]?.address && promptOf(await lastReq()).includes('This location: A cramped crawlspace full of cobwebs.'), String(await stored()));
-    check('dig narrative: in the new room; its way back listed', (await stored()) === ch2?.[0]?.address && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
+    const ch2 = lu.extra.worldscrawl_change, to2 = lu.extra.worldscrawl_dig?.to;
+    check('dig narrative: a new place is one create_place patch (engine-made id) in the current subregion', ch2?.type === 'patch' && ch2.ops?.length === 1 && ch2.ops[0].op === 'create_place' && ch2.ops[0].name === 'Dusty Crawl Space' && ch2.ops[0].description === 'A cramped crawlspace full of cobwebs.' && ch2.ops[0].exits?.[0]?.return_direction === 'hole' && ch2.ops[0].exits[0].direction === 'back' && String(to2).startsWith('riverton:drowned_rat/'), JSON.stringify(lu.extra));
+    check('dig narrative: unclear "then" -> goes through, party ends in the new room; narration gets its description', (await stored()) === to2 && promptOf(await lastReq()).includes('This location: A cramped crawlspace full of cobwebs.'), String(await stored()));
+    check('dig narrative: in the new room; its way back listed', (await stored()) === to2 && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
     await go('back');
-    // Failure: unreadable destination twice -> no change, a notice, narration says nothing gave way.
-    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'the moon' }, { content: 'You strain.' }]);
+    // Failure: unreadable answer twice -> no change, a notice, narration says nothing gave way.
+    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: '{"existing":"the moon","direction":"up"}' }, { content: 'You strain.' }]);
+    const rF = (await reqsNow()).length;
     await send('I smash the wall with my fist until it breaks', 4);
     lu = await lastU();
-    check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way'), JSON.stringify(lu.extra));
-    // /ws-dig: two-way by default with dir/returndir, refused when either side has that name, new room, one-way.
-    const dig = async t => { await page.evaluate(t => SillyTavern.getContext().executeSlashCommandsWithOptions(t), t); await page.waitForTimeout(1000); };
-    const nBefore2 = await M(m => m.chatChanges().length);
-    await dig('/ws-dig down Village Square');
-    check('/ws-dig refused: exit name already here', (await M(m => m.chatChanges().length)) === nBefore2);
-    await dig('/ws-dig crack/gap Village Square');
-    check('/ws-dig two-way with dir/returndir', (await lastMes()) === '[Engine: a passage crack to Village Square was opened (back: gap).]', await lastMes());
-    await dig('/ws-dig crevice/gap Village Square');
-    check('/ws-dig refused: return name already on the far side', (await M(m => m.chatChanges().length)) === nBefore2 + 1);
-    await dig('/ws-dig north Common Room');
-    check('/ws-dig compass return name is the opposite', (await M(m => m.chatChanges().at(-1)?.return_direction)) === 'south');
-    await dig('/ws-dig nook new Little Nook: A tiny nook.');
-    check('/ws-dig new room', (await wsExits()).includes('nook (Little Nook)') && (await lastMes()) === '[Engine: a passage nook to Little Nook was opened (back: back).]', await wsExits());
-    await dig('/ws-dig oneway=true chute Village Square');
-    check('/ws-dig oneway=true', (await M(m => m.chatChanges().at(-1)?.type)) === 'add_exit' && (await lastMes()) === '[Engine: a passage chute to Village Square was opened.]', await lastMes());
+    const fq = (await reqsNow()).slice(rF);
+    check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way') && promptOf(fq[2]).includes('the answer was not a JSON object'), JSON.stringify(lu.extra));
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
     await sw(true, true);
     await go('up');
     const nearUp = (await (await stFetch('/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
     const sqU = nearUp.findIndex(r => r.address === 'riverton:streets/square') + 1;
     let rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '3' }, { content: String(sqU) }, { content: 'Below, the square bustles.' }]);
+    await queue([{ content: 'look' }, { content: 'Window.' }, { content: 'village square' }, { content: 'Below, the square bustles.' }]);
     await send('I look out the window', 4);
     let lq = (await reqsNow()).slice(rL), lk = await lastU();
-    check('look: intent offers look; target list has the exits plus a window', promptOf(lq[0]).includes('- look: the player looks, peers, peeks or listens') && promptOf(lq[1]).includes('1. around here in general, nothing specific') && promptOf(lq[1]).includes('2. the down exit (to Common Room)') && promptOf(lq[1]).includes('3. out a window or opening with no exit'), promptOf(lq[1]).slice(-400));
-    check('look: window view picked from the nearby list and stamped as a view link', promptOf(lq[2]).includes('Which place can they most likely see? Reply with just the number.') && JSON.stringify(lk.extra.worldscrawl_change) === JSON.stringify([{ type: 'view_link', from: 'riverton:drowned_rat/upstairs', to: 'riverton:streets/square' }]), JSON.stringify(lk.extra));
+    check('look: intent offers look; target list has the exits plus a window', promptOf(lq[0]).includes('- look: the player looks, peers, peeks or listens') && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[1]).includes('- down: the down exit (to Common Room)') && promptOf(lq[1]).includes('- window: out a window or opening with no exit') && promptOf(lq[1]).includes('Reply with just the key.'), promptOf(lq[1]).slice(-400));
+    check('look: window view picked from the nearby list and stamped as a view link', promptOf(lq[2]).includes('Which place can they most likely see? Reply with just the key.') && JSON.stringify(lk.extra.worldscrawl_change) === JSON.stringify([{ type: 'view_link', from: 'riverton:drowned_rat/upstairs', to: 'riverton:streets/square' }]), JSON.stringify(lk.extra));
     check('look: narration sees the square, party stays', promptOf(lq[3]).includes('looks out and sees Village Square') && promptOf(lq[3]).includes('Visible from here (no way through): Village Square') && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(lq[3]).slice(-900));
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '3' }, { content: 'The square again.' }]);
+    await queue([{ content: 'look' }, { content: 'window' }, { content: 'The square again.' }]);
     await send('I glance out the window again', 3);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look: second look reuses the view link (no question, no new stamp)', lq.length === 3 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.to === 'riverton:streets/square', JSON.stringify(lk.extra));
@@ -1039,24 +1026,24 @@ try {
     check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looks around') && promptOf(lq[1]).includes('mention every exit listed above') && !promptOf(lq[1]).includes('looks out and sees'), promptOf(lq[1]).slice(-600));
     // Ambiguous look: option 1 = around; no window option without window words (and no views here).
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '1' }, { content: 'The room, in general.' }]);
+    await queue([{ content: 'look' }, { content: 'Around' }, { content: 'The room, in general.' }]);
     await send('I look at things for a while', 3);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('look: option 1 (around) gives kind around, no stamp', lk.extra.worldscrawl_look?.kind === 'around' && !lk.extra.worldscrawl_change && promptOf(lq[1]).includes('1. around here in general, nothing specific') && promptOf(lq[2]).includes('mention every exit listed above'), JSON.stringify(lk.extra));
+    check('look: option around gives kind around, no stamp', lk.extra.worldscrawl_look?.kind === 'around' && !lk.extra.worldscrawl_change && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[2]).includes('mention every exit listed above'), JSON.stringify(lk.extra));
     check('look: window option absent without window words', !promptOf(lq[1]).includes('out a window or opening'), promptOf(lq[1]).slice(-400));
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '2' }, { content: '2' }, { content: 'You peek outside.' }]);
+    await queue([{ content: 'look' }, { content: 'out' }, { content: 'They peek.' }, { content: 'You peek outside.' }]);
     await send('I peek through the keyhole of the front door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('doors: closed-door question offers listen / peek / open / just looking', ['1. only listens', '2. peeks through it', '3. opens it', '4. just looks at the closed door'].every(x => promptOf(lq[2]).includes(x)), promptOf(lq[2]).slice(-400));
+    check('doors: closed-door question offers listen / peek / open / just looking', ['- listen: only listens', '- peek: peeks through it', '- open: opens it', '- look: just looks at the closed door'].every(x => promptOf(lq[2]).includes(x)), promptOf(lq[2]).slice(-400));
     check('doors: peek shows the room beyond but leaves the door shut, stamps a peek record', lk.extra.worldscrawl_look?.kind === 'see' && lk.extra.worldscrawl_look.peek === true && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_peek?.type === 'peek' && lk.extra.worldscrawl_peek.door === 'out' && lk.extra.worldscrawl_peek.from === 'riverton:drowned_rat/common_room' && (await openDoors()) === '' && promptOf(lq[3]).includes('peeks through the closed door (out) without opening it') && promptOf(lq[3]).includes('The door stays closed'), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-400));
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '2' }, { content: '4' }, { content: 'A sturdy door.' }]);
+    await queue([{ content: 'look' }, { content: 'out' }, { content: 'look' }, { content: 'A sturdy door.' }]);
     await send('I look at the front door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: just looking at a closed door: "the door is closed", nothing opened or peeked', lk.extra.worldscrawl_look?.kind === 'closed' && !lk.extra.worldscrawl_change && !lk.extra.worldscrawl_peek && (await openDoors()) === '' && promptOf(lq[3]).includes('The door is closed; nothing beyond it can be seen') && !promptOf(lq[3]).includes('sees Village Square'), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-400));
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '2' }, { content: '3' }, { content: 'You open it and look outside.' }]);
+    await queue([{ content: 'look' }, { content: 'the out door' }, { content: 'OPEN' }, { content: 'You open it and look outside.' }]);
     await send('I open the front door and look outside', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: opening a closed door to look stamps open_door and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && !lk.extra.worldscrawl_peek && promptOf(lq[3]).includes('opens the door (out) first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Looking out, you can see Village Square: '), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
@@ -1079,14 +1066,14 @@ try {
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-close north')); await page.waitForTimeout(1000);
     check('doors: explicit close from the other side', (await openDoors()) === '', await openDoors());
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '2' }, { content: '1' }, { content: 'Muffled voices.' }]);
+    await queue([{ content: 'look' }, { content: 'in' }, { content: 'listen' }, { content: 'Muffled voices.' }]);
     await send('I listen at the tavern door', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: listening at a closed door: faint hint only, nothing opened', lk.extra.worldscrawl_look?.kind === 'listen' && !lk.extra.worldscrawl_change && promptOf(lq[3]).includes('Only faint, muffled sounds') && !promptOf(lq[3]).includes('Looking in, you can see'), promptOf(lq[3]).slice(-500));
     // Obscured trapdoor: both rooms recorded (opaque tokens), so it stays open in the cellar and shuts once both are left.
     await go('in', 'back');
     rL = (await reqsNow()).length;
-    await queue([{ content: 'look' }, { content: '5' }, { content: '4' }, { content: 'A stair into the dark.' }]);
+    await queue([{ content: 'look' }, { content: 'trapdoor' }, { content: 'look' }, { content: 'A stair into the dark.' }]);
     await send('I look at the trapdoor', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('obscured trapdoor: looking at it injects its near-side description and says where it leads is unknown (not revealed, not "nothing")', lq.length === 4 && lk.extra.worldscrawl_look?.kind === 'threshold' && lk.extra.worldscrawl_look.unknown === true && promptOf(lq[3]).includes('heavy cellar door set into the flagstones') && promptOf(lq[3]).includes('Where it leads is not clear and is unknown') && !promptOf(lq[3]).includes('Cellar (') && !promptOf(lq[3]).includes('ale casks') && !promptOf(lq[3]).includes('nothing can be made out') && !lk.extra.worldscrawl_change, JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
@@ -1758,7 +1745,7 @@ try {
         const view = await ui.evaluate(() => ({ hidden: document.getElementById('windows').hidden, cards: document.querySelectorAll('.pe-card').length, close: !!document.querySelector('.toolview-close'), resize: getComputedStyle(document.querySelector('.pe-text')).resize, sel: document.querySelector('.pe-profile').value }));
         check('Prompt Editor takes over the view with a Close button; one card per prompt; textareas resize vertically; on Default', view.hidden && view.cards >= 60 && view.close && view.resize === 'vertical' && view.sel === 'Default', JSON.stringify(view));
         const grp = await ui.evaluate(() => [...document.querySelectorAll('details.pe-group')].map(d => ({ id: d.dataset.group, open: d.open, count: d.querySelector('.pe-count')?.textContent, flow: !!d.querySelector('.pe-flow')?.textContent.trim(), pieces: !!d.querySelector('details.pe-pieces') })));
-        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 8 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces, JSON.stringify(grp));
+        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 9 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces, JSON.stringify(grp));
         const openAll = () => ui.evaluate(() => document.querySelectorAll('details.pe-group, details.pe-pieces').forEach(d => { d.open = true; }));
         await openAll(); await ui.waitForTimeout(200);
         const lk = await ui.evaluate(() => { const c = document.querySelector('.pe-card[data-id="intent.system"]'); return { lock: !!c.querySelector('.pe-lock'), why: c.querySelector('.pe-locked')?.textContent, ro: c.querySelector('.pe-text').readOnly, shown: c.offsetHeight > 0 }; });
@@ -1805,12 +1792,12 @@ try {
         const discarded = (await card('expand.system').locator('.pe-text').inputValue()).endsWith('SAVED') && await ui.locator('.toolview').count() === 1;
         check('leaving the editor with unsaved edits asks Save / Discard / Stay (Stay keeps it, Save submits then switches, Discard drops them); one tool at a time',
             JSON.stringify(choices) === '["Save","Discard","Stay"]' && stayed && closed && saved && discarded, JSON.stringify({ choices, stayed, closed, saved, discarded }));
-        await card('dig.stay').locator('.pe-text').fill('no placeholders here');
-        const warn = await card('dig.stay').locator('.pe-warn').textContent();
+        await card('travel.question').locator('.pe-text').fill('no placeholders here');
+        const warn = await card('travel.question').locator('.pe-warn').textContent();
         answers.push(false);
-        await card('dig.stay').locator('.pe-submit').click(); await ui.waitForTimeout(500);
-        check('removing a required placeholder warns, and asks before saving (declined: not saved)', /said/.test(warn) && await card('dig.stay').locator('.pe-overridden').count() === 0, warn);
-        await card('dig.stay').locator('.pe-undo').click();
+        await card('travel.question').locator('.pe-submit').click(); await ui.waitForTimeout(500);
+        check('removing a required placeholder warns, and asks before saving (declined: not saved)', /said/.test(warn) && await card('travel.question').locator('.pe-overridden').count() === 0, warn);
+        await card('travel.question').locator('.pe-undo').click();
         const ec = await ui.locator('details.pe-group[data-group="style"] .pe-edited-count').textContent();
         check('a group shows how many of its prompts are edited', /1 edited/.test(ec), ec);
         // An older default under the override: the editor shows "default changed" with a diff.

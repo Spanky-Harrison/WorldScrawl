@@ -39,7 +39,7 @@ test('the extension copy of prompts.mjs matches the plugin one', () => {
     assert.equal(b.split('\n').slice(1).join('\n'), a);
 });
 test('an override changes the prompt, values are not re-filled', () => {
-    ext.setPrompts({ ...Object.fromEntries(def.prompts.map(e => [e.id, e.text])), 'dig.stay': 'X {{said}} Y' });
-    assert.equal(ext.digStayPrompt('said {{who}}'), 'X said {{who}} Y');
+    ext.setPrompts({ ...Object.fromEntries(def.prompts.map(e => [e.id, e.text])), 'dig.style': 'X {{who}} Y' });
+    assert.match(ext.digPrompt({ name: 'Hall', exits: [] }, 'said {{who}}', [], [], true), /said \{\{who\}\}[\s\S]*X \{\{who\}\} Y/);
     ext.setPrompts(def);
 });

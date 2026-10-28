@@ -20,30 +20,30 @@ test('fresh user: Default selected, active prompts are the default text', () => 
 });
 test('Default is read-only; a new profile stores only its overrides with the base text and hash', () => {
     const root = tmp();
-    assert.equal(call(root, 'POST', '/prompts/override', { profile: 'Default', id: 'dig.stay', text: 'x' }).status, 400);
+    assert.equal(call(root, 'POST', '/prompts/override', { profile: 'Default', id: 'travel.question', text: 'x' }).status, 400);
     assert.equal(call(root, 'POST', '/prompts/profile', { action: 'new', name: 'default' }).status, 400);
     assert.equal(call(root, 'POST', '/prompts/profile', { action: 'new', name: 'Mine' }).status, 200);
     assert.equal(call(root, 'POST', '/prompts/profile', { action: 'new', name: 'mine' }).status, 400, 'names are unique');
-    const r = call(root, 'POST', '/prompts/override', { profile: 'Mine', id: 'dig.stay', text: 'Stay? {{said}}' });
-    const o = r.body.profiles.Mine.overrides['dig.stay'];
-    const base = def.prompts.find(e => e.id === 'dig.stay').text;
+    const r = call(root, 'POST', '/prompts/override', { profile: 'Mine', id: 'travel.question', text: 'Stay? {{said}}' });
+    const o = r.body.profiles.Mine.overrides['travel.question'];
+    const base = def.prompts.find(e => e.id === 'travel.question').text;
     assert.deepEqual(o, { text: 'Stay? {{said}}', base_hash: hashText(base), base_text: base, default_changed: false });
-    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(storeFile(root), 'utf8')).profiles.Mine.overrides), ['dig.stay']);
+    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(storeFile(root), 'utf8')).profiles.Mine.overrides), ['travel.question']);
     // "restart": a new read from disk
     const a = call(root, 'GET', '/prompts/active').body;
-    assert.equal(a.profile, 'Mine'); assert.equal(a.prompts['dig.stay'], 'Stay? {{said}}'); assert.equal(a.prompts['dig.name'], def.prompts.find(e => e.id === 'dig.name').text);
+    assert.equal(a.profile, 'Mine'); assert.equal(a.prompts['travel.question'], 'Stay? {{said}}'); assert.equal(a.prompts['dig.style'], def.prompts.find(e => e.id === 'dig.style').text);
     assert.equal(fs.readFileSync(DEF, 'utf8'), fs.readFileSync(DEF, 'utf8'));
-    call(root, 'POST', '/prompts/reset', { profile: 'Mine', id: 'dig.stay' });
+    call(root, 'POST', '/prompts/reset', { profile: 'Mine', id: 'travel.question' });
     assert.deepEqual(call(root, 'GET', '/prompts').body.profiles.Mine.overrides, {});
-    call(root, 'POST', '/prompts/override', { profile: 'Mine', id: 'dig.stay', text: base });
+    call(root, 'POST', '/prompts/override', { profile: 'Mine', id: 'travel.question', text: base });
     assert.deepEqual(call(root, 'GET', '/prompts').body.profiles.Mine.overrides, {}, 'saving the default text keeps no override');
 });
 test('duplicate, rename, delete, select', () => {
     const root = tmp();
     call(root, 'POST', '/prompts/profile', { action: 'new', name: 'A' });
-    call(root, 'POST', '/prompts/override', { profile: 'A', id: 'dig.name', text: 'N' });
+    call(root, 'POST', '/prompts/override', { profile: 'A', id: 'dig.style', text: 'N' });
     call(root, 'POST', '/prompts/profile', { action: 'duplicate', from: 'A', name: 'B' });
-    assert.equal(call(root, 'GET', '/prompts/active').body.prompts['dig.name'], 'N');
+    assert.equal(call(root, 'GET', '/prompts/active').body.prompts['dig.style'], 'N');
     assert.equal(call(root, 'POST', '/prompts/profile', { action: 'rename', from: 'B', name: 'A' }).status, 400);
     let r = call(root, 'POST', '/prompts/profile', { action: 'rename', from: 'B', name: 'C' });
     assert.equal(r.body.selected, 'C'); assert.ok(!r.body.profiles.B);
@@ -57,11 +57,11 @@ test('when the default text changes later, the override says so and keeps the ol
     const root = tmp(), d = tmp(), f = path.join(d, 'default.json');
     fs.writeFileSync(f, JSON.stringify(def));
     call(root, 'POST', '/prompts/profile', { action: 'new', name: 'A' }, f);
-    call(root, 'POST', '/prompts/override', { profile: 'A', id: 'dig.name', text: 'Mine' }, f);
-    const changed = structuredClone(def); changed.prompts.find(e => e.id === 'dig.name').text = 'New default';
+    call(root, 'POST', '/prompts/override', { profile: 'A', id: 'dig.style', text: 'Mine' }, f);
+    const changed = structuredClone(def); changed.prompts.find(e => e.id === 'dig.style').text = 'New default';
     fs.writeFileSync(f, JSON.stringify(changed)); const t = new Date(Date.now() + 5000); fs.utimesSync(f, t, t);
-    const o = call(root, 'GET', '/prompts', null, f).body.profiles.A.overrides['dig.name'];
-    assert.equal(o.default_changed, true); assert.equal(o.base_text, def.prompts.find(e => e.id === 'dig.name').text);
+    const o = call(root, 'GET', '/prompts', null, f).body.profiles.A.overrides['dig.style'];
+    assert.equal(o.default_changed, true); assert.equal(o.base_text, def.prompts.find(e => e.id === 'dig.style').text);
 });
 test('per-user folder comes from SillyTavern req.user', () => {
     assert.equal(userRoot({ user: { directories: { root: '/st/data/alice' } } }, {}), '/st/data/alice');

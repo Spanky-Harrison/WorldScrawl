@@ -26,14 +26,11 @@ const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weathe
     [null, false, { dig: { direction: 'hole', to_name: 'Cellar' } }], [null, false, { digFailed: true }], [null, false, { lookAround: true }], [{ ...trip, stopped: true }, false, {}]];
 const pl = opDocs => ({ opDocs });
 export const cases = ({ ext, patches, placeform }) => ({
+    'pick.system': ext.pickSys(),
     'dig.system': ext.digSys(),
-    'dig.destination': ext.digDestPrompt(loc, said, rooms),
-    'dig.destination.nodesc': ext.digDestPrompt({ ...loc, description: undefined }, said, []),
-    'dig.direction': ext.digDirPrompt(loc, said, 'Hall', ['north', 'east']),
-    'dig.direction.none': ext.digDirPrompt(loc, said, 'a new space', []),
-    'dig.name': ext.digNamePrompt(loc, said),
-    'dig.description': ext.digDescPrompt(loc, said, 'Dusty Crawlspace'),
-    'dig.stay': ext.digStayPrompt(said),
+    'dig.question': ext.digPrompt(loc, said, ext.digOptions(rooms), ['north', 'east'], true),
+    'dig.question.existing_only': ext.digPrompt({ ...loc, description: undefined }, said, ext.digOptions(rooms), [], false),
+    'dig.question.retry': ext.digPrompt(loc, said, [], [], true, 'there is already an exit "north" here'),
     'look.target': ext.lookTargetPrompt(loc, said, [exitA], true),
     'look.target.nowindow': ext.lookTargetPrompt(loc, said, [exitA, exitB], false),
     'look.closed_door': ext.closedDoorPrompt(said, exitA),
@@ -57,6 +54,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'change.patch.bare': patches.patchPrompt({ outline: [] }, {}),
     'discover.system': ext.discoverSys(),
     'discover.question': ext.discoverPrompt(k, { exits: 'south -> r:inn/common', near: 'none', story: 'They open the green door.', start: 2, id: 5, note: 'green door', err: '' }),
+    'discover.question.existing': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: 'green door', err: '', existing: ext.roomOptions([{ name: 'Village Square', display_name: 'Village Square (Streets)', summary: 'Busy.', address: 'r:s/square' }]) }),
     'discover.question.retry': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: '', err: 'no name' }),
     'narration.flag_hint': ext.flagHint(),
     'narration.wait_hint': ext.waitHint(),
