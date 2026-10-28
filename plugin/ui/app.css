@@ -195,3 +195,12 @@ textarea, .placeform textarea, .mapaction textarea, .patchform textarea { resize
 .pe-changed summary { color: #e8a33d; cursor: pointer; }
 .pe-diff { white-space: pre-wrap; font-size: .85em; } .pe-diff .add { color: #6c6; } .pe-diff .del { color: #e66; }
 [hidden] { display: none !important; }
+.pe-group { border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+.pe-group > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; font-weight: bold; }
+.pe-group-title { font-size: 1.05em; }
+.pe-count, .pe-edited-count { font-weight: normal; font-size: .85em; color: var(--SmartThemeEmColor); }
+.pe-edited-count { color: var(--SmartThemeQuoteColor); }
+.pe-flow { white-space: pre-wrap; font-size: .9em; margin: 6px 0 10px; padding: 6px 8px; border-left: 3px solid var(--SmartThemeQuoteColor); background: rgba(0,0,0,.15); }
+.pe-pieces { margin: 6px 0; } .pe-pieces > summary { cursor: pointer; color: var(--SmartThemeEmColor); margin-bottom: 6px; }
+.pe-locked { color: #e8a33d; font-size: .9em; margin-top: 4px; }
+.pe-card.readonly .pe-text { opacity: .75; cursor: not-allowed; }

@@ -28,14 +28,34 @@ export function lineDiff(a, b) {
     return out;
 }
 
+/**
+ * Sort the prompts into their process groups (in the file's group order): [{group, main, pieces}]. Prompts with no known
+ * group go in a last "Other" group. `piece: true` entries (small fragments filled into a bigger prompt) go in `pieces`.
+ */
+export function groupPrompts(prompts, groups = []) {
+    const out = groups.map(g => ({ group: g, main: [], pieces: [] })), by = new Map(out.map(x => [x.group.id, x]));
+    let other = null;
+    for (const e of prompts) {
+        let g = by.get(e.group);
+        if (!g) { if (!other) other = { group: { id: 'other', title: 'Other', flow: '' }, main: [], pieces: [] }; g = other; }
+        (e.piece ? g.pieces : g.main).push(e);
+    }
+    return [...out, ...(other ? [other] : [])].filter(x => x.main.length + x.pieces.length);
+}
+/** A locked prompt (the game depends on its exact wording or format) is read-only unless Debug > Unlock locked prompts is on. */
+export const isLocked = (e, unlocked = false) => !!e.locked && !unlocked;
+
 const h = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else if (v !== false && v != null) el.setAttribute(k, v === true ? '' : v); } el.append(...kids.flat().filter(x => x != null && x !== false)); return el; };
 
 /**
  * Build the editor in `root`. io = {get(path), post(path, body), changed()}: changed() is called after anything is saved
- * (the map tells the SillyTavern tab to reload its prompts). ui = {ask(question, def) -> string|null, confirm(text) -> bool}.
+ * (the map tells the SillyTavern tab to reload its prompts). ui = {ask(question, def) -> string|null, confirm(text) -> bool, unlocked() -> bool}.
+ * Returns {onClose, refresh}: call refresh() when the unlock setting changes.
  */
-export function promptEditor(root, io, ui = { ask: (q, d) => prompt(q, d), confirm: t => confirm(t) }) {
+export function promptEditor(root, io, ui = {}) {
+    ui = { ask: (q, d) => prompt(q, d), confirm: t => confirm(t), unlocked: () => false, ...ui };
     let st = null, dirty = new Map(); // id -> unsaved text
+    const opened = new Set(); // group ids (and 'pieces:<group id>') the user opened; everything starts collapsed
     const status = h('span', { class: 'pe-status', role: 'status' });
     const say = t => { status.textContent = t; };
     const head = h('div', { class: 'pe-profiles' }), list = h('div', { class: 'pe-list' });
@@ -68,8 +88,9 @@ export function promptEditor(root, io, ui = { ask: (q, d) => prompt(q, d), confi
             ro ? h('span', { class: 'pe-ro-note' }, 'Default is read-only. Start editing and you will be asked to make a profile.') : null);
     }
     function card(e) {
+        const locked = isLocked(e, ui.unlocked());
         const o = ov(e.id), text = dirty.has(e.id) ? dirty.get(e.id) : savedText(e);
-        const ta = h('textarea', { class: 'pe-text', spellcheck: 'false', 'aria-label': e.title, rows: Math.min(18, Math.max(2, text.split('\n').length + 1)) });
+        const ta = h('textarea', { class: 'pe-text', spellcheck: 'false', 'aria-label': e.title, rows: Math.min(18, Math.max(2, text.split('\n').length + 1)), readonly: locked });
         ta.value = text;
         const warn = h('div', { class: 'pe-warn' });
         const showWarn = () => {
@@ -85,9 +106,9 @@ export function promptEditor(root, io, ui = { ask: (q, d) => prompt(q, d), confi
         const undo = h('button', { type: 'button', class: 'crumb pe-undo', title: 'Go back to the last saved text', onclick: () => { dirty.delete(e.id); draw(); } }, 'Undo edits');
         const reset = h('button', { type: 'button', class: 'crumb pe-reset', title: 'Remove this edit; use the default text', disabled: !o,
             onclick: () => { if (ui.confirm(`Reset "${e.title}" to the default text?`)) act('/prompts/reset', { profile: st.selected, id: e.id }, `"${e.title}" uses the default again.`); } }, 'Reset to default');
-        const sync = () => { const d = dirty.has(e.id); sub.disabled = !d; undo.disabled = !d; el.classList.toggle('dirty', d); };
+        const sync = () => { const d = dirty.has(e.id); sub.disabled = !d || locked; undo.disabled = !d; el.classList.toggle('dirty', d); };
         ta.addEventListener('focus', async () => {
-            if (!readOnly()) return;
+            if (locked || !readOnly()) return;
             ta.blur();
             if (ui.confirm('Default is read-only. Make a new profile to edit the prompts?')) await newProfile();
         });
@@ -95,9 +116,10 @@ export function promptEditor(root, io, ui = { ask: (q, d) => prompt(q, d), confi
         const ph = (e.placeholders ?? []).map(p => h('code', { class: `pe-ph${p.generated ? ' generated' : ''}`, title: p.generated ? 'Made by the game (read-only)' : 'Filled in by the game' }, `{{${p.name}}}`));
         const badge = o?.default_changed ? h('details', { class: 'pe-changed' }, h('summary', {}, '⚠ Default changed since you edited this'),
             h('pre', { class: 'pe-diff' }, lineDiff(o.base_text ?? '', e.text).map(d => h('span', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : '' }, `${d.op} ${d.line}\n`)))) : null;
-        const el = h('article', { class: 'pe-card', 'data-id': e.id },
-            h('div', { class: 'pe-card-head' }, h('b', {}, e.title), o ? h('span', { class: 'pe-overridden', title: 'This profile changes this prompt' }, '● edited') : null, h('code', { class: 'pe-id' }, e.id)),
-            e.description ? h('div', { class: 'pe-desc' }, e.description) : null, badge,
+        const el = h('article', { class: `pe-card${e.locked ? ' locked' : ''}${locked ? ' readonly' : ''}`, 'data-id': e.id },
+            h('div', { class: 'pe-card-head' }, e.locked ? h('span', { class: 'pe-lock', title: locked ? 'Locked' : 'Unlocked (Debug menu)' }, locked ? '🔒' : '🔓') : null, h('b', {}, e.title), o ? h('span', { class: 'pe-overridden', title: 'This profile changes this prompt' }, '● edited') : null, h('code', { class: 'pe-id' }, e.id)),
+            e.description ? h('div', { class: 'pe-desc' }, e.description) : null,
+            e.locked ? h('div', { class: 'pe-locked' }, locked ? `Locked: ${e.locked} Turn on Debug > Unlock locked prompts to edit it.` : `Unlocked (normally locked): ${e.locked} Edit with care.`) : null, badge,
             ta, warn, ph.length ? h('div', { class: 'pe-phs' }, 'Placeholders: ', ph) : null,
             h('div', { class: 'pe-buttons' }, sub, undo, reset));
         sync(); showWarn();
@@ -107,8 +129,21 @@ export function promptEditor(root, io, ui = { ask: (q, d) => prompt(q, d), confi
         if (!st) return;
         drawHead();
         const q = search.value.trim().toLowerCase();
-        list.replaceChildren(...st.prompts.filter(e => !q || `${e.id} ${e.title} ${e.description} ${savedText(e)}`.toLowerCase().includes(q)).map(card));
+        const hits = st.prompts.filter(e => !q || `${e.id} ${e.title} ${e.description} ${savedText(e)}`.toLowerCase().includes(q));
+        const section = (key, cls, summary, kids) => { // collapsed unless opened (or searching); remembers what you opened
+            const d = h('details', { class: cls, 'data-group': key, ...(q || opened.has(key) ? { open: true } : {}) }, h('summary', {}, summary), kids);
+            d.addEventListener('toggle', () => { if (q) return; if (d.open) opened.add(key); else opened.delete(key); });
+            return d;
+        };
+        list.replaceChildren(...groupPrompts(hits, st.groups).map(({ group: g, main, pieces }) => {
+            const all = [...main, ...pieces], edited = all.filter(e => ov(e.id)).length;
+            return section(g.id, 'pe-group', [h('span', { class: 'pe-group-title' }, g.title),
+                h('span', { class: 'pe-count' }, `${all.length} prompt${all.length === 1 ? '' : 's'}`),
+                edited ? h('span', { class: 'pe-edited-count' }, `${edited} edited`) : null], [
+                g.flow ? h('p', { class: 'pe-flow' }, g.flow) : null, ...main.map(card),
+                pieces.length ? section(`pieces:${g.id}`, 'pe-pieces', `Pieces (${pieces.length}): small parts filled into the prompts above`, pieces.map(card)) : null]);
+        }));
     }
     io.get('/prompts').then(s => { st = s; draw(); }).catch(e => say(`Couldn't load the prompts: ${e.message}`));
-    return { onClose: () => !dirty.size || ui.confirm('You have unsaved edits. Close and lose them?') };
+    return { onClose: () => !dirty.size || ui.confirm('You have unsaved edits. Close and lose them?'), refresh: () => draw() };
 }

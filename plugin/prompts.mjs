@@ -51,7 +51,7 @@ export function editorState(def, s) {
     const byId = Object.fromEntries(def.prompts.map(e => [e.id, e]));
     const profiles = Object.fromEntries(Object.entries(s.profiles).map(([name, p]) => [name, { overrides: Object.fromEntries(Object.entries(p.overrides ?? {})
         .filter(([id]) => byId[id]).map(([id, o]) => [id, { ...o, default_changed: !!o.base_hash && o.base_hash !== hashText(byId[id].text) }])) }]));
-    return { selected: s.profiles[s.selected] ? s.selected : DEFAULT_PROFILE, default_profile: DEFAULT_PROFILE, prompts: def.prompts, profiles };
+    return { selected: s.profiles[s.selected] ? s.selected : DEFAULT_PROFILE, default_profile: DEFAULT_PROFILE, groups: def.groups ?? [], prompts: def.prompts, profiles };
 }
 /** Framework-free handler for /prompts routes. Returns null for any other path. */
 export function handlePrompts(method, url, body, root, defFile = DEFAULT_FILE) {
