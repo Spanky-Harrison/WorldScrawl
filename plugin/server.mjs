@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
+import { SnapshotCache } from './snapcache.mjs';
 import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
 import { inheritNotes, moveNames } from './movenotes.mjs';
@@ -175,26 +176,24 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         return worlds.get(wid);
     }
 
-    const changedCache = new Map(); // LRU of worlds with a chat's changes applied
+    const changedCache = new Map(); // LRU of built worlds, keyed by the snapshot key (world + version + active changes)
+    const snapshots = new SnapshotCache(); // throwaway checkpoints of the replay (plugin/snapcache.mjs)
     /** The world with a chat's changes applied ({w, worldJson, raw, info}); expired patch ops (game time `now`) left out. */
     function changed_for(wid, changesIn, now = null) {
         const lw = get_world(wid);
         const changes = activeChanges(changesIn, now);
         if (!changes.length) return { w: lw.world, worldJson: lw.raw[0], raw: lw.raw[1], info: { patches: [] } };
-        const key = `${lw.id}\u0000${lw.version}\u0000${stable(changes)}`;
-        let e = changedCache.get(key);
-        if (e === undefined) {
-            try {
-                const info = { patches: [] };
-                const [wj, raw] = apply_changes(...lw.raw, changes, { now, info, lenient: true });
-                e = { w: build_world(wj, raw), worldJson: wj, raw, info };
-            } catch (err) {
-                if (err instanceof WorldError) throw new HttpError(400, { error: err.message });
-                throw err;
-            }
+        let e;
+        try {
+            const s = snapshots.build(`${lw.id}\u0000${lw.version}`, ...lw.raw, changes, now);
+            e = changedCache.get(s.key);
+            if (e === undefined) e = { w: build_world(s.wj, s.raw), worldJson: s.wj, raw: s.raw, info: s.info, key: s.key, expires: s.expires };
+            changedCache.delete(s.key);
+            changedCache.set(s.key, e);
+        } catch (err) {
+            if (err instanceof WorldError) throw new HttpError(400, { error: err.message });
+            throw err;
         }
-        changedCache.delete(key);
-        changedCache.set(key, e);
         while (changedCache.size > 32) changedCache.delete(changedCache.keys().next().value);
         return e;
     }
@@ -235,6 +234,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const lw = get_world(q('world')), w = lw.world;
             return { ok: true, world: lw.id, map_version: lw.version, regions: w.regions.size, locations: w.locations.size, subregions: w.subregions.size, start: w.start };
         },
+        'GET /cache': () => ({ ...snapshots.info(), built: changedCache.size }),
+        'POST /cache/clear': () => { const checkpoints = snapshots.clear(), built = changedCache.size; changedCache.clear(); return { cleared: true, checkpoints, built }; },
         'POST /open-folder': ({ q }) => {
             if (rootDir === null) throw new HttpError(400, 'No worlds folder (single WORLDSCRAWL_WORLD_DIR mode).');
             const base = fs.realpathSync(rootDir), world = q('world');

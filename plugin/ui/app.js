@@ -726,6 +726,11 @@ export const DEBUG = [
         set: on => { if (!state) return setStatus('SillyTavern not connected'); channel.postMessage({ type: 'set_debug', key: 'showEditMessages', value: on }); } },
     { id: 'unlock-prompts', label: 'Unlock locked prompts', toggle: true, checked: () => unlockPrompts,
         set: on => { unlockPrompts = !!on; try { localStorage.setItem('worldscrawl_unlock_prompts', on ? '1' : '0'); } catch {} promptView?.refresh(); } },
+    { id: 'clear-map-cache', label: 'Clear map cache', open: async () => {
+        // The cache is a throwaway copy of the built map (rebuilt from the chat on the next request); clearing it is always safe.
+        try { const r = await postJson(`${API}/cache/clear`, {}); setStatus(`Map cache cleared (${r.checkpoints} snapshots). It rebuilds from the chat on the next map request.`); }
+        catch (e) { setStatus(`Clear map cache failed: ${e.message}`); }
+    } },
     { id: 'reveal-map', label: 'Reveal map', open: async () => {
         if (!state?.on || !state.chatId) return setStatus('Open a WorldScrawl chat first.');
         if (!confirm('Reveal the whole map? Every place is marked as visited, so you can travel anywhere (the same as /ws-reveal all). Delete the reveal message in the chat to undo.')) return;

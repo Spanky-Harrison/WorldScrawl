@@ -58,7 +58,10 @@ export function apply_changes(worldJson, rawIn, changes, opts = {}) {
     let wj = structuredClone(worldJson), raw = structuredClone(rawIn);
     const info = opts.info;
     if (info) info.patches ??= [];
+    const from = Number.isInteger(opts.from) ? opts.from : 0; // resume a replay from a snapshot: changes before `from` are already applied
     changes.forEach((ch, i) => {
+        if (i < from) return;
+        opts.onStep?.(i, wj, raw);
         if (ch?.off === true) return;
         const pi = info?.patches?.length ?? 0;
         try {
@@ -70,6 +73,7 @@ export function apply_changes(worldJson, rawIn, changes, opts = {}) {
             if (info) { info.patches.length = pi; (info.failed ??= []).push({ index: i, id: ch?.id ?? null, msg: ch?._msg ?? null, error: e.message.replace(/^change #1(, )?:? ?/, '') }); }
         }
     });
+    opts.onStep?.(changes.length, wj, raw);
     return [wj, raw];
 }
 function applyStrict(worldJson, rawIn, changes, { now = null, info = null } = {}) {
