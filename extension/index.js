@@ -1180,14 +1180,14 @@ export function viewPickPrompt(loc, said, rooms) {
     return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: optionLines(roomOptions(rooms)) });
 }
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
-async function narrativeLook(msg, loc) {
+async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const exits = loc.exits.filter(e => !e.hidden || revealsDestination(e)); // an unrevealed hidden exit is never named
     const stampChange = c => { msg.extra[CHANGE_KEY] = [...changesOf(msg), c]; };
     let look;
-    if (LOOK_AROUND_RE.test(String(msg.mes ?? ''))) look = { kind: 'around' }; // 'I look around': no question, no view link
+    if (!forced && LOOK_AROUND_RE.test(String(msg.mes ?? ''))) look = { kind: 'around' }; // 'I look around': no question, no view link
     const win = !look && offerWindow(loc, msg.mes);
-    const pick = look ? null : await askValid('look target', lookTargetPrompt(loc, said, exits, win), pickKey(lookOptions(exits, win)));
+    const pick = look ? null : forced ?? await askValid('look target', lookTargetPrompt(loc, said, exits, win), pickKey(lookOptions(exits, win)));
     if (look) { /* around */ }
     else if (pick == null) look = { kind: 'nothing' };
     else if (pick.key === 'around') look = { kind: 'around' };
@@ -1197,7 +1197,7 @@ async function narrativeLook(msg, loc) {
         let v = viewOf(e, open), opened = false, through = false, stuck = false;
         if (v === 'closed' && sightOf(e, open) !== 'none') { v = 'open'; through = true; } // a closed gate/grate: seen through as it is
         else if (v === 'closed') {
-            const act = await askValid('closed door', closedDoorPrompt(said, e), a => matchKey(a, DOOR_LOOK)) ?? 'look'; // unreadable: just looking (never opens a door by accident)
+            const act = forcedAct ?? await askValid('closed door', closedDoorPrompt(said, e), a => matchKey(a, DOOR_LOOK)) ?? 'look'; // unreadable: just looking (never opens a door by accident)
             if (act === 'listen') v = 'listen';
             else if (act === 'open' && isStuck(e, open)) { v = 'shut'; stuck = true; }
             else if (act === 'open') { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
@@ -1367,6 +1367,95 @@ async function parseIntent(msg) {
     return { kind: 'move', loc: res.to };
 }
 
+// ---- Bracket commands: "I [move] north", "I [look] out the window". One verb table for bracket verbs and slash
+// commands: a recognised verb skips the intent question; its target is matched exactly from the words after it, with
+// one small target-only question if that fails. Unknown bracket words ([OOC: ...], [sic]) are left alone.
+export const VERBS = [
+    { id: 'move', words: ['move', 'go', 'walk'], slash: '/ws-go <exit or place>', help: 'go through an exit or to a known place, e.g. [move] north' },
+    { id: 'travel', words: ['travel'], slash: '/ws-go <place>', help: 'travel to a place you know, e.g. [travel] Village Square' },
+    { id: 'look', words: ['look'], slash: null, help: 'look around, at an exit, or out a window, e.g. [look] out the window' },
+    { id: 'open', words: ['open'], slash: '/ws-open <exit>', help: 'open a door here, e.g. [open] trapdoor' },
+    { id: 'close', words: ['close', 'shut'], slash: '/ws-close <exit>', help: 'close a door here, e.g. [close] door' },
+    { id: 'dig', words: ['dig', 'break', 'break through'], slash: '/ws-dig <exit> <place>', help: 'break a new opening, e.g. I [break through] the wall' },
+    { id: 'wait', words: ['wait'], slash: '/ws-wait <time>', help: 'let time pass here, e.g. [wait] 2h or [wait] until morning' },
+    { id: 'sleep', words: ['sleep'], slash: '/ws-sleep [time]', help: 'sleep here (8h unless you say), e.g. [sleep] until morning' },
+    { id: 'help', words: ['help'], slash: '/ws-help', help: 'list these commands' },
+];
+const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));
+const TARGET_FILLER = new Set(['to', 'the', 'a', 'an', 'at', 'through', 'into', 'in', 'toward', 'towards', 'out', 'of', 'my', 'way']);
+/** The first bracket whose word is a known verb: {verb, target, raw}, or null. "out" stays when it is all there is ("[move] out"). */
+export function parseBracket(text) {
+    for (const m of String(text ?? '').matchAll(/\[([^\[\]]{1,40})\]([^\[\n.!?,;:]*)/g)) {
+        const v = VERB_OF.get(m[1].trim().toLowerCase().replace(/\s+/g, ' '));
+        if (!v) continue;
+        const words = m[2].trim().split(/\s+/).filter(Boolean);
+        let i = 0;
+        while (i < words.length - 1 && TARGET_FILLER.has(words[i].toLowerCase())) i++;
+        if (words.length === 1 && TARGET_FILLER.has(words[0].toLowerCase()) && !['out', 'in'].includes(words[0].toLowerCase())) i = 1;
+        return { verb: v.id, word: m[1].trim(), target: words.slice(i).join(' '), raw: m[0] };
+    }
+    return null;
+}
+/** Bracketed verbs read as plain words for the narrator ("I [move] north" -> "I move north"). */
+export const unbracket = text => String(text ?? '').replace(/\[([^\[\]]{1,40})\]/g, (all, w) => (VERB_OF.has(w.trim().toLowerCase().replace(/\s+/g, ' ')) ? w.trim() : all));
+export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}`;
+export const bracketTargetPrompt = (loc, b, opts) => P('intent.bracket_target', { party: whoMoves(), place: displayName(loc), verb: b.word, target: b.target, options: optionLines(opts) });
+/** Exact match first (an exit name, then a place), else one small target-only question; null when nothing fits. */
+async function bracketTarget(loc, b, opts) {
+    if (!b.target || !opts.length) return null;
+    const exact = opts.filter(o => sameName(o.match ?? o.key, b.target) || sameName(o.key, b.target));
+    if (exact.length === 1) return exact[0];
+    const pick = pickKey(opts);
+    return (await askValid('bracket target', bracketTargetPrompt(loc, b, opts), a => (/^none\b/i.test(String(a).trim()) ? false : pick(a)))) || null; // 'none': no retries
+}
+const failed = (loc, note) => ({ kind: 'bracket_failed', loc, note });
+/** Handle one bracket verb on the player's message. Returns a parseIntent-style result. */
+export async function bracketIntent(msg, b) {
+    await ensurePrompts();
+    msg.extra = msg.extra ?? {};
+    msg.extra.worldscrawl_intent_checked = true;
+    msg.extra.worldscrawl_bracket = { verb: b.verb, target: b.target };
+    const loc = await currentLocation();
+    const exitsSeen = loc.exits.filter(e => !e.hidden || revealsDestination(e));
+    if (b.verb === 'help') return { kind: 'help', loc };
+    if (b.verb === 'move' || b.verb === 'travel') {
+        if (!b.target) return failed(loc, `[${b.word}] needs where to: an exit or a place you know.`);
+        const taken = new Set(), cands = await travelCandidates(loc);
+        const opts = [...(b.verb === 'move' ? exitsSeen.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), match: e.direction, exit: e })) : []),
+            ...cands.filter(x => !x.direction).map(x => ({ key: keyFor(x.name ?? x.label, taken), label: x.label, match: x.name ?? x.label, place: x }))];
+        const hit = await bracketTarget(loc, b, opts);
+        if (!hit) return failed(loc, `[${b.word}] ${b.target}: there is no exit or known place called "${b.target}" here.`);
+        const res = hit.exit ? await engineMove(hit.exit.direction) : await engineTravel(hit.place.address, hit.place.prefix ?? null);
+        if (!res.ok) return failed(loc, `[${b.word}] ${b.target}: ${res.error ?? 'there is no way there from here.'}`);
+        stamp(msg, res.to, res.move);
+        return { kind: 'move', loc: res.to };
+    }
+    if (b.verb === 'look') {
+        const t = b.target.toLowerCase();
+        if (!t || /^(around|about|here|room)$/.test(t)) return await narrativeLook(msg, loc, { key: 'around' });
+        if (/\b(window|opening)\b/.test(t) && !exitsSeen.some(e => sameName(e.direction, t))) return await narrativeLook(msg, loc, { key: 'window' });
+        const opts = lookOptions(exitsSeen, false).filter(o => o.exit).map(o => ({ ...o, match: o.exit.direction }));
+        const hit = await bracketTarget(loc, b, opts);
+        if (!hit) return failed(loc, `[${b.word}] ${b.target}: there is no "${b.target}" to look at here.`);
+        return await narrativeLook(msg, loc, hit, 'look');
+    }
+    if (b.verb === 'open' || b.verb === 'close') {
+        const d = doorCandidates(loc), list = b.verb === 'open' ? [...d.toOpen, ...d.stuck] : d.toClose;
+        const opts = doorOptions(list).map(o => ({ ...o, match: o.exit.direction }));
+        const hit = list.length === 1 && !b.target ? opts[0] : await bracketTarget(loc, b, opts);
+        if (!hit) return failed(loc, list.length ? `[${b.word}] ${b.target}: doors you can ${b.verb} here: ${list.map(x => x.direction).join(', ')}.` : `[${b.word}]: no door to ${b.verb} here.`);
+        return await narrativeDoor(msg, loc, [hit.exit], b.verb === 'open' ? 'open_door' : 'close_door');
+    }
+    if (b.verb === 'dig') return await narrativeDig(msg, loc);
+    if (b.verb === 'wait' || b.verb === 'sleep') {
+        const w = await planWait(b.target, b.verb === 'sleep');
+        if (w.error) return failed(loc, `[${b.word}] ${b.target}: ${w.error}.`);
+        stampWait(msg, w);
+        return { kind: STAY, loc };
+    }
+    return null;
+}
+
 const MENTION_STOP = new Set(['the', 'a', 'an', 'of', 'to', 'into', 'onto', 'in', 'on', 'at', 'by', 'and', 'or', 'with', 'from', 'back', 'behind', 'beside', 'down', 'up', 'out', 'its', 'set', 'leading', 'leads', 'way', 'room', 'rooms']);
 /** Does the player's text refer to this exit itself (its word, or a word of its description: "down the stair" -> grate)? */
 export function exitMentioned(text, exit) {
@@ -1405,15 +1494,15 @@ export const whichText = (cands, prefix = WHICH_PREFIX) => `${prefix} ${cands.ma
  * kind 'which' lists candidate buttons; otherwise the not-aware / no-route text plus exit buttons.
  * Everything needed to rebuild the buttons is stored on the message, so they survive reloads.
  */
-async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '', prefix = WHICH_PREFIX }) {
+async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '', prefix = WHICH_PREFIX, text = '' }) {
     const c = ctx();
     const which = kind === 'which';
     const cands = candidates.map(x => ({ label: x.label, name: x.name, ...(x.direction ? { direction: x.direction } : {}), ...(x.prefix ? { prefix: x.prefix } : {}), address: x.address }));
     const msg = {
         name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: which ? whichText(cands, prefix) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute),
+        mes: kind === 'text' ? text : which ? whichText(cands, prefix) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute),
         extra: { worldscrawl_notice: true, worldscrawl_notice_kind: kind, worldscrawl_notice_loc: loc?.address ?? null,
-            worldscrawl_notice_prefix: which ? prefix : kind === 'already' ? `You're already in ${name}.` : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
+            worldscrawl_notice_prefix: kind === 'text' ? '' : which ? prefix : kind === 'already' ? `You're already in ${name}.` : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
     };
     c.chat.push(msg);
     c.addOneMessage(msg);
@@ -1548,15 +1637,24 @@ export function stripStartMarker(arr) {
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
     stripStartMarker(_chat);
+    _chat.forEach((m, i) => { if (m?.is_user && typeof m.mes === 'string' && m.mes.includes('[')) { const t = unbracket(m.mes); if (t !== m.mes) _chat[i] = { ...m, mes: t }; } });
     if (type === 'quiet' || type === 'impersonate' || !isOn()) return;
     try {
         const c = ctx();
         const chat = c.chat ?? [];
         const last = chat[chat.length - 1];
         const s = settings();
-        if ((!type || type === 'normal') && last?.is_user && s.moveMode === 'typed'
-            && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked) {
-            const r = await parseIntent(last);
+        const bracket = (!type || type === 'normal') && last?.is_user && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked ? parseBracket(last.mes) : null;
+        if (bracket || ((!type || type === 'normal') && last?.is_user && s.moveMode === 'typed'
+            && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked)) {
+            const r = (bracket && await bracketIntent(last, bracket)) || await parseIntent(last);
+            await c.saveChat();
+            if (r.kind === 'help' || r.kind === 'bracket_failed') {
+                abort(true); // answered here: the narrator is not called
+                await addNotice({ loc: r.loc, kind: 'text', text: r.kind === 'help' ? helpText() : r.note });
+                renderAllExits();
+                return;
+            }
             await c.saveChat();
             if (r.kind === ELSEWHERE || r.kind === 'which' || r.kind === 'already') {
                 abort(true); // no model call: the model would only narrate a trip that didn't happen
@@ -1801,6 +1899,7 @@ function registerSlashCommands() {
             : 'WorldScrawl: wait here: /ws-wait 2h, /ws-wait 1h30m, /ws-wait 2d, /ws-wait until dawn|morning|noon|dusk|evening|night|midnight|14:30. Delete the message to undo.',
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'how long, or "until <time>"', typeList: [ARGUMENT_TYPE.STRING], isRequired: !sleep })],
     }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-help', callback: async () => { await addNotice({ kind: 'text', text: helpText() }); return ''; }, helpString: 'WorldScrawl: list the commands ([move], [look], ... and their slash commands). Answered here; the narrator is not called.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
@@ -2044,6 +2143,7 @@ async function renderNotices() {
             text.append(']');
             continue;
         }
+        if (msg.extra.worldscrawl_notice_kind === 'text') continue;
         const cands = msg.extra.worldscrawl_notice_kind === 'which' ? msg.extra.worldscrawl_notice_candidates ?? [] : null;
         const addr = msg.extra.worldscrawl_notice_loc;
         const loc = id === last && addr && !cands ? await fetchLocationCached(addr) : null;

@@ -1024,6 +1024,35 @@ try {
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look around: no target question, no view_link, kind around', lq.length === 2 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.kind === 'around' && !lq.some(q => promptOf(q).includes('What is the player looking at')), JSON.stringify(lk.extra) + lq.length);
     check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looks around') && promptOf(lq[1]).includes('mention every exit listed above') && !promptOf(lq[1]).includes('looks out and sees'), promptOf(lq[1]).slice(-600));
+    // Bracket commands: a known verb skips the intent question; [help] and unresolved targets never reach the narrator.
+    const lastChatMsg = () => page.evaluate(() => { const m = SillyTavern.getContext().chat.at(-1); return { mes: m.mes, sys: !!m.is_system, kind: m.extra?.worldscrawl_notice_kind }; });
+    rL = (await reqsNow()).length;
+    await send('[help]', 0);
+    let bm = await lastChatMsg();
+    check('bracket [help]: verb list answered directly, no model call', (await reqsNow()).length === rL && bm.kind === 'text' && /\[move\]/.test(bm.mes) && /\/ws-help/.test(bm.mes), JSON.stringify(bm));
+    await queue([{ content: 'You take in the room again.' }]);
+    await send('I [look] around.', 1);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('bracket [look] around: no intent question, look-around narration, brackets gone for the narrator', lq.length === 1 && lk.extra.worldscrawl_look?.kind === 'around' && promptOf(lq[0]).includes('looks around') && promptOf(lq[0]).includes('I look around.') && !promptOf(lq[0]).includes('[look]'), lq.length + JSON.stringify(lk.extra));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'none' }]);
+    await send('I [move] sideways', 1);
+    lq = (await reqsNow()).slice(rL); bm = await lastChatMsg();
+    check('bracket [move] unknown target: one target-only question, then a clear note, no narration, no move', lq.length === 1 && promptOf(lq[0]).includes('Which of these does \\"sideways\\" mean') && bm.kind === 'text' && /no exit or known place called "sideways"/.test(bm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', lq.length + JSON.stringify(bm) + (await stored()) + promptOf(lq[0] ?? {}).slice(0, 400));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'You open the door.' }]);
+    await send('I [open] out', 1);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('bracket [open] out: exact target, door opened, narration only', lq.length === 1 && lk.extra.worldscrawl_door?.type === 'open_door' && (await openDoors()) === 'common_room|out', lq.length + JSON.stringify(lk.extra) + await openDoors());
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'You close the door.' }]);
+    await send('I [close] the out', 1);
+    lk = await lastU();
+    check('bracket [close]: door closed again', (await reqsNow()).length - rL === 1 && lk.extra.worldscrawl_door?.type === 'close_door' && (await openDoors()) === '', JSON.stringify(lk.extra) + await openDoors());
+    rL = (await reqsNow()).length;
+    await send('/ws-help', 0);
+    bm = await lastChatMsg();
+    check('/ws-help: same verb list, no model call', (await reqsNow()).length === rL && bm.kind === 'text' && /\[open\]/.test(bm.mes), JSON.stringify(bm));
     // Ambiguous look: option 1 = around; no window option without window words (and no views here).
     rL = (await reqsNow()).length;
     await queue([{ content: 'look' }, { content: 'Around' }, { content: 'The room, in general.' }]);

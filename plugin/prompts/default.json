@@ -16,7 +16,7 @@
     {
       "id": "intent",
       "title": "Player intent",
-      "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'."
+      "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'. Bracket commands: when the message has a known verb in brackets (\"I [move] north\", \"[look] out the window\"), step 1 is skipped. The words after the verb are matched to an exit or place by name; only if that fails, 'Bracket command: which target' asks which option they mean. If nothing fits, the game shows a note and the narrator is not called. Unknown bracket words like [OOC: ...] are ignored."
     },
     {
       "id": "dig",
@@ -100,6 +100,7 @@
     "steps": "what happened on the way, step by step, joined with \"Then:\"",
     "story": "the part of the story that changed the map",
     "style": "The Writing style entry for this process (how names and descriptions are written), filled in by the game.",
+    "target": "What the player wrote after a bracket command's verb, e.g. \"north\" in \"[move] north\".",
     "text": "your draft text",
     "to": "the room the party arrived in",
     "used": "The exit names already used at this place, comma-separated, or \"none\".",
@@ -473,6 +474,32 @@
       "placeholders": [
         {
           "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.bracket_target",
+      "title": "Bracket command: which target",
+      "description": "Step 1 (bracket commands only): used only when the words after a bracket verb (\"I [move] up the stairs\") don't name an exit or place exactly. The options (key: meaning) are made by the game.",
+      "group": "intent",
+      "locked": "The game reads the chosen option key back; changing this can break bracket commands.",
+      "text": "{{party}} is in {{place}}.\nThe player wrote the command [{{verb}}] {{target}}\n\nWhich of these does \"{{target}}\" mean? If none of them, reply none.\n{{options}}\n\nReply with just the key.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "verb"
+        },
+        {
+          "name": "target"
+        },
+        {
+          "name": "options",
           "generated": true
         }
       ]
