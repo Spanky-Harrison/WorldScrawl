@@ -14,11 +14,16 @@ const rooms = (a, changes) => c.post('/rooms', { json: { addresses: [a], changes
 test('discover: preview makes the id from the name and adds one door pair, nothing else', () => {
     const r = c.post('/patch/preview', { json: { patch: { ops: [op()] } } }).json();
     assert.equal(r.ops[0].id, 'guest_room');
-    assert.deepEqual(r.touched, [UP, ROOM]);
+    assert.deepEqual([...r.touched].sort(), [ROOM, UP].sort());
     assert.equal(r.before[ROOM], null);
     assert.equal(r.after[ROOM].name, 'Guest Room');
     assert.equal(r.after[UP].description, r.before[UP].description, 'the hallway description is untouched');
-    assert.deepEqual(r.after[UP].exits.at(-1).barrier, {});
+    assert.equal(r.ops[0].op, 'create_place', 'a discovery is a normal create_place');
+    assert.equal(r.ops[0].story, true);
+    const door = [r.after[UP].exits.at(-1), r.after[ROOM].exits[0]].filter(x => x.barrier);
+    assert.equal(door.length, 1, 'one door, shared by the pair');
+    assert.equal(r.after[UP].exits.at(-1).direction, 'guest room door');
+    assert.equal(r.after[ROOM].exits[0].direction, 'hallway');
     assert.equal(r.after[ROOM].exits[0].to, UP);
 });
 

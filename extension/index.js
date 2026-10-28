@@ -2489,22 +2489,16 @@ export function parseJsonAnswer(text) {
     return null;
 }
 const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
-const PATCH_SYS = `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
+const patchSys = pl => `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
 ADDR is a room's full address copied exactly from the map, e.g. "riverton:drowned_rat/common_room". AREA is a region id ("riverton") or subregion id ("riverton:drowned_rat"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.
-Allowed ops:
-{"op":"set_description","loc":ADDR,"text":"..."}  {"op":"append_description","loc":ADDR,"text":"..."}  {"op":"set_name","loc":ADDR,"text":"New display name"}
-{"op":"update_area","area":AREA,"name":"New display name","notes":"..."} (rename a whole building/area and/or rewrite its notes; give name, notes or both)
-{"op":"set_notes","area":AREA,"text":"..."}  {"op":"append_notes","area":AREA,"text":"..."}
-{"op":"block_exit"|"open_exit"|"lock_exit"|"unlock_exit"|"break_exit"|"remove_exit","loc":ADDR,"direction":"exit name"}
-{"op":"set_exit_description","loc":ADDR,"direction":"exit name","text":"..."} (that side's exit text only; the way back keeps its own)
-{"op":"set_travel_time","loc":ADDR,"direction":"exit name","time":"10m"} (both ways)
-{"op":"remove_location","loc":ADDR}
-{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept and rewritten)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (a new room: just give its name, the engine makes its id; optional "area":AREA)
+Allowed ops (exactly what the map editor can do):
+${pl.opDocs()}
 Example, a whole inn turned into a palace: {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace"},{"op":"set_description","loc":"riverton:drowned_rat/common_room","text":"A gilded throne hall; an old brass rail shows under the gold leaf."},{"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."},{"op":"set_description","loc":"riverton:drowned_rat/courtyard","text":"..."}]}
 Any op may add "lasts":"3d" (or "12h") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters.
 DESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now ("scorch marks blacken the beams", "an old brass rail shows under the gold leaf"). Never narrate the change itself: no "has been replaced by", "was transformed", "was once", "now". History goes in notes instead: a short append_notes on the place's area, e.g. {"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."}. Exception: a temporary change with "lasts" (smoke, a fresh fire) may mention the event.
 People and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule.
-Exit names (the "direction", e.g. "grate", "narrow door") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.`;
+Exit names (the "direction", e.g. "grate", "narrow door") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.
+If the story changed the map in a way none of these ops can express, do not force a wrong op: reply {"cant": "one short sentence saying what can't be shown on the map"}.`;
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -2539,10 +2533,11 @@ async function analyzeFlag(id) {
         const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
         let ops = null, err = '', preview = null;
         for (let tries = 0; tries < 2; tries++) {
-            const ans = parseJsonAnswer(await c.generateRaw({ prompt: patchQ(err), systemPrompt: PATCH_SYS, responseLength: 900 }));
-            ops = Array.isArray(ans?.ops) ? ans.ops : null;
+            const ans = pl.readChangeAnswer(parseJsonAnswer(await c.generateRaw({ prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
+            if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
+            if (ans?.nothing) { f.status = 'nothing'; return; }
+            ops = ans?.ops ?? null;
             if (!ops) { err = 'the answer was not {"ops": [...]} JSON'; continue; }
-            if (!ops.length) { f.status = 'nothing'; return; }
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
@@ -2560,8 +2555,8 @@ async function analyzeFlag(id) {
 }
 
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
-// room behind it is added as if it had always been there: one "discover" patch op (a new room with an engine-made id
-// and one door pair). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
+// room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
+// id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
 const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:
 {"name": "...", "description": "...", "direction": "exit name from the current room", "return_direction": "exit name back", "exit_description": "...", "return_description": "..."}
 name: short display name (e.g. "Guest Room"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. "east guest room", "green door"). return_direction: usually "out" or "hallway". exit_description / return_description: one sentence each about the door from each side.`;
@@ -2583,7 +2578,8 @@ async function analyzeDiscovery(id) {
         for (let tries = 0; tries < 2 && !preview; tries++) {
             const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: DISCOVER_SYS, responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
-            ops = [{ op: 'discover', loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) }];
+            // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
+            ops = [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; } else err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
@@ -2843,6 +2839,7 @@ export function renderPatchCards() {
         if (f && (f.swipe ?? 0) === swipeOf(msg)) {
             if (f.status === 'working') card.append(line(`🗺 Checking what changed on the map (messages #${f.start}–#${id})…`));
             else if (f.status === 'nothing') card.append(line(`🗺 No lasting map change found in messages #${f.start}–#${id}.`), startPicker(), cardButton('Check again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
+            else if (f.status === 'cant') card.append(line(`🗺 The map can't show this change yet: ${f.error}`), startPicker(), cardButton('Try again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
             else if (f.status === 'error') card.append(line(`🗺 ${f.error || 'Something went wrong.'}`), startPicker(), cardButton('Try again', () => analyzeFlag(id)), cardButton('Dismiss', () => discardFlag(id)));
             else if (f.status === 'review' && f.proposal) {
                 card.append(line('🗺 Proposed map change:'));
