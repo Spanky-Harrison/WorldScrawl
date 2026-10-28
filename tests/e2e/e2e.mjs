@@ -1011,8 +1011,8 @@ try {
     await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'banana' }, { content: 'The wall bursts open onto a hidden attic. [ws_flag: discover | hole]' }]);
     await send('I smash the wall with my fist until it breaks', 4);
     await page.waitForTimeout(1500);
-    const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
-    check('dig failed: the narrator is told it failed and its discover flag is ignored', promptOf(await lastReq()).includes('it FAILED') && fl === null && (await M(m => m.chatChanges().length)) === 0, JSON.stringify(fl));
+    const flD = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
+    check('dig failed: the narrator is told it failed and its discover flag is ignored', promptOf(await lastReq()).includes('it FAILED') && flD === null && (await M(m => m.chatChanges().length)) === 0, JSON.stringify(flD));
     lu = await lastU();
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
