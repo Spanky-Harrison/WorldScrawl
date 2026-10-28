@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
-import { initialState, placeOps, areaOps, newExit, formProblems, ROOM_FIELDS, EXIT_FIELDS } from '../../plugin/ui/placeform.mjs';
+import { initialState, placeOps, areaOps, newExit, formProblems, setDirection, ROOM_FIELDS, EXIT_FIELDS } from '../../plugin/ui/placeform.mjs';
 import { applyPatch, getRoom, PatchError } from '../../plugin/ui/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 const loadRaw = () => read_world_raw(RIVERTON)[1];
@@ -127,4 +127,45 @@ test('exit See/Hear destination: an unset open/no-door value defaults from the e
     assert.deepEqual(exitLevelDefault({ side: {}, barrier: {} }, 'sight'), { value: 'partial', from: 'default' });
     assert.equal(exitLevelDefault({ side: { type: 'open' }, barrier: null }, 'sound').value, 'clear');
     assert.equal(exitLevelDefault({ side: { obscured: true }, barrier: null }, 'sight').value, 'none');
+});
+
+test('exit sides: opposite directions, real-name labels, the way back filled in until edited', async () => {
+    const { opposite, sideLabels, setDirection, setBackDirection } = await import('../../plugin/ui/placeform.mjs');
+    assert.equal(opposite('north'), 'south'); assert.equal(opposite('Up'), 'Down'); assert.equal(opposite('out'), 'in'); assert.equal(opposite('trapdoor'), '');
+    assert.deepEqual(sideLabels('Common Room', 'Cellar'), { there: 'From Common Room, go ___ to reach Cellar', back: 'From Cellar, go ___ to get back' });
+    const e = newExit();
+    setDirection(e, 'east'); assert.equal(e.back.direction, 'west');
+    setBackDirection(e, 'bar'); setDirection(e, 'north'); assert.equal(e.back.direction, 'bar');
+});
+
+test('edit form: the way back is edited on the destination, by its own direction, renamed last', () => {
+    const c = client(RIVERTON), x = ctxOf(c, TAVERN), s = initialState(x);
+    const out = s.exits.find(e => e.orig === 'out');
+    assert.equal(out.back_orig, 'in'); assert.ok(out.back.description);
+    out.back.description = 'Back inside, under the swinging sign.'; out.back.sight = 'none'; out.back.direction = 'tavern';
+    const ops = placeOps(x, s);
+    assert.deepEqual(ops.find(o => o.op === 'set_exit_description'), { op: 'set_exit_description', loc: SQUARE, direction: 'in', text: 'Back inside, under the swinging sign.' });
+    const se = ops.find(o => o.op === 'set_exit' && o.loc === SQUARE);
+    assert.deepEqual(se.fields, { sight: 'none', direction: 'tavern' });
+    assert.equal(Object.keys(se.fields).at(-1), 'direction');
+    const r = preview(c, ops); assert.equal(r.status_code, 200, JSON.stringify(r.json()));
+});
+
+test('create place: the Edit place form, empty; Submit makes create_place plus what it cannot carry', () => {
+    const c = client(RIVERTON), x = ctxOf(c, 'new:riverton:drowned_rat');
+    assert.equal(x.create, true); assert.equal(x.kind, 'room'); assert.deepEqual(x.own, {}); assert.deepEqual(x.exits, []);
+    assert.equal(x.inherited.exposure.value, 'sheltered'); assert.ok(x.parent_notes.length);
+    const s = initialState(x);
+    assert.ok(formProblems(x, s).some(p => /Name/.test(p)) && formProblems(x, s).some(p => /at least one exit/.test(p)));
+    s.own.name = 'Common Room'; s.own.description = 'Another one.'; s.own.exposure = 'outdoor';
+    const e = newExit(); e.to = TAVERN; setDirection(e, 'north'); e.side.hidden = true; e.back.sight = 'none'; e.barrier = { locked: true }; s.exits.push(e);
+    assert.deepEqual(formProblems(x, s), []);
+    const ops = placeOps(x, s);
+    assert.equal(ops[0].op, 'create_place'); assert.equal(ops[0].id, 'common_room_2', 'a free id');
+    assert.deepEqual(ops[0].exits, [{ direction: 'north', to: TAVERN, return_direction: 'south', door: true }]);
+    const a = 'riverton:drowned_rat/common_room_2';
+    assert.ok(ops.some(o => o.op === 'set_fields' && o.target === a && o.fields.exposure === 'outdoor'));
+    assert.ok(ops.some(o => o.op === 'set_exit' && o.loc === a && o.fields.hidden === true && o.fields.barrier.locked === true));
+    assert.ok(ops.some(o => o.op === 'set_exit' && o.loc === TAVERN && o.direction === 'south' && o.fields.sight === 'none'));
+    const r = preview(c, ops); assert.equal(r.status_code, 200, JSON.stringify(r.json()));
 });

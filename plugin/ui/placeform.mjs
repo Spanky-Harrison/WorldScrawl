@@ -2,13 +2,24 @@
 // form into patch ops) are node-tested; buildEditForm makes the DOM. The form starts from /edit/context: `own` holds
 // what the place itself sets, `inherited` what an unset field gets and from where. Only fields the user explicitly
 // changed become ops, so submitting an untouched form never copies inherited values into the place.
-import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS } from './patches.mjs';
+import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS, newRoomId } from './patches.mjs';
 import { pickField, pathOf } from './picker.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const str = v => (typeof v === 'string' ? v.trim() : '');
+
+/** The usual way back for a direction (north -> south, up -> down, in -> out); '' when there is no obvious one. */
+const OPP = { north: 'south', east: 'west', northeast: 'southwest', northwest: 'southeast', up: 'down', in: 'out', inside: 'outside', ne: 'sw', nw: 'se', n: 's', e: 'w', u: 'd', forward: 'back', left: 'right' };
+for (const [k, v] of Object.entries({ ...OPP })) OPP[v] = k;
+export function opposite(dir) {
+    const d = str(dir), low = d.toLowerCase(), o = OPP[low];
+    if (!o) return '';
+    return d[0] === d[0].toUpperCase() && d[0] !== d[0].toLowerCase() ? o[0].toUpperCase() + o.slice(1) : o;
+}
+/** The sentences that label the two sides of an exit pair, with real place names. */
+export const sideLabels = (here, there) => ({ there: `From ${here || 'here'}, go ___ to reach ${there || '?'}`, back: `From ${there || '?'}, go ___ to get back` });
 
 /** Field specs: type text | textarea | bool | number | choice (radio for 2-3 options, a dropdown for 4+). */
 export const ROOM_FIELDS = [
@@ -52,7 +63,6 @@ export const AREA_FIELDS = {
 export const EXIT_FIELDS = [
     { k: 'direction', type: 'text', label: 'Direction', required: true },
     { k: 'description', type: 'textarea', label: 'Description (this side)', ai: true },
-    { k: 'travel_time', type: 'text', label: 'Travel time (both ways)', shared: true },
     { k: 'type', type: 'choice', label: 'Type', options: ENUMS.type, dflt: 'portal' },
     { k: 'sight', type: 'choice', label: 'See destination', options: ENUMS.sight },
     { k: 'sound', type: 'choice', label: 'Hear destination', options: ENUMS.sound },
@@ -60,6 +70,8 @@ export const EXIT_FIELDS = [
     { k: 'hidden', type: 'bool', label: 'Hidden', dflt: false },
     { k: 'obscured', type: 'bool', label: 'Obscured', dflt: false },
 ];
+/** The pair's shared fields (they change both sides). The door has its own block. */
+export const PAIR_FIELDS = [{ k: 'travel_time', type: 'text', label: 'Travel time (both ways)', shared: true }];
 export const DOOR_FIELDS = [
     { k: 'openable', type: 'bool', label: 'Can be opened', dflt: true },
     { k: 'locked', type: 'bool', label: 'Locked', dflt: false },
@@ -81,12 +93,58 @@ export function initialState(ctx) {
     if (ctx.kind === 'room') {
         s.area = ctx.area;
         s.exits = (ctx.exits ?? []).map(e => ({ orig: e.direction, to: e.to, to_name: e.to_name, side: structuredClone(e.side ?? {}),
+            back: structuredClone(e.back_side ?? {}), back_orig: e.back_direction ?? null, back_auto: false,
             travel_time: e.travel_time ?? undefined, barrier: e.barrier === null ? null : structuredClone(e.barrier), removed: false }));
     }
     return s;
 }
 /** A blank exit block for "Add exit". */
-export const newExit = () => ({ orig: null, to: '', side: {}, travel_time: undefined, barrier: null, return_direction: '', return_description: '', removed: false });
+export const newExit = () => ({ orig: null, to: '', side: {}, back: {}, back_orig: null, back_auto: true, travel_time: undefined, barrier: null, removed: false });
+/** Typing this side's direction fills in the way back (its usual opposite) until the user edits the way back. */
+export function setDirection(e, v) {
+    e.side.direction = v;
+    if (e.back_auto) { const o = opposite(v); if (o) e.back.direction = o; else delete e.back.direction; }
+}
+export function setBackDirection(e, v) { e.back.direction = v; e.back_auto = false; }
+const EXTRA_SIDE = EXIT_SIDE_KEYS.filter(k => k !== 'description' && k !== 'direction');
+const backDir = e => str(e.back?.direction) || str(e.return_direction) || 'back';
+/** add_exit (in create_place's form when `inCreate`) plus set_exit for what add_exit can't carry. */
+function newExitOps(a, e, inCreate) {
+    const dir = str(e.side.direction), back = backDir(e);
+    const x = { direction: dir, to: e.to, return_direction: back };
+    if (str(e.travel_time)) x.travel_time = str(e.travel_time);
+    if (str(e.side.description)) x.description = str(e.side.description);
+    const rd = str(e.back?.description) || str(e.return_description);
+    if (rd) x.return_description = rd;
+    if (e.barrier) x.door = true;
+    const more = [];
+    const f = fieldDiff({}, e.side, EXTRA_SIDE);
+    for (const k of Object.keys(f)) if (f[k] === null) delete f[k];
+    if (e.barrier && Object.keys(e.barrier).length) f.barrier = e.barrier;
+    if (Object.keys(f).length) more.push({ op: 'set_exit', loc: a, direction: dir, fields: f });
+    const g = fieldDiff({}, e.back ?? {}, EXTRA_SIDE);
+    for (const k of Object.keys(g)) if (g[k] === null) delete g[k];
+    if (Object.keys(g).length) more.push({ op: 'set_exit', loc: e.to, direction: back, fields: g });
+    return { add: inCreate ? x : { op: 'add_exit', loc: a, ...x }, more };
+}
+/** The Create place form's ops: create_place with its exits, then what create_place can't carry. */
+function createOps(ctx, state) {
+    const o = state.own ?? {}, name = str(o.name), area = state.area || ctx.area;
+    if (!name) return [];
+    const used = new Set((ctx.rooms ?? []).map(r => r.address)), base = newRoomId(name);
+    let id = base; for (let n = 2; used.has(`${area}/${id}`); n++) id = `${base}_${n}`;
+    const a = `${area}/${id}`, exits = [], more = [];
+    for (const e of state.exits ?? []) {
+        if (e.removed || !str(e.side.direction) || !str(e.to)) continue;
+        const r = newExitOps(a, e, true); exits.push(r.add); more.push(...r.more);
+    }
+    const ops = [{ op: 'create_place', area, id, name, description: str(o.description), exits }];
+    if (o.expandable !== undefined) ops.push({ op: 'set_expandable', target: a, value: o.expandable });
+    const f = fieldDiff({}, o, FIELD_KEYS.room);
+    for (const k of Object.keys(f)) if (f[k] === null) delete f[k];
+    if (Object.keys(f).length) ops.push({ op: 'set_fields', target: a, fields: f });
+    return [...ops, ...more];
+}
 
 function fieldDiff(before, after, keys) {
     const f = {};
@@ -95,6 +153,7 @@ function fieldDiff(before, after, keys) {
 }
 /** The patch ops for a room form: only what differs from the context it started from. */
 export function placeOps(ctx, state) {
+    if (ctx.create) return createOps(ctx, state);
     const a = ctx.address, b = ctx.own ?? {}, o = state.own ?? {}, ops = [];
     if (str(o.name) && str(o.name) !== str(b.name)) ops.push({ op: 'set_name', loc: a, text: str(o.name) });
     if (str(o.description) && str(o.description) !== str(b.description)) ops.push({ op: 'set_description', loc: a, text: str(o.description) });
@@ -110,20 +169,23 @@ export function placeOps(ctx, state) {
         const d = str(e.side.description);
         if (d && d !== str(was.side?.description)) ops.push({ op: 'set_exit_description', loc: a, direction: e.orig, text: d });
         if (str(e.travel_time) && str(e.travel_time) !== str(was.travel_time)) ops.push({ op: 'set_travel_time', loc: a, direction: e.orig, time: str(e.travel_time) });
-        const sideKeys = EXIT_SIDE_KEYS.filter(k => k !== 'description' && k !== 'direction');
-        const fields = fieldDiff(was.side ?? {}, e.side, sideKeys);
+        if (e.back_orig) {
+            // The way back is the destination's exit: edit it there, by its own (old) direction.
+            const wb = was.back_side ?? {}, bd = str(e.back?.description);
+            if (bd && bd !== str(wb.description)) ops.push({ op: 'set_exit_description', loc: e.to, direction: e.back_orig, text: bd });
+            const bf = fieldDiff(wb, e.back ?? {}, EXTRA_SIDE);
+            if (str(e.back?.direction) && str(e.back.direction) !== e.back_orig) bf.direction = str(e.back.direction);
+            if (Object.keys(bf).length) ops.push({ op: 'set_exit', loc: e.to, direction: e.back_orig, fields: bf });
+        }
+        const fields = fieldDiff(was.side ?? {}, e.side, EXTRA_SIDE);
         if (!same(was.barrier, e.barrier)) fields.barrier = e.barrier;
         if (str(e.side.direction) && str(e.side.direction) !== e.orig) fields.direction = str(e.side.direction); // last: later ops use the old name
         if (Object.keys(fields).length) ops.push({ op: 'set_exit', loc: a, direction: e.orig, fields });
     }
     for (const e of state.exits ?? []) {
         if (e.orig !== null || e.removed || !str(e.side.direction) || !str(e.to)) continue;
-        const op = { op: 'add_exit', loc: a, direction: str(e.side.direction), to: e.to, return_direction: str(e.return_direction) || 'back' };
-        if (str(e.travel_time)) op.travel_time = str(e.travel_time);
-        if (str(e.side.description)) op.description = str(e.side.description);
-        if (str(e.return_description)) op.return_description = str(e.return_description);
-        if (e.barrier) op.door = true;
-        ops.push(op);
+        const r = newExitOps(a, e, false);
+        ops.push(r.add, ...r.more);
     }
     if (state.area && state.area !== ctx.area) ops.push({ op: 'move_location', loc: a, area: state.area });
     return ops;
@@ -143,6 +205,11 @@ export function formProblems(ctx, state) {
     const out = [];
     const specs = ctx.kind === 'room' ? ROOM_FIELDS : AREA_FIELDS[ctx.kind];
     for (const s of specs) if (s.required && has(ctx.own, s.k) && !str(state.own[s.k])) out.push(`${s.label} can't be empty`);
+    if (ctx.create) {
+        for (const s of specs) if (s.required && !str(state.own[s.k])) out.push(`${s.label} can't be empty`);
+        if (!(state.exits ?? []).some(e => !e.removed)) out.push('A new place needs at least one exit');
+    }
+    for (const e of state.exits ?? []) if (!e.removed && (e.orig === null || e.back_orig) && e.back && 'direction' in e.back && !str(e.back.direction)) out.push('Every way back needs a direction');
     for (const e of state.exits ?? []) {
         if (e.removed) continue;
         if (!str(e.side.direction)) out.push('Every exit needs a direction');
@@ -258,8 +325,10 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
         if (ol) mv.classList.add('pf-input', 'pf-move');
         mv.value = state.area;
         mv.addEventListener('change', () => { state.area = mv.value; changed(); });
-        root.append(el('div', { class: 'pf-row', 'data-field': 'move' }, el('label', { class: 'pf-label' }, 'Move to subregion'), mv));
+        root.append(el('div', { class: 'pf-row', 'data-field': 'move' }, el('label', { class: 'pf-label' }, ctx.create ? 'Subregion' : 'Move to subregion'), mv));
         const list = el('div', { class: 'pf-exits' });
+        const nameHooks = [], toHooks = new Map();
+        root.addEventListener('input', ev => { if (ev.target.closest?.('.pf-row[data-field="name"]')) nameHooks.forEach(f => f()); });
         const blocks = [];
         const addBlock = (e, open) => {
             const blk = el('div', { class: 'pf-exit' });
@@ -279,28 +348,47 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
                 const to = ol ? pickField(doc, { kind: 'room', title: 'exit destination', outline: ol, exclude: [ctx.address ?? ctx.location].filter(Boolean), value: '' })
                     : el('select', { class: 'pf-input pf-to' }, el('option', { value: '' }, '(pick a place)'), ...(ctx.rooms ?? []).map(r => el('option', { value: r.address }, `${r.name} (${r.area_name})`)));
                 if (ol) to.classList.add('pf-input', 'pf-to');
-                to.addEventListener('change', () => { e.to = to.value; e.to_name = null; upd(); });
+                to.addEventListener('change', () => { e.to = to.value; e.to_name = null; toHooks.get(e)?.(); upd(); });
                 body.append(el('div', { class: 'pf-row', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), to));
             } else body.append(el('div', { class: 'pf-row muted', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), e.to_name ?? e.to));
             const live = [];
-            const senseHead = el('b', { class: 'pf-sense-head', 'data-for': 'exit' });
-            const headText = () => { senseHead.textContent = e.barrier ? 'Sense transparency – unblocked' : 'Sense transparency'; };
-            const upd2 = () => { for (const x of live) x.rerender(); headText(); upd(); };
-            headText();
-            for (const s of EXIT_FIELDS) {
-                if (s.k === 'sight') body.append(senseHead);
-                const holder = s.shared ? e : e.side;
-                const lv = s.k === 'sight' || s.k === 'sound' ? () => exitLevelDefault(e, s.k) : null;
-                const sp = s;
-                const fr = fieldRow(doc, s.shared ? { ...s, k: 'travel_time' } : sp, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
-                if (lv) live.push(fr);
-                body.append(fr);
-            }
-            if (e.orig === null) {
-                const rd = { return_direction: e.return_direction, return_description: e.return_description };
-                body.append(fieldRow(doc, { k: 'return_direction', type: 'text', label: 'Way back (direction)' }, rd, { onChange: () => { e.return_direction = rd.return_direction ?? ''; upd(); } }),
-                    fieldRow(doc, { k: 'return_description', type: 'textarea', label: 'Way back description' }, rd, { onChange: () => { e.return_description = rd.return_description ?? ''; upd(); } }));
-            }
+            const hereName = () => str(state.own.name) || str(ctx.own?.name) || (ctx.create ? 'the new place' : ctx.title) || 'here';
+            const thereName = () => e.to_name ?? ctx.rooms?.find(r => r.address === e.to)?.name ?? (ol && e.to ? pathOf(ol, 'room', e.to) : null) ?? (e.to || '?');
+            const sideBox = (which, holder) => {
+                const box = el('div', { class: 'pf-side', 'data-side': which });
+                const head = el('div', { class: 'pf-side-head' });
+                const dir = el('input', { type: 'text', class: 'pf-input pf-dir', 'data-field': which === 'there' ? 'direction' : 'back_direction', placeholder: which === 'there' ? 'e.g. north' : 'e.g. south' });
+                dir.value = holder.direction ?? '';
+                const sentence = () => { const [pre, post] = sideLabels(hereName(), thereName())[which].split('___'); head.replaceChildren(pre, dir, post); };
+                dir.addEventListener('input', () => {
+                    if (which === 'there') { setDirection(e, dir.value); const b = blk.querySelector('.pf-dir[data-field="back_direction"]'); if (b && e.back_auto) b.value = e.back.direction ?? ''; }
+                    else setBackDirection(e, dir.value);
+                    upd();
+                });
+                sentence(); sentences.push(sentence);
+                box.append(head);
+                const sb = el('b', { class: 'pf-sense-head', 'data-for': 'exit' });
+                const headText = () => { sb.textContent = e.barrier ? 'Sense transparency – unblocked' : 'Sense transparency'; };
+                headText(); heads.push(headText);
+                const lvOf = k => () => exitLevelDefault({ side: holder }, k);
+                for (const sp of EXIT_FIELDS) {
+                    if (sp.k === 'direction') continue;
+                    if (sp.k === 'sight') box.append(sb);
+                    const lv = sp.k === 'sight' || sp.k === 'sound' ? lvOf(sp.k) : null;
+                    const fr = fieldRow(doc, sp, holder, { onChange: upd2, ai: aiFor(e), ...(lv ? { inh: lv } : {}) });
+                    if (lv) live.push(fr);
+                    box.append(fr);
+                }
+                return box;
+            };
+            const sentences = [], heads = [];
+            const upd2 = () => { for (const x of live) x.rerender(); heads.forEach(h => h()); upd(); };
+            body.append(sideBox('there', e.side));
+            if (e.orig === null || e.back_orig) body.append(sideBox('back', e.back));
+            else body.append(el('div', { class: 'pf-row muted', 'data-field': 'one_way' }, `One way: ${thereName()} has no exit back here.`));
+            for (const sp of PAIR_FIELDS) body.append(fieldRow(doc, sp, e, { onChange: upd2 }));
+            nameHooks.push(() => sentences.forEach(f => f()));
+            toHooks.set(e, () => sentences.forEach(f => f()));
             const doorBox = el('div', { class: 'pf-door' });
             const doorRows = () => doorBox.replaceChildren(...(e.barrier ? DOOR_FIELDS.flatMap(s => [...(s.k === 'closed_sight' ? [el('b', { class: 'pf-sense-head', 'data-for': 'door' }, 'Sense transparency – blocked')] : []), fieldRow(doc, s, e.barrier, { onChange: upd2 })]) : []));
             const dk = el('input', { type: 'checkbox', class: 'pf-input' }); dk.checked = !!e.barrier;
@@ -319,6 +407,7 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
             el('button', { type: 'button', class: 'crumb pf-collapse', onclick: () => all(false) }, 'Collapse all'), ' ',
             el('button', { type: 'button', class: 'crumb pf-expand', onclick: () => all(true) }, 'Expand all')), list);
         for (const e of state.exits) list.append(addBlock(e, expand ? e.orig?.toLowerCase() === expand : false));
+        if (ctx.create && !state.exits.length) { const e = newExit(); state.exits.push(e); list.append(addBlock(e, true)); }
     }
     return { el: root, state, getOps, problems: () => formProblems(ctx, state) };
 }

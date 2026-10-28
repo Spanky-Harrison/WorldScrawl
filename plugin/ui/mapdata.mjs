@@ -62,8 +62,11 @@ const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0].slice
  * The play-mode graph. Only discovered places: rooms stood in (full detail and exits) and rooms seen
  * (name, area and a one-line summary; never their exits). An exit that does not reveal where it leads is a
  * stub node carrying only its label. state: {location, stood[], seen[], doors_open[]}; rooms: address -> known room.
+ * An exit pair is one line: a hidden or obscured side whose other side is in a room stood in (the player has been
+ * to its destination) joins that room instead of becoming a stub. With mark (the editor and pick mode) a revealed
+ * hidden or obscured side carries obscured: true, drawn as a "?" on that end.
  */
-export function buildGraph(state, rooms) {
+export function buildGraph(state, rooms, { mark = false } = {}) {
     const stood = new Set(state?.stood ?? []), nodes = new Map(), edges = [];
     if (state?.location) stood.add(state.location);
     const open = state?.doors_open ?? [], shut = state?.doors_closed ?? [];
@@ -79,14 +82,20 @@ export function buildGraph(state, rooms) {
             subEntrance: (r?.subregion ?? s)?.entrance ?? '', regionEntrance: (r?.region ?? reg)?.entrance ?? '' });
     };
     for (const a of state?.seen ?? []) { const r = rooms.get(a); if (r) addSeen(a, r.name, r.subregion, firstSentence(r.description), r.region, r); }
+    // The other side of a door, in a room stood in: door id -> that room's address.
+    const otherSide = new Map();
+    for (const a of stood) for (const e of rooms.get(a)?.exits ?? []) if (e.door && e.to) { const k = e.door; if (!otherSide.has(k)) otherSide.set(k, []); otherSide.get(k).push({ at: a, to: e.to }); }
+    const pairedRoom = (a, e) => (e.door ? (otherSide.get(e.door) ?? []).find(x => x.at !== a && x.to === a)?.at ?? null : null);
     for (const a of stood) {
         const r = rooms.get(a);
         if (!r) continue;
-        for (const e of (r.exits ?? []).filter(e => !e.hidden || e.revealed)) { // an unrevealed hidden exit is a secret: not even a stub
+        for (const e of (r.exits ?? []).filter(e => !e.hidden || e.revealed || pairedRoom(a, e))) { // an unrevealed hidden exit is a secret: not even a stub
             const closed = isClosed(e, open, shut), blocked = isBlocked(e), locked = closed && !!e.barrier?.locked;
-            if (revealsDestination(e) && e.to) {
-                addSeen(e.to, e.to_name, e.to_subregion, '', e.to_region, rooms.get(e.to));
-                edges.push({ from: a, to: e.to, direction: e.direction, closed, blocked, locked, dug: !!e.dug, description: e.description ?? '' });
+            const via = revealsDestination(e) && e.to ? e.to : pairedRoom(a, e);
+            if (via) {
+                const t = rooms.get(via);
+                addSeen(via, e.to_name ?? t?.name, e.to_subregion ?? t?.subregion, '', e.to_region ?? t?.region, t);
+                edges.push({ from: a, to: via, direction: e.direction, closed, blocked, locked, dug: !!e.dug, description: e.description ?? '', ...(mark && (e.hidden || e.obscured) ? { obscured: true } : {}) });
             } else { // unrevealed: label only, the destination stays unknown
                 const id = `stub:${a}|${lc(e.direction)}`;
                 nodes.set(id, { id, kind: 'stub', name: e.direction, subregion: { id: '', name: '' }, region: '', description: '', pos: null, here: false });

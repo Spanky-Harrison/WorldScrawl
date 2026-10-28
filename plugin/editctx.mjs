@@ -43,6 +43,7 @@ export function editContext(w, worldJson, raw, target) {
         const parent_notes = sub && rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_notes' }] : [];
         return { kind, area: sub ? `${rid}:${sid}` : rid, title: obj.name ?? t, own, inherited, entrances, parent_notes };
     }
+    if (t.startsWith('new:')) return createContext(w, worldJson, raw, t.slice(4), rooms);
     const a = t.startsWith('loc:') ? t.slice(4) : t.startsWith('exit:') ? t.slice(5).split('|')[0] : t;
     const loc = w.get(a), r = getRoom(raw, a);
     if (!loc || !r) return null;
@@ -58,12 +59,33 @@ export function editContext(w, worldJson, raw, target) {
         const backRoom = getRoom(raw, e.to), back = backRoom ? (backRoom.exits ?? []).find(x => isObj(x) && x.to === a) ?? null : null;
         const barrier = isObj(e.barrier) ? e.barrier : isObj(back?.barrier) ? back.barrier : null;
         return { direction: e.direction, to: e.to, to_name: backRoom?.name ?? e.to, side: pick(e, EXIT_SIDE_KEYS), travel_time: e.travel_time ?? null,
-            barrier: barrier ? structuredClone(barrier) : null, back_direction: back?.direction ?? null };
+            barrier: barrier ? structuredClone(barrier) : null, back_direction: back?.direction ?? null, back_side: back ? pick(back, EXIT_SIDE_KEYS) : null };
     });
     return { kind: 'room', address: a, area: `${rid}:${sid}`, title: r.name, own, inherited, exits,
         subregions: Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ area: `${rid}:${s}`, name: o.name ?? s })),
         rooms: rooms.filter(x => x.address !== a),
         // The parent notes stacked on top of this place's own description (each with its inherit toggle).
+        parent_notes: [
+            ...(rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_region_notes' }] : []),
+            ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
+        ] };
+}
+
+/**
+ * Create place: the Edit place form, empty, for a new place in subregion `area` ("region:sub"). Unset fields show
+ * what the new place would inherit from its subregion and region.
+ */
+function createContext(w, worldJson, raw, area, rooms) {
+    const [rid, sid] = String(area).split(':'), rawR = raw[rid], rawS = rawR?.subregions?.[sid];
+    if (!isObj(rawS)) return null;
+    const ins = inspect(w, [worldJson, raw], `sub:${area}`);
+    const inherited = inheritedFrom(ins?.resolved ?? [], FIELD_KEYS.room.filter(k => !/^inherit_/.test(k)), {});
+    inherited.inherit_region_notes = has(rawS, 'inherit_notes') ? { value: rawS.inherit_notes, from: 'subregion' } : { value: true, from: 'default' };
+    inherited.inherit_subregion_notes = { value: true, from: 'default' };
+    inherited.expandable = expandInherit([['subregion', rawS], ['region', rawR], ['world', worldJson]]);
+    return { kind: 'room', create: true, address: null, area, title: 'New place', own: {}, inherited, exits: [],
+        subregions: Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ area: `${rid}:${s}`, name: o.name ?? s })),
+        rooms,
         parent_notes: [
             ...(rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_region_notes' }] : []),
             ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
