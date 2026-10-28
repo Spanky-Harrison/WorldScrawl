@@ -590,6 +590,36 @@ export function parseChoice(answer, options) {
     return options.find(o => o.toLowerCase() === a) ?? null;
 }
 
+// ---- Pick-one questions (dev standard, see README "Prompt rules"): options are short text keys, never numbers.
+/** Lowercase, punctuation/underscores/dashes to single spaces. */
+export const normKey = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/** A short unique key for a label ("Common Room (The Drowned Rat)" -> "common_room_the_drowned"). `taken` is a Set. */
+export function keyFor(label, taken = new Set()) {
+    const base = normKey(label).split(' ').slice(0, 4).join('_') || 'option';
+    let k = base;
+    for (let i = 2; taken.has(k); i++) k = `${base}_${i}`;
+    taken.add(k);
+    return k;
+}
+/**
+ * Match a model answer to one key, ignoring case, punctuation and extra words: an exact match first, else the one
+ * key that appears as whole words in the answer (the longest wins; a tie is no match). Returns the key or null.
+ */
+export function matchKey(answer, keys) {
+    const a = normKey(cleanAnswer(answer));
+    if (!a) return null;
+    const nk = keys.map(normKey), exact = nk.indexOf(a);
+    if (exact >= 0) return keys[exact];
+    const hits = keys.filter((k, i) => nk[i] && ` ${a} `.includes(` ${nk[i]} `));
+    if (!hits.length) return null;
+    const len = Math.max(...hits.map(k => normKey(k).length)), best = [...new Set(hits.filter(k => normKey(k).length === len))];
+    return best.length === 1 ? best[0] : null;
+}
+/** "- key: meaning" lines for a pick-one prompt. */
+export const optionLines = opts => opts.map(o => `- ${o.key}: ${o.label}`).join('\n');
+/** askValid validator: the chosen option object, or null. */
+export const pickKey = opts => a => { const k = matchKey(a, opts.map(o => o.key)); return k == null ? null : opts.find(o => o.key === k); };
+
 // ---- Discovered places and route-finding (read-only map; visited set derived from this chat's messages).
 /**
  * The one place that decides whether an exit reveals where it leads. Later a hidden/obscured exit
@@ -1018,10 +1048,12 @@ export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no
 // ---- Narrative digging: "I smash a hole in the wall". Small sequential questions, each validated and retried alone.
 export const digSys = () => P('dig.system');
 export const DIG_TRIES = 2;
+export const pickSys = () => P('pick.system');
 export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
-async function askValid(label, prompt, validate) {
+/** Ask one pick-one question; one retry if the answer matches nothing. */
+async function askValid(label, prompt, validate, systemPrompt = pickSys()) {
     for (let i = 0; i < DIG_TRIES; i++) {
-        const a = await ctx().generateRaw({ prompt, systemPrompt: digSys(), responseLength: 60 });
+        const a = await ctx().generateRaw({ prompt, systemPrompt, responseLength: 60 });
         const v = validate(trimAnswer(cleanAnswer(a)));
         console.log(`[WorldScrawl] dig ${label} (try ${i + 1}): ${JSON.stringify(String(a).slice(0, 80))} -> ${v == null ? 'invalid' : JSON.stringify(v)}`);
         if (v != null) return v;
@@ -1047,8 +1079,9 @@ export const digDescPrompt = (loc, said, name) => P('dig.description', { party: 
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
+    const ask = (l, p, v) => askValid(l, p, v, digSys());
     const rooms = await nearbyRooms(loc);
-    const n = await askValid('destination', digDestPrompt(loc, said, rooms), a => {
+    const n = await ask('destination', digDestPrompt(loc, said, rooms), a => {
         const m = a.match(/^(\d+)\b/); const i = m ? Number(m[1]) : (sameName(a, NEW_PLACE) ? rooms.length + 1 : rooms.findIndex(r => sameName(a, r.display_name) || sameName(a, r.name)) + 1);
         return i >= 1 && i <= rooms.length + 1 ? i : null;
     });
@@ -1056,7 +1089,7 @@ async function narrativeDig(msg, loc) {
     const target = n <= rooms.length ? await fetchLocationCached(rooms[n - 1].address) : null;
     if (n <= rooms.length && !target) return fail('destination unknown');
     const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
-    const direction = await askValid('direction', digDirPrompt(loc, said, target ? roomLabel(target) : 'a new space', used), a => {
+    const direction = await ask('direction', digDirPrompt(loc, said, target ? roomLabel(target) : 'a new space', used), a => {
         const d = a.toLowerCase().replace(/^the\s+/, '').replace(/\s+/g, ' ');
         if (!/^[a-z][a-z'-]*( [a-z][a-z'-]*)?$/.test(d) || d.length > 20 || hasExit(loc, d)) return null;
         if (target && hasExit(target, returnName(d))) return null;
@@ -1065,13 +1098,13 @@ async function narrativeDig(msg, loc) {
     if (direction == null) return fail('no direction');
     let dest = { address: target?.address };
     if (!target) {
-        const name = await askValid('name', digNamePrompt(loc, said), a => {
+        const name = await ask('name', digNamePrompt(loc, said), a => {
             const t = a.replace(/\s+/g, ' ');
             const w = t.split(' ').length;
             return /^[A-Za-z][A-Za-z' -]*$/.test(t) && w <= 4 && t.length <= 40 && !sameName(t, loc.name) ? t.replace(/\b[a-z]/g, c => c.toUpperCase()) : null;
         });
         if (name == null) return fail('no name');
-        const description = await askValid('description', digDescPrompt(loc, said, name), a => {
+        const description = await ask('description', digDescPrompt(loc, said, name), a => {
             const t = a.replace(/\s+/g, ' ').trim();
             return t.length >= 10 && t.length <= 200 ? (/[.!?]$/.test(t) ? t : t + '.') : null;
         });
@@ -1104,17 +1137,21 @@ export const AROUND = 'around here in general, nothing specific';
 export const WINDOW_WORD_RE = /\b(?:windows?|shutters?|outside|outdoors|openings?|balcon(?:y|ies)|portholes?|skylights?)\b/i;
 /** Offer the window option only when the player mentions one, or the room already has a view. */
 export const offerWindow = (loc, text) => WINDOW_WORD_RE.test(String(text ?? '')) || (loc.views ?? []).length > 0;
-/** Options: 1 = around, then the exits, then (maybe) the window, last. */
+/** Options: `around`, then one key per exit, then (maybe) `window`, last. */
+export function lookOptions(exits, withWindow = true) {
+    const taken = new Set(['around', 'window']);
+    return [{ key: 'around', label: AROUND }, ...exits.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })), ...(withWindow ? [{ key: 'window', label: NO_EXIT }] : [])];
+}
 export function lookTargetPrompt(loc, said, exits, withWindow = true) {
-    const opts = [AROUND, ...exits.map(exitTargetLabel), ...(withWindow ? [NO_EXIT] : [])];
-    return P('look.target', { party: whoMoves(), place: displayName(loc), said, options: opts.map((o, i) => `${i + 1}. ${o}`).join('\n') });
+    return P('look.target', { party: whoMoves(), place: displayName(loc), said, options: optionLines(lookOptions(exits, withWindow)) });
 }
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
 export const closedDoorPrompt = (said, e) => P('look.closed_door', { said, direction: e.direction });
+/** One option per nearby room, keyed by its name. */
+export const roomOptions = (rooms, taken = new Set()) => rooms.map(r => ({ key: keyFor(r.display_name, taken), label: `${r.display_name}: ${r.summary}`, room: r }));
 export function viewPickPrompt(loc, said, rooms) {
-    return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') });
+    return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: optionLines(roomOptions(rooms)) });
 }
-const pickNumber = n => a => { const m = String(a).match(/^(\d+)\b/); const i = m ? Number(m[1]) : 0; return i >= 1 && i <= n ? i : null; };
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
 async function narrativeLook(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1123,18 +1160,17 @@ async function narrativeLook(msg, loc) {
     let look;
     if (LOOK_AROUND_RE.test(String(msg.mes ?? ''))) look = { kind: 'around' }; // 'I look around': no question, no view link
     const win = !look && offerWindow(loc, msg.mes);
-    const n = look ? null : await askValid('look target', lookTargetPrompt(loc, said, exits, win), pickNumber(exits.length + 1 + (win ? 1 : 0)));
+    const pick = look ? null : await askValid('look target', lookTargetPrompt(loc, said, exits, win), pickKey(lookOptions(exits, win)));
     if (look) { /* around */ }
-    else if (n == null) look = { kind: 'nothing' };
-    else if (n === 1) look = { kind: 'around' };
-    else if (n <= exits.length + 1) {
-        const e = exits[n - 2];
+    else if (pick == null) look = { kind: 'nothing' };
+    else if (pick.key === 'around') look = { kind: 'around' };
+    else if (pick.exit) {
+        const e = pick.exit;
         const open = doorOverrides();
         let v = viewOf(e, open), opened = false, through = false, stuck = false;
         if (v === 'closed' && sightOf(e, open) !== 'none') { v = 'open'; through = true; } // a closed gate/grate: seen through as it is
         else if (v === 'closed') {
-            const k = await askValid('closed door', closedDoorPrompt(said, e), pickNumber(4));
-            const act = DOOR_LOOK[(k ?? 4) - 1]; // unreadable: just looking (never opens a door by accident)
+            const act = await askValid('closed door', closedDoorPrompt(said, e), a => matchKey(a, DOOR_LOOK)) ?? 'look'; // unreadable: just looking (never opens a door by accident)
             if (act === 'listen') v = 'listen';
             else if (act === 'open' && isStuck(e, open)) { v = 'shut'; stuck = true; }
             else if (act === 'open') { stampChange(doorChange('open_door', loc, e)); opened = true; v = 'open'; }
@@ -1154,8 +1190,8 @@ async function narrativeLook(msg, loc) {
         let view = (loc.views ?? [])[0]; // hand-written views first, then an earlier view link: the same answer every time
         if (!view) {
             const rooms = await nearbyRooms(loc);
-            const k = rooms.length ? await askValid('view', viewPickPrompt(loc, said, rooms), pickNumber(rooms.length)) : null;
-            if (k != null) { view = rooms[k - 1]; stampChange({ type: 'view_link', from: loc.address, to: view.address }); }
+            const k = rooms.length ? await askValid('view', viewPickPrompt(loc, said, rooms), pickKey(roomOptions(rooms))) : null;
+            if (k != null) { view = k.room; stampChange({ type: 'view_link', from: loc.address, to: view.address }); }
         }
         const t = view ? await fetchLocationCached(view.address) : null;
         look = t ? { kind: 'see', window: true, to: t.address, name: displayName(t), description: t.description } : { kind: 'nothing', window: true };
@@ -1165,14 +1201,14 @@ async function narrativeLook(msg, loc) {
     console.log(`[WorldScrawl] look: ${JSON.stringify(look).slice(0, 160)}`);
     return { kind: 'look', loc };
 }
-export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: whoMoves(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') });
+export const doorOptions = list => { const taken = new Set(); return list.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })); };
+export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: whoMoves(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: optionLines(doorOptions(list)) });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     let e = list.length === 1 ? list[0] : null;
     if (!e) {
-        const k = await askValid('door', doorPickPrompt(loc, said, list, type), pickNumber(list.length));
-        e = k ? list[k - 1] : null;
+        e = (await askValid('door', doorPickPrompt(loc, said, list, type), pickKey(doorOptions(list))))?.exit ?? null;
     }
     if (!e) return { kind: STAY, loc };
     if (type === 'open_door' && isStuck(e)) { msg.extra.worldscrawl_door = { type: 'stuck', direction: e.direction, why: stuckWhy(e) }; return { kind: 'door', loc }; }

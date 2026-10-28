@@ -26,6 +26,7 @@ const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weathe
     [null, false, { dig: { direction: 'hole', to_name: 'Cellar' } }], [null, false, { digFailed: true }], [null, false, { lookAround: true }], [{ ...trip, stopped: true }, false, {}]];
 const pl = opDocs => ({ opDocs });
 export const cases = ({ ext, patches, placeform }) => ({
+    'pick.system': ext.pickSys(),
     'dig.system': ext.digSys(),
     'dig.destination': ext.digDestPrompt(loc, said, rooms),
     'dig.destination.nodesc': ext.digDestPrompt({ ...loc, description: undefined }, said, []),

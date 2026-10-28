@@ -9,6 +9,11 @@
       "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through names and describes the new room. Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
     },
     {
+      "id": "pick",
+      "title": "Pick one option (shared)",
+      "flow": "Not a process of its own: the shared base for every question that asks the model to pick one option from a list (which exit to look at, what to do at a closed door, which place a window shows, which door to open or close). Step 1: the game lists the options as short text keys (\"- key: meaning\") and sends this system prompt with the question. The answer is matched to a key ignoring case, punctuation and extra words; if nothing matches, the question is asked once more."
+    },
+    {
       "id": "intent",
       "title": "Player intent",
       "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'."
@@ -82,11 +87,11 @@
     "note": "the narrator's note naming the door",
     "option": "the short answer word for this choice, e.g. \"look\" or \"stay\"",
     "option_lines": "the list of possible answers, one per line, each with what it means (built from the Player intent pieces)",
-    "options": "the possible answers, as a numbered list or a comma-separated list",
+    "options": "the possible answers: \"- key: meaning\" lines (pick-one questions) or a comma-separated list (intent)",
     "outline": "an outline of the rooms and exits in the area",
     "party": "who is travelling: the \"Who moves\" setting, e.g. your persona name, or your persona and the character",
     "place": "the name of the room the party is in now",
-    "places": "the nearby places, as a numbered list with a short summary of each",
+    "places": "the nearby places, one \"- key: name: short summary\" line each",
     "range": "which rooms the patch may touch",
     "region_name": "the name of the region",
     "region_notes": "the notes of the region",
@@ -106,6 +111,15 @@
     "why": "why the door would not move (e.g. it is locked)"
   },
   "prompts": [
+    {
+      "id": "pick.system",
+      "title": "Pick one option: system prompt",
+      "description": "Step 1: the system prompt for every pick-one question (Looking and Doors). The options are short text keys.",
+      "group": "pick",
+      "locked": "Shared by every pick-one question: the game reads the answer as one option key.",
+      "placeholders": [],
+      "text": "You help run a text adventure game. Reply with exactly one option key from the list and nothing else."
+    },
     {
       "id": "dig.system",
       "title": "Breaking through: system prompt",
@@ -237,10 +251,10 @@
     {
       "id": "look.target",
       "title": "Looking: at what",
-      "description": "Step 1 of 2: what the player is looking at. Asks what the player is looking at or listening to. The numbered options are made by the game.",
+      "description": "Step 1 of 2: what the player is looking at. Asks what the player is looking at or listening to. The options (key: meaning) are made by the game.",
       "group": "look",
-      "locked": "The game reads the chosen option back; changing this can break looking.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the number.",
+      "locked": "The game reads the chosen option key back; changing this can break looking.",
+      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
         {
           "name": "party"
@@ -262,8 +276,8 @@
       "title": "Looking: a closed door",
       "description": "Step 2 of 2 (a closed door): listen, peek, open or just look. Asks what the player does with a closed door. The game reads the answer as 1 to 4, in this order.",
       "group": "look",
-      "locked": "The game reads the number: 1 listen, 2 peek, 3 open, 4 just look, in this order.",
-      "text": "{{said}}\n\nThe {{direction}} door is closed. What does the player do with it?\n1. only listens at it\n2. peeks through it (a crack, keyhole or gap) without opening it\n3. opens it\n4. just looks at the closed door\n\nReply with just the number.",
+      "locked": "The game reads the key: listen, peek, open or look.",
+      "text": "{{said}}\n\nThe {{direction}} door is closed. What does the player do with it?\n- listen: only listens at it\n- peek: peeks through it (a crack, keyhole or gap) without opening it\n- open: opens it\n- look: just looks at the closed door\n\nReply with just the key.",
       "placeholders": [
         {
           "name": "said"
@@ -278,8 +292,8 @@
       "title": "Looking: out a window",
       "description": "Step 2 of 2 (a window with no view yet): which nearby place can be seen. Asks which nearby place can be seen out of a window or opening.",
       "group": "look",
-      "locked": "The game reads the chosen option back; changing this can break looking.",
-      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the number.",
+      "locked": "The game reads the chosen place key back; changing this can break looking.",
+      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the key.",
       "placeholders": [
         {
           "name": "party"
@@ -305,8 +319,8 @@
       "title": "Doors: which door",
       "description": "Step 1 of 1 (only when several doors fit): which door. Asks which door the player opens or closes.",
       "group": "door",
-      "locked": "The game reads the chosen door number back; changing this can break doors.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the number.",
+      "locked": "The game reads the chosen door key back; changing this can break doors.",
+      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
         {
           "name": "party"
