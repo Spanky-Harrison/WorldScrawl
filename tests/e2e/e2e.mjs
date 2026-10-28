@@ -1176,8 +1176,26 @@ try {
     const dIds = await nodeIds();
     check('double-click drills down to the rooms', dIds.includes('riverton:drowned_rat/upstairs') && (await crumbText()).length === 3, JSON.stringify(dIds));
     await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
-    await ui.click('.mapbuttons .topbutton'); await ui.waitForTimeout(300);
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
     check('Centre goes back to the current room\'s layer', (await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id)) === m2.here);
+    // Breadcrumbs: pills (the last one highlighted like a map node), no ⓘ, the Center button (icon + label) in its place.
+    const bc = await ui.evaluate(() => { const cs = [...document.querySelectorAll('#breadcrumb .crumb')], st = x => getComputedStyle(x);
+        return { n: cs.length, pill: cs.every(x => parseFloat(st(x).borderRadius) >= 8 && st(x).borderStyle !== 'none'), active: cs.at(-1)?.classList.contains('active') && st(cs.at(-1)).boxShadow !== 'none',
+            info: /ⓘ/.test(document.getElementById('breadcrumb').textContent), center: document.querySelector('#breadcrumb .centerbtn')?.textContent ?? '', centerLast: document.getElementById('breadcrumb').lastElementChild?.classList.contains('centerbtn') }; });
+    check('breadcrumb: pill crumbs, the current one highlighted, no ⓘ, "⌖ Center" in its place', bc.n === 3 && bc.pill && bc.active && !bc.info && /⌖\s*Center/.test(bc.center) && bc.centerLast, JSON.stringify(bc));
+    // Clicking a crumb shows the level with that entity's contents and selects that entity (not the player's child of it).
+    const pickOf = () => ui.evaluate(() => ({ sel: document.querySelector('.node.selected')?.dataset.id ?? null, h: document.querySelector('.side h3')?.textContent ?? '', area: document.querySelector('.side .area')?.textContent ?? '', crumbs: [...document.querySelectorAll('#breadcrumb .crumb')].map(x => x.textContent) }));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(400);
+    const pr = await pickOf(), prIds = await nodeIds();
+    check('region crumb: shows the region\'s subregions and selects the region itself', prIds.every(i => i.startsWith('sub:riverton:')) && pr.sel === null && pr.h === pr.crumbs.at(-1) && /Region/.test(pr.area) && pr.crumbs.length === 2, JSON.stringify([pr, prIds]));
+    await ui.click('#breadcrumb .crumb[data-level="world"]'); await ui.waitForTimeout(400);
+    const pw = await pickOf();
+    check('world crumb: shows the regions and selects the world', pw.sel === null && pw.h === 'World' && pw.crumbs.length === 1, JSON.stringify(pw));
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
+    await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(400);
+    const plc = await pickOf();
+    check('last crumb: stays on the current area and selects that area (not its parent, not the room)', plc.sel === null && plc.h === plc.crumbs.at(-1) && /Area/.test(plc.area) && plc.crumbs.length === 3, JSON.stringify(plc));
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
     // Waiting / sleeping: /ws-wait stamps a message and advances the clock; the map's Wait picker asks this tab; delete undoes.
     const clockNow = () => page.evaluate(async () => (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).chatElapsed());
     const t0 = await clockNow(), hereBefore = await stored();
@@ -1310,7 +1328,7 @@ try {
         && byOp('add_exit')[0]?.to === 'riverton:streets/market_lane' && byOp('add_exit')[0]?.return_direction === 'tavern', JSON.stringify(pfOps));
     await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nPf); await page.waitForTimeout(1500);
     // Edit live on a region / subregion page: rename via update_area, stamped on a hidden message, tagged in Resolved.
-    await ui.click('.crumb.inspect'); await ui.waitForTimeout(1200);
+    await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(1200);
     const areaKind = await ui.evaluate(() => document.querySelector('.side .area')?.textContent ?? '');
     const nameRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'name'); return tr ? { v: tr.querySelector('.val')?.textContent ?? '', src: tr.querySelector('.src')?.textContent ?? '', mark: !!tr.querySelector('.patchmark') } : null; });
     const an0 = await nameRow();
@@ -1330,7 +1348,7 @@ try {
     check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter' && !('notes' in ae.op), JSON.stringify(ae));
     await ui.waitForTimeout(1500);
     for (let k = 0; k < 4; k++) { // the map re-renders after the stamp; reopen the area page once it settles
-        await ui.click('.crumb.inspect'); await ui.waitForTimeout(1000);
+        await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(1000);
         if ((await nameRow())?.v === 'The Gilded Quarter') break;
     }
     const an1 = await nameRow();
