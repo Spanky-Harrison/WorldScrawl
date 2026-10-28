@@ -7,6 +7,7 @@
 // remove_area / move_location / move_area); the engine checks them again. Id clashes are caught here first from the
 // outline (a rename box prefilled with a suggested id) and again from the server's 400 {clash}. Nothing is overwritten.
 import { suggestId, slugId } from './patches.mjs';
+import { pickField } from './picker.mjs';
 
 const ACTIONS = {
     world: [['create_region', 'Create region']],
@@ -87,7 +88,6 @@ export function openAction(doc, pane, action, ctx, io) {
     });
     const cancel = $('button', { class: 'crumb mw-cancel', onclick: () => (ctx.cancel ?? io.back)() }, 'Cancel');
     const o = ctx.outline;
-    const roomOpts = (except = []) => [['', '— pick a place —'], ...allRooms(o).filter(r => !except.includes(r.address)).map(r => [r.address, r.label])];
 
     /** Rename boxes for clashing ids: one row per clash, prefilled with the suggestion. */
     function renameBox(prefixLabel) {
@@ -118,7 +118,7 @@ export function openAction(doc, pane, action, ctx, io) {
     const exitsEditor = (from, min) => {
         const list = $('div', { class: 'mw-exits' }), rows = [];
         const add = () => {
-            const to = select(roomOpts(from ? [from] : []), ''), dir = input('', 'direction from here (e.g. north)'), back = input('', 'way back (e.g. south)');
+            const to = pickField(doc, { kind: 'room', title: 'exit destination', exclude: from ? [from] : [], outline: o, value: '' }), dir = input('', 'direction from here (e.g. north)'), back = input('', 'way back (e.g. south)');
             const r = $('div', { class: 'mw-exit' }, to, dir, back, $('button', { type: 'button', class: 'crumb', onclick: () => { r.remove(); rows.splice(rows.indexOf(x), 1); refresh(); } }, '×'));
             const x = { to, dir, back }; rows.push(x); list.append(r); refresh();
         };
@@ -175,8 +175,7 @@ export function openAction(doc, pane, action, ctx, io) {
         case 'delete_subregion': case 'delete_region': {
             const isSub = action === 'delete_subregion', [rid, sid] = t.split(':'), me = isSub ? findSub(o, t) : findRegion(o, t);
             const mode = select([['delete', `Delete its ${isSub ? 'places' : 'subregions'} too`], ['move', `Move all its ${isSub ? 'places' : 'subregions'} into…`]], 'delete');
-            const intoOpts = isSub ? o.regions.flatMap(r => r.subregions.filter(s => s.area !== t).map(s => [s.area, `${s.name} (${r.name})`])) : o.regions.filter(r => r.id !== t).map(r => [r.id, r.name]);
-            const into = select(intoOpts, intoOpts[0]?.[0]), rn = renameBox('there');
+            const into = pickField(doc, isSub ? { kind: 'subregion', title: 'subregion to move its places into', exclude: [t], outline: o } : { kind: 'region', title: 'region to move its subregions into', exclude: [t], outline: o }), rn = renameBox('there');
             const recheck = () => {
                 if (mode.value !== 'move') return rn.set([]);
                 const ids = isSub ? me.rooms.map(r => r.id) : me.subregions.map(s => s.id);
@@ -186,7 +185,7 @@ export function openAction(doc, pane, action, ctx, io) {
             renames = rn;
             mode.addEventListener('change', () => { intoRow.hidden = mode.value !== 'move'; recheck(); }); into.addEventListener('change', recheck);
             const intoRow = row('Into', into, { 'data-field': 'into', hidden: true });
-            build = () => [{ op: 'remove_area', area: t, contents: mode.value, ...(mode.value === 'move' ? { into: into.value, ...(Object.keys(rn.ids).length ? { ids: { ...rn.ids } } : {}) } : {}) }];
+            build = () => { if (mode.value === 'move' && !into.value) throw new Error(`Choose the ${isSub ? 'subregion' : 'region'} to move them into.`); return [{ op: 'remove_area', area: t, contents: mode.value, ...(mode.value === 'move' ? { into: into.value, ...(Object.keys(rn.ids).length ? { ids: { ...rn.ids } } : {}) } : {}) }]; };
             const startBlocked = !isSub && o.start_region === t;
             const show = () => { header(`Delete ${me.name}`, ...(startBlocked ? [$('p', { class: 'mw-blocked' }, `${me.name} is the world's starting region, so it can't be deleted.`)] : []),
                 $('p', { class: 'muted' }, `Moving everything into another ${isSub ? 'subregion' : 'region'} is how two ${isSub ? 'subregions' : 'regions'} merge. Old addresses lead to the new ones.`), row('Contents', mode, { 'data-field': 'contents' }), intoRow, rn.el);
@@ -197,22 +196,21 @@ export function openAction(doc, pane, action, ctx, io) {
         }
         case 'move_place': {
             const [a0, id] = [t.split('/')[0], t.split('/')[1]];
-            const opts = o.regions.flatMap(r => r.subregions.filter(s => s.area !== a0).map(s => [s.area, `${s.name} (${r.name})`]));
-            const dest = select(opts, opts[0]?.[0]), rn = renameBox('there'); renames = rn;
+            const dest = pickField(doc, { kind: 'subregion', title: 'subregion to move it to', exclude: [a0], outline: o }), rn = renameBox('there'); renames = rn;
             const recheck = () => rn.set(clashes([id], findSub(o, dest.value)?.rooms.map(r => r.id) ?? [], a0.split(':')[1]).map(c => ({ ...c, kind: 'room' })));
             dest.addEventListener('change', recheck);
-            build = () => [{ op: 'move_location', loc: t, area: dest.value, ...(rn.ids[id] ? { id: rn.ids[id] } : {}) }];
+            build = () => { if (!dest.value) throw new Error('Choose the subregion to move it to.'); return [{ op: 'move_location', loc: t, area: dest.value, ...(rn.ids[id] ? { id: rn.ids[id] } : {}) }]; };
             const show = () => { header(`Move ${allRooms(o).find(r => r.address === t)?.name ?? t}`, $('p', { class: 'muted' }, 'Exits follow it; the old address leads to the new one (turn the change off to undo).'), row('To subregion', dest, { 'data-field': 'dest' }), rn.el); recheck(); refresh(); };
             const cas = cascadeOf(o, 'room', t);
             if (cas) cascadeGate(cas, 'Move', addFirstFor(cas), show); else show();
             return box;
         }
         case 'move_subregion': {
-            const [rid, sid] = t.split(':'), opts = o.regions.filter(r => r.id !== rid).map(r => [r.id, r.name]);
-            const dest = select(opts, opts[0]?.[0]), rn = renameBox('there'); renames = rn;
+            const [rid, sid] = t.split(':');
+            const dest = pickField(doc, { kind: 'region', title: 'region to move it to', exclude: [rid], outline: o }), rn = renameBox('there'); renames = rn;
             const recheck = () => rn.set(clashes([sid], findRegion(o, dest.value)?.subregions.map(s => s.id) ?? [], rid).map(c => ({ ...c, kind: 'subregion' })));
             dest.addEventListener('change', recheck);
-            build = () => { if (!dest.value) throw new Error('There is no other region to move it to.'); return [{ op: 'move_area', area: t, region: dest.value, ...(rn.ids[sid] ? { id: rn.ids[sid] } : {}) }]; };
+            build = () => { if (!dest.value) throw new Error('Choose the region to move it to.'); return [{ op: 'move_area', area: t, region: dest.value, ...(rn.ids[sid] ? { id: rn.ids[sid] } : {}) }]; };
             const show = () => { header(`Move ${findSub(o, t)?.name ?? t}`, $('p', { class: 'muted' }, 'All its places move with it; old addresses lead to the new ones.'), row('To region', dest, { 'data-field': 'dest' }), rn.el); recheck(); refresh(); };
             const cas = cascadeOf(o, 'subregion', t);
             if (cas && o.start_region !== cas.area) cascadeGate(cas, 'Move', addFirstFor(cas), show); else show();

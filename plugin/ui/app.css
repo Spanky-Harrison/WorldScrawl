@@ -134,3 +134,22 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .mapaction .mw-picks { display: flex; flex-direction: column; }
 .side .mapact { margin-left: 4px; }
 .pf-sense-head { display: block; font-size: .9em; margin-top: 4px; }
+
+/* Map pick mode (picker.mjs + app.js): a big banner, highlighted targets, a Yes/No confirm. */
+.wspick { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wspick-value { padding: 2px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; min-width: 8em; }
+.wspick-banner { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--SmartThemeQuoteColor); color: #000; font-size: 1.25em; font-weight: bold; z-index: 5; }
+.wspick-title { flex: 0 0 auto; }
+.wspick-find { position: relative; flex: 1 1 auto; font-size: .75em; font-weight: normal; }
+.wspick-search { width: 100%; max-width: 420px; padding: 4px 8px; border-radius: 6px; border: 1px solid #0006; font: inherit; }
+.wspick-results { position: absolute; left: 0; top: 100%; margin: 2px 0 0; padding: 0; list-style: none; max-height: 300px; overflow: auto; min-width: 320px; background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #ddd); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; z-index: 6; }
+.wspick-results:empty { display: none; }
+.wspick-results li { padding: 4px 10px; cursor: pointer; }
+.wspick-results li:hover { background: rgba(127,127,127,.25); }
+.wspick-results li.dim { opacity: .45; }
+.wspick-cancel { font-size: .8em; background: #fff; color: #000; }
+svg.picking .node.pickable rect { stroke: #ffd84a; stroke-width: 4px; }
+svg.picking .node.pickable { cursor: pointer; }
+svg.picking .node.pickdim { opacity: .3; }
+.wspick-confirm { position: fixed; top: 30%; left: 50%; transform: translateX(-50%); padding: 16px 20px; background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #ddd); border: 2px solid var(--SmartThemeQuoteColor); border-radius: 10px; box-shadow: 0 4px 24px #000a; z-index: 10; display: flex; gap: 10px; align-items: center; }
+.wspick-q { font-weight: bold; margin-right: 8px; }

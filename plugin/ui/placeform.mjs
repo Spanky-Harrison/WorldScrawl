@@ -3,6 +3,7 @@
 // what the place itself sets, `inherited` what an unset field gets and from where. Only fields the user explicitly
 // changed become ops, so submitting an untouched form never copies inherited values into the place.
 import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS } from './patches.mjs';
+import { pickField, pathOf } from './picker.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
@@ -160,7 +161,7 @@ const showVal = v => (v === null || v === undefined ? '(none)' : typeof v === 'b
  * value an unset field defaults to. An unset field shows that value greyed out with a "from …" tag; once set, a small
  * reset button drops it again (back to inheriting).
  */
-export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange = () => {}, ai = null } = {}) {
+export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange = () => {}, ai = null, pick = null } = {}) {
     const el = (tag, attrs = {}, ...kids) => { const n = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v === true ? '' : v); } n.append(...kids.filter(x => x !== null && x !== undefined)); return n; };
     const row = el('div', { class: 'pf-row', 'data-field': spec.k });
     const getInh = typeof inh === 'function' ? inh : () => inh;
@@ -175,6 +176,12 @@ export function fieldRow(doc, spec, obj, { inh = null, options = null, onChange 
             ctl = el('input', { type: 'checkbox', class: 'pf-input' });
             ctl.checked = !!cur;
             ctl.addEventListener('change', () => change(ctl.checked));
+        } else if (pick) {
+            // A map pick (the entrance): local ids in the form, full ids on the map.
+            const fb = fallback ? pathOf(pick.outline, pick.kind, pick.toFull(fallback.value)) ?? showVal(fallback.value) : null;
+            ctl = pickField(doc, { ...pick, value: set ? pick.toFull(cur) : '', empty: fb ? `(${fb})` : '(not set)' });
+            ctl.classList.add('pf-input');
+            ctl.addEventListener('change', () => change(ctl.value === '' ? undefined : pick.toLocal(ctl.value)));
         } else if (spec.type === 'choice' && opts.length <= 3) {
             const name = `pf_${spec.k}_${Math.random().toString(36).slice(2, 8)}`;
             ctl = el('span', { class: 'pf-radios' }, ...opts.map(o => {
@@ -226,10 +233,15 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
     const specs = ctx.kind === 'room' ? ROOM_FIELDS : AREA_FIELDS[ctx.kind];
     const aiFor = fieldObj => (ai ? (k, text) => ai({ kind: ctx.kind, field: k, text, exit: fieldObj }) : null);
     const textKey = ctx.kind === 'room' ? 'description' : 'notes';
+    // With an outline (the map passes /edit/outline) the area-picking fields are map picks, else plain dropdowns.
+    const ol = ctx.outline ?? null;
+    const entrancePick = !ol || ctx.kind === 'room' ? null : ctx.kind === 'subregion'
+        ? { kind: 'room', title: 'entrance', outline: ol, clearable: true, allowed: (ctx.entrances ?? []).map(x => `${ctx.area}/${x.value}`), toFull: v => `${ctx.area}/${v}`, toLocal: v => v.split('/').pop() }
+        : { kind: 'subregion', title: 'entrance', outline: ol, clearable: true, allowed: (ctx.entrances ?? []).map(x => `${ctx.area}:${x.value}`), toFull: v => `${ctx.area}:${v}`, toLocal: v => v.split(':').pop() };
     for (const s of specs) {
         // Descriptions and notes are additive: the own text is never inherited, so no placeholder or reset.
         const inh = s.k === textKey ? null : ctx.inherited?.[s.k] ?? null;
-        root.append(fieldRow(doc, s, state.own, { inh, options: s.options === 'entrances' ? ctx.entrances : null, onChange: changed, ai: aiFor(null) }));
+        root.append(fieldRow(doc, s, state.own, { inh, options: s.options === 'entrances' ? ctx.entrances : null, onChange: changed, ai: aiFor(null), pick: s.options === 'entrances' ? entrancePick : null }));
         if (s.k === textKey && ctx.parent_notes?.length) {
             const box = el('div', { class: 'pf-parent-notes', 'data-field': 'parent_notes' });
             for (const n of ctx.parent_notes) box.append(el('div', { class: 'pf-parent-note muted', 'data-from': n.from, 'data-toggle': n.toggle },
@@ -241,7 +253,9 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
     const syncNotes = () => { for (const d of root.querySelectorAll('.pf-parent-note')) { const k = d.dataset.toggle, v = has(state.own, k) ? state.own[k] : ctx.inherited?.[k]?.value ?? true; d.classList.toggle('off', v === false); } };
     root.addEventListener('change', syncNotes); root.addEventListener('click', () => setTimeout(syncNotes)); syncNotes();
     if (ctx.kind === 'room') {
-        const mv = el('select', { class: 'pf-input pf-move' }, ...(ctx.subregions ?? []).map(s => el('option', { value: s.area }, s.name)));
+        const mv = ol ? pickField(doc, { kind: 'subregion', title: 'subregion to move it to', outline: ol, value: state.area })
+            : el('select', { class: 'pf-input pf-move' }, ...(ctx.subregions ?? []).map(s => el('option', { value: s.area }, s.name)));
+        if (ol) mv.classList.add('pf-input', 'pf-move');
         mv.value = state.area;
         mv.addEventListener('change', () => { state.area = mv.value; changed(); });
         root.append(el('div', { class: 'pf-row', 'data-field': 'move' }, el('label', { class: 'pf-label' }, 'Move to subregion'), mv));
@@ -251,7 +265,7 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
             const blk = el('div', { class: 'pf-exit' });
             const body = el('div', { class: 'pf-exit-body' });
             const head = el('div', { class: 'pf-exit-head' });
-            const title = () => `${str(e.side.direction) || '(new exit)'} → ${e.to_name ?? ctx.rooms?.find(r => r.address === e.to)?.name ?? (e.to || '?')}${e.removed ? ' (removed)' : ''}`;
+            const title = () => `${str(e.side.direction) || '(new exit)'} → ${e.to_name ?? ctx.rooms?.find(r => r.address === e.to)?.name ?? (ol && e.to ? pathOf(ol, 'room', e.to) : null) ?? (e.to || '?')}${e.removed ? ' (removed)' : ''}`;
             const setOpen = v => { body.hidden = !v || e.removed; tog.textContent = v ? '▾' : '▸'; blk.classList.toggle('collapsed', !v); };
             const tog = el('button', { type: 'button', class: 'pf-toggle', onclick: () => setOpen(body.hidden) }, '▾');
             const name = el('span', { class: 'pf-exit-title', onclick: () => setOpen(body.hidden) }, title());
@@ -262,7 +276,9 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
             head.append(tog, name, x);
             const upd = () => { name.textContent = title(); changed(); };
             if (e.orig === null) {
-                const to = el('select', { class: 'pf-input pf-to' }, el('option', { value: '' }, '(pick a place)'), ...(ctx.rooms ?? []).map(r => el('option', { value: r.address }, `${r.name} (${r.area_name})`)));
+                const to = ol ? pickField(doc, { kind: 'room', title: 'exit destination', outline: ol, exclude: [ctx.address ?? ctx.location].filter(Boolean), value: '' })
+                    : el('select', { class: 'pf-input pf-to' }, el('option', { value: '' }, '(pick a place)'), ...(ctx.rooms ?? []).map(r => el('option', { value: r.address }, `${r.name} (${r.area_name})`)));
+                if (ol) to.classList.add('pf-input', 'pf-to');
                 to.addEventListener('change', () => { e.to = to.value; e.to_name = null; upd(); });
                 body.append(el('div', { class: 'pf-row', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), to));
             } else body.append(el('div', { class: 'pf-row muted', 'data-field': 'to' }, el('label', { class: 'pf-label' }, 'Leads to'), e.to_name ?? e.to));
