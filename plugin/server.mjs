@@ -358,7 +358,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 for (let k = changes.length - (changes.some(c => c?.off) ? 0 : 1); k >= 0; k--) { let pw; try { pw = changed_for(wid, onAgain.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
                 return null;
             };
-            const r = resolvePosition(e.w, address, { relocate: relocateMap(e.info.patches, since), allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
+            const r = resolvePosition(e.w, address, { relocate: { ...relocateMap(e.info.patches), ...relocateMap(e.info.patches, since) }, // every active move applies forward, whenever the position was stamped (a moved place is the same place)
+                 allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
             const loc = e.w.locations.get(r.address);
             return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
         },

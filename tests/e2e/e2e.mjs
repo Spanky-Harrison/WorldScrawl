@@ -1647,6 +1647,19 @@ try {
     await page.evaluate(async ({ mi, pid }) => { await (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).toggleChange(mi, pid); }, rv0);
     const rvOnAgain = await waitHere('riverton:green/green');
     check('map refresh: turning the move on again moves the party (and the map) to the Green in Riverton', rvOnAgain === 'riverton:green/green', String(rvOnAgain));
+    // Off → walk to the Green at its Larkspur address → on: the forward redirect applies to a position stamped while the move was off.
+    const owo = await page.evaluate(async ({ mi, pid }) => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), c = SillyTavern.getContext(), wait = () => new Promise(r => setTimeout(r, 1500));
+        const s0 = m.getStoredLocation();
+        await m.toggleChange(mi, pid, { choice: 'one' }); await wait(); const off = m.getStoredLocation();
+        const to = 'larkspur:green/green', walk = { name: 'User', is_user: true, send_date: Date.now(), mes: 'I walk to the green.', extra: { worldscrawl_location: to, worldscrawl_move: { from: off, to, via: [to] } } };
+        c.chat.push(walk); c.addOneMessage(walk); await c.saveChat();
+        await m.toggleChange(mi, pid); await wait();
+        return { s0, off, on: m.getStoredLocation() };
+    }, rv0);
+    const owoMap = await waitHere('riverton:green/green');
+    check('round trip on → walk → off → on keeps the party on the Green (never relocated by a toggle)', owo.s0 === 'riverton:green/green' && owo.off === 'larkspur:green/green', JSON.stringify(owo));
+    check('off → walk to the Green → on: the move redirects the party forward to the Green in Riverton (map follows)', owo.on === 'riverton:green/green' && owoMap === 'riverton:green/green', JSON.stringify([owo, owoMap]));
     await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await page.waitForTimeout(1500);
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
