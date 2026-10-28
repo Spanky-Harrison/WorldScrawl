@@ -3,7 +3,7 @@
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
-import { buildMenu, openToolView } from './menus.mjs';
+import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
 import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
@@ -712,15 +712,20 @@ channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onSta
 // ---- Menus. TOOLS fill the "Tools" menu (each takes over the full view, with a Close button); DEBUG fills the "Debug" menu.
 // An item is {id, label, open()} or a toggle {id, label, toggle: true, checked(), set(on)}. See README "Adding a tool".
 const getJson = async path => { const r = await fetch(`${API}${path}`); if (!r.ok) throw new Error(`map server answered ${r.status}`); return r.json(); };
+let unlockPrompts = false; // Debug > Unlock locked prompts (off by default; remembered in this browser)
+try { unlockPrompts = localStorage.getItem('worldscrawl_unlock_prompts') === '1'; } catch {}
+let promptView = null;
 export const TOOLS = [
-    { id: 'prompts', label: 'Prompt Editor', open: () => openToolView('prompts', 'Prompt Editor', body => promptEditor(body, {
+    { id: 'prompts', label: 'Prompt Editor', open: () => openToolView('prompts', 'Prompt Editor', body => (promptView = promptEditor(body, {
         get: getJson, post: (path, b) => postJson(`${API}${path}`, b), changed: () => channel.postMessage({ type: 'prompts_changed' }),
-    })) },
+    }, { unlocked: () => unlockPrompts, choose }))) },
 ];
 const pendingReveals = new Map();
 export const DEBUG = [
     { id: 'show-edit-messages', label: 'Show map edit messages', toggle: true, checked: () => !!state?.showEditMessages,
         set: on => { if (!state) return setStatus('SillyTavern not connected'); channel.postMessage({ type: 'set_debug', key: 'showEditMessages', value: on }); } },
+    { id: 'unlock-prompts', label: 'Unlock locked prompts', toggle: true, checked: () => unlockPrompts,
+        set: on => { unlockPrompts = !!on; try { localStorage.setItem('worldscrawl_unlock_prompts', on ? '1' : '0'); } catch {} promptView?.refresh(); } },
     { id: 'reveal-map', label: 'Reveal map', open: async () => {
         if (!state?.on || !state.chatId) return setStatus('Open a WorldScrawl chat first.');
         if (!confirm('Reveal the whole map? Every place is marked as visited, so you can travel anywhere (the same as /ws-reveal all). Delete the reveal message in the chat to undo.')) return;
@@ -739,6 +744,7 @@ channel.addEventListener('message', ev => { if (ev.data?.type === 'reveal_result
 
 buildMenus();
 buildTopBar();
+guardViewButtons(document.getElementById('windowButtons'));
 setEditor(editor);
 toggleWindow(WINDOWS[0], true);
 themeFromSettings();

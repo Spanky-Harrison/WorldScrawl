@@ -38,9 +38,22 @@ export function buildMenu(id, title, items) {
     root.append(btn, list);
     return root;
 }
-/** Show a full-view tool: hides the normal windows; Close (or opening another tool) brings them back. */
-export function openToolView(id, title, build) {
-    closeToolView();
+/** A small modal with one button per choice; resolves to the label clicked (Escape = the last one). */
+export function choose(message, buttons) {
+    return new Promise(res => {
+        const done = b => { box.remove(); document.removeEventListener('keydown', key, true); res(b); };
+        const key = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); done(buttons[buttons.length - 1]); } };
+        const box = h('div', { class: 'ws-choose-back' }, h('div', { class: 'ws-choose', role: 'alertdialog', 'aria-label': message }, h('p', {}, message),
+            h('div', { class: 'ws-choose-buttons' }, buttons.map(b => h('button', { type: 'button', class: 'topbutton', 'data-choice': b, onclick: () => done(b) }, b)))));
+        document.addEventListener('keydown', key, true);
+        document.body.append(box);
+        box.querySelector('button')?.focus();
+    });
+}
+/** Show a full-view tool: hides the normal windows. Only one tool is open at a time: opening one first closes the open one
+ * (which may ask about unsaved edits and refuse). Resolves to the view, or null when the open tool stayed. */
+export async function openToolView(id, title, build) {
+    if (!(await closeToolView())) return null;
     const body = h('div', { class: 'toolview-body' });
     const view = h('section', { class: 'toolview', id: `tool-${id}`, 'data-tool': id },
         h('header', { class: 'toolview-head' }, h('h2', {}, title), h('button', { type: 'button', class: 'topbutton toolview-close', onclick: () => closeToolView() }, 'Close')), body);
@@ -50,11 +63,21 @@ export function openToolView(id, title, build) {
     view._onClose = r?.onClose;
     return view;
 }
-export function closeToolView() {
+/** Close the open tool, if any. Resolves false when the tool said no (e.g. the user chose Stay on unsaved edits). */
+export async function closeToolView() {
     const v = document.querySelector('.toolview');
     if (!v) return true;
-    if (v._onClose && v._onClose() === false) return false; // the tool said no (e.g. unsaved edits)
+    if (v._onClose && (await v._onClose()) === false) return false;
     v.remove();
     document.getElementById('windows').hidden = false;
     return true;
+}
+/** Top-bar view buttons (the map and other windows, Editor) close the open tool first; if it stays open, the click is dropped. */
+export function guardViewButtons(nav) {
+    nav.addEventListener('click', ev => {
+        const b = ev.target.closest('button');
+        if (!b || b._wsPass || !document.querySelector('.toolview')) return;
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        closeToolView().then(ok => { if (ok) { b._wsPass = true; try { b.click(); } finally { b._wsPass = false; } } });
+    }, true);
 }

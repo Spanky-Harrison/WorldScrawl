@@ -1757,7 +1757,20 @@ try {
         await ui.waitForSelector('.pe-card', { timeout: 10000 });
         const view = await ui.evaluate(() => ({ hidden: document.getElementById('windows').hidden, cards: document.querySelectorAll('.pe-card').length, close: !!document.querySelector('.toolview-close'), resize: getComputedStyle(document.querySelector('.pe-text')).resize, sel: document.querySelector('.pe-profile').value }));
         check('Prompt Editor takes over the view with a Close button; one card per prompt; textareas resize vertically; on Default', view.hidden && view.cards >= 60 && view.close && view.resize === 'vertical' && view.sel === 'Default', JSON.stringify(view));
+        const grp = await ui.evaluate(() => [...document.querySelectorAll('details.pe-group')].map(d => ({ id: d.dataset.group, open: d.open, count: d.querySelector('.pe-count')?.textContent, flow: !!d.querySelector('.pe-flow')?.textContent.trim(), pieces: !!d.querySelector('details.pe-pieces') })));
+        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 8 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces, JSON.stringify(grp));
+        const openAll = () => ui.evaluate(() => document.querySelectorAll('details.pe-group, details.pe-pieces').forEach(d => { d.open = true; }));
+        await openAll(); await ui.waitForTimeout(200);
+        const lk = await ui.evaluate(() => { const c = document.querySelector('.pe-card[data-id="intent.system"]'); return { lock: !!c.querySelector('.pe-lock'), why: c.querySelector('.pe-locked')?.textContent, ro: c.querySelector('.pe-text').readOnly, shown: c.offsetHeight > 0 }; });
+        check('locked prompts show a padlock, the reason and a read-only box', lk.lock && lk.why && lk.ro && lk.shown, JSON.stringify(lk));
         const card = id => ui.locator(`.pe-card[data-id="${id}"]`);
+        // Debug > Unlock locked prompts (off by default) makes them editable; left on for the edit checks below.
+        await ui.click('#menu-debug .menu-title');
+        const u0 = await ui.locator('#menu-debug [data-item="unlock-prompts"]').getAttribute('aria-checked');
+        await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
+        const ro1 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
+        check('Debug > Unlock locked prompts (off by default) makes locked prompts editable', u0 !== 'true' && ro1 === false, JSON.stringify({ u0, ro1 }));
+        await ui.keyboard.press('Escape').catch(() => {});
         const orig = await card('expand.system').locator('.pe-text').inputValue();
         answers.push(true, 'E2E');
         await card('expand.system').locator('.pe-text').focus();
@@ -1771,12 +1784,35 @@ try {
         await card('expand.system').locator('.pe-text').fill('scratch');
         await card('expand.system').locator('.pe-undo').click();
         check('Undo edits goes back to the last saved text', (await card('expand.system').locator('.pe-text').inputValue()) === orig + '\nE2E-MARK');
-        await card('change.system').locator('.pe-text').fill('no placeholders here');
-        const warn = await card('change.system').locator('.pe-warn').textContent();
+        // One tool at a time: the map button (or another view / Tools item) closes the editor, asking about unsaved edits.
+        const reopen = async () => { await ui.click('#menu-tools .menu-title'); await ui.click('#menu-tools [data-item="prompts"]'); await ui.waitForSelector('.pe-card', { timeout: 10000 }); await openAll(); await ui.waitForTimeout(200); };
+        const mapBtn = '#windowButtons [data-window]';
+        await card('expand.system').locator('.pe-text').fill(orig + '\nE2E-MARK\nSAVED');
+        await ui.click(mapBtn);
+        await ui.waitForSelector('.ws-choose', { timeout: 5000 }).catch(() => {});
+        const choices = await ui.locator('.ws-choose button').allTextContents();
+        await ui.click('.ws-choose [data-choice="Stay"]');
+        const stayed = await ui.evaluate(() => !!document.querySelector('.toolview') && document.querySelector('.pe-card[data-id="expand.system"] .pe-text').value.endsWith('SAVED'));
+        await ui.click(mapBtn); await ui.click('.ws-choose [data-choice="Save"]');
+        await ui.waitForFunction(() => !document.querySelector('.toolview'), null, { timeout: 10000 }).catch(() => {});
+        const closed = await ui.evaluate(() => !document.querySelector('.toolview') && !document.getElementById('windows').hidden);
+        await reopen();
+        const saved = (await card('expand.system').locator('.pe-text').inputValue()).endsWith('SAVED');
+        await card('expand.system').locator('.pe-text').fill('discard me');
+        await ui.click('#menu-tools .menu-title'); await ui.click('#menu-tools [data-item="prompts"]');
+        await ui.click('.ws-choose [data-choice="Discard"]');
+        await ui.waitForSelector('.pe-card', { timeout: 10000 }); await openAll(); await ui.waitForTimeout(200);
+        const discarded = (await card('expand.system').locator('.pe-text').inputValue()).endsWith('SAVED') && await ui.locator('.toolview').count() === 1;
+        check('leaving the editor with unsaved edits asks Save / Discard / Stay (Stay keeps it, Save submits then switches, Discard drops them); one tool at a time',
+            JSON.stringify(choices) === '["Save","Discard","Stay"]' && stayed && closed && saved && discarded, JSON.stringify({ choices, stayed, closed, saved, discarded }));
+        await card('dig.stay').locator('.pe-text').fill('no placeholders here');
+        const warn = await card('dig.stay').locator('.pe-warn').textContent();
         answers.push(false);
-        await card('change.system').locator('.pe-submit').click(); await ui.waitForTimeout(500);
-        check('removing a required placeholder warns, and asks before saving (declined: not saved)', /edit_types/.test(warn) && await card('change.system').locator('.pe-overridden').count() === 0, warn);
-        await card('change.system').locator('.pe-undo').click();
+        await card('dig.stay').locator('.pe-submit').click(); await ui.waitForTimeout(500);
+        check('removing a required placeholder warns, and asks before saving (declined: not saved)', /said/.test(warn) && await card('dig.stay').locator('.pe-overridden').count() === 0, warn);
+        await card('dig.stay').locator('.pe-undo').click();
+        const ec = await ui.locator('details.pe-group[data-group="style"] .pe-edited-count').textContent();
+        check('a group shows how many of its prompts are edited', /1 edited/.test(ec), ec);
         // An older default under the override: the editor shows "default changed" with a diff.
         const fs = await import('node:fs'), f = '/tmp/st-ws/default-user/worldscrawl/prompts.json';
         const store = JSON.parse(fs.readFileSync(f, 'utf8')); const o = store.profiles.E2E.overrides['expand.system'];
@@ -1784,6 +1820,7 @@ try {
         await ui.click('.toolview-close');
         check('Close brings the map back', await ui.evaluate(() => !document.getElementById('windows').hidden && !document.querySelector('.toolview')));
         await ui.click('#menu-tools .menu-title'); await ui.click('#menu-tools [data-item="prompts"]');
+        await ui.waitForSelector('.pe-card', { timeout: 10000 }); await openAll();
         await ui.waitForSelector('.pe-card[data-id="expand.system"] .pe-changed', { timeout: 10000 }).catch(() => {});
         const diff = await card('expand.system').locator('.pe-diff .del').allTextContents().catch(() => []);
         check('"Default changed since you edited this" badge with a diff of the old and new default', diff.some(t => t.includes('AN OLDER DEFAULT LINE')), JSON.stringify(diff));
@@ -1800,6 +1837,11 @@ try {
         await ui.waitForFunction(() => document.querySelector('.pe-profile')?.value === 'Default', null, { timeout: 10000 }).catch(() => {});
         const left = await ui.evaluate(() => [...document.querySelectorAll('.pe-profile option')].map(o => o.value));
         check('Rename and Delete a profile (back on Default)', JSON.stringify(left) === '["Default"]', JSON.stringify(left));
+        await ui.click('#menu-debug .menu-title'); await ui.click('#menu-debug [data-item="unlock-prompts"]'); await ui.waitForTimeout(300);
+        await openAll();
+        const ro2 = await card('intent.system').locator('.pe-text').evaluate(t => t.readOnly);
+        check('turning Unlock locked prompts off makes them read-only again', ro2 === true);
+        await ui.keyboard.press('Escape').catch(() => {});
         await ui.click('.toolview-close');
         // Debug menu.
         const st = () => page.evaluate(() => !!SillyTavern.getContext().extensionSettings.worldscrawl.showEditMessages);
