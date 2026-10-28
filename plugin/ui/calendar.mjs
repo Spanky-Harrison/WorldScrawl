@@ -186,10 +186,37 @@ export function sumTravel(chat, after = -1) {
 export const WAIT_TARGETS = ['dawn', 'morning', 'noon', 'dusk', 'evening', 'night', 'midnight'];
 export const SLEEP_DEFAULT = 8 * 3600;
 /** Parse wait arguments: {seconds} for a duration (days allowed: "2d", "1d6h"), {until} for a time of day; throws. */
+const UNIT = { s: 1, sec: 1, secs: 1, second: 1, seconds: 1, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, d: 'day', day: 'day', days: 'day', w: 'week', wk: 'week', week: 'week', weeks: 'week' };
+const NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, 'forty-five': 45, fifty: 50, sixty: 60, ninety: 90, few: 3, couple: 2 };
+const FILLER = new Set(['for', 'about', 'around', 'roughly', 'some', 'and', 'another', 'more', 'of', 'or', 'so', 'just', 'over', 'nearly', 'almost', 'maybe', 'like', 'a', 'an', 'the', 'good', 'full', 'whole', 'solid']);
+/** Seconds in a loose wait like "1 hour and 1 minute", "an hour", "half an hour", "2 hours 30 minutes", "90 min", "a day", "1h30m"; null if not one. */
+export function waitWords(text, spd = 86400) {
+    const s = String(text ?? '').toLowerCase().replace(/(\d)([a-z])/g, '$1 $2').replace(/([a-z])(\d)/g, '$1 $2').replace(/[,.;!?]/g, ' ').trim();
+    if (!s) return null;
+    const toks = s.split(/\s+/);
+    let total = 0, num = null, any = false, lastUnit = 0;
+    const unitSec = u => (UNIT[u] === 'day' ? spd : UNIT[u] === 'week' ? 7 * spd : UNIT[u]);
+    for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (t === 'half') { // "half an hour", "an hour and a half"
+            const next = toks.slice(i + 1).find(x => !FILLER.has(x));
+            if (next && UNIT[next] != null) { total += unitSec(next) / 2; any = true; i = toks.indexOf(next, i + 1); num = null; continue; }
+            if (any && lastUnit) { total += lastUnit / 2; continue; }
+            return null;
+        }
+        if (/^\d+(?:\.\d+)?$/.test(t)) { num = parseFloat(t); continue; }
+        if (UNIT[t] != null) { const u = unitSec(t); total += (num ?? 1) * u; lastUnit = u; num = null; any = true; continue; }
+        if (NUMBER_WORDS[t] != null && UNIT[toks[i + 1]] != null || (NUMBER_WORDS[t] != null && (toks[i + 1] === 'of' || FILLER.has(toks[i + 1] ?? '')) && t !== 'a' && t !== 'an')) { num = NUMBER_WORDS[t]; continue; }
+        if (FILLER.has(t)) continue;
+        return null;
+    }
+    if (num != null) return null; // a number with no unit after it
+    return any ? Math.round(total) : null;
+}
 export function parseWait(text, cal = GREGORIAN) {
-    const s = String(text ?? '').trim().toLowerCase().replace(/^for\s+/, '');
+    const s = String(text ?? '').trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^(?:for|about|around|roughly)\s+/, '');
     if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
-    const u = /^(?:until|till|til|to)\s+(.+)$/.exec(s);
+    const u = /^(?:until|till|til|to|unti)\s+(.+)$/.exec(s);
     if (u) {
         const t = u[1].trim().replace(/^the\s+/, '');
         if (t === 'sunrise') return { until: 'dawn' };
@@ -198,11 +225,11 @@ export function parseWait(text, cal = GREGORIAN) {
         parseClock(t, cal);
         return { until: t };
     }
-    const d = /^(\d+)\s*d(?:ays?)?\s*(.*)$/.exec(s);
-    const days = d ? +d[1] * secondsPerDay(cal) : 0, rest = d ? d[2].trim() : s;
-    const n = rest ? (/^\d+$/.test(rest) ? +rest * 3600 : parseDuration(rest.replace(/hours?|hrs?/g, 'h').replace(/minutes?|mins?/g, 'm').replace(/\s+/g, ''))) : 0;
-    if (days + n <= 0) throw new Error('the wait must be longer than zero');
-    return { seconds: days + n };
+    if (/^\d+$/.test(s)) { if (+s <= 0) throw new Error('the wait must be longer than zero'); return { seconds: +s * 3600 }; } // a bare number: hours
+    const secs = waitWords(s, secondsPerDay(cal));
+    if (secs == null) throw new Error(`wait must look like "2h", "1h30m", "an hour and a half", "90 min" or "until dawn", got ${JSON.stringify(String(text ?? '').trim())}`);
+    if (secs <= 0) throw new Error('the wait must be longer than zero');
+    return { seconds: secs };
 }
 /**
  * Seconds from game time `elapsed` until the next `target` (a WAIT_TARGETS word or "HH:MM") - always in the future,

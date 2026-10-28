@@ -1633,8 +1633,33 @@ try {
         return { id, status: f?.status, error: f?.error, ops: f?.proposal?.ops, summary: f?.proposal?.summary, card };
     }, [wsMod, UPST]); };
     const cant = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ cant: 'The hallway now floats above the town.' }) }]);
-    check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /can't show this change/.test(cant.card), JSON.stringify(cant));
+    check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /Can't show this on the map: The hallway now floats/.test(cant.card) && /Retry/.test(cant.card), JSON.stringify(cant));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, cant.id); await page.waitForTimeout(1500);
+    // A manual flag never ends silently: an empty {"ops": []} reply, an unreadable answer, a model error.
+    const empty = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [] }) }]);
+    check('manual flag: an empty {"ops": []} reply shows "no map change found" with Retry', empty.status === 'nothing' && /No map change found/.test(empty.card) && /Retry/.test(empty.card), JSON.stringify(empty));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, empty.id); await page.waitForTimeout(1500);
+    const junk = await changeFlag([{ content: 'I cannot help with portals.' }]);
+    check('manual flag: an unreadable answer shows an error in the bar with Retry', junk.status === 'error' && /Map change failed: .*not JSON/.test(junk.card) && /Retry/.test(junk.card), JSON.stringify(junk));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, junk.id); await page.waitForTimeout(1500);
+    await queue([]);
+    const dbg = await page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext(), seen = [], orig = console.info;
+        m.settings().showEditMessages = true; console.info = (...a) => { seen.push(String(a[0])); orig(...a); };
+        const gen = c.generateRaw; let threw = false;
+        c.chat.push({ name: 'Narrator', is_user: false, mes: 'A portal to a mind dimension opens for exactly 1 hour.', extra: { worldscrawl_location: UPST } }); await c.saveChat();
+        const id = c.chat.length - 1;
+        try {
+            const t = await m.flagMessage(id, { source: 'button' });
+            for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
+        } catch { threw = true; }
+        console.info = orig; m.settings().showEditMessages = false;
+        m.renderPatchCards();
+        const f = c.chat[id].extra.worldscrawl_flag;
+        return { id, threw, status: f?.status, seen, card: document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '' };
+    }, [wsMod, UPST]);
+    check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Keep/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await page.waitForTimeout(1500);
     const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
     const hubR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Crystal Room', 'crystal arch'), mk('Ember Room', 'ember arch'), mk('Tide Room', 'tide arch')] }) }]);
     check('change call: three new rooms off a hub in one change, engine-made ids', hubR.status === 'review' && hubR.ops?.length === 3 && hubR.ops.every(o => o.op === 'create_place' && o.id !== 'bogus' && o.story === true)
