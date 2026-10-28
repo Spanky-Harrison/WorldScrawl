@@ -996,6 +996,25 @@ try {
     lu = await lastU();
     const fq = (await reqsNow()).slice(rF);
     check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way') && promptOf(fq[2]).includes('the answer was not a JSON object'), JSON.stringify(lu.extra));
+    // Knarfy's playtest: the player names the courtyard. A "new" answer is refused (named existing place), a second unreadable one
+    // still links the named courtyard directly (window <-> window, since the courtyard already has "in"), never a new area.
+    await queue([{ content: 'new opening' }, { content: '{"new":{"name":"Precarious Ledge","description":"A narrow ledge above the yard."},"direction":"window","then":"go_through"}' }, { content: 'banana' }, { content: 'You drop into the courtyard.' }]);
+    const rK = (await reqsNow()).length;
+    await send('I break open the window, opening a precarious passage to the courtyard.', 4);
+    lu = await lastU();
+    const kq = (await reqsNow()).slice(rK), chK = lu.extra.worldscrawl_change;
+    check('dig courtyard: the named place is offered first and no new place is offered', /The player names Courtyard/.test(promptOf(kq[1])) && !promptOf(kq[1]).includes('Or it can lead to a new space'), promptOf(kq[1]).slice(0, 900));
+    check('dig courtyard: linked to the existing courtyard, not a new area', chK?.type === 'dig' && chK.to === 'riverton:drowned_rat/courtyard' && chK.direction === 'window' && chK.return_direction === 'window' && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/courtyard', JSON.stringify(lu.extra));
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    check('dig courtyard: undone', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
+    // A failure the narrator ignores: its [ws_flag: discover] is dropped, so no room appears.
+    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'banana' }, { content: 'The wall bursts open onto a hidden attic. [ws_flag: discover | hole]' }]);
+    await send('I smash the wall with my fist until it breaks', 4);
+    await page.waitForTimeout(1500);
+    const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
+    check('dig failed: the narrator is told it failed and its discover flag is ignored', promptOf(await lastReq()).includes('it FAILED') && fl === null && (await M(m => m.chatChanges().length)) === 0, JSON.stringify(fl));
+    lu = await lastU();
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
     await sw(true, true);
     await go('up');
