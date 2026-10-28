@@ -70,8 +70,8 @@ export function fieldDiffs(before = {}, after = {}, relocate = {}) {
         if (!area) {
             const oe = (o?.exits ?? []).filter(isObj), ne = (n?.exits ?? []).filter(isObj);
             const dirs = [...new Set([...oe, ...ne].map(e => e.direction))];
-            const one = e => e ? `${exitLine(e)} (${exitState(e)})${e.description ? `: ${e.description}` : ''}` : '';
-            const rows = dirs.map(d => ({ a: one(oe.find(e => e.direction === d)), b: one(ne.find(e => e.direction === d)) }));
+            const one = (e, old) => e ? `${exitLine(old ? { ...e, to: relocate?.[e.to] ?? e.to } : e)} (${exitState(e)})${e.description ? `: ${e.description}` : ''}` : '';
+            const rows = dirs.map(d => ({ a: one(oe.find(e => e.direction === d), true), b: one(ne.find(e => e.direction === d)) }));
             if (rows.length) fields.push({ field: 'exits', label: 'Exits', kind: 'list', old: rows.map(r => r.a).filter(Boolean), new: rows.map(r => r.b).filter(Boolean), changed: rows.some(r => r.a !== r.b) });
         }
         const status = !o && n ? 'added' : o && !n ? 'removed' : fields.some(f => f.changed) ? 'changed' : 'same';
@@ -79,10 +79,77 @@ export function fieldDiffs(before = {}, after = {}, relocate = {}) {
     }
     return out;
 }
+/** Field changes for a moved entity: its old address before against its new one after (exits compared after relocation). */
+export function movedFields(before = {}, after = {}, oldKey, newKey, relocate = {}) {
+    const d = fieldDiffs({ [newKey]: before?.[oldKey] ?? null }, { [newKey]: after?.[newKey] ?? null }, {}).find(Boolean);
+    if (!d) return [];
+    // Exits that only moved with their rooms aren't changes.
+    const norm = fieldDiffs({ [newKey]: relocateExits(before?.[oldKey], relocate) }, { [newKey]: after?.[newKey] ?? null }, {})[0];
+    return (norm ?? d).fields.filter(f => f.changed);
+}
+const relocateExits = (o, relocate) => o && Array.isArray(o.exits) ? { ...o, exits: o.exits.map(e => isObj(e) ? { ...e, to: relocate?.[e.to] ?? e.to } : e) } : o;
+const tail = a => String(a).split(/[/:]/).pop();
+const areaOf = a => String(a).slice(0, String(a).indexOf('/'));
+/** "now inherits Riverton's notes and climate instead of Larkspur's" (null when nothing inherited changes). */
+export function inheritLine(n) {
+    if (!n?.changed?.length) return null;
+    const c = n.changed, list = c.length === 1 ? c[0] : `${c.slice(0, -1).join(', ')} and ${c[c.length - 1]}`;
+    return `now inherits ${n.to}'s ${list} instead of ${n.from}'s`;
+}
+const mergeNotes = ns => { ns = ns.filter(Boolean); if (!ns.length) return null; return { from: ns[0].from, to: ns[0].to, changed: [...new Set(ns.flatMap(n => n.changed))] }; };
+/**
+ * Moves as one line per moved entity, grouped by where they came from: [{from, to, fromName, toName, note?, items: [{kind:
+ * 'place'|'subregion', old, new, title, renamed: {from, to}|null, note?, fields, children?: [{old, new, title, renamed}]}]}].
+ * Built from the ops (move_location, move_area, remove_area with contents "move") and the relocate map, so it also works
+ * for a stored change with no before/after. `covered` lists the keys these lines stand for (hidden from the field view).
+ */
+export function moveGroups({ ops = [], relocate = {}, before = {}, after = {}, inherit = {}, names = {} } = {}) {
+    const groups = new Map(), covered = new Set();
+    const nameOf = (k, side) => (side === 'old' ? before : after)?.[k]?.name ?? names?.[k] ?? null;
+    const group = (from, to) => { const k = `${from}|${to}`; if (!groups.has(k)) groups.set(k, { from, to, fromName: nameOf(from, 'old') ?? from, toName: nameOf(to, 'new') ?? to, items: [] }); return groups.get(k); };
+    const ren = (o, n) => tail(o) !== tail(n) ? { from: tail(o), to: tail(n) } : null;
+    const place = (o, toArea) => {
+        const n = relocate?.[o]; if (!n || covered.has(o)) return;
+        covered.add(o); covered.add(n);
+        const note = inherit?.[o] ?? null;
+        group(areaOf(o), toArea ?? areaOf(n)).items.push({ kind: 'place', old: o, new: n, title: nameOf(n, 'new') ?? nameOf(o, 'old') ?? tail(n), renamed: ren(o, n), note, fields: movedFields(before, after, o, n, relocate) });
+    };
+    const sub = (A, region) => {
+        const kids = Object.keys(relocate ?? {}).filter(k => k.startsWith(`${A}/`) && !covered.has(k));
+        const B = kids.length ? areaOf(relocate[kids[0]]) : `${region}:${A.split(':')[1]}`;
+        covered.add(A); covered.add(B);
+        const children = kids.map(o => { const n = relocate[o]; covered.add(o); covered.add(n);
+            return { old: o, new: n, title: nameOf(n, 'new') ?? nameOf(o, 'old') ?? tail(n), renamed: ren(o, n), fields: movedFields(before, after, o, n, relocate) }; });
+        const af = fieldDiffs({ [B]: before?.[A] ?? null }, { [B]: after?.[B] ?? null }, {})[0];
+        return { kind: 'subregion', old: A, new: B, title: nameOf(B, 'new') ?? nameOf(A, 'old') ?? tail(B), renamed: ren(A, B), note: mergeNotes(kids.map(o => inherit?.[o])),
+            fields: before?.[A] && after?.[B] ? (af?.fields ?? []).filter(f => f.changed) : [], children };
+    };
+    for (const op of ops ?? []) {
+        if (!isObj(op)) continue;
+        if (op.op === 'move_location' && typeof op.loc === 'string') place(op.loc, op.area);
+        else if (op.op === 'move_area' && typeof op.area === 'string') { const A = op.area; group(A.split(':')[0], op.region).items.push(sub(A, op.region)); }
+        else if (op.op === 'remove_area' && op.contents === 'move' && typeof op.area === 'string') {
+            if (op.area.includes(':')) { for (const o of Object.keys(relocate ?? {}).filter(k => k.startsWith(`${op.area}/`))) place(o, op.into); covered.add(op.area); }
+            else {
+                const subs = [...new Set(Object.keys(relocate ?? {}).filter(k => k.startsWith(`${op.area}:`)).map(areaOf))];
+                const g = group(op.area, op.into);
+                for (const A of subs) g.items.push(sub(A, op.into));
+                covered.add(op.area);
+            }
+        }
+    }
+    const out = [...groups.values()].filter(g => g.items.length);
+    // One note per group when every line in it would say the same thing.
+    for (const g of out) {
+        const lines = g.items.map(i => inheritLine(i.note));
+        if (g.items.length > 1 && lines[0] && lines.every(l => l === lines[0])) { g.note = g.items[0].note; for (const i of g.items) i.note = null; }
+    }
+    return { groups: out, covered };
+}
 /** Merged rooms as one line each: "rooms A, B → C". */
-export function mergeLines(diffs) {
+export function mergeLines(diffs, skip = new Set()) {
     const by = new Map();
-    for (const d of diffs) if (d.status === 'removed' && d.into) by.set(d.into, [...(by.get(d.into) ?? []), d.title]);
+    for (const d of diffs) if (d.status === 'removed' && d.into && !skip.has(d.key)) by.set(d.into, [...(by.get(d.into) ?? []), d.title]);
     return [...by].map(([into, from]) => { const t = diffs.find(d => d.key === into)?.title ?? into; return `rooms ${from.join(', ')} → ${t}`; });
 }
 
@@ -103,6 +170,12 @@ const CSS = `
 .wsdiff-toggle{cursor:pointer;font-size:0.8em;opacity:0.75;text-decoration:underline;margin-right:10px;}
 .wsdiff-raw{max-height:240px;overflow:auto;font-size:0.85em;white-space:pre-wrap;}
 .wsdiff-merge{font-weight:bold;}
+.wsdiff-move-group{margin:6px 0;padding:4px 6px;border:1px solid var(--SmartThemeBorderColor,#555);border-radius:6px;}
+.wsdiff-move-head{font-weight:bold;margin-bottom:2px;}
+.wsdiff-move{font-family:monospace;font-size:0.95em;margin:2px 0;}
+.wsdiff-move details{margin-left:1.2em;}
+.wsdiff-move summary{cursor:pointer;font-family:inherit;opacity:0.8;}
+.wsdiff-note{font-size:0.85em;opacity:0.75;font-style:italic;margin:1px 0 2px 1.2em;}
 `;
 function ensureCss(doc) {
     if (doc.getElementById('wsdiff-css')) return;
@@ -110,11 +183,12 @@ function ensureCss(doc) {
 }
 
 /** The red/green view. opts: {before, after, ops, relocate}. Unchanged fields hidden behind a toggle; "Raw JSON" toggle. */
-export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = {} } = {}) {
+export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = {}, inherit = {}, names = {} } = {}) {
     ensureCss(doc);
     const mk = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     const root = mk('div', 'wsdiff');
     const diffs = fieldDiffs(before, after, relocate);
+    const moves = moveGroups({ ops, relocate, before, after, inherit, names });
     let showSame = false, showRaw = false;
     const body = mk('div'), bar = mk('div');
     const blk = (type, text) => { const e = mk('div', `wsdiff-blk wsdiff-${type}`, text); if (type !== 'same') e.setAttribute('data-mark', type === 'del' ? 'Removed' : 'Added'); return e; };
@@ -146,8 +220,10 @@ export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = 
     };
     function draw() {
         body.replaceChildren();
-        for (const line of mergeLines(diffs)) body.append(mk('div', 'wsdiff-merge', `Merge: ${line}`));
+        body.append(...renderMoves(doc, moves.groups, f => f.kind === 'list' ? listDiff(f) : textDiff(f)));
+        for (const line of mergeLines(diffs, moves.covered)) body.append(mk('div', 'wsdiff-merge', `Merge: ${line}`));
         for (const d of diffs) {
+            if (moves.covered.has(d.key)) continue;
             if (d.status === 'same' && !showSame) continue;
             const place = mk('div', 'wsdiff-place');
             place.setAttribute('data-key', d.key);
@@ -173,4 +249,31 @@ export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = 
     root.append(body, bar);
     draw();
     return root;
+}
+
+/** The move lines (also used by the Changes tab, without field diffs). fieldView(f) draws one changed field. */
+export function renderMoves(doc, groups, fieldView = null) {
+    ensureCss(doc);
+    const mk = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+    const lineText = i => `${i.old} → ${i.new}${i.renamed ? ` (renamed ${i.renamed.from} → ${i.renamed.to}: the id was taken)` : ''}`;
+    const fields = (box, list) => { if (fieldView) for (const f of list ?? []) box.append(mk('div', 'wsdiff-label', f.label), fieldView(f)); };
+    return groups.map(g => {
+        const box = mk('div', 'wsdiff-move-group');
+        box.setAttribute('data-from', g.from); box.setAttribute('data-to', g.to);
+        box.append(mk('div', 'wsdiff-move-head', `Moved from ${g.fromName} → into ${g.toName}`));
+        const gn = inheritLine(g.note); if (gn) box.append(mk('div', 'wsdiff-note', gn));
+        for (const i of g.items) {
+            const line = mk('div', 'wsdiff-move'); line.setAttribute('data-old', i.old); line.setAttribute('data-kind', i.kind);
+            line.append(mk('div', '', `${i.kind === 'subregion' ? 'subregion ' : ''}${lineText(i)}`));
+            const n = inheritLine(i.note); if (n) line.append(mk('div', 'wsdiff-note', n));
+            fields(line, i.fields);
+            if (i.children?.length) {
+                const det = mk('details'); det.append(mk('summary', '', `${i.children.length} place${i.children.length === 1 ? '' : 's'}`));
+                for (const c of i.children) { const cl = mk('div', 'wsdiff-move'); cl.setAttribute('data-old', c.old); cl.append(mk('div', '', lineText(c))); fields(cl, c.fields); det.append(cl); }
+                line.append(det);
+            }
+            box.append(line);
+        }
+        return box;
+    });
 }

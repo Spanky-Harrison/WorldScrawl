@@ -2163,7 +2163,7 @@ async function loadDiffLib() { try { diffLib ??= await import(`${baseUrl()}/ui/d
 async function drawDiff(box, pv) {
     const dl = await loadDiffLib();
     if (!dl) { box.textContent = ''; return; }
-    box.replaceChildren(dl.renderDiff(document, { before: pv.before ?? {}, after: pv.after ?? {}, ops: pv.ops ?? [], relocate: pv.relocate ?? {} }));
+    box.replaceChildren(dl.renderDiff(document, { before: pv.before ?? {}, after: pv.after ?? {}, ops: pv.ops ?? [], relocate: pv.relocate ?? {}, inherit: pv.inherit ?? {}, names: pv.names ?? {} }));
 }
 /** Re-preview edited ops (debounced) and redraw the diff: the view follows the form while you type. */
 const liveTimers = new WeakMap();
@@ -2202,7 +2202,7 @@ async function saveKeptEdit(id, pid, form) {
     const r = await previewOps(ops, { changes: before, now: chatElapsed(chat.slice(0, id + 1)) });
     if (!r.ok) { form.setErrors(r.errors); return; }
     const old = { ops: p.ops, summary: p.summary, relocate: p.relocate };
-    Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, edited: Date.now() });
+    Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, edited: Date.now() });
     const all = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
     if (!all.ok) {
         Object.assign(p, old);
@@ -2305,7 +2305,7 @@ export async function liveEdit(ops, note = '') {
     if (!r.ok) return r;
     const fl = await loadFormLib();
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: note || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: chatElapsed(chat),
-        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
+        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
     const text = fl ? fl.editLine(r.preview.summary) : `Map edit: ${(r.preview.summary ?? []).join('; ')}`;
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'map_edit', [PATCH_KEY]: [p] } };
     chat.push(msg); c.addOneMessage(msg); await c.saveChat?.();
@@ -2413,7 +2413,7 @@ async function analyzeFlag(id) {
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
         if (!preview) { f.status = 'error'; f.error = `The suggested change didn't fit the map: ${err}`; return; }
-        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate, before: preview.before, after: preview.after };
+        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
         if (settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
@@ -2454,7 +2454,7 @@ async function analyzeDiscovery(id) {
         }
         if (!preview) { f.status = 'error'; f.error = `The new room didn't fit the map: ${err}`; return; }
         f.note = f.note || clip(preview.summary[0], 120);
-        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate ?? {}, before: preview.before, after: preview.after };
+        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate ?? {}, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
         if (!settings().reviewDiscoveries || settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
@@ -2496,11 +2496,11 @@ async function keepFlag(id, { quiet = false } = {}) {
         if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Discard.' }]); return; }
         const r = await previewOps(ops, { changes: chatChanges(chat.slice(0, id + 1)), now: chatElapsed(chat.slice(0, id + 1)) });
         if (!r.ok) { form.setErrors(r.errors); return; }
-        f.proposal = { ...f.proposal, ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {} };
+        f.proposal = { ...f.proposal, ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {} };
         openForms.delete(`${id}|flag`);
     }
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
-        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
+        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
     syncSwipeExtra(msg);
     f.status = 'kept'; f.patch = p.id;

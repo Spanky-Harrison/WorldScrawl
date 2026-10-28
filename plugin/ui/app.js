@@ -3,7 +3,7 @@
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
-import { renderDiff } from './diffview.mjs';
+import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -245,6 +245,7 @@ async function renderInspector(side, target, ctx) {
     const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Turn one off to take it off the map for now, or delete its message to undo it.' : 'Map changes from this chat that touch this. Turn one off to take it off the map for now, or delete its message to undo it.'),
         $('ul', { class: 'warnings' }, ...changes.map(c => {
             const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}${c.off ? ' (turned off)' : ''}`);
+            if (Object.keys(c.relocate ?? {}).length) li.append(...renderMoves(document, moveGroups({ ops: c.ops ?? [], relocate: c.relocate, inherit: c.inherit ?? {}, names: c.names ?? {} }).groups));
             if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
             if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'));
             return li;
