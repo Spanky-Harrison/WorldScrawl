@@ -997,23 +997,25 @@ try {
     const fq = (await reqsNow()).slice(rF);
     check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way') && promptOf(fq[2]).includes('the answer was not a JSON object'), JSON.stringify(lu.extra));
     // Knarfy's playtest: the player names the courtyard. A "new" answer is refused (named existing place), a second unreadable one
-    // still links the named courtyard directly (window <-> window, since the courtyard already has "in"), never a new area.
+    // still links the named courtyard directly (on a free return name), never a new area.
     await queue([{ content: 'new opening' }, { content: '{"new":{"name":"Precarious Ledge","description":"A narrow ledge above the yard."},"direction":"window","then":"go_through"}' }, { content: 'banana' }, { content: 'You drop into the courtyard.' }]);
     const rK = (await reqsNow()).length;
     await send('I break open the window, opening a precarious passage to the courtyard.', 4);
     lu = await lastU();
     const kq = (await reqsNow()).slice(rK), chK = lu.extra.worldscrawl_change;
     check('dig courtyard: the named place is offered first and no new place is offered', /The player names Courtyard/.test(promptOf(kq[1])) && !promptOf(kq[1]).includes('Or it can lead to a new space'), promptOf(kq[1]).slice(0, 900));
-    check('dig courtyard: linked to the existing courtyard, not a new area', chK?.type === 'dig' && chK.to === 'riverton:drowned_rat/courtyard' && chK.direction === 'window' && chK.return_direction === 'window' && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/courtyard', JSON.stringify(lu.extra));
+    check('dig courtyard: linked to the existing courtyard, not a new area', chK?.type === 'dig' && chK.to === 'riverton:drowned_rat/courtyard' && chK.direction === 'window' && !['in', 'kitchen', 'stable', 'trapdoor'].includes(chK.return_direction) && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/courtyard', JSON.stringify(lu.extra));
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     check('dig courtyard: undone', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
     // A failure the narrator ignores: its [ws_flag: discover] is dropped, so no room appears.
+    const chBefore = await M(m => m.chatChanges().length);
     await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'banana' }, { content: 'The wall bursts open onto a hidden attic. [ws_flag: discover | hole]' }]);
     await send('I smash the wall with my fist until it breaks', 4);
     await page.waitForTimeout(1500);
     const flD = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
-    check('dig failed: the narrator is told it failed and its discover flag is ignored', promptOf(await lastReq()).includes('it FAILED') && flD === null && (await M(m => m.chatChanges().length)) === 0, JSON.stringify(flD));
     lu = await lastU();
+    const lpD = promptOf(await lastReq());
+    check('dig failed: the narrator is told it failed and its discover flag is ignored', lpD.includes('it FAILED') && lu.extra.worldscrawl_dig_failed === true && flD === null && (await M(m => m.chatChanges().length)) === chBefore, JSON.stringify({ flD, extra: lu.extra, prompt: lpD.slice(-700) }));
     await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
     await sw(true, true);
@@ -1673,10 +1675,11 @@ try {
             for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
         } catch { threw = true; }
         console.info = orig; m.settings().showEditMessages = false;
-        m.renderPatchCards();
         const f = c.chat[id].extra.worldscrawl_flag;
-        return { id, threw, status: f?.status, seen, card: document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '' };
+        return { id, threw, status: f?.status, seen };
     }, [wsMod, UPST]);
+    await page.evaluate(() => SillyTavern.getContext().reloadCurrentChat()); await page.waitForTimeout(2000); // the pushed message gets its block
+    dbg.card = await page.evaluate(id => document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '', dbg.id);
     check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Keep/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await page.waitForTimeout(1500);
     const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
