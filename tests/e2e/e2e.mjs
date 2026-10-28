@@ -1586,7 +1586,8 @@ try {
     // a bulk delete that sweeps the carrier up warns and can put it back.
     const cr = await page.evaluate(async () => {
         const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), R = 'riverton:drowned_rat/common_room';
-        const n0 = c.chat.length;
+        const n0 = c.chat.length, w = c.extensionSettings.worldscrawl.world || '';
+        const descNow = async () => (await (await fetch(`/api/plugins/worldscrawl/rooms${w ? `?world=${encodeURIComponent(w)}` : ''}`, { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify({ addresses: [R], changes: m.chatChanges(), now: m.chatElapsed() }) })).json()).rooms?.[0]?.description; // the chat's patched map
         const a = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier one.' }], '', { separate: true });
         const b = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier two.' }]);
         const d3 = await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: 'riverton:drowned_rat/stable', text: 'Carrier three.' }]);
@@ -1602,7 +1603,7 @@ try {
         await m.toggleChange(mi, ids[2]); // back on (toggle posts a notice, which ends the run)
         const u = await m.removeChange(mi, ids[1], { choice: 'one' });
         out.undoOne = u.ok && c.chat[mi].extra.worldscrawl_patches.map(p => p.id).join() === [ids[0], ids[2]].join() && /\(2 changes\)/.test(c.chat[mi].mes);
-        out.desc = (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(R))).json()).description;
+        out.desc = await descNow();
         // A new edit after the toggle notice starts a new carrier.
         const n1 = c.chat.length; await globalThis.worldscrawlLiveEdit([{ op: 'set_description', loc: R, text: 'Carrier four.' }]); out.newRun = c.chat.length === n1 + 1;
         // Bulk delete from the first carrier: the warning remembers both carriers; restore puts them back with the same ids.
@@ -1612,7 +1613,7 @@ try {
         const n2 = c.chat.length; await globalThis.worldscrawlRestoreCarriers();
         const back = c.chat.slice(n2).flatMap(x => (x.extra?.worldscrawl_patches ?? []).map(p => p.id));
         out.restored = back.includes(ids[0]) && back.includes(ids[2]) && !back.includes(ids[1]);
-        out.descBack = (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(R))).json()).description;
+        out.descBack = await descNow();
         await c.executeSlashCommandsWithOptions(`/cut ${n2}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 1000));
         out.cutStart = n0; return out;
     });

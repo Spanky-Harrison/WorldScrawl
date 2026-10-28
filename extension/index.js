@@ -347,6 +347,7 @@ async function currentLocation() {
     if (stored) {
         const loc = await fetchLocationCached(stored);
         if (loc) return loc;
+        if (patchSig()) return missingRoomFallback(stored); // not in this chat's patched map (moved, merged, removed): resolve it, even when the base world still has it
         const r = await api(`/location/${encodeURIComponent(stored)}`).catch(() => null);
         if (r?.status === 404 && r.body?.detail?.error === 'world_not_found') { syncWorld(); const again = await fetchLocationCached(stored); if (again) return again; }
         else if (r?.status === 404) return missingRoomFallback(stored);
