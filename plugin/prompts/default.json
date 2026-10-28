@@ -901,11 +901,20 @@
     {
       "id": "narration.wait_hint",
       "title": "Narration: how to pass time",
-      "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag long waits. Tells the narrator to tag long waits.",
+      "description": "Alongside (map tools off, flag tags on): tells the narrator when and how to tag time passing in the scene.",
       "group": "narration",
       "locked": "The exact [ws_wait: …] tag format the game looks for.",
-      "text": "If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.",
+      "text": "End your reply with [ws_wait: 2h] (or [ws_wait: 45m], [ws_wait: until dusk], [ws_wait: sleep until morning]) whenever a meaningful amount of time (about 15 minutes or more) passes in the scene without travelling, not just long waits or sleep: a long meal or conversation, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or a time skip. Give your best guess at how long. Do not use it for moment-to-moment action or for travel (moves already count their own time). The player can adjust or discard it, so when in doubt, propose it. Never write it otherwise.",
       "placeholders": []
+    },
+    {
+      "id": "narration.wait_tool",
+      "title": "Narration: the ws_wait tool description (tools on)",
+      "description": "Alongside (map tools on): the description of the ws_wait tool, telling the narrator when to pass time.",
+      "group": "narration",
+      "locked": "Names the ws_wait tool's duration and until arguments, which the game reads.",
+      "placeholders": [],
+      "text": "Call this whenever a meaningful amount of time (about 15 minutes or more) passes in the scene without travelling, not just long waits or sleep: a long meal or conversation, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or a time skip. Give your best guess at how long. Do not use it for moment-to-moment action or for travel (moves already count their own time). The player can adjust or discard it, so when in doubt, propose it. Give a duration (\"45m\", \"2h\", \"1h30m\", \"2d\") or a time to wait until (\"morning\", \"dusk\", \"14:00\"). The game clock moves on once the player keeps it; the result says the new time."
     },
     {
       "id": "expand.system",
