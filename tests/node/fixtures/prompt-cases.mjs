@@ -54,6 +54,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'change.patch.bare': patches.patchPrompt({ outline: [] }, {}),
     'discover.system': ext.discoverSys(),
     'discover.question': ext.discoverPrompt(k, { exits: 'south -> r:inn/common', near: 'none', story: 'They open the green door.', start: 2, id: 5, note: 'green door', err: '' }),
+    'discover.question.existing': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: 'green door', err: '', existing: ext.roomOptions([{ name: 'Village Square', display_name: 'Village Square (Streets)', summary: 'Busy.', address: 'r:s/square' }]) }),
     'discover.question.retry': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: '', err: 'no name' }),
     'narration.flag_hint': ext.flagHint(),
     'narration.wait_hint': ext.waitHint(),

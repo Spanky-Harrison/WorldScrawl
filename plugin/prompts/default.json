@@ -70,6 +70,7 @@
     "edit_types": "the list of map edit types the model may use (made by the game)",
     "end": "where the story text to look at ends",
     "error": "what was wrong with the last answer",
+    "existing": "nearby places not yet connected to this room, offered as an alternative to a new room (empty when there are none)",
     "exits": "the list of exits from the current room, one per line, or \"- (none)\" when there are none",
     "field": "which text to write: the description or the notes (the Expand with AI pieces)",
     "from": "the room the party left",
@@ -98,6 +99,7 @@
     "start": "where the story text to look at starts",
     "steps": "what happened on the way, step by step, joined with \"Then:\"",
     "story": "the part of the story that changed the map",
+    "style": "The Writing style entry for this process (how names and descriptions are written), filled in by the game.",
     "text": "your draft text",
     "to": "the room the party arrived in",
     "used": "The exit names already used at this place, comma-separated, or \"none\".",
@@ -105,8 +107,7 @@
     "via": "the rooms passed through on the way, comma separated",
     "what": "what change was flagged, in the narrator's words",
     "where": "where the party is now, for the narrator",
-    "why": "why the door would not move (e.g. it is locked)",
-    "style": "The Writing style entry for this process (how names and descriptions are written), filled in by the game."
+    "why": "why the door would not move (e.g. it is locked)"
   },
   "prompts": [
     {
@@ -1084,7 +1085,7 @@
       "description": "Step 1 of 1: describe the room behind the door.",
       "group": "discover",
       "locked": "The game reads the reply as a new room in a fixed format; changing this can break new rooms.",
-      "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{door}}{{retry}}Describe the room behind the door that was opened.",
+      "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{existing}}{{door}}{{retry}}Describe the room behind the door that was opened.",
       "placeholders": [
         {
           "name": "region_name"
@@ -1125,6 +1126,10 @@
           "name": "story"
         },
         {
+          "name": "existing",
+          "generated": true
+        },
+        {
           "name": "door",
           "generated": true
         },
@@ -1145,6 +1150,21 @@
       "placeholders": [
         {
           "name": "note"
+        }
+      ]
+    },
+    {
+      "id": "discover.existing",
+      "title": "Discovery: an existing place behind the door",
+      "description": "Piece of the discovery question, added only when places nearby are not yet connected to this room. Lets the door lead to a place already on the map instead of a new room.",
+      "group": "discover",
+      "piece": true,
+      "locked": "The game reads the JSON answer with these exact keys; changing this can break discovery.",
+      "text": "Places nearby that are not connected to this room yet (key: place):\n{{places}}\nIf the door clearly leads to one of them, reply {\"existing\": \"place key\", \"direction\": \"...\", \"return_direction\": \"...\", \"exit_description\": \"...\", \"return_description\": \"...\"} instead of a new name and description.\n\n",
+      "placeholders": [
+        {
+          "name": "places",
+          "generated": true
         }
       ]
     },

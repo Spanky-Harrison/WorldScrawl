@@ -2636,8 +2636,17 @@ async function analyzeFlag(id) {
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
 export const discoverSys = () => P('discover.system');
-export const discoverPrompt = (k, { exits, near, story, start, id, note, err }) => P('discover.question', { region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
+export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
+/** A discovery answer naming an existing place: one door pair (add_exit) to it. null when the answer is a new room. */
+export function existingDiscovery(a, existing, from) {
+    if (a?.existing == null || a.existing === '') return null;
+    const key = matchKey(String(a.existing), existing.map(o => o.key));
+    if (key == null) return { error: `"existing" must be one of the place keys: ${existing.map(o => o.key).join(', ') || '(none): describe a new room'}` };
+    const t = x => (typeof a[x] === 'string' && a[x].trim() ? a[x].trim() : undefined);
+    if (!t('direction')) return { error: '"direction" is needed' };
+    return { op: { op: 'add_exit', loc: from, to: existing.find(o => o.key === key).room.address, direction: t('direction'), return_direction: t('return_direction') ?? 'out', door: true, description: t('exit_description'), return_description: t('return_description') } };
+}
 async function analyzeDiscovery(id) {
     await ensurePrompts();
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
@@ -2652,13 +2661,18 @@ async function analyzeDiscovery(id) {
         const exits = k.exits.map(x => `${x.direction} -> ${x.to}${x.description ? `: ${x.description}` : ''}`).join('\n') || 'none';
         const near = k.neighbors.map(n => `${n.name} (${n.address}): ${clip(n.description, 300)}`).join('\n') || 'none';
         const story = clip(storyText(chat, f.start, id), 4000);
-        const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err });
+        // Places nearby that are not connected here yet: the door may lead to one of them instead of a new room.
+        const linked = new Set([k.location, ...k.neighbors.map(n => n.address), ...k.exits.map(x => x.to)]);
+        const existing = roomOptions((await nearbyRooms({ address: k.location })).filter(r => !linked.has(r.address)));
+        const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err, existing });
         let preview = null, ops = null, err = '';
         for (let tries = 0; tries < 2 && !preview; tries++) {
             const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
+            const ex = existingDiscovery(a, existing, k.location);
+            if (ex?.error) { err = ex.error; continue; }
             // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
-            ops = [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
+            ops = ex ? [ex.op] : [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; } else err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }

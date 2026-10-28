@@ -27,3 +27,14 @@ test('errors (sent back on the retry): not expandable, unknown key, taken exit, 
     assert.match(readDigAnswer({ existing: 'cellar', direction: 'down' }, { loc, opts, canNew: true }).error, /already an exit "down"/);
     assert.match(readDigAnswer('banana', { loc, opts, canNew: true }).error, /not a JSON object/);
 });
+
+// Discovery: the opened door may lead to a place already on the map (one door pair, add_exit) instead of a new room.
+const { existingDiscovery } = await import('../../extension/index.js');
+test('discovery: connect to an existing place, matched leniently; a new-room answer is left alone', () => {
+    const ex = roomOptions(rooms);
+    assert.deepEqual(existingDiscovery({ existing: 'Village Square.', direction: 'green door', exit_description: 'A green door.' }, ex, 'r:t/hall').op,
+        { op: 'add_exit', loc: 'r:t/hall', to: 'r:s/square', direction: 'green door', return_direction: 'out', door: true, description: 'A green door.', return_description: undefined });
+    assert.equal(existingDiscovery({ name: 'Guest Room', description: 'Small.' }, ex, 'r:t/hall'), null);
+    assert.match(existingDiscovery({ existing: 'the moon', direction: 'x' }, ex, 'r:t/hall').error, /place keys: village_square, cellar/);
+    assert.match(existingDiscovery({ existing: 'cellar' }, ex, 'r:t/hall').error, /direction/);
+});
