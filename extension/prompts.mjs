@@ -15,7 +15,9 @@ export const promptText = id => {
 };
 /** Fill {{name}} placeholders in one pass. An unknown name is left as it is. */
 export const fill = (text, vars = {}) => String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(vars, k) && vars[k] != null ? String(vars[k]) : m));
-export const render = (id, vars = {}) => fill(promptText(id), vars);
+/** {{who}} is the old name of {{party}}: saved profiles that still use it keep working. */
+const withAliases = vars => (vars && 'party' in vars && !('who' in vars) ? { ...vars, who: vars.party } : vars);
+export const render = (id, vars = {}) => fill(promptText(id), withAliases(vars));
 /** The placeholder names used in a text. */
 export const placeholdersIn = text => [...new Set([...String(text).matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))];
 /** Fetch the active (default + selected profile) prompts from the plugin. */

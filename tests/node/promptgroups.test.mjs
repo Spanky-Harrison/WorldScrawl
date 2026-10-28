@@ -23,13 +23,13 @@ test('every non-piece prompt says which step it is', () => {
     for (const e of def.prompts.filter(e => !e.piece)) assert.match(e.description, /^(Steps? \d|Alongside)/, e.id);
 });
 test('tiny fragments are pieces', () => {
-    for (const id of ['door.verb_open', 'door.verb_close', 'intent.no_exits', 'narration.travel_cut_short', 'expand.field_description', 'expand.field_notes', 'change.patch_retry', 'discover.retry', 'intent.option.exit'])
+    for (const id of ['narration.travel_cut_short', 'expand.field_description', 'expand.field_notes', 'change.patch_retry', 'discover.retry', 'intent.option.exit'])
         assert.equal(byId[id].piece, true, id);
     for (const id of ['intent.question', 'narration.move', 'change.system', 'expand.question']) assert.ok(!byId[id].piece, id);
 });
 test('format-critical prompts are locked with a one-line reason; creative ones are not', () => {
     for (const id of ['intent.system', 'travel.system', 'dig.system', 'change.system', 'change.scope_system', 'discover.system', 'change.patch_retry', 'discover.retry',
-        'door.verb_open', 'door.verb_close', 'narration.flag_hint', 'narration.wait_hint', 'narration.new_door_tags', 'narration.new_door_tools', 'look.closed_door',
+        'narration.flag_hint', 'narration.wait_hint', 'narration.new_door_tags', 'narration.new_door_tools', 'look.closed_door',
         ...def.prompts.filter(e => e.id.startsWith('intent.option.')).map(e => e.id)]) {
         assert.equal(typeof byId[id].locked, 'string', id); assert.ok(byId[id].locked.length > 5 && !byId[id].locked.includes('\n'), id);
     }
@@ -44,13 +44,30 @@ test('groupPrompts: file group order, pieces split out, unknown groups go to Oth
     const g = groupPrompts(def.prompts, def.groups);
     assert.deepEqual(g.map(x => x.group.id), def.groups.map(x => x.id));
     assert.equal(g.reduce((n, x) => n + x.main.length + x.pieces.length, 0), def.prompts.length);
-    assert.ok(g.find(x => x.group.id === 'door').pieces.some(e => e.id === 'door.verb_open'));
+    assert.ok(g.find(x => x.group.id === 'narration').pieces.some(e => e.id === 'narration.travel_cut_short'));
     assert.ok(!g.find(x => x.group.id === 'door').main.some(e => e.piece));
     const h = groupPrompts([{ id: 'a', group: 'nope' }, byId['dig.stay']], def.groups);
     assert.deepEqual(h.map(x => x.group.id), ['dig', 'other']);
 });
 test('the editor state sends the groups', () => {
     const r = handlePrompts('GET', '/prompts', null, fs.mkdtempSync(path.join(os.tmpdir(), 'wsgroups-')), DEF);
-    assert.deepEqual(r.body.groups, def.groups);
+    assert.deepEqual(r.body.groups, def.groups); assert.deepEqual(r.body.placeholders, def.placeholders);
     assert.ok(r.body.prompts.find(e => e.id === 'intent.system').locked);
+});
+test('engine words are back in code, not prompts', () => {
+    for (const id of ['door.verb_open', 'door.verb_close', 'intent.no_exits']) assert.ok(!byId[id], id);
+});
+test('one placeholder dictionary describes every placeholder; fixed values are listed', () => {
+    const used = new Set(def.prompts.flatMap(e => e.placeholders.map(p => p.name)));
+    assert.deepEqual(Object.keys(def.placeholders).sort(), [...used].sort());
+    for (const [n, d] of Object.entries(def.placeholders)) assert.ok(typeof d === 'string' && d.length > 10, n);
+    assert.match(def.placeholders.verb, /"open" or "close"/);
+    assert.match(def.placeholders.exits, /- \(none\)/);
+    assert.match(def.placeholders.party, /Who moves/);
+    assert.ok(!used.has('who') && !def.prompts.some(e => e.text.includes('{{who}}')));
+});
+test('{{who}} still works as the old name of {{party}} in saved profiles', async () => {
+    const pr = await import('../../plugin/ui/prompts.mjs');
+    pr.setPrompts({ 'x': 'A {{who}} B {{party}}' });
+    assert.equal(pr.render('x', { party: 'Ann and Bob' }), 'A Ann and Bob B Ann and Bob');
 });

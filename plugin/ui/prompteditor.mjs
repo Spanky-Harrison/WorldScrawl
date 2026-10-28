@@ -5,11 +5,13 @@ import { placeholdersIn } from './prompts.mjs';
 /** Placeholders the default text has that this text dropped (the game fills them; leaving one out loses that part). */
 export const missingPlaceholders = (entry, text) => {
     const have = new Set(placeholdersIn(text));
+    if (have.has('who')) have.add('party'); // old name, still filled
     return (entry.placeholders ?? []).filter(p => !p.optional && !have.has(p.name)).map(p => p.name);
 };
 /** Placeholders in the text that the game never fills (shown as a warning). */
 export const unknownPlaceholders = (entry, text) => {
     const known = new Set((entry.placeholders ?? []).map(p => p.name));
+    if (known.has('party')) known.add('who');
     return placeholdersIn(text).filter(n => !known.has(n));
 };
 /** A line diff (longest common subsequence): [{op: ' '|'-'|'+', line}]. */
@@ -62,6 +64,7 @@ export function promptEditor(root, io, ui = {}) {
     const search = h('input', { type: 'search', class: 'pe-search', placeholder: 'Find a prompt…', oninput: () => draw() });
     root.append(h('div', { class: 'pe' }, head, h('div', { class: 'pe-tools' }, search, status), list));
     const readOnly = () => !st || st.selected === st.default_profile;
+    const phDesc = n => st?.placeholders?.[n] ?? 'Filled in by the game';
     const ov = id => st.profiles[st.selected]?.overrides?.[id];
     const savedText = e => ov(e.id)?.text ?? e.text;
     const act = async (path, body, msg) => {
@@ -113,14 +116,16 @@ export function promptEditor(root, io, ui = {}) {
             if (ui.confirm('Default is read-only. Make a new profile to edit the prompts?')) await newProfile();
         });
         ta.addEventListener('input', () => { if (ta.value === savedText(e)) dirty.delete(e.id); else dirty.set(e.id, ta.value); showWarn(); sync(); });
-        const ph = (e.placeholders ?? []).map(p => h('code', { class: `pe-ph${p.generated ? ' generated' : ''}`, title: p.generated ? 'Made by the game (read-only)' : 'Filled in by the game' }, `{{${p.name}}}`));
+        const ph = (e.placeholders ?? []).map(p => h('code', { class: `pe-ph${p.generated ? ' generated' : ''}`, title: `${phDesc(p.name)}${p.generated ? ' (made by the game, read-only)' : ''}` }, `{{${p.name}}}`));
+        const phTable = ph.length ? h('details', { class: 'pe-phtable' }, h('summary', {}, 'What the placeholders mean'),
+            h('table', {}, (e.placeholders ?? []).map(p => h('tr', {}, h('td', {}, h('code', {}, `{{${p.name}}}`)), h('td', {}, phDesc(p.name)))))) : null;
         const badge = o?.default_changed ? h('details', { class: 'pe-changed' }, h('summary', {}, '⚠ Default changed since you edited this'),
             h('pre', { class: 'pe-diff' }, lineDiff(o.base_text ?? '', e.text).map(d => h('span', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : '' }, `${d.op} ${d.line}\n`)))) : null;
         const el = h('article', { class: `pe-card${e.locked ? ' locked' : ''}${locked ? ' readonly' : ''}`, 'data-id': e.id },
             h('div', { class: 'pe-card-head' }, e.locked ? h('span', { class: 'pe-lock', title: locked ? 'Locked' : 'Unlocked (Debug menu)' }, locked ? '🔒' : '🔓') : null, h('b', {}, e.title), o ? h('span', { class: 'pe-overridden', title: 'This profile changes this prompt' }, '● edited') : null, h('code', { class: 'pe-id' }, e.id)),
             e.description ? h('div', { class: 'pe-desc' }, e.description) : null,
             e.locked ? h('div', { class: 'pe-locked' }, locked ? `Locked: ${e.locked} Turn on Debug > Unlock locked prompts to edit it.` : `Unlocked (normally locked): ${e.locked} Edit with care.`) : null, badge,
-            ta, warn, ph.length ? h('div', { class: 'pe-phs' }, 'Placeholders: ', ph) : null,
+            ta, warn, ph.length ? h('div', { class: 'pe-phs' }, 'Placeholders: ', ph) : null, phTable,
             h('div', { class: 'pe-buttons' }, sub, undo, reset));
         sync(); showWarn();
         return el;

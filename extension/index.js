@@ -1035,14 +1035,14 @@ async function nearbyRooms(loc) {
 }
 export const NEW_PLACE = 'somewhere new';
 export function digDestPrompt(loc, said, rooms) {
-    return P('dig.destination', { who: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
+    return P('dig.destination', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
         places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n'), new_number: rooms.length + 1, new_place: NEW_PLACE });
 }
 export function digDirPrompt(loc, said, destLabel, used) {
-    return P('dig.direction', { who: whoMoves(), place: displayName(loc), said, destination: destLabel, compass: COMPASS.join(', '), used: used.join(', ') || 'none' });
+    return P('dig.direction', { party: whoMoves(), place: displayName(loc), said, destination: destLabel, compass: COMPASS.join(', '), used: used.join(', ') || 'none' });
 }
-export const digNamePrompt = (loc, said) => P('dig.name', { who: whoMoves(), place: displayName(loc), said });
-export const digDescPrompt = (loc, said, name) => P('dig.description', { who: whoMoves(), place: displayName(loc), said, name });
+export const digNamePrompt = (loc, said) => P('dig.name', { party: whoMoves(), place: displayName(loc), said });
+export const digDescPrompt = (loc, said, name) => P('dig.description', { party: whoMoves(), place: displayName(loc), said, name });
 /** The 'new opening' intent: ask destination, direction, (new room) name and description; stamp the change on the player's message. */
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1107,12 +1107,12 @@ export const offerWindow = (loc, text) => WINDOW_WORD_RE.test(String(text ?? '')
 /** Options: 1 = around, then the exits, then (maybe) the window, last. */
 export function lookTargetPrompt(loc, said, exits, withWindow = true) {
     const opts = [AROUND, ...exits.map(exitTargetLabel), ...(withWindow ? [NO_EXIT] : [])];
-    return P('look.target', { who: whoMoves(), place: displayName(loc), said, options: opts.map((o, i) => `${i + 1}. ${o}`).join('\n') });
+    return P('look.target', { party: whoMoves(), place: displayName(loc), said, options: opts.map((o, i) => `${i + 1}. ${o}`).join('\n') });
 }
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
 export const closedDoorPrompt = (said, e) => P('look.closed_door', { said, direction: e.direction });
 export function viewPickPrompt(loc, said, rooms) {
-    return P('look.view', { who: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') });
+    return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') });
 }
 const pickNumber = n => a => { const m = String(a).match(/^(\d+)\b/); const i = m ? Number(m[1]) : 0; return i >= 1 && i <= n ? i : null; };
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
@@ -1165,7 +1165,7 @@ async function narrativeLook(msg, loc) {
     console.log(`[WorldScrawl] look: ${JSON.stringify(look).slice(0, 160)}`);
     return { kind: 'look', loc };
 }
-export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { who: whoMoves(), place: displayName(loc), said, verb: P(type === 'open_door' ? 'door.verb_open' : 'door.verb_close'), options: list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') });
+export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: whoMoves(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1183,7 +1183,7 @@ async function narrativeDoor(msg, loc, list, type) {
 export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
 export const travelSys = () => P('travel.system');
-export const travelYesNoPrompt = (loc, said) => P('travel.question', { who: whoMoves(), place: loc.name, said });
+export const travelYesNoPrompt = (loc, said) => P('travel.question', { party: whoMoves(), place: loc.name, said });
 export const intentSys = () => P('intent.system');
 
 /**
@@ -1198,7 +1198,7 @@ export function intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOp
         + (canOpen ? opt('new_opening', OPEN) : '') + (canLook ? opt('look', LOOK) : '') + (canOpenDoor ? opt('open_door', OPEN_DOOR) : '')
         + (canCloseDoor ? opt('close_door', CLOSE_DOOR) : '') + (canNewDoor ? opt('new_door', NEW_DOOR) : '') + opt('stay', STAY)
         + (onlyLook ? '\n' : opt('elsewhere', ELSEWHERE) + opt('unclear', UNCLEAR) + '\n');
-    return P('intent.question', { who: whoMoves(), place: displayName(loc), exits: exitLines.join('\n') || P('intent.no_exits'), said, option_lines: lines, options: options.join(', ') });
+    return P('intent.question', { party: whoMoves(), place: displayName(loc), exits: exitLines.join('\n') || '- (none)', said, option_lines: lines, options: options.join(', ') });
 }
 async function parseIntent(msg) {
     await ensurePrompts();
@@ -1417,7 +1417,7 @@ export function lookText(who, here, look) {
 }
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
 /** The narration line for a door that is not on the map yet: open it (and flag a discovery) only if it fits the room. */
-export const newDoorLine = (who, place, tools) => P('narration.new_door', { who, place, how_to_flag: P(tools ? 'narration.new_door_tools' : 'narration.new_door_tags') });
+export const newDoorLine = (who, place, tools) => P('narration.new_door', { party: who, place, how_to_flag: P(tools ? 'narration.new_door_tools' : 'narration.new_door_tags') });
 export function factsText(loc, move, toolsOn, extra = {}) {
     const who = whoMoves();
     const lines = [
@@ -1434,21 +1434,21 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     const arrivalText = arr ? ` ${who} ${arr.text}.` : '', where = arr?.where ?? move?.to_name, place = displayName(loc);
-    if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
-    else if (move?.path?.length > 2) lines.push(P('narration.travel', { who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
-    else if (move) lines.push(P('narration.move', { who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
+    if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { party: who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
+    else if (move?.path?.length > 2) lines.push(P('narration.travel', { party: who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
+    else if (move) lines.push(P('narration.move', { party: who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
-    else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
+    else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
     else if (extra.newDoor) lines.push(newDoorLine(who, place, toolsOn));
-    else if (extra.door) lines.push(P('narration.door', { who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
-    else if (extra.dig) lines.push(P('narration.dig_here', { who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
-    else if (extra.digFailed) lines.push(P('narration.dig_failed', { who, place }));
-    else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { who, place }));
+    else if (extra.door) lines.push(P('narration.door', { party: who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
+    else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
+    else if (extra.digFailed) lines.push(P('narration.dig_failed', { party: who, place }));
+    else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));
     if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
     if (move?.traversal?.length && move.to === loc.address) lines.push(P('narration.on_the_way', { steps: move.traversal.join(' Then: ') }));
     if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(P('narration.exits_hint'));
-    lines.push(toolsOn ? P('narration.rules_tools') : P('narration.rules', { who }));
+    lines.push(toolsOn ? P('narration.rules_tools') : P('narration.rules', { party: who }));
     return lines.filter(Boolean).join('\n');
 }
 
