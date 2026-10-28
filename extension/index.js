@@ -9,7 +9,7 @@ export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -2069,7 +2069,7 @@ let mapChannel = null;
 /** The state the map window shows: this chat's world, where the party is, what it knows, open doors and changes. */
 export async function mapState() {
     const c = ctx();
-    const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars() };
+    const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars(), showEditMessages: !!settings().showEditMessages };
     if (!isOn() || !base.chatId) return { ...base, on: false };
     syncWorld();
     const stood = [...await stoodInAddresses()];
@@ -2095,6 +2095,15 @@ function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
         if (ev.data?.type === 'hello') broadcastMapState();
+        if (ev.data?.type === 'set_debug' && ev.data.key === 'showEditMessages') { // the map's Debug menu toggle
+            settings().showEditMessages = !!ev.data.value; ctx().saveSettingsDebounced?.(); renderPatchCards(); broadcastMapState();
+        }
+        if (ev.data?.type === 'reveal') { // the map's Debug > Reveal map: the same as /ws-reveal (the map asked to confirm)
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) revealPlaces(String(d.what ?? 'all'))
+                .then(t => { toastr.info(t); ch.postMessage({ type: 'reveal_result', req: d.req, ok: true, text: t }); })
+                .catch(e => { toastr.error(e.message); ch.postMessage({ type: 'reveal_result', req: d.req, ok: false, error: e.message }); });
+        }
         if (ev.data?.type === 'prompts_changed') ensurePrompts(true).catch(e => console.warn('[WorldScrawl]', e.message)); // the Prompt Editor saved
         // The map's Wait button: only the tab showing that chat acts on it (the map never changes state itself).
         if (ev.data?.type === 'patch') { // the map's "Edit live": this tab stamps it on a hidden message and answers
@@ -2870,12 +2879,12 @@ export function renderPatchCards() {
             }
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
-        const carrier = isCarrier(msg);
-        el.classList.toggle('worldscrawl_carrier_mes', carrier);
+        const carrier = isCarrier(msg), showAll = !!settings().showEditMessages; // Debug > Show map edit messages: full message, list open
+        el.classList.toggle('worldscrawl_carrier_mes', carrier && !showAll);
         let box = card;
         if (carrier) {
             const det = document.createElement('details'); det.className = 'worldscrawl_carrier';
-            if (kept.some(p => openForms.has(`${id}|${p.id}`)) || openCarriers.has(msg)) det.open = true;
+            if (showAll || kept.some(p => openForms.has(`${id}|${p.id}`)) || openCarriers.has(msg)) det.open = true;
             det.addEventListener('toggle', () => { if (det.open) openCarriers.add(msg); else openCarriers.delete(msg); });
             const sum = document.createElement('summary'); sum.textContent = `🗺 ${msg.mes}`; det.append(sum);
             card.append(det); box = det;

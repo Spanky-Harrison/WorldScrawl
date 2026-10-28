@@ -3,6 +3,8 @@
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
+import { buildMenu, openToolView } from './menus.mjs';
+import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
 import { pickSearch, pickValid, pathOf } from './picker.mjs';
@@ -149,7 +151,7 @@ async function postJson(url, body) {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
     if (!r.ok) { // a 400 carries {detail: {error, clash?}}: keep it for the wizards' rename prompts
         let detail = null; try { detail = (await r.json()).detail ?? null; } catch {}
-        const e = new Error(typeof detail?.error === 'string' ? detail.error : `map server answered ${r.status}`); e.detail = detail; throw e;
+        const e = new Error(typeof detail === 'string' ? detail : typeof detail?.error === 'string' ? detail.error : `map server answered ${r.status}`); e.detail = detail; throw e;
     }
     return r.json();
 }
@@ -707,6 +709,35 @@ function onState(st) {
 }
 channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result' || ev.data?.type === 'remove_result') pendingToggles.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'expand_result') pendingExpands.get(ev.data.req)?.(ev.data); });
 
+// ---- Menus. TOOLS fill the "Tools" menu (each takes over the full view, with a Close button); DEBUG fills the "Debug" menu.
+// An item is {id, label, open()} or a toggle {id, label, toggle: true, checked(), set(on)}. See README "Adding a tool".
+const getJson = async path => { const r = await fetch(`${API}${path}`); if (!r.ok) throw new Error(`map server answered ${r.status}`); return r.json(); };
+export const TOOLS = [
+    { id: 'prompts', label: 'Prompt Editor', open: () => openToolView('prompts', 'Prompt Editor', body => promptEditor(body, {
+        get: getJson, post: (path, b) => postJson(`${API}${path}`, b), changed: () => channel.postMessage({ type: 'prompts_changed' }),
+    })) },
+];
+const pendingReveals = new Map();
+export const DEBUG = [
+    { id: 'show-edit-messages', label: 'Show map edit messages', toggle: true, checked: () => !!state?.showEditMessages,
+        set: on => { if (!state) return setStatus('SillyTavern not connected'); channel.postMessage({ type: 'set_debug', key: 'showEditMessages', value: on }); } },
+    { id: 'reveal-map', label: 'Reveal map', open: async () => {
+        if (!state?.on || !state.chatId) return setStatus('Open a WorldScrawl chat first.');
+        if (!confirm('Reveal the whole map? Every place is marked as visited, so you can travel anywhere (the same as /ws-reveal all). Delete the reveal message in the chat to undo.')) return;
+        const req = `r${Date.now().toString(36)}`;
+        const r = await new Promise(res => { pendingReveals.set(req, res); channel.postMessage({ type: 'reveal', req, chatId: state.chatId, what: 'all' }); setTimeout(() => res({ ok: false, error: 'SillyTavern did not answer' }), 15000); });
+        pendingReveals.delete(req);
+        setStatus(r.ok ? r.text : r.error);
+    } },
+];
+function buildMenus() {
+    const bar = document.getElementById('topbar');
+    bar.querySelector('.brand').after(buildMenu('tools', 'Tools', TOOLS));
+    bar.append(buildMenu('debug', 'Debug', DEBUG)); // far right, after the status text
+}
+channel.addEventListener('message', ev => { if (ev.data?.type === 'reveal_result') pendingReveals.get(ev.data.req)?.(ev.data); });
+
+buildMenus();
 buildTopBar();
 setEditor(editor);
 toggleWindow(WINDOWS[0], true);
