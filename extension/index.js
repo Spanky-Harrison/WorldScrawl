@@ -2053,6 +2053,12 @@ function openMapChannel() {
                 .then(r => ch.postMessage({ type: 'toggle_result', req: d.req, ...r }))
                 .catch(e => ch.postMessage({ type: 'toggle_result', req: d.req, ok: false, error: e.message }));
         }
+        if (ev.data?.type === 'remove_change') { // the inspector's Undo of one change
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) removeChange(Number(d.msg), String(d.id ?? ''), { choice: d.choice })
+                .then(r => ch.postMessage({ type: 'remove_result', req: d.req, ...r }))
+                .catch(e => ch.postMessage({ type: 'remove_result', req: d.req, ok: false, error: e.message }));
+        }
         if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
             const c = ctx(), d = ev.data;
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: EXPAND_SYS, responseLength: 300 })
@@ -2309,15 +2315,92 @@ export async function liveEdit(ops, note = '') {
     const fl = await loadFormLib();
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: note || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: chatElapsed(chat),
         ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: 0, source: 'live' };
-    const text = fl ? fl.editLine(r.preview.summary) : `Map edit: ${(r.preview.summary ?? []).join('; ')}`;
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'map_edit', [PATCH_KEY]: [p] } };
-    chat.push(msg); c.addOneMessage(msg); await c.saveChat?.();
+    // Consecutive editor edits share one carrier message (each patch keeps its id); any other message in between starts a new one.
+    const last = chat[chat.length - 1];
+    if (isCarrier(last)) {
+        last.extra[PATCH_KEY].push(p);
+        last.mes = carrierLine(fl, last.extra[PATCH_KEY]);
+        syncSwipeExtra(last);
+        c.updateMessageBlock?.(chat.length - 1, last);
+        await c.saveChat?.();
+    } else {
+        const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: carrierLine(fl, [p]), extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'map_edit', [PATCH_KEY]: [p] } };
+        chat.push(msg); c.addOneMessage(msg); await c.saveChat?.();
+    }
+    snapCarriers();
     exitsCache.clear();
     await applyFacts();
     renderAllExits();
     return { ok: true, summary: r.preview.summary, msg: chat.length - 1 };
 }
 globalThis.worldscrawlLiveEdit = liveEdit;
+
+// ---- Map-edit carriers: one compact message holds a run of editor edits.
+export const isCarrier = m => m?.extra?.worldscrawl_notice_kind === 'map_edit' && Array.isArray(m.extra?.[PATCH_KEY]) && m.extra[PATCH_KEY].length > 0;
+const carrierLine = (fl, ps) => fl?.carrierText ? fl.carrierText(ps) : ps.length === 1 ? `Map edit: ${(ps[0].summary ?? []).join('; ')}` : `Map update (${ps.length} changes)`;
+/** Undo one change (from a card or the Changes tab): it leaves its message, which goes once it holds none. Like Turn off,
+ *  it asks first when later changes need it ({ok:false, confirm}); choice 'all' also turns those off, 'one' just removes it. */
+export async function removeChange(mi, pid, { choice } = {}) {
+    const c = ctx(), chat = c.chat ?? [], m = chat[mi], list = m?.extra?.[PATCH_KEY];
+    const k = Array.isArray(list) ? list.findIndex(x => x?.id === pid) : -1;
+    if (k < 0) return { ok: false, error: 'That change is no longer on its message.' };
+    if (choice === 'cancel') return { ok: false, cancelled: true };
+    if (list[k].off !== true && choice !== 'one') {
+        const deps = await changeDependents(mi, pid);
+        if (!choice && (deps.hard.length || deps.overlaps.length)) return { ok: false, confirm: deps };
+        if (choice === 'all') for (const d of [...deps.hard, ...deps.overlaps]) { const q = d.msg != null && patchesOn(chat[d.msg]).find(x => x.id === d.id); if (q) { q.off = true; syncSwipeExtra(chat[d.msg]); } }
+    }
+    list.splice(k, 1);
+    if (!list.length && m.extra?.worldscrawl_notice_kind === 'map_edit' && typeof c.deleteMessage === 'function') {
+        ownDelete = true;
+        try { await c.deleteMessage(mi); } finally { ownDelete = false; }
+    } else {
+        if (!list.length) delete m.extra[PATCH_KEY];
+        else if (m.extra?.worldscrawl_notice_kind === 'map_edit') { m.mes = carrierLine(await loadFormLib(), list); c.updateMessageBlock?.(mi, m); }
+        syncSwipeExtra(m);
+        await c.saveChat?.();
+    }
+    snapCarriers();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+    renderPatchCards();
+    broadcastMapState();
+    return { ok: true };
+}
+async function removeFromCard(mi, pid) {
+    let r = await removeChange(mi, pid);
+    if (r.confirm) r = await removeChange(mi, pid, { choice: await confirmOff(mi, r.confirm) });
+    if (!r.ok && r.error) toastr.error(`WorldScrawl: ${r.error}`);
+}
+// Bulk deletes (/del N, /cut, delete mode) can sweep carriers up with them: ST has no event before a delete, so the
+// carriers are remembered and compared after MESSAGE_DELETED; a toast offers to put the lost ones back at the end.
+let carrierSnap = [], ownDelete = false;
+export function snapCarriers() { carrierSnap = (ctx().chat ?? []).filter(isCarrier); }
+export let lastLostCarriers = [];
+async function onMessagesDeleted() {
+    const now = new Set(ctx().chat ?? []), lost = carrierSnap.filter(m => !now.has(m));
+    snapCarriers();
+    if (!lost.length || ownDelete) return;
+    lastLostCarriers = lost;
+    const n = lost.reduce((a, m) => a + (m.extra?.[PATCH_KEY]?.length ?? 0), 0);
+    try { toastr.warning(`${n} map edit${n === 1 ? ' was' : 's were'} deleted along with those messages. Click to undo.`, 'WorldScrawl: Undo?', { timeOut: 20000, extendedTimeOut: 10000, closeButton: true, onclick: () => restoreCarriers(lost) }); } catch {}
+}
+/** Put deleted carriers back (same stamps, same patch ids) at the end of the chat. */
+export async function restoreCarriers(lost = lastLostCarriers) {
+    const c = ctx(), chat = c.chat ?? [];
+    for (const m of lost) { const copy = structuredClone(m); copy.send_date = Date.now(); chat.push(copy); c.addOneMessage?.(copy); }
+    await c.saveChat?.();
+    lastLostCarriers = [];
+    snapCarriers();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+    renderPatchCards();
+    return lost.length;
+}
+globalThis.worldscrawlRestoreCarriers = restoreCarriers;
+globalThis.worldscrawlLostCarriers = () => lastLostCarriers.length;
 async function loadPatchLib() { try { patchLib ??= await import(`${baseUrl()}/ui/patches.mjs`); } catch (e) { console.warn('[WorldScrawl] patches lib unavailable:', e.message); } return patchLib; }
 
 /** Where the story range for a flag on message `end` starts: after the previous flag, or at the last move into or out of `loc`; at most ~10 messages back. */
@@ -2733,27 +2816,38 @@ export function renderPatchCards() {
                     cardButton(form ? 'Keep edited' : 'Keep', () => keepFlag(id)), cardButton('Discard', () => { openForms.delete(`${id}|flag`); discardFlag(id); }));
             }
         }
+        // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
+        const carrier = isCarrier(msg);
+        el.classList.toggle('worldscrawl_carrier_mes', carrier);
+        let box = card;
+        if (carrier) {
+            const det = document.createElement('details'); det.className = 'worldscrawl_carrier';
+            if (kept.some(p => openForms.has(`${id}|${p.id}`)) || openCarriers.has(msg)) det.open = true;
+            det.addEventListener('toggle', () => { if (det.open) openCarriers.add(msg); else openCarriers.delete(msg); });
+            const sum = document.createElement('summary'); sum.textContent = `🗺 ${msg.mes}`; det.append(sum);
+            card.append(det); box = det;
+        }
         for (const p of kept) {
             const what = (p.summary ?? []).join('; ') || p.note;
             if (p.off === true) {
                 const d = line(`🗺 Map change turned off: ${what}`);
                 d.className = 'worldscrawl_change_off'; d.style.opacity = '0.6';
                 d.append(' ', cardButton('Turn on', () => toggleFromCard(id, p.id), 'Put this change back on the map'));
-                card.append(d);
+                box.append(d);
                 continue;
             }
             const d = line(`🗺 Map changed here: ${what}`);
             const key = `${id}|${p.id}`, form = openForms.get(key);
             d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
                 cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)'),
-                cardButton('Undo', () => { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); }, 'Remove this change (deleting the message does the same)'));
-            card.append(d);
+                cardButton('Undo', () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }, 'Remove this change (deleting the message does the same)'));
+            box.append(d);
             const bad = failedFor(id, p.id);
-            if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; card.append(w); }
+            if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; box.append(w); }
             if (form) {
                 const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
                 form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
-                card.append(form.el, diffBox, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
+                box.append(form.el, diffBox, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
                 form.onLive(form.getOps());
             }
         }
@@ -2762,6 +2856,17 @@ export function renderPatchCards() {
     }
 }
 
+const openCarriers = new WeakSet();
+(function carrierCss() {
+    if (typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
+    const st = document.createElement('style'); st.id = 'worldscrawl_carrier_css';
+    st.textContent = `#chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;font-size:0.82em;}
+#chat .mes.worldscrawl_carrier_mes .mes_text,#chat .mes.worldscrawl_carrier_mes .avatar,#chat .mes.worldscrawl_carrier_mes .mesIDDisplay,#chat .mes.worldscrawl_carrier_mes .mes_timer,#chat .mes.worldscrawl_carrier_mes .tokenCounterDisplay{display:none;}
+#chat .mes.worldscrawl_carrier_mes .worldscrawl_patchcard{margin-top:0!important;padding:2px 6px!important;font-size:1em!important;}
+.worldscrawl_carrier>summary{cursor:pointer;opacity:0.85;}
+.worldscrawl_carrier>div{margin:2px 0 2px 1em;}`;
+    (document.head ?? document.documentElement).append(st);
+})();
 function addSettingsPanel() {
     const html = `
 <div class="worldscrawl_settings">
@@ -2855,7 +2960,8 @@ function addSettingsPanel() {
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { onReplyForFlags(Number(id)).catch(e => console.error('[WorldScrawl] flag', e)); });
-    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; await applyChatState(); });
+    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; snapCarriers(); await applyChatState(); });
+    if (eventTypes.MESSAGE_DELETED) eventSource.on(eventTypes.MESSAGE_DELETED, () => { onMessagesDeleted().catch(e => console.error('[WorldScrawl] delete check', e)); });
     eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0 && isOn()) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));
     eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));

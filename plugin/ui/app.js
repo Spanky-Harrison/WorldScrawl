@@ -100,6 +100,20 @@ function sendLiveEdit(ops) {
 }
 /** Turn off / Turn on from the inspector's Changes tab: the SillyTavern tab runs it (same flow as its cards) and answers. */
 const pendingToggles = new Map();
+function sendRemove(msg, id, choice) {
+    const req = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    return new Promise(resolve => {
+        const t = setTimeout(() => { pendingToggles.delete(req); resolve({ ok: false, error: 'No answer from SillyTavern. Is the chat open in a tab?' }); }, 15000);
+        pendingToggles.set(req, r => { clearTimeout(t); pendingToggles.delete(req); resolve(r); });
+        channel.postMessage({ type: 'remove_change', chatId: curState?.chatId, req, msg, id, ...(choice ? { choice } : {}) });
+    });
+}
+async function removeFromInspector(c) {
+    let r = await sendRemove(c.msg, c.id);
+    if (r.confirm) r = await sendRemove(c.msg, c.id, await confirmOff(c.msg, r.confirm));
+    if (!r.ok && r.error) setStatus(r.error);
+    return r;
+}
 function sendToggle(msg, id, choice) {
     const req = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     return new Promise(resolve => {
@@ -247,7 +261,8 @@ async function renderInspector(side, target, ctx) {
             const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}${c.off ? ' (turned off)' : ''}`);
             if (Object.keys(c.relocate ?? {}).length) li.append(...renderMoves(document, moveGroups({ ops: c.ops ?? [], relocate: c.relocate, inherit: c.inherit ?? {}, names: c.names ?? {} }).groups));
             if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
-            if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'));
+            if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'),
+                ' ', $('button', { class: 'crumb removechange', title: 'Remove this change (it leaves its message)', onclick: () => removeFromInspector(c) }, 'Undo'));
             return li;
         }))]
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
@@ -579,7 +594,7 @@ function onState(st) {
     setStatus(st.on ? `${st.worldName ?? st.world ?? ''}${st.chatName ? ` · ${st.chatName}` : ''}${st.clock ? ` · ${st.clock}` : ''}${st.last_wait?.recent ? ` (${st.last_wait.label})` : ''}${st.weather ? ` · ${st.weather}` : ''}` : 'No WorldScrawl chat');
     for (const fn of listeners) fn(st);
 }
-channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result') pendingToggles.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'expand_result') pendingExpands.get(ev.data.req)?.(ev.data); });
+channel.addEventListener('message', ev => { if (ev.data?.type === 'state') onState(ev.data); if (ev.data?.type === 'patch_result') pendingEdits.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'toggle_result' || ev.data?.type === 'remove_result') pendingToggles.get(ev.data.req)?.(ev.data); if (ev.data?.type === 'expand_result') pendingExpands.get(ev.data.req)?.(ev.data); });
 
 buildTopBar();
 setEditor(editor);
