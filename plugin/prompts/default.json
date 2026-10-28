@@ -6,7 +6,7 @@
       "id": "style",
       "title": "Writing style",
       "open": true,
-      "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through names and describes the new room. Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
+      "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through and New room behind a door say how a new room is named and described, and Map changes says how changed places are described. Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
     },
     {
       "id": "pick",
@@ -21,7 +21,7 @@
     {
       "id": "dig",
       "title": "Breaking through",
-      "flow": "Runs when Player intent decides the player is breaking a new opening (a hole in a wall, floor or window). It asks a chain of small questions, one at a time, all with the same system prompt. Each answer is checked by the game and that one question is asked again once if the answer doesn't fit. Step 1: where does it lead (a nearby place or somewhere new). Step 2: what the opening is called from this side. Steps 3 and 4 (only for somewhere new): a name and a one-sentence description for the new room. If any step fails, nothing is changed and the narrator is told nothing gave way. Otherwise the game makes the opening, saves it on the player's message, then Step 5 asks whether the player stays on this side; anything but a clear 'yes' moves the party through. The result is handed to 'Narration'."
+      "flow": "Runs when Player intent decides the player is breaking a new opening (a hole in a wall, floor or window). Step 1: one JSON question. The game lists the nearby places (up to 3 steps away) as short keys, plus a new place where new rooms are allowed (\"expandable\"). The model answers with the place (an existing key, or a new name and description), the opening's name on both sides, and whether the party stays or goes through. The game checks the answer and asks once more, with the error, if it doesn't fit. An existing place just gets the linked pair of exits; a new place is made with the same \"create place\" edit the editor and New room behind a door use. If it still fails, nothing is changed and the narrator is told nothing gave way. Otherwise the change is saved on the player's message and, unless the answer was \"stay\", the party moves through. The result is handed to 'Narration'."
     },
     {
       "id": "look",
@@ -61,11 +61,9 @@
     "area_notes": "the notes of the area",
     "areas": "the area notes that apply, for context",
     "arrival": "what the party sees on arrival (the new room's description)",
-    "compass": "the compass directions to choose from, e.g. \"north, south, east, west, up, down, …\"",
     "context": "what is already around the place (its region, area and neighbours), or empty",
     "cut_short": "empty, or \" (the trip was cut short there)\" when the trip stopped early (the Narration piece)",
     "description": "the description of the room the prompt is about",
-    "destination": "where the new opening leads, as already worked out in the step before",
     "direction": "the exit or direction, e.g. \"north\", \"up\" or \"through the trapdoor\"",
     "door": "the door being used, e.g. \"the north door\"",
     "draft": "your draft text for the field, or empty (the Expand with AI piece)",
@@ -82,8 +80,7 @@
     "name": "the name of the place (new or being changed)",
     "near": "the places near the new room",
     "neighbors": "the places one step beyond the change (from the Map changes piece), or empty",
-    "new_number": "the number of the \"somewhere new\" option in the list",
-    "new_place": "the answer word that means \"somewhere new\"",
+    "new_place": "The new-place option, only where new rooms are allowed (empty otherwise).",
     "note": "the narrator's note naming the door",
     "option": "the short answer word for this choice, e.g. \"look\" or \"stay\"",
     "option_lines": "the list of possible answers, one per line, each with what it means (built from the Player intent pieces)",
@@ -103,12 +100,13 @@
     "story": "the part of the story that changed the map",
     "text": "your draft text",
     "to": "the room the party arrived in",
-    "used": "directions this room already has exits in, or \"none\"",
+    "used": "The exit names already used at this place, comma-separated, or \"none\".",
     "verb": "the door action: \"open\" or \"close\" in the door question; \"opens\" or \"closes\" in the narration line",
     "via": "the rooms passed through on the way, comma separated",
     "what": "what change was flagged, in the narrator's words",
     "where": "where the party is now, for the narrator",
-    "why": "why the door would not move (e.g. it is locked)"
+    "why": "why the door would not move (e.g. it is locked)",
+    "style": "The Writing style entry for this process (how names and descriptions are written), filled in by the game."
   },
   "prompts": [
     {
@@ -122,20 +120,19 @@
     },
     {
       "id": "dig.system",
-      "title": "Breaking through: system prompt",
-      "description": "Steps 1 to 5: the system prompt shared by every breaking-through question. The system prompt for the small questions asked when the player breaks a new opening.",
+      "title": "Breaking through: system prompt (JSON answer)",
+      "description": "Step 1 of 1: the system prompt for the one breaking-through call. It sets the JSON answer: an existing place or a new one, the exit names on both sides, and whether the party goes through.",
       "group": "dig",
-      "locked": "The game checks each short answer's exact format (a number, a name, one sentence).",
-      "text": "You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.",
+      "locked": "The game reads the JSON answer with these exact keys; changing this can break breaking through.",
+      "text": "You help run a text adventure game. The player is breaking a new opening (a hole in a wall, floor, ceiling or window). Reply with JSON only:\n{\"existing\": \"place key\", \"direction\": \"exit name from this side\", \"return_direction\": \"exit name from the other side\", \"then\": \"stay\" or \"go_through\"}\nWhen a new place is allowed, you may reply {\"new\": {\"name\": \"...\", \"description\": \"...\"}} instead of \"existing\".\ndirection: one of north, south, east, west, up, down, or a short new word (1-2 words) such as hole, crack, window, breach; never one already used here. return_direction: the way back from the other side (the opposite compass word, or a word like hole); never one the other place already uses. then: \"stay\" only if the player clearly stays on this side (only making the opening, looking or reaching through); otherwise \"go_through\".",
       "placeholders": []
     },
     {
-      "id": "dig.destination",
-      "title": "Breaking through: where does it lead",
-      "description": "Step 1 of 5: where the opening leads. Asks which nearby place a newly broken opening leads to.",
+      "id": "dig.question",
+      "title": "Breaking through: where it leads and how",
+      "description": "Step 1 of 1: the one breaking-through question. The game lists nearby places as keys (and offers a new place only where new rooms are allowed); the model answers in JSON.",
       "group": "dig",
-      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
-      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. Places nearby:\n{{places}}\n{{new_number}}. {{new_place}}: a new space nobody has seen yet\n\nWhere does this opening most likely lead? Reply with just the number.",
+      "locked": "The game reads the JSON answer with these exact keys; changing this can break breaking through.",
       "placeholders": [
         {
           "name": "party"
@@ -155,98 +152,48 @@
           "generated": true
         },
         {
-          "name": "new_number",
-          "generated": true
-        },
-        {
           "name": "new_place",
-          "generated": true
-        }
-      ]
-    },
-    {
-      "id": "dig.direction",
-      "title": "Breaking through: exit name",
-      "description": "Step 2 of 5: what the opening is called from this side. Asks what the new opening is called from this side.",
-      "group": "dig",
-      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe player has made a new opening from here to {{destination}}.\nWhat is the opening called from this side? Use one of: {{compass}}, or a short new word (1-2 words) such as hole, crack, window, breach.\nAlready used here (do not use): {{used}}.\nReply with just the word.",
-      "placeholders": [
-        {
-          "name": "party"
-        },
-        {
-          "name": "place"
-        },
-        {
-          "name": "said"
-        },
-        {
-          "name": "destination"
-        },
-        {
-          "name": "compass",
           "generated": true
         },
         {
           "name": "used",
           "generated": true
+        },
+        {
+          "name": "retry",
+          "generated": true
         }
-      ]
+      ],
+      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. It can lead to one of these places nearby (key: place):\n{{places}}\n{{new_place}}Exits already used here: {{used}}.\n{{retry}}Reply with JSON only."
     },
     {
-      "id": "dig.name",
-      "title": "Breaking through: new room name",
-      "description": "Used by Breaking through. Step 3 of 5 (somewhere new only): a name for the new room. Asks for a name for the new room behind the opening.",
-      "group": "style",
-      "process": "dig",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.",
-      "placeholders": [
-        {
-          "name": "party"
-        },
-        {
-          "name": "place"
-        },
-        {
-          "name": "said"
-        }
-      ]
-    },
-    {
-      "id": "dig.description",
-      "title": "Breaking through: new room description",
-      "description": "Used by Breaking through. Step 4 of 5 (somewhere new only): a one-sentence description of the new room. Asks for a one-sentence description of the new room.",
-      "group": "style",
-      "process": "dig",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room called {{name}}. Describe it in one short sentence. Reply with just the sentence.",
-      "placeholders": [
-        {
-          "name": "party"
-        },
-        {
-          "name": "place"
-        },
-        {
-          "name": "said"
-        },
-        {
-          "name": "name"
-        }
-      ]
-    },
-    {
-      "id": "dig.stay",
-      "title": "Breaking through: stay or go through",
-      "description": "Step 5 of 5: does the player stay on this side. Asks whether the player stays on this side of the new opening. Must be answered yes or no.",
+      "id": "dig.new",
+      "title": "Breaking through: the new-place option",
+      "description": "Piece of the breaking-through question, added only where new rooms are allowed. {{style}} is the Writing style entry for the new room.",
       "group": "dig",
-      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
-      "text": "{{said}}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.",
+      "piece": true,
+      "locked": "The game reads the JSON answer with these exact keys; changing this can break breaking through.",
       "placeholders": [
         {
-          "name": "said"
+          "name": "style",
+          "generated": true
         }
-      ]
+      ],
+      "text": "Or it can lead to a new space nobody has seen yet: then reply \"new\" instead of \"existing\". {{style}}"
+    },
+    {
+      "id": "dig.retry",
+      "title": "Breaking through: retry",
+      "description": "Piece of the breaking-through question, only on the second try: passes the game's error back to the model.",
+      "group": "dig",
+      "piece": true,
+      "locked": "Part of the JSON retry loop: it passes the game's error back to the model.",
+      "placeholders": [
+        {
+          "name": "error"
+        }
+      ],
+      "text": "Your last answer did not fit: {{error}}. Fix it."
     },
     {
       "id": "look.target",
@@ -637,6 +584,16 @@
       "piece": true,
       "text": " (the trip was cut short there)",
       "placeholders": []
+    },
+    {
+      "id": "dig.style",
+      "title": "Breaking through: how the new room is named and described",
+      "description": "Used by Breaking through. Step 1 (somewhere new only): how the new room's name and description are written. Added to the breaking-through question.",
+      "group": "style",
+      "process": "dig",
+      "piece": true,
+      "placeholders": [],
+      "text": "Name it in 2-3 words (like Dusty Crawlspace) and describe it in one short sentence."
     },
     {
       "id": "narration.dig_through",

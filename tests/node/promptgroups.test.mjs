@@ -47,7 +47,7 @@ test('groupPrompts: file group order, pieces split out, unknown groups go to Oth
     assert.equal(g.reduce((n, x) => n + x.main.length + x.pieces.length, 0), def.prompts.length);
     assert.ok(g.find(x => x.group.id === 'style').pieces.some(e => e.id === 'narration.travel_cut_short'));
     assert.ok(!g.find(x => x.group.id === 'door').main.some(e => e.piece));
-    const h = groupPrompts([{ id: 'a', group: 'nope' }, byId['dig.stay']], def.groups);
+    const h = groupPrompts([{ id: 'a', group: 'nope' }, byId['dig.question']], def.groups);
     assert.deepEqual(h.map(x => x.group.id), ['dig', 'other']);
 });
 test('the editor state sends the groups', () => {
@@ -75,7 +75,7 @@ test('{{who}} still works as the old name of {{party}} in saved profiles', async
 test('Writing style: open by default, holds the prose prompts, each says which process uses it', () => {
     assert.equal(def.groups[0].open, true);
     assert.ok(def.groups.slice(1).every(g => !g.open));
-    for (const id of ['narration.move', 'narration.travel', 'narration.look_around', 'narration.exits_hint', 'dig.name', 'dig.description', 'expand.system', 'expand.question'])
+    for (const id of ['narration.move', 'narration.travel', 'narration.look_around', 'narration.exits_hint', 'dig.style', 'expand.system', 'expand.question'])
         assert.equal(byId[id].group, 'style', id);
     for (const id of ['narration.header', 'narration.rules', 'narration.arrival_reminder', 'narration.flag_hint', 'narration.wait_hint']) { assert.equal(byId[id].group, 'narration', id); assert.ok(byId[id].locked, id); }
     for (const e of def.prompts.filter(e => e.group === 'style')) assert.match(e.description, /^Used by /, e.id);

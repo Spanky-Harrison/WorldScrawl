@@ -1065,67 +1065,90 @@ async function nearbyRooms(loc) {
     const r = await api('/nearby', { method: 'POST', body: JSON.stringify({ from: loc.address, depth: 3, limit: 12, ...mapCtx() }) });
     return r.ok ? r.body.rooms : [];
 }
-export const NEW_PLACE = 'somewhere new';
-export function digDestPrompt(loc, said, rooms) {
-    return P('dig.destination', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
-        places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n'), new_number: rooms.length + 1, new_place: NEW_PLACE });
+export const NEW_PLACE = 'new';
+/** The places a new opening can lead to: nearby rooms keyed by name (`new` is never a place key). */
+export const digOptions = rooms => roomOptions(rooms, new Set([NEW_PLACE]));
+export function digPrompt(loc, said, opts, used, canNew, err = '') {
+    return P('dig.question', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
+        places: optionLines(opts) || '- (none)', new_place: canNew ? P('dig.new', { style: P('dig.style') }) + '\n' : '', used: used.join(', ') || 'none',
+        retry: err ? P('dig.retry', { error: err }) + '\n' : '' });
 }
-export function digDirPrompt(loc, said, destLabel, used) {
-    return P('dig.direction', { party: whoMoves(), place: displayName(loc), said, destination: destLabel, compass: COMPASS.join(', '), used: used.join(', ') || 'none' });
+const digWord = v => String(v ?? '').trim().toLowerCase().replace(/^the\s+/, '').replace(/\s+/g, ' ');
+const okWord = d => /^[a-z][a-z'-]*( [a-z][a-z'-]*)?$/.test(d) && d.length <= 20;
+/**
+ * Check one breaking-through JSON answer. Returns {ok:true, dest:{room}|{name, description}, direction, back, stay}
+ * or {ok:false, error} (the error goes back to the model on the retry).
+ */
+export function readDigAnswer(a, { loc, opts, canNew, target = null }) {
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return { ok: false, error: 'the answer was not a JSON object' };
+    let dest;
+    if (a.existing != null && a.existing !== '') {
+        const k = matchKey(String(a.existing), opts.map(o => o.key));
+        if (k == null) return { ok: false, error: `"existing" must be one of the place keys: ${opts.map(o => o.key).join(', ') || '(none)'}` };
+        dest = { room: opts.find(o => o.key === k).room };
+    } else if (a.new && typeof a.new === 'object') {
+        if (!canNew) return { ok: false, error: 'no new place can be made here: pick an "existing" place key' };
+        const name = String(a.new.name ?? '').trim().replace(/\s+/g, ' '), description = String(a.new.description ?? '').trim().replace(/\s+/g, ' ');
+        if (!/^[A-Za-z][A-Za-z' -]*$/.test(name) || name.split(' ').length > 5 || name.length > 40 || sameName(name, loc.name)) return { ok: false, error: '"new.name" must be a short new name (2-3 words, letters only)' };
+        if (description.length < 10 || description.length > 300) return { ok: false, error: '"new.description" must be one short sentence' };
+        dest = { name: name.replace(/\b[a-z]/g, c => c.toUpperCase()), description: /[.!?]$/.test(description) ? description : description + '.' };
+    } else return { ok: false, error: canNew ? 'give "existing" (a place key) or "new" ({"name", "description"})' : 'give "existing" (a place key)' };
+    const direction = digWord(a.direction);
+    if (!okWord(direction)) return { ok: false, error: '"direction" must be a short exit name (1-2 words)' };
+    if (hasExit(loc, direction)) return { ok: false, error: `there is already an exit "${direction}" here` };
+    const back = digWord(a.return_direction) || returnName(direction);
+    if (!okWord(back)) return { ok: false, error: '"return_direction" must be a short exit name (1-2 words)' };
+    if (target && hasExit(target, back)) return { ok: false, error: `${roomLabel(target)} already has an exit "${back}"` };
+    const stay = matchKey(String(a.then ?? ''), ['stay', 'go_through']) === 'stay'; // biased toward moving: only a clear "stay" stays
+    return { ok: true, dest, direction, back, stay };
 }
-export const digNamePrompt = (loc, said) => P('dig.name', { party: whoMoves(), place: displayName(loc), said });
-export const digDescPrompt = (loc, said, name) => P('dig.description', { party: whoMoves(), place: displayName(loc), said, name });
-/** The 'new opening' intent: ask destination, direction, (new room) name and description; stamp the change on the player's message. */
+/** Make the opening: an existing place gets the linked exit pair (a 'dig' change); a new one the shared create_place edit (a 'patch' change). */
+async function makeDig(loc, r) {
+    const desc = 'A freshly broken opening.';
+    if (r.dest.room) {
+        const b = await buildDig(loc, r.direction, { address: r.dest.room.address }, { returnDirection: r.back, description: desc, returnDescription: desc });
+        return b.ok ? { ok: true, change: b.change, to: b.to, label: b.label } : { ok: false, error: b.error };
+    }
+    const pl = await loadPatchLib();
+    if (!pl) return { ok: false, error: 'the map editor library is unavailable' };
+    const op = pl.discoverToCreate({ loc: loc.address, name: r.dest.name, description: r.dest.description, direction: r.direction, return_direction: r.back, door: false, exit_description: desc, return_description: desc, travel_time: '10s' });
+    const p = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: [op] }, ...mapCtx() }) });
+    if (!p.ok) return { ok: false, error: p.body?.detail?.error ?? JSON.stringify(p.body?.detail ?? p.status) };
+    const to = (p.body.touched ?? []).find(a => a.includes('/') && a !== loc.address);
+    const change = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: `Broke through ${r.direction} to ${r.dest.name}`, at: chatElapsed(), ops: p.body.ops ?? [op] };
+    return { ok: true, change, to, label: p.body.after?.[to]?.name ?? r.dest.name };
+}
+/**
+ * The 'new opening' intent: ONE JSON question (where it leads: a nearby place or, where rooms may be added, a new one;
+ * the exit names on both sides; stay or go through), retried once with the error. The change is stamped on the player's message.
+ */
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
     const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
-    const ask = (l, p, v) => askValid(l, p, v, digSys());
-    const rooms = await nearbyRooms(loc);
-    const n = await ask('destination', digDestPrompt(loc, said, rooms), a => {
-        const m = a.match(/^(\d+)\b/); const i = m ? Number(m[1]) : (sameName(a, NEW_PLACE) ? rooms.length + 1 : rooms.findIndex(r => sameName(a, r.display_name) || sameName(a, r.name)) + 1);
-        return i >= 1 && i <= rooms.length + 1 ? i : null;
-    });
-    if (n == null) return fail('no destination');
-    const target = n <= rooms.length ? await fetchLocationCached(rooms[n - 1].address) : null;
-    if (n <= rooms.length && !target) return fail('destination unknown');
+    const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
+    const canNew = loc.expandable !== false;
+    if (!opts.length && !canNew) return fail('nowhere to lead');
     const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
-    const direction = await ask('direction', digDirPrompt(loc, said, target ? roomLabel(target) : 'a new space', used), a => {
-        const d = a.toLowerCase().replace(/^the\s+/, '').replace(/\s+/g, ' ');
-        if (!/^[a-z][a-z'-]*( [a-z][a-z'-]*)?$/.test(d) || d.length > 20 || hasExit(loc, d)) return null;
-        if (target && hasExit(target, returnName(d))) return null;
-        return d;
-    });
-    if (direction == null) return fail('no direction');
-    let dest = { address: target?.address };
-    if (!target) {
-        const name = await ask('name', digNamePrompt(loc, said), a => {
-            const t = a.replace(/\s+/g, ' ');
-            const w = t.split(' ').length;
-            return /^[A-Za-z][A-Za-z' -]*$/.test(t) && w <= 4 && t.length <= 40 && !sameName(t, loc.name) ? t.replace(/\b[a-z]/g, c => c.toUpperCase()) : null;
-        });
-        if (name == null) return fail('no name');
-        const description = await ask('description', digDescPrompt(loc, said, name), a => {
-            const t = a.replace(/\s+/g, ' ').trim();
-            return t.length >= 10 && t.length <= 200 ? (/[.!?]$/.test(t) ? t : t + '.') : null;
-        });
-        if (description == null) return fail('no description');
-        dest = { name, description };
+    let err = '', made = null, r = null;
+    for (let i = 0; i < DIG_TRIES && !made; i++) {
+        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, said, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
+        const a = parseJsonAnswer(raw);
+        const pre = readDigAnswer(a, { loc, opts, canNew });
+        const target = pre.ok && pre.dest.room ? await fetchLocationCached(pre.dest.room.address) : null;
+        r = pre.ok && pre.dest.room ? (target ? readDigAnswer(a, { loc, opts, canNew, target }) : { ok: false, error: 'that place is unknown' }) : pre;
+        if (r.ok) { const m = await makeDig(loc, r); if (m.ok) made = m; else r = { ok: false, error: m.error }; }
+        console.log(`[WorldScrawl] dig (try ${i + 1}): ${JSON.stringify(String(raw).slice(0, 120))} -> ${r.ok ? JSON.stringify({ to: made.to, direction: r.direction, back: r.back, stay: r.stay }) : r.error}`);
+        if (!made) err = r.error;
     }
-    const r = await buildDig(loc, direction, dest, { description: 'A freshly broken opening.', returnDescription: 'A freshly broken opening.' });
-    if (!r.ok) return fail(r.error);
-    msg.extra[CHANGE_KEY] = r.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
-    msg.extra.worldscrawl_dig = { direction: r.direction, back: r.back, to: r.to, to_name: r.label };
-    // Biased toward moving: only a clean "yes" (they clearly stay on this side) keeps the party here; anything else goes through.
-    const stayAns = await ctx().generateRaw({ prompt: digStayPrompt(said), systemPrompt: digSys(), responseLength: 48 });
-    const stays = parseYesNo(stayAns) === 'yes';
-    console.log(`[WorldScrawl] dig stay-here: ${JSON.stringify(String(stayAns).slice(0, 80))} -> ${stays ? 'stay' : 'go through'}`);
-    if (stays) return { kind: 'dig', loc };
+    if (!made) return fail(err);
+    msg.extra[CHANGE_KEY] = made.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
+    msg.extra.worldscrawl_dig = { direction: r.direction, back: r.back, to: made.to, to_name: made.label };
+    if (r.stay) return { kind: 'dig', loc };
     const res = await engineMove(r.direction); // the change is already on this message, so /move gets it via chatChanges()
     if (!res.ok) { console.warn(`[WorldScrawl] dig: moving through ${r.direction} failed: ${res.error}`); return { kind: 'dig', loc }; }
     stamp(msg, res.to, res.move); // dig first, then location = destination (both roll back with this message)
     return { kind: 'move', loc: res.to };
 }
-export const digStayPrompt = said => P('dig.stay', { said });
 // ---- Looking and doors (the party never moves).
 export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door', NEW_DOOR = 'try another door';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
@@ -1148,7 +1171,11 @@ export function lookTargetPrompt(loc, said, exits, withWindow = true) {
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
 export const closedDoorPrompt = (said, e) => P('look.closed_door', { said, direction: e.direction });
 /** One option per nearby room, keyed by its name. */
-export const roomOptions = (rooms, taken = new Set()) => rooms.map(r => ({ key: keyFor(r.display_name, taken), label: `${r.display_name}: ${r.summary}`, room: r }));
+/** Short keys from the place name; the area is added only when two nearby places share a name. */
+export const roomOptions = (rooms, taken = new Set()) => {
+    const n = {}; for (const r of rooms) { const k = normKey(r.name ?? r.display_name); n[k] = (n[k] ?? 0) + 1; }
+    return rooms.map(r => ({ key: keyFor(n[normKey(r.name ?? r.display_name)] > 1 ? r.display_name : (r.name ?? r.display_name), taken), label: `${r.display_name}: ${r.summary}`, room: r }));
+};
 export function viewPickPrompt(loc, said, rooms) {
     return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: optionLines(roomOptions(rooms)) });
 }
