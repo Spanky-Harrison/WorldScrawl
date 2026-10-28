@@ -10,8 +10,8 @@
     },
     {
       "id": "pick",
-      "title": "Pick one option (shared)",
-      "flow": "Not a process of its own: the shared base for every question that asks the model to pick one option from a list (which exit to look at, what to do at a closed door, which place a window shows, which door to open or close). Step 1: the game lists the options as short text keys (\"- key: meaning\") and sends this system prompt with the question. The answer is matched to a key ignoring case, punctuation and extra words; if nothing matches, the question is asked once more."
+      "title": "Shared bases",
+      "flow": "Not a process of its own: the shared base for every question that asks the model to pick one option from a list (which exit to look at, what to do at a closed door, which place a window shows, which door to open or close). Step 1: the game lists the options as short text keys (\"- key: meaning\") and sends this system prompt with the question. The answer is matched to a key ignoring case, punctuation and extra words; if nothing matches, the question is asked once more. The shared base lines (pick.base_one, pick.base_json, pick.base_text) are the generic reply rules every system prompt ends with; each call's system prompt adds its own task line and fills the base in as {{reply}}. A saved profile that replaced a whole system prompt (without {{reply}}) keeps working as it was."
     },
     {
       "id": "intent",
@@ -108,26 +108,64 @@
     "via": "the rooms passed through on the way, comma separated",
     "what": "what change was flagged, in the narrator's words",
     "where": "where the party is now, for the narrator",
-    "why": "why the door would not move (e.g. it is locked)"
+    "why": "why the door would not move (e.g. it is locked)",
+    "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game."
   },
   "prompts": [
     {
       "id": "pick.system",
       "title": "Pick one option: system prompt",
-      "description": "Step 1: the system prompt for every pick-one question (Looking and Doors). The options are short text keys.",
+      "description": "Step 1: the system prompt for every pick-one question (Looking and Doors). The options are short text keys. {{reply}} is the shared base line pick.base_one.",
       "group": "pick",
       "locked": "Shared by every pick-one question: the game reads the answer as one option key.",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ],
+      "text": "You help run a text adventure game. {{reply}}"
+    },
+    {
+      "id": "pick.base_one",
+      "title": "Shared base: reply with one option key",
+      "description": "Step 1: the shared base line for every pick-one system prompt (pick.system, intent.system). Each call adds its own task line before it.",
+      "group": "pick",
+      "locked": "The game reads the answer as exactly one option key.",
       "placeholders": [],
-      "text": "You help run a text adventure game. Reply with exactly one option key from the list and nothing else."
+      "text": "Reply with exactly one option key from the list and nothing else."
+    },
+    {
+      "id": "pick.base_json",
+      "title": "Shared base: reply with JSON",
+      "description": "Step 1: the shared base line for every JSON system prompt (breaking through, map changes, new rooms). Each call adds its own task line and keys.",
+      "group": "pick",
+      "locked": "The game parses every JSON answer; the reply must be JSON only.",
+      "placeholders": [],
+      "text": "Reply with JSON only"
+    },
+    {
+      "id": "pick.base_text",
+      "title": "Shared base: reply with only the text",
+      "description": "Step 1: the shared base line for plain-text answers (Expand with AI). The call adds its own task line before it.",
+      "group": "pick",
+      "locked": "The game puts the whole answer into the field, so it must be the text alone.",
+      "placeholders": [],
+      "text": "Reply with only the text: no title, no quotes, no notes."
     },
     {
       "id": "dig.system",
       "title": "Breaking through: system prompt (JSON answer)",
-      "description": "Step 1 of 1: the system prompt for the one breaking-through call. It sets the JSON answer: an existing place or a new one, the exit names on both sides, and whether the party goes through.",
+      "description": "Step 1 of 1: the system prompt for the one breaking-through call. It sets the JSON answer: an existing place or a new one, the exit names on both sides, and whether the party goes through. {{reply}} is the shared base line pick.base_json.",
       "group": "dig",
       "locked": "The game reads the JSON answer with these exact keys; changing this can break breaking through.",
-      "text": "You help run a text adventure game. The player is breaking a new opening (a hole in a wall, floor, ceiling or window). Reply with JSON only:\n{\"existing\": \"place key\", \"direction\": \"exit name from this side\", \"return_direction\": \"exit name from the other side\", \"then\": \"stay\" or \"go_through\"}\nWhen a new place is allowed, you may reply {\"new\": {\"name\": \"...\", \"description\": \"...\"}} instead of \"existing\".\ndirection: one of north, south, east, west, up, down, or a short new word (1-2 words) such as hole, crack, window, breach; never one already used here. return_direction: the way back from the other side (the opposite compass word, or a word like hole); never one the other place already uses. then: \"stay\" only if the player clearly stays on this side (only making the opening, looking or reaching through); otherwise \"go_through\".",
-      "placeholders": []
+      "text": "You help run a text adventure game. The player is breaking a new opening (a hole in a wall, floor, ceiling or window). {{reply}}:\n{\"existing\": \"place key\", \"direction\": \"exit name from this side\", \"return_direction\": \"exit name from the other side\", \"then\": \"stay\" or \"go_through\"}\nWhen a new place is allowed, you may reply {\"new\": {\"name\": \"...\", \"description\": \"...\"}} instead of \"existing\".\ndirection: one of north, south, east, west, up, down, or a short new word (1-2 words) such as hole, crack, window, breach; never one already used here. return_direction: the way back from the other side (the opposite compass word, or a word like hole); never one the other place already uses. then: \"stay\" only if the player clearly stays on this side (only making the opening, looking or reaching through); otherwise \"go_through\".",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "dig.question",
@@ -293,11 +331,16 @@
     {
       "id": "intent.system",
       "title": "Player intent: system prompt",
-      "description": "Step 1 of 2: the system prompt for the intent question. The system prompt for the question that works out what the player is trying to do.",
+      "description": "Step 1 of 2: the system prompt for the intent question. The system prompt for the question that works out what the player is trying to do. {{reply}} is the shared base line pick.base_one.",
       "group": "intent",
       "locked": "The game reads the answer as exactly one option from the list.",
-      "text": "You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.",
-      "placeholders": []
+      "text": "You classify player intent for a text adventure game. {{reply}}",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "intent.question",
@@ -867,11 +910,16 @@
     {
       "id": "expand.system",
       "title": "Expand with AI: system prompt",
-      "description": "Used by Expand with AI. Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields.",
+      "description": "Used by Expand with AI. Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields. {{reply}} is the shared base line pick.base_text.",
       "group": "style",
       "process": "expand",
-      "text": "You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.",
-      "placeholders": []
+      "text": "You write short, vivid setting text for a text adventure map. {{reply}}",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "expand.question",
@@ -959,11 +1007,16 @@
     {
       "id": "change.scope_system",
       "title": "Map changes: which places (system prompt)",
-      "description": "Step 1 of 2: the system prompt for 'which places changed'. First of the two calls that turn a flagged story change into a map change.",
+      "description": "Step 1 of 2: the system prompt for 'which places changed'. First of the two calls that turn a flagged story change into a map change. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON answer.",
-      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.",
-      "placeholders": []
+      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). {{reply}}.",
+      "placeholders": [
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "change.scope",
@@ -1003,10 +1056,10 @@
     {
       "id": "change.system",
       "title": "Map changes: the patch (system prompt)",
-      "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written.",
+      "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON edits in this exact format.",
-      "text": "You turn a lasting change in a story into a map patch. Reply with JSON only: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
+      "text": "You turn a lasting change in a story into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
       "placeholders": [
         {
           "name": "edit_types",
@@ -1014,6 +1067,10 @@
         },
         {
           "name": "style",
+          "generated": true
+        },
+        {
+          "name": "reply",
           "generated": true
         }
       ]
@@ -1124,13 +1181,17 @@
     {
       "id": "discover.system",
       "title": "New room behind a door (system prompt)",
-      "description": "Step 1 of 1: the system prompt for the new room (JSON answer). The game reads the JSON answer, so keep the reply format. {{style}} is the Writing style entry for the new room's name and description.",
+      "description": "Step 1 of 1: the system prompt for the new room (JSON answer). The game reads the JSON answer, so keep the reply format. {{style}} is the Writing style entry for the new room's name and description. {{reply}} is the shared base line pick.base_json.",
       "group": "discover",
       "locked": "The game reads the JSON answer with these exact keys.",
-      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\n{{style}} direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
+      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. {{reply}}:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\n{{style}} direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
       "placeholders": [
         {
           "name": "style",
+          "generated": true
+        },
+        {
+          "name": "reply",
           "generated": true
         }
       ]
