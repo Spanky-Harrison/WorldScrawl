@@ -5,13 +5,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
-import { SnapshotCache } from './snapcache.mjs';
+import { SnapshotCache, stable as stableJson } from './snapcache.mjs';
 import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
 import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
-import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
+import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
+import { opActive, parseLasts } from './ui/patches.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
@@ -177,9 +178,10 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
     }
 
     const changedCache = new Map(); // LRU of built worlds, keyed by the snapshot key (world + version + active changes)
+    const explained = new Map(); // (changes, now) -> failed list with inactive notes
     const snapshots = new SnapshotCache(); // throwaway checkpoints of the replay (plugin/snapcache.mjs)
     /** The world with a chat's changes applied ({w, worldJson, raw, info}); expired patch ops (game time `now`) left out. */
-    function changed_for(wid, changesIn, now = null) {
+    function changed_for(wid, changesIn, now = null, explain = true) {
         const lw = get_world(wid);
         const changes = activeChanges(changesIn, now);
         if (!changes.length) return { w: lw.world, worldJson: lw.raw[0], raw: lw.raw[1], info: { patches: [] } };
@@ -189,10 +191,17 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             e = changedCache.get(s.key);
             if (e === undefined) {
                 e = { w: build_world(s.wj, s.raw), worldJson: s.wj, raw: s.raw, info: s.info, key: s.key, expires: s.expires };
-                if (now !== null && s.info.failed?.length) markExpiredDependencies(wid, changesIn, s.info);
             }
             changedCache.delete(s.key);
             changedCache.set(s.key, e);
+            if (explain && e.info.failed?.length) {
+                // Why each skipped change is inactive depends on the full list and the clock (an off change and an expired
+                // one can leave the same active list), so it's worked out per (changes, now), on a copy.
+                const xk = `${s.key}\u0000${now}\u0000${crypto.createHash('sha1').update(stableJson(changesIn)).digest('base64url')}`;
+                let failed = explained.get(xk);
+                if (!failed) { failed = e.info.failed.map(f => ({ ...f })); explainInactive(wid, changesIn, now, { failed }); explained.set(xk, failed); while (explained.size > 64) explained.delete(explained.keys().next().value); }
+                e = { ...e, info: { ...e.info, failed } };
+            }
         } catch (err) {
             if (err instanceof WorldError) throw new HttpError(400, { error: err.message });
             throw err;
@@ -200,14 +209,53 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         while (changedCache.size > 32) changedCache.delete(changedCache.keys().next().value);
         return e;
     }
-    /** Changes that fail only because a temporary change they built on ran out (they apply with no clock): flag them and
-     *  say so in the "can't apply" note. Rewinding the clock (or deleting the later message) brings them back. */
-    function markExpiredDependencies(wid, changesIn, info) {
-        let ok;
-        try { ok = changed_for(wid, changesIn, null).info; } catch { return; }
-        const failedNoClock = new Set((ok.failed ?? []).map(f => `${f.msg}\u0000${f.id}`));
-        info.failed = info.failed.map(f => (failedNoClock.has(`${f.msg}\u0000${f.id}`) ? f
-            : { ...f, expired_dependency: true, error: `${f.error} (a temporary change it built on ran out)` }));
+    /** The game date `t` seconds in, for notes ("Tue 12 Apr 1247, 08:00 (morning)"). */
+    const gameDate = (wid, t) => { try { const tm = get_world(wid).time(); return shortDate(dateAt(t, tm.start_date, tm.calendar)); } catch { return `${t}s`; } };
+    const msgRef = c => (c?._msg === null || c?._msg === undefined ? 'a patch' : `message #${c._msg}`);
+    /** What a temporary op was about ("Guest Room 1"), by name. */
+    const opSubject = (wid, op) => {
+        if (op?.name && (op.op === 'create_place' || op.op === 'create_subregion' || op.op === 'create_region')) return op.name;
+        const a = op?.loc ?? op?.into ?? op?.area ?? (Array.isArray(op?.locs) ? op.locs[0] : null);
+        if (typeof a === 'string') { try { const w = changed_for(wid, [], null, false).w, l = w.locations.get(a); if (l) return World.place_label(l.name, w.sub_of(l).name); } catch { /* the address then */ } return a; }
+        return 'a temporary change';
+    };
+    /** "Guest Room 1 expired at <date> (lasted 1h, from message #5)" for a change whose ops ran out at `now`, or null. */
+    function expiredText(wid, c, now) {
+        if (now === null || c?.type !== 'patch' || !Array.isArray(c.ops)) return null;
+        const op = c.ops.find(o => !opActive(o, c, now));
+        if (!op) return null;
+        let end; try { end = Number(c.at) + parseLasts(op.lasts); } catch { return null; }
+        return `${opSubject(wid, op)} expired at ${gameDate(wid, end)} (lasted ${op.lasts}, from ${msgRef(c)})`;
+    }
+    /** Changes the replay skipped because something they built on is inactive (expired, turned off, or itself skipped):
+     *  marked `inactive` with a plain note naming the cause, nearest first. Ones that fail on their own keep the raw error. */
+    function explainInactive(wid, changesIn, now, info) {
+        const all = changesIn.map(c => (c?.off === true ? { ...c, off: false } : c));
+        const keyOf = c => `${c?._msg ?? null}\u0000${c?.id ?? null}`;
+        const fails = list => { try { return new Set((changed_for(wid, list, null, false).info.failed ?? []).map(f => `${f.msg ?? null}\u0000${f.id ?? null}`)); } catch { return null; } };
+        const own = fails(all);
+        if (!own) return;
+        const pos = new Map(changesIn.map((c, i) => [keyOf(c), i]));
+        const notes = new Map(); // changesIn index -> note, for the chain
+        const sorted = [...info.failed].sort((x, y) => (pos.get(`${x.msg ?? null}\u0000${x.id ?? null}`) ?? 0) - (pos.get(`${y.msg ?? null}\u0000${y.id ?? null}`) ?? 0));
+        for (const f of sorted) {
+            const k = `${f.msg ?? null}\u0000${f.id ?? null}`, i = pos.get(k);
+            if (i === undefined || own.has(k)) continue;
+            const without = (j, c) => fails(all.map((x, n) => (n === j ? c : x)))?.has(k);
+            let note = null;
+            for (let j = i - 1; j >= 0 && !note; j--) {
+                const c = changesIn[j];
+                if (notes.has(j) && without(j, { ...all[j], off: true })) note = `depends on ${msgRef(c)}`;
+                else if (c?.off === true && without(j, { ...all[j], off: true })) note = `depends on ${msgRef(c)}, which is turned off`;
+                else if (now !== null && c?.type === 'patch' && Array.isArray(c.ops) && c.ops.some(o => !opActive(o, c, now))) {
+                    const ops = c.ops.filter(o => opActive(o, c, now));
+                    if (without(j, ops.length ? { ...all[j], ops } : { ...all[j], off: true })) note = `depends on ${expiredText(wid, c, now).replace(' expired at ', ', which expired at ')}`;
+                }
+            }
+            if (!note) continue;
+            notes.set(i, note);
+            Object.assign(f, { inactive: `Inactive: ${note}`, ...(now !== null && /expired at/.test(note) ? { expired_dependency: true } : {}) });
+        }
     }
     const world_for = (wid, changes, now = null) => changed_for(wid, changes, now).w;
 
@@ -247,7 +295,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             return { ok: true, world: lw.id, map_version: lw.version, regions: w.regions.size, locations: w.locations.size, subregions: w.subregions.size, start: w.start };
         },
         'GET /cache': () => ({ ...snapshots.info(), built: changedCache.size }),
-        'POST /cache/clear': () => { const checkpoints = snapshots.clear(), built = changedCache.size; changedCache.clear(); return { cleared: true, checkpoints, built }; },
+        'POST /cache/clear': () => { const checkpoints = snapshots.clear(), built = changedCache.size; changedCache.clear(); explained.clear(); return { cleared: true, checkpoints, built }; },
         'POST /open-folder': ({ q }) => {
             if (rootDir === null) throw new HttpError(400, 'No worlds folder (single WORLDSCRAWL_WORLD_DIR mode).');
             const base = fs.realpathSync(rootDir), world = q('world');
@@ -439,7 +487,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'POST /inspect/index': ({ q, body }) => { needBody(body); const lw = get_world(q('world')), e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)); return { world: lw.id, map_version: lw.version, ...inspectIndex(e.w) }; },
         'POST /inspect': ({ q, body }) => { // with this chat's changes: patched rooms show which message changed them
             needBody(body);
-            const e = changed_for(q('world'), field(body, 'changes', 'list', []), nowOf(body));
+            const now = nowOf(body), e = changed_for(q('world'), field(body, 'changes', 'list', []), now);
             const target = field(body, 'target', 'str', 'world');
             const lw = get_world(q('world'));
             const r = inspect(e.w, [e.worldJson, e.raw], target, e.info.patches, { w: lw.world, raw: lw.raw });
@@ -453,7 +501,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 if (c?.type !== 'patch' || !(target === 'changes' || r.kind === 'world' || names(c))) continue;
                 const failed = (e.info.failed ?? []).find(f => f.msg === (c._msg ?? null) && f.id === (c.id ?? null));
                 if (c.off === true) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, off: true });
-                else if (failed) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, failed: failed.error });
+                else if (failed) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, failed: failed.error, ...(failed.inactive ? { inactive: failed.inactive } : {}) });
+                else if (Array.isArray(c.ops) && c.ops.length && now !== null && c.ops.every(o => !opActive(o, c, now))) extra.push({ msg: c._msg ?? null, note: c.note ?? '', id: c.id ?? null, summary: c.summary ?? [], touched: [], relocate: {}, inactive: `Inactive: ${expiredText(q('world'), c, now)}` });
             }
             if (extra.length) r.changes = [...(r.changes ?? []), ...extra].sort((a, b) => (a.msg ?? -1) - (b.msg ?? -1));
             return r;

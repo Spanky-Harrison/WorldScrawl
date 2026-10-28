@@ -970,3 +970,13 @@ export function readChangeAnswer(ans) {
     });
     return { ops };
 }
+
+/** A kept change's one-line text for the Changes tab: " · note: summary", with repeats dropped (a note that is just one of
+ *  the summary lines, and the same summary line twice). */
+export function changeText(c) {
+    const norm = t => String(t ?? '').trim().toLowerCase();
+    const sum = [];
+    for (const t of c?.summary ?? []) if (t && !sum.some(x => norm(x) === norm(t))) sum.push(t);
+    const note = c?.note && !sum.some(t => norm(t) === norm(c.note) || norm(t).endsWith(`: ${norm(c.note)}`) || norm(t).includes(norm(c.note))) ? c.note : '';
+    return `${note ? ` · ${note}` : ''}: ${sum.join('; ') || c?.note || ''}${c?.off ? ' (turned off)' : ''}`;
+}

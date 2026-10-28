@@ -1960,6 +1960,9 @@ try {
     const pop = await popup; if (pop) await pop.waitForURL(/worldscrawl\/ui\//, { timeout: 10000 }).catch(() => {});
     check('/ws-map opens the map window', !!pop && /\/api\/plugins\/worldscrawl\/ui\/$/.test(pop.url()), pop?.url());
     await pop?.close();
+    const cacheRes = await (await stFetch('/cache/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const cacheStats = await (await stFetch('/cache')).json();
+    check('map cache: Debug clear empties it', typeof cacheRes.cleared === 'number' && cacheStats.checkpoints === 0 && cacheStats.built === 0, JSON.stringify([cacheRes, cacheStats]));
     check('settings panel has an Open map window button', await page.locator('#worldscrawl_open_map').count() === 1);
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });

@@ -43,7 +43,7 @@ test('expiry: later changes built on an expired room are skipped with a "can\'t 
     const s = status(ch, H);
     assert.deepEqual(s.failed.map(f => f.msg), [4]);
     assert.equal(s.failed[0].expired_dependency, true);
-    assert.match(s.failed[0].error, /temporary change .*ran out/);
+    assert.match(s.failed[0].inactive, /^Inactive: depends on Pop-up Stall, which expired at .+ \(lasted 1h, from message #2\)$/, s.failed[0].inactive);
     // The cellar (permanent, but hung off the stall) drops out cleanly: no room, no dangling exit anywhere.
     assert.deepEqual(rooms(ch, CELLAR2, H).unknown, [CELLAR2]);
     const sq = rooms(ch, SQUARE, H).rooms[0];
@@ -108,4 +108,32 @@ test('expiry: rewinding (an earlier clock, or deleting the message) restores the
     c.post('/inspect/index', { json: { changes: ch, now: H } });
     assert.deepEqual(c.post('/inspect/index', { json: { changes: ch, now: H - 1 } }).json(), before);
     assert.deepEqual(c.post('/inspect/index', { json: { changes: ch.slice(0, 1), now: 10 } }).json(), c.post('/inspect/index', { json: { changes: [stall()], now: 10 } }).json());
+});
+
+test('inactive notes: a chain says which message it depends on; a turned-off cause says so; the expired change itself is listed', () => {
+    const ch = [stall(),
+        patch('cellar', 4, 600, [{ op: 'create_place', area: 'riverton:streets', id: 'stall_cellar', name: 'Stall Cellar', description: 'Damp.', exits: [{ direction: 'down', to: BOOTH, return_direction: 'up' }] }]),
+        patch('crate', 7, 800, [{ op: 'set_description', loc: CELLAR2, text: 'Crates everywhere.' }])];
+    const s = status(ch, H);
+    assert.deepEqual(s.failed.map(f => [f.msg, f.inactive]), [[4, s.failed[0].inactive], [7, 'Inactive: depends on message #4']]);
+    assert.match(s.failed[0].inactive, /depends on Pop-up Stall, which expired at/);
+    // Turned off (no clock): the dependents name it.
+    const off = [{ ...stall(), off: true }, ...ch.slice(1)];
+    assert.deepEqual(status(off, null).failed.map(f => f.inactive), ['Inactive: depends on message #2, which is turned off', 'Inactive: depends on message #4']);
+    // A change that fails on its own keeps its raw error, no inactive note.
+    const own = [patch('bad', 3, 0, [{ op: 'set_description', loc: 'riverton:streets/nowhere', text: 'x' }])];
+    const sf = status(own, null).failed;
+    assert.equal(sf.length, 1); assert.equal(sf[0].inactive, undefined);
+    // The Changes list: the expired change is a greyed "Inactive: ... expired" entry, the dependents too.
+    const list = c.post('/inspect', { json: { target: 'changes', changes: ch, now: H } }).json().changes;
+    const byMsg = m => list.find(x => x.msg === m);
+    assert.match(byMsg(2).inactive, /^Inactive: Pop-up Stall expired at .+ \(lasted 1h, from message #2\)$/);
+    assert.equal(byMsg(7).inactive, 'Inactive: depends on message #4');
+});
+
+test('change text: a note that repeats a summary line is shown once', async () => {
+    const { changeText } = await import('../../plugin/ui/patches.mjs');
+    const t = changeText({ note: 'new exit to Courtyard (back: Broken Window)', summary: ['Stable window: new exit to Courtyard (back: Broken Window)', 'Stable window: new exit to Courtyard (back: Broken Window)'] });
+    assert.equal(t, ': Stable window: new exit to Courtyard (back: Broken Window)');
+    assert.equal(changeText({ note: 'fire', summary: ['Square: description changed'] }), ' · fire: Square: description changed');
 });

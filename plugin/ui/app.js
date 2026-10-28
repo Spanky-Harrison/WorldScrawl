@@ -1,5 +1,6 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
+import { changeText } from './patches.mjs';
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
@@ -263,11 +264,13 @@ async function renderInspector(side, target, ctx) {
     };
     const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Turn one off to take it off the map for now, or delete its message to undo it.' : 'Map changes from this chat that touch this. Turn one off to take it off the map for now, or delete its message to undo it.'),
         $('ul', { class: 'warnings' }, ...changes.map(c => {
-            const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), `${c.note ? ` · ${c.note}` : ''}: ${(c.summary ?? []).join('; ')}${c.off ? ' (turned off)' : ''}`);
+            const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), changeText(c));
             if (Object.keys(c.relocate ?? {}).length) li.append(...renderMoves(document, moveGroups({ ops: c.ops ?? [], relocate: c.relocate, inherit: c.inherit ?? {}, names: c.names ?? {} }).groups));
-            if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
-            if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'),
+            if (c.inactive) { li.classList.add('inactive'); li.style.opacity = '.6'; li.append($('div', { class: 'inactive-note muted' }, c.inactive)); }
+            else if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
+            if (live && c.msg !== null && c.msg !== undefined && c.id && !c.inactive) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'),
                 ' ', $('button', { class: 'crumb removechange', title: 'Remove this change (it leaves its message)', onclick: () => removeFromInspector(c) }, 'Undo'));
+            else if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb removechange', title: 'Remove this change (it leaves its message)', onclick: () => removeFromInspector(c) }, 'Undo'));
             return li;
         }))]
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
