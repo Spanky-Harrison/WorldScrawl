@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
 import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
+import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart } from './ui/calendar.mjs';
@@ -303,8 +304,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const patch = field(body, 'patch', 'dict?');
             if (!patch) bad('patch', 'Input should be a valid dictionary', patch);
             const raw = structuredClone(e.raw);
-            let r;
-            try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch', dropNoops: true, world: e.worldJson }); build_world(e.worldJson, raw); } catch (err) {
+            let r, wa;
+            try { r = applyPatch(raw, { ...patch, at: nowOf(body) ?? 0 }, { now: null, where: 'patch', dropNoops: true, world: e.worldJson }); wa = build_world(e.worldJson, raw); } catch (err) {
                 if (err instanceof PatchError || err instanceof WorldError) throw new HttpError(400, { error: err.message, ...(err.choices ? { choices: err.choices, key: err.key } : {}), ...(err.clash ? { clash: err.clash } : {}) });
                 throw err;
             }
@@ -312,7 +313,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const touched = [...new Set(r.touched)];
             const areaOf = (src, a) => { const [rid, sid] = a.split(':'); const o = sid ? src[rid]?.subregions?.[sid] : src[rid]; return o ? { name: o.name ?? a, notes: o.notes ?? '', area: true } : null; };
             const pick = src => Object.fromEntries(touched.map(a => [a, a.includes('/') ? getRoom(src, a) : areaOf(src, a)]));
-            return { ok: true, ops: r.ops, noops: r.noops, summary: r.summary, relocate: r.relocate, touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
+            return { ok: true, ops: r.ops, noops: r.noops, summary: r.summary, relocate: r.relocate, inherit: inheritNotes(e.w, wa, r.relocate), names: moveNames(e.w, wa, r.relocate), touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
         },
         'POST /changes/status': ({ q, body }) => {
             // Which stored changes can't apply any more (skipped one by one in the replay; the map never breaks).
@@ -357,7 +358,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 for (let k = changes.length - (changes.some(c => c?.off) ? 0 : 1); k >= 0; k--) { let pw; try { pw = changed_for(wid, onAgain.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
                 return null;
             };
-            const r = resolvePosition(e.w, address, { relocate: relocateMap(e.info.patches, since), allRelocate: relocateMap(all.info.patches), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
+            const r = resolvePosition(e.w, address, { relocate: { ...relocateMap(e.info.patches), ...relocateMap(e.info.patches, since) }, // every active move applies forward, whenever the position was stamped (a moved place is the same place)
+                 allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
             const loc = e.w.locations.get(r.address);
             return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
         },
