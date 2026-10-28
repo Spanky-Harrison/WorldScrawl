@@ -38,3 +38,13 @@ test('discovery: connect to an existing place, matched leniently; a new-room ans
     assert.match(existingDiscovery({ existing: 'the moon', direction: 'x' }, ex, 'r:t/hall').error, /place keys: village_square, cellar/);
     assert.match(existingDiscovery({ existing: 'cellar' }, ex, 'r:t/hall').error, /direction/);
 });
+
+test('style wording lives in Writing style entries; the system prompts keep only the locked format and render as before', async () => {
+    const { DEFAULT_PROMPTS } = await import('./useprompts.mjs');
+    const by = Object.fromEntries(DEFAULT_PROMPTS.prompts.map(e => [e.id, e]));
+    for (const id of ['discover.style', 'change.style', 'dig.style']) { assert.equal(by[id].group, 'style', id); assert.ok(!by[id].locked, id); }
+    for (const id of ['discover.system', 'change.system', 'dig.question']) assert.ok(by[id].locked, id);
+    assert.ok(by['discover.system'].text.includes('{{style}}') && !by['discover.system'].text.includes('present tense'));
+    assert.ok(by['change.system'].text.includes('{{style}}') && !by['change.system'].text.includes('DESCRIPTION RULE'));
+    assert.match(by['change.style'].text, /DESCRIPTION RULE/);
+});

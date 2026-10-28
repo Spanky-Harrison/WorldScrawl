@@ -41,12 +41,12 @@
     {
       "id": "change",
       "title": "Map changes",
-      "flow": "Runs when a message is flagged as changing the map: the flag button, the narrator's ws_flag tool or [ws_flag: …] tag, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on)."
+      "flow": "Runs when a message is flagged as changing the map: the flag button, the narrator's ws_flag tool or [ws_flag: …] tag, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on)."
     },
     {
       "id": "discover",
       "title": "New room behind a door",
-      "flow": "Runs when the narrator opens a door that isn't on the map yet and flags it as a discovery (from the 'door not on the map' narration). Step 1: the model gets the region and area notes, the current room, its exits, nearby rooms and the story, and answers in JSON with the new room and the door pair. The game turns that into the same 'create place' edit the editor uses and test-applies it; if it doesn't fit, Step 1 is asked once more with the retry piece. The room is added at once, as if it had always been there, unless 'review discoveries' is on."
+      "flow": "Runs when the narrator opens a door that isn't on the map yet and flags it as a discovery (from the 'door not on the map' narration). Step 1: the model gets the region and area notes, the current room, its exits, nearby rooms and the story, and answers in JSON with the new room and the door pair. If places nearby are not yet connected to this room, they are listed as short keys (the existing piece) and the model may instead answer with one of them; then only the door pair to that place is added. The new room's name and description follow the Writing style entry 'New room behind a door: how it is named and described'. The game turns that into the same 'create place' edit the editor uses and test-applies it; if it doesn't fit, Step 1 is asked once more with the retry piece. The room is added at once, as if it had always been there, unless 'review discoveries' is on."
     },
     {
       "id": "expand",
@@ -910,6 +910,26 @@
       ]
     },
     {
+      "id": "discover.style",
+      "title": "New room behind a door: how it is named and described",
+      "description": "Used by New room behind a door: how the new room's name and description are written. Added to its system prompt.",
+      "group": "style",
+      "process": "discover",
+      "piece": true,
+      "placeholders": [],
+      "text": "name: short display name (e.g. \"Guest Room\"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes."
+    },
+    {
+      "id": "change.style",
+      "title": "Map changes: how descriptions are written",
+      "description": "Used by Map changes (step 2): how changed descriptions are written, the description rule, and people in a room. Added to its system prompt.",
+      "group": "style",
+      "process": "change",
+      "piece": true,
+      "placeholders": [],
+      "text": "Descriptions are present tense, 1-3 sentences, about the place, not the characters.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_notes on the place's area, e.g. {\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nPeople and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule."
+    },
+    {
       "id": "change.scope_system",
       "title": "Map changes: which places (system prompt)",
       "description": "Step 1 of 2: the system prompt for 'which places changed'. First of the two calls that turn a flagged story change into a map change.",
@@ -956,13 +976,17 @@
     {
       "id": "change.system",
       "title": "Map changes: the patch (system prompt)",
-      "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here.",
+      "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written.",
       "group": "change",
       "locked": "The game reads the JSON edits in this exact format.",
-      "text": "You turn a lasting change in a story into a map patch. Reply with JSON only: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_notes on the place's area, e.g. {\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nPeople and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule.\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
+      "text": "You turn a lasting change in a story into a map patch. Reply with JSON only: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
       "placeholders": [
         {
           "name": "edit_types",
+          "generated": true
+        },
+        {
+          "name": "style",
           "generated": true
         }
       ]
@@ -1073,11 +1097,16 @@
     {
       "id": "discover.system",
       "title": "New room behind a door (system prompt)",
-      "description": "Step 1 of 1: the system prompt for the new room (JSON answer). The game reads the JSON answer, so keep the reply format.",
+      "description": "Step 1 of 1: the system prompt for the new room (JSON answer). The game reads the JSON answer, so keep the reply format. {{style}} is the Writing style entry for the new room's name and description.",
       "group": "discover",
       "locked": "The game reads the JSON answer with these exact keys.",
-      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\nname: short display name (e.g. \"Guest Room\"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
-      "placeholders": []
+      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\n{{style}} direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
+      "placeholders": [
+        {
+          "name": "style",
+          "generated": true
+        }
+      ]
     },
     {
       "id": "discover.question",

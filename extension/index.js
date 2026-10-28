@@ -2574,7 +2574,7 @@ export function parseJsonAnswer(text) {
     return null;
 }
 export const scopeSys = () => P('change.scope_system');
-export const patchSys = pl => P('change.system', { edit_types: pl.opDocs() });
+export const patchSys = pl => P('change.system', { edit_types: pl.opDocs(), style: P('change.style') });
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -2635,7 +2635,7 @@ async function analyzeFlag(id) {
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
-export const discoverSys = () => P('discover.system');
+export const discoverSys = () => P('discover.system', { style: P('discover.style') });
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
 /** A discovery answer naming an existing place: one door pair (add_exit) to it. null when the answer is a new room. */
