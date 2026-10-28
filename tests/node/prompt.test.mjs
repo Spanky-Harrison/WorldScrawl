@@ -1,11 +1,12 @@
-// The patch prompt's rules, read from the extension source (it needs SillyTavern to import).
+// The patch prompt's rules, read from plugin/prompts/default.json.
+import { DEFAULT_PROMPTS } from './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
 import { opDocs as opDocs0 } from '../../plugin/ui/patches.mjs';
-const sys = src.slice(src.indexOf('const patchSys = pl => `'), src.indexOf('`;', src.indexOf('const patchSys = pl => `'))).replace('${pl.opDocs()}', opDocs0());
+const sys = DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.system').text.replace('{{edit_types}}', opDocs0());
 
 test('patch prompt: descriptions say what a place is now, traces allowed, the change itself never narrated, history in notes', () => {
     assert.match(sys, /only what the place IS now/);

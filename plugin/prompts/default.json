@@ -1,0 +1,969 @@
+{
+  "version": 1,
+  "about": "WorldScrawl prompts. Edit them in the map window: Tools > Prompt Editor. {{name}} is filled in by the game.",
+  "prompts": [
+    {
+      "id": "dig.system",
+      "title": "Breaking through: system prompt",
+      "description": "The system prompt for the small questions asked when the player breaks a new opening.",
+      "text": "You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.",
+      "placeholders": []
+    },
+    {
+      "id": "dig.destination",
+      "title": "Breaking through: where does it lead",
+      "description": "Asks which nearby place a newly broken opening leads to.",
+      "text": "{{who}} is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. Places nearby:\n{{places}}\n{{new_number}}. {{new_place}}: a new space nobody has seen yet\n\nWhere does this opening most likely lead? Reply with just the number.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "description",
+          "optional": true
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "places",
+          "generated": true
+        },
+        {
+          "name": "new_number",
+          "generated": true
+        },
+        {
+          "name": "new_place",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "dig.direction",
+      "title": "Breaking through: exit name",
+      "description": "Asks what the new opening is called from this side.",
+      "text": "{{who}} is in {{place}}.\n{{said}}\n\nThe player has made a new opening from here to {{destination}}.\nWhat is the opening called from this side? Use one of: {{compass}}, or a short new word (1-2 words) such as hole, crack, window, breach.\nAlready used here (do not use): {{used}}.\nReply with just the word.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "compass",
+          "generated": true
+        },
+        {
+          "name": "used",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "dig.name",
+      "title": "Breaking through: new room name",
+      "description": "Asks for a name for the new room behind the opening.",
+      "text": "{{who}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        }
+      ]
+    },
+    {
+      "id": "dig.description",
+      "title": "Breaking through: new room description",
+      "description": "Asks for a one-sentence description of the new room.",
+      "text": "{{who}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room called {{name}}. Describe it in one short sentence. Reply with just the sentence.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "dig.stay",
+      "title": "Breaking through: stay or go through",
+      "description": "Asks whether the player stays on this side of the new opening. Must be answered yes or no.",
+      "text": "{{said}}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.",
+      "placeholders": [
+        {
+          "name": "said"
+        }
+      ]
+    },
+    {
+      "id": "look.target",
+      "title": "Looking: at what",
+      "description": "Asks what the player is looking at or listening to. The numbered options are made by the game.",
+      "text": "{{who}} is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the number.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "options",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "look.closed_door",
+      "title": "Looking: a closed door",
+      "description": "Asks what the player does with a closed door. The game reads the answer as 1 to 4, in this order.",
+      "text": "{{said}}\n\nThe {{direction}} door is closed. What does the player do with it?\n1. only listens at it\n2. peeks through it (a crack, keyhole or gap) without opening it\n3. opens it\n4. just looks at the closed door\n\nReply with just the number.",
+      "placeholders": [
+        {
+          "name": "said"
+        },
+        {
+          "name": "direction"
+        }
+      ]
+    },
+    {
+      "id": "look.view",
+      "title": "Looking: out a window",
+      "description": "Asks which nearby place can be seen out of a window or opening.",
+      "text": "{{who}} is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the number.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "description",
+          "optional": true
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "places",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "door.pick",
+      "title": "Doors: which door",
+      "description": "Asks which door the player opens or closes.",
+      "text": "{{who}} is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the number.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "verb",
+          "generated": true
+        },
+        {
+          "name": "options",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "door.verb_open",
+      "title": "Doors: the word for opening",
+      "description": "Fills {{verb}} in \"Which door\" when opening.",
+      "text": "open",
+      "placeholders": []
+    },
+    {
+      "id": "door.verb_close",
+      "title": "Doors: the word for closing",
+      "description": "Fills {{verb}} in \"Which door\" when closing.",
+      "text": "close",
+      "placeholders": []
+    },
+    {
+      "id": "intent.system",
+      "title": "Player intent: system prompt",
+      "description": "The system prompt for the question that works out what the player is trying to do.",
+      "text": "You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.",
+      "placeholders": []
+    },
+    {
+      "id": "intent.question",
+      "title": "Player intent: the question",
+      "description": "The multiple-choice question about the player's message. The option lines come from the \"Player intent: option\" prompts below.",
+      "text": "{{who}} is at {{place}}. Its exits are:\n{{exits}}\n\n{{said}}\n\nAnswer with one option:\n{{option_lines}}Which option: {{options}}? Reply with exactly one option from that list.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "exits",
+          "generated": true
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "option_lines",
+          "generated": true
+        },
+        {
+          "name": "options",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.no_exits",
+      "title": "Player intent: no exits",
+      "description": "Shown as the exit list when a place has no exits.",
+      "text": "- (none)",
+      "placeholders": []
+    },
+    {
+      "id": "intent.option.exit",
+      "title": "Player intent option: an exit",
+      "description": "One line per exit.",
+      "text": "- {{direction}}: the player goes through the \"{{direction}}\" exit right now",
+      "placeholders": [
+        {
+          "name": "direction"
+        }
+      ]
+    },
+    {
+      "id": "intent.option.place",
+      "title": "Player intent option: a known place",
+      "description": "One line per place the player knows about.",
+      "text": "- {{label}}: the player travels to {{label}}, a place they know about",
+      "placeholders": [
+        {
+          "name": "label"
+        }
+      ]
+    },
+    {
+      "id": "intent.option.new_opening",
+      "title": "Player intent option: breaking through",
+      "description": "Only offered when the player uses a breaking-through word.",
+      "text": "- {{option}}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.look",
+      "title": "Player intent option: looking",
+      "description": "Only offered when the player uses a looking word.",
+      "text": "- {{option}}: the player looks, peers, peeks or listens at something from here, without going anywhere",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.open_door",
+      "title": "Player intent option: opening a door",
+      "description": "",
+      "text": "- {{option}}: the player opens a closed door here, without going through it",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.close_door",
+      "title": "Player intent option: closing a door",
+      "description": "",
+      "text": "- {{option}}: the player closes an open door here",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.new_door",
+      "title": "Player intent option: a door not on the map",
+      "description": "",
+      "text": "- {{option}}: the player opens or tries a door, hatch or stair that is none of the exits listed above (e.g. another door along a hallway)",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.stay",
+      "title": "Player intent option: staying",
+      "description": "",
+      "text": "- {{option}}: the player is not trying to travel anywhere",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.elsewhere",
+      "title": "Player intent option: somewhere unlisted",
+      "description": "",
+      "text": "- {{option}}: the player wants to go to a place that is not listed above",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.option.unclear",
+      "title": "Player intent option: unclear",
+      "description": "",
+      "text": "- {{option}}: the player wants to travel, but it is unclear which of the listed places they mean",
+      "placeholders": [
+        {
+          "name": "option",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "travel.system",
+      "title": "Travel check: system prompt",
+      "description": "For the yes/no follow-up when the intent answer could not be read.",
+      "text": "Reply with exactly one word: yes or no.",
+      "placeholders": []
+    },
+    {
+      "id": "travel.question",
+      "title": "Travel check: the question",
+      "description": "Asked when the intent answer could not be read. Must be answered yes or no.",
+      "text": "{{who}} is at {{place}}.\n{{said}}\n\nIs the player trying to travel to a different place? Answer yes or no.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        }
+      ]
+    },
+    {
+      "id": "narration.header",
+      "title": "Narration: first line",
+      "description": "First line of the world state given to the narrator each turn.",
+      "text": "[World state from the game engine. This is authoritative.]",
+      "placeholders": []
+    },
+    {
+      "id": "narration.move",
+      "title": "Narration: a move",
+      "description": "What just happened, for a one-step move.",
+      "text": "What just happened: {{who}} moved {{direction}} from {{from}} to {{to}}.{{arrival}} Describe arriving in {{where}}.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "from"
+        },
+        {
+          "name": "to"
+        },
+        {
+          "name": "arrival",
+          "generated": true
+        },
+        {
+          "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.travel",
+      "title": "Narration: a journey",
+      "description": "What just happened, for a trip through several places.",
+      "text": "What just happened: {{who}} travelled from {{from}} through {{via}} to {{to}}{{cut_short}}.{{arrival}} Narrate the journey briefly, in that order, ending with arriving in {{where}}.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "from"
+        },
+        {
+          "name": "via"
+        },
+        {
+          "name": "to"
+        },
+        {
+          "name": "cut_short",
+          "generated": true
+        },
+        {
+          "name": "arrival",
+          "generated": true
+        },
+        {
+          "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.travel_cut_short",
+      "title": "Narration: a journey cut short",
+      "description": "Fills {{cut_short}} when the trip stopped early.",
+      "text": " (the trip was cut short there)",
+      "placeholders": []
+    },
+    {
+      "id": "narration.dig_through",
+      "title": "Narration: broke through and went",
+      "description": "",
+      "text": "What just happened: {{who}} broke through, making a new opening ({{direction}}) from {{from}}, and went straight through it.{{arrival}} Narrate breaking through and arriving in {{where}}.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "from"
+        },
+        {
+          "name": "arrival",
+          "generated": true
+        },
+        {
+          "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.dig_here",
+      "title": "Narration: broke through, stayed",
+      "description": "",
+      "text": "What just happened: {{who}} broke through, making a new opening ({{direction}}) from here to {{to}}. It exists now and is listed in the exits. {{who}} has not gone through it yet and is still at {{place}}. Narrate the breakthrough.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "to"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.dig_failed",
+      "title": "Narration: breaking through failed",
+      "description": "",
+      "text": "What just happened: {{who}} tried to break through, but nothing gave way. No new opening exists. {{who}} is still at {{place}}. Narrate the attempt failing.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.door_stuck",
+      "title": "Narration: a stuck door",
+      "description": "",
+      "text": "What just happened: {{who}} tries to open the {{door}}, but it {{why}}. It stays shut. {{who}} stays at {{place}}.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "why"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.door",
+      "title": "Narration: opening or closing a door",
+      "description": "",
+      "text": "What just happened: {{who}} {{verb}} the {{door}}. {{who}} stays at {{place}}.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "verb",
+          "generated": true
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.new_door",
+      "title": "Narration: a door not on the map",
+      "description": "",
+      "text": "What just happened: {{who}} tries a door that is not among the exits. If such a door plausibly fits {{place}} (its description and the area notes), narrate it opening and {{how_to_flag}}; the engine adds the room behind it. If no such door fits, narrate that there is none. {{who}} stays at {{place}} for now.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "how_to_flag",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.new_door_tools",
+      "title": "Narration: flagging a new door (tools on)",
+      "description": "Fills {{how_to_flag}} when function tools are on.",
+      "text": "call ws_flag with action \"discover\" and a note naming the door",
+      "placeholders": []
+    },
+    {
+      "id": "narration.new_door_tags",
+      "title": "Narration: flagging a new door (tools off)",
+      "description": "Fills {{how_to_flag}} when function tools are off.",
+      "text": "end your reply with [ws_flag: discover | which door]",
+      "placeholders": []
+    },
+    {
+      "id": "narration.look_around",
+      "title": "Narration: looking around",
+      "description": "",
+      "text": "What just happened: {{who}} looks around {{place}}. {{who}} stays here.",
+      "placeholders": [
+        {
+          "name": "who"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.on_the_way",
+      "title": "Narration: on the way",
+      "description": "Things passed during a move.",
+      "text": "On the way: {{steps}} Work this into the narration of the move.",
+      "placeholders": [
+        {
+          "name": "steps",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.exits_hint",
+      "title": "Narration: mention the exits",
+      "description": "Added after a move or looking around.",
+      "text": "In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.rules_tools",
+      "title": "Narration: last line (tools on)",
+      "description": "",
+      "text": "Do not invent locations or exits that are not listed.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.rules",
+      "title": "Narration: last line (tools off)",
+      "description": "",
+      "text": "You only narrate. The game engine controls movement: never move {{who}} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.",
+      "placeholders": [
+        {
+          "name": "who"
+        }
+      ]
+    },
+    {
+      "id": "narration.arrival_reminder",
+      "title": "Narration: arrival reminder",
+      "description": "Short last-line reminder on move and travel turns.",
+      "text": "[Engine: this turn ends in {{where}}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
+      "placeholders": [
+        {
+          "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.flag_hint",
+      "title": "Narration: how to flag map changes",
+      "description": "Tells the narrator to tag lasting changes and door discoveries.",
+      "text": "If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.wait_hint",
+      "title": "Narration: how to pass time",
+      "description": "Tells the narrator to tag long waits.",
+      "text": "If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.",
+      "placeholders": []
+    },
+    {
+      "id": "expand.system",
+      "title": "Expand with AI: system prompt",
+      "description": "For the \"Expand with AI\" button on description and notes fields.",
+      "text": "You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.",
+      "placeholders": []
+    },
+    {
+      "id": "expand.question",
+      "title": "Expand with AI: the request",
+      "description": "{{context}} is the region, area and connected places, made by the game.",
+      "text": "{{context}}\nWrite the {{field}} for the {{kind}} \"{{name}}\".{{draft}}\nTwo to four sentences of plain prose, fitting the setting above. Reply with only the text.",
+      "placeholders": [
+        {
+          "name": "context",
+          "generated": true
+        },
+        {
+          "name": "field",
+          "generated": true
+        },
+        {
+          "name": "kind",
+          "generated": true
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "draft",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "expand.field_description",
+      "title": "Expand with AI: describing a description",
+      "description": "Fills {{field}} for a description.",
+      "text": "description (what a visitor sees, hears and smells)",
+      "placeholders": []
+    },
+    {
+      "id": "expand.field_notes",
+      "title": "Expand with AI: describing notes",
+      "description": "Fills {{field}} for notes.",
+      "text": "notes (facts for the narrator: who is here, what goes on, secrets)",
+      "placeholders": []
+    },
+    {
+      "id": "expand.draft",
+      "title": "Expand with AI: keep the draft",
+      "description": "Added when the field already has text.",
+      "text": "Expand on this draft, keeping everything in it: {{text}}",
+      "placeholders": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "id": "change.scope_system",
+      "title": "Map changes: which places (system prompt)",
+      "description": "First of the two calls that turn a flagged story change into a map change.",
+      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.",
+      "placeholders": []
+    },
+    {
+      "id": "change.scope",
+      "title": "Map changes: which places",
+      "description": "The game reads the JSON answer, so keep the reply format.",
+      "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change in a lasting way? Reply {\"rooms\": [addresses], \"areas\": [area ids changed as a whole (renamed, or general notes changed), e.g. \"{{area}}\"]}, or {\"rooms\": []} if nothing lasting changed.",
+      "placeholders": [
+        {
+          "name": "area_name"
+        },
+        {
+          "name": "area"
+        },
+        {
+          "name": "region_name"
+        },
+        {
+          "name": "outline",
+          "generated": true
+        },
+        {
+          "name": "start"
+        },
+        {
+          "name": "end"
+        },
+        {
+          "name": "story"
+        },
+        {
+          "name": "what"
+        }
+      ]
+    },
+    {
+      "id": "change.system",
+      "title": "Map changes: the patch (system prompt)",
+      "description": "Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here.",
+      "text": "You turn a lasting change in a story into a map patch. Reply with JSON only: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nAny op may add \"lasts\":\"3d\" (or \"12h\") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_notes on the place's area, e.g. {\"op\":\"append_notes\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nPeople and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule.\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
+      "placeholders": [
+        {
+          "name": "edit_types",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "change.patch",
+      "title": "Map changes: the patch",
+      "description": "The game reads the JSON answer, so keep the reply format.",
+      "text": "Places that changed (their current JSON):\n{{rooms}}\n{{areas}}{{neighbors}}{{mentions}}Neighbouring map (for exits and merges):\n{{outline}}\n\nStory (messages {{range}}):\n{{story}}\n\n{{what}}\n{{retry}}Write the patch JSON.",
+      "placeholders": [
+        {
+          "name": "rooms",
+          "generated": true
+        },
+        {
+          "name": "areas",
+          "generated": true
+        },
+        {
+          "name": "neighbors",
+          "generated": true
+        },
+        {
+          "name": "mentions",
+          "generated": true
+        },
+        {
+          "name": "outline",
+          "generated": true
+        },
+        {
+          "name": "range"
+        },
+        {
+          "name": "story"
+        },
+        {
+          "name": "what"
+        },
+        {
+          "name": "retry",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "change.patch_areas",
+      "title": "Map changes: area notes",
+      "description": "Fills {{areas}} when areas are involved.",
+      "text": "Areas (current notes): {{areas}}",
+      "placeholders": [
+        {
+          "name": "areas",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "change.patch_neighbors",
+      "title": "Map changes: neighbours",
+      "description": "Fills {{neighbors}}.",
+      "text": "One step beyond the change (neighbors: name: description | exits \"exit text\"). If a neighbor's description or exit text names or describes a changed place the old way, you may patch it too (set_description, or set_exit_description for that side's exit text); leaving them alone is fine:\n{{neighbors}}",
+      "placeholders": [
+        {
+          "name": "neighbors",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "change.patch_mentions",
+      "title": "Map changes: other mentions",
+      "description": "Fills {{mentions}}.",
+      "text": "Other world text that names a changed place (where.field: text). Patch it only if it now reads wrong: set_description for a room, set_exit_description for an exit, update_area/set_notes for a region or subregion's notes:\n{{mentions}}",
+      "placeholders": [
+        {
+          "name": "mentions",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "change.patch_retry",
+      "title": "Map changes: retry",
+      "description": "Fills {{retry}} after a rejected answer.",
+      "text": "Your last patch was rejected: {{error}}\nFix it.",
+      "placeholders": [
+        {
+          "name": "error",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "discover.system",
+      "title": "New room behind a door (system prompt)",
+      "description": "The game reads the JSON answer, so keep the reply format.",
+      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\nname: short display name (e.g. \"Guest Room\"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
+      "placeholders": []
+    },
+    {
+      "id": "discover.question",
+      "title": "New room behind a door",
+      "description": "",
+      "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{door}}{{retry}}Describe the room behind the door that was opened.",
+      "placeholders": [
+        {
+          "name": "region_name"
+        },
+        {
+          "name": "region_notes"
+        },
+        {
+          "name": "area_name"
+        },
+        {
+          "name": "area_notes"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "address"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "exits",
+          "generated": true
+        },
+        {
+          "name": "near",
+          "generated": true
+        },
+        {
+          "name": "start"
+        },
+        {
+          "name": "end"
+        },
+        {
+          "name": "story"
+        },
+        {
+          "name": "door",
+          "generated": true
+        },
+        {
+          "name": "retry",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "discover.door",
+      "title": "New room: the door",
+      "description": "Fills {{door}}.",
+      "text": "The door: \"{{note}}\".",
+      "placeholders": [
+        {
+          "name": "note"
+        }
+      ]
+    },
+    {
+      "id": "discover.retry",
+      "title": "New room: retry",
+      "description": "Fills {{retry}} after an answer that did not fit.",
+      "text": "Your last answer did not fit: {{error}}. Fix it.",
+      "placeholders": [
+        {
+          "name": "error",
+          "generated": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 // Map-level actions (PR B): create region / subregion / place, delete with cascade, move places and subregions
 // (id clashes prompt, never overwrite; moves leave redirects like merges), merge-by-moving, and the AI expand context.
+import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';

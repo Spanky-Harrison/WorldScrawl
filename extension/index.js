@@ -4,6 +4,8 @@
 // The party's location is stored on chat messages (message.extra.worldscrawl_location) so that
 // deleting or swiping messages rolls the location back with them.
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
+import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
+export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -527,7 +529,7 @@ function registerTools() {
 function applyNudge() {
     const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
-    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? `${FLAG_HINT}\n${WAIT_HINT}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? `${flagHint()}\n${waitHint()}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
 // ---- Engine-driven movement. The engine moves the party; the model never touches the map.
@@ -998,12 +1000,12 @@ export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(an
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
 
 // ---- Narrative digging: "I smash a hole in the wall". Small sequential questions, each validated and retried alone.
-export const DIG_SYS = 'You help run a text adventure game. Answer exactly what is asked, as briefly as asked, and nothing else.';
+export const digSys = () => P('dig.system');
 export const DIG_TRIES = 2;
 export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
 async function askValid(label, prompt, validate) {
     for (let i = 0; i < DIG_TRIES; i++) {
-        const a = await ctx().generateRaw({ prompt, systemPrompt: DIG_SYS, responseLength: 60 });
+        const a = await ctx().generateRaw({ prompt, systemPrompt: digSys(), responseLength: 60 });
         const v = validate(trimAnswer(cleanAnswer(a)));
         console.log(`[WorldScrawl] dig ${label} (try ${i + 1}): ${JSON.stringify(String(a).slice(0, 80))} -> ${v == null ? 'invalid' : JSON.stringify(v)}`);
         if (v != null) return v;
@@ -1017,18 +1019,14 @@ async function nearbyRooms(loc) {
 }
 export const NEW_PLACE = 'somewhere new';
 export function digDestPrompt(loc, said, rooms) {
-    return `${whoMoves()} is in ${displayName(loc)}. ${loc.description ?? ''}\n${said}\n\n`
-        + `The player is breaking a new opening. Places nearby:\n`
-        + rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') + `\n${rooms.length + 1}. ${NEW_PLACE}: a new space nobody has seen yet\n\n`
-        + `Where does this opening most likely lead? Reply with just the number.`;
+    return P('dig.destination', { who: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
+        places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n'), new_number: rooms.length + 1, new_place: NEW_PLACE });
 }
 export function digDirPrompt(loc, said, destLabel, used) {
-    return `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe player has made a new opening from here to ${destLabel}.\n`
-        + `What is the opening called from this side? Use one of: ${COMPASS.join(', ')}, or a short new word (1-2 words) such as hole, crack, window, breach.\n`
-        + `Already used here (do not use): ${used.join(', ') || 'none'}.\nReply with just the word.`;
+    return P('dig.direction', { who: whoMoves(), place: displayName(loc), said, destination: destLabel, compass: COMPASS.join(', '), used: used.join(', ') || 'none' });
 }
-export const digNamePrompt = (loc, said) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.`;
-export const digDescPrompt = (loc, said, name) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nThe opening leads to a new room called ${name}. Describe it in one short sentence. Reply with just the sentence.`;
+export const digNamePrompt = (loc, said) => P('dig.name', { who: whoMoves(), place: displayName(loc), said });
+export const digDescPrompt = (loc, said, name) => P('dig.description', { who: whoMoves(), place: displayName(loc), said, name });
 /** The 'new opening' intent: ask destination, direction, (new room) name and description; stamp the change on the player's message. */
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1069,7 +1067,7 @@ async function narrativeDig(msg, loc) {
     msg.extra[CHANGE_KEY] = r.change; // on the player's message, like a move: swipes keep it, deleting the message undoes it
     msg.extra.worldscrawl_dig = { direction: r.direction, back: r.back, to: r.to, to_name: r.label };
     // Biased toward moving: only a clean "yes" (they clearly stay on this side) keeps the party here; anything else goes through.
-    const stayAns = await ctx().generateRaw({ prompt: digStayPrompt(said), systemPrompt: DIG_SYS, responseLength: 48 });
+    const stayAns = await ctx().generateRaw({ prompt: digStayPrompt(said), systemPrompt: digSys(), responseLength: 48 });
     const stays = parseYesNo(stayAns) === 'yes';
     console.log(`[WorldScrawl] dig stay-here: ${JSON.stringify(String(stayAns).slice(0, 80))} -> ${stays ? 'stay' : 'go through'}`);
     if (stays) return { kind: 'dig', loc };
@@ -1078,7 +1076,7 @@ async function narrativeDig(msg, loc) {
     stamp(msg, res.to, res.move); // dig first, then location = destination (both roll back with this message)
     return { kind: 'move', loc: res.to };
 }
-export const digStayPrompt = said => `${said}\n\nThe player has just made a new opening. Does the player clearly stay on this side (only making the opening, looking or reaching through)? Reply yes or no.`;
+export const digStayPrompt = said => P('dig.stay', { said });
 // ---- Looking and doors (the party never moves).
 export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door', NEW_DOOR = 'try another door';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
@@ -1093,14 +1091,12 @@ export const offerWindow = (loc, text) => WINDOW_WORD_RE.test(String(text ?? '')
 /** Options: 1 = around, then the exits, then (maybe) the window, last. */
 export function lookTargetPrompt(loc, said, exits, withWindow = true) {
     const opts = [AROUND, ...exits.map(exitTargetLabel), ...(withWindow ? [NO_EXIT] : [])];
-    return `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhat is the player looking at or listening to?\n`
-        + opts.map((o, i) => `${i + 1}. ${o}`).join('\n') + '\n\nReply with just the number.';
+    return P('look.target', { who: whoMoves(), place: displayName(loc), said, options: opts.map((o, i) => `${i + 1}. ${o}`).join('\n') });
 }
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
-export const closedDoorPrompt = (said, e) => `${said}\n\nThe ${e.direction} door is closed. What does the player do with it?\n1. only listens at it\n2. peeks through it (a crack, keyhole or gap) without opening it\n3. opens it\n4. just looks at the closed door\n\nReply with just the number.`;
+export const closedDoorPrompt = (said, e) => P('look.closed_door', { said, direction: e.direction });
 export function viewPickPrompt(loc, said, rooms) {
-    return `${whoMoves()} is in ${displayName(loc)}. ${loc.description ?? ''}\n${said}\n\nThe player looks out of a window or opening. Places nearby:\n`
-        + rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') + `\n\nWhich place can they most likely see? Reply with just the number.`;
+    return P('look.view', { who: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: rooms.map((r, i) => `${i + 1}. ${r.display_name}: ${r.summary}`).join('\n') });
 }
 const pickNumber = n => a => { const m = String(a).match(/^(\d+)\b/); const i = m ? Number(m[1]) : 0; return i >= 1 && i <= n ? i : null; };
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
@@ -1153,7 +1149,7 @@ async function narrativeLook(msg, loc) {
     console.log(`[WorldScrawl] look: ${JSON.stringify(look).slice(0, 160)}`);
     return { kind: 'look', loc };
 }
-export const doorPickPrompt = (loc, said, list, type) => `${whoMoves()} is in ${displayName(loc)}.\n${said}\n\nWhich door does the player ${type === 'open_door' ? 'open' : 'close'}?\n` + list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') + '\n\nReply with just the number.';
+export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { who: whoMoves(), place: displayName(loc), said, verb: P(type === 'open_door' ? 'door.verb_open' : 'door.verb_close'), options: list.map((x, i) => `${i + 1}. ${exitTargetLabel(x)}`).join('\n') });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1170,9 +1166,9 @@ async function narrativeDoor(msg, loc, list, type) {
 }
 export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
-export const TRAVEL_YN_SYS = 'Reply with exactly one word: yes or no.';
-export const travelYesNoPrompt = (loc, said) => `${whoMoves()} is at ${loc.name}.\n${said}\n\nIs the player trying to travel to a different place? Answer yes or no.`;
-export const SYS = 'You classify player intent for a text adventure game. Reply with exactly one option from the list and nothing else.';
+export const travelSys = () => P('travel.system');
+export const travelYesNoPrompt = (loc, said) => P('travel.question', { who: whoMoves(), place: loc.name, said });
+export const intentSys = () => P('intent.system');
 
 /**
  * Ask the model one multiple-choice question about the player's message.
@@ -1180,19 +1176,13 @@ export const SYS = 'You classify player intent for a text adventure game. Reply 
  * ("trying to travel?"): a clear yes is 'elsewhere', anything else is 'stay'.
  */
 export function intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options }) {
-    return `${whoMoves()} is at ${displayName(loc)}. Its exits are:\n${exitLines.join('\n') || '- (none)'}\n\n`
-        + `${said}\n\nAnswer with one option:\n`
-        + moveDirs.map(d => `- ${d}: the player goes through the "${d}" exit right now\n`).join('')
-        + movePlaces.map(p => `- ${p.label}: the player travels to ${p.label}, a place they know about\n`).join('')
-        + (canOpen ? `- ${OPEN}: the player clearly breaks through a wall, floor, ceiling or window right now, making a new opening (not just hitting, kicking or touching it)\n` : '')
-        + (canLook ? `- ${LOOK}: the player looks, peers, peeks or listens at something from here, without going anywhere\n` : '')
-        + (canOpenDoor ? `- ${OPEN_DOOR}: the player opens a closed door here, without going through it\n` : '')
-        + (canCloseDoor ? `- ${CLOSE_DOOR}: the player closes an open door here\n` : '')
-        + (canNewDoor ? `- ${NEW_DOOR}: the player opens or tries a door, hatch or stair that is none of the exits listed above (e.g. another door along a hallway)\n` : '')
-        + `- ${STAY}: the player is not trying to travel anywhere\n`
-        + (onlyLook ? '\n' : `- ${ELSEWHERE}: the player wants to go to a place that is not listed above\n`
-        + `- ${UNCLEAR}: the player wants to travel, but it is unclear which of the listed places they mean\n\n`)
-        + `Which option: ${options.join(', ')}? Reply with exactly one option from that list.`;
+    const opt = (id, option) => P(`intent.option.${id}`, { option }) + '\n';
+    const lines = moveDirs.map(d => P('intent.option.exit', { direction: d }) + '\n').join('')
+        + movePlaces.map(p => P('intent.option.place', { label: p.label }) + '\n').join('')
+        + (canOpen ? opt('new_opening', OPEN) : '') + (canLook ? opt('look', LOOK) : '') + (canOpenDoor ? opt('open_door', OPEN_DOOR) : '')
+        + (canCloseDoor ? opt('close_door', CLOSE_DOOR) : '') + (canNewDoor ? opt('new_door', NEW_DOOR) : '') + opt('stay', STAY)
+        + (onlyLook ? '\n' : opt('elsewhere', ELSEWHERE) + opt('unclear', UNCLEAR) + '\n');
+    return P('intent.question', { who: whoMoves(), place: displayName(loc), exits: exitLines.join('\n') || P('intent.no_exits'), said, option_lines: lines, options: options.join(', ') });
 }
 async function parseIntent(msg) {
     const c = ctx();
@@ -1220,7 +1210,7 @@ async function parseIntent(msg) {
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
     const prompt = intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options });
-    const answer = await c.generateRaw({ prompt, systemPrompt: SYS, responseLength: 48 });
+    const answer = await c.generateRaw({ prompt, systemPrompt: intentSys(), responseLength: 48 });
     const cands = await travelCandidates(loc);
     // Without the word check passing, "new opening" is not an option: such an answer falls through to the normal handling.
     let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), ...extras]);
@@ -1238,7 +1228,7 @@ async function parseIntent(msg) {
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
     }
     if (!choice) {
-        const yn = await c.generateRaw({ prompt: travelYesNoPrompt(loc, said), systemPrompt: TRAVEL_YN_SYS, responseLength: 48 });
+        const yn = await c.generateRaw({ prompt: travelYesNoPrompt(loc, said), systemPrompt: travelSys(), responseLength: 48 });
         choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
         console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
     }
@@ -1376,7 +1366,7 @@ export function arrival(loc, move) {
 export function arrivalReminder(loc, move) {
     if (!move || move.to !== loc.address) return '';
     const where = arrival(loc, move).where;
-    return `[Engine: this turn ends in ${where}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in ${where}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]`;
+    return P('narration.arrival_reminder', { where });
 }
 
 /** "out", "up", "north"...: a direction, not a thing you can look through. */
@@ -1408,14 +1398,13 @@ export function lookText(who, here, look) {
     if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
-export const EXITS_HINT = 'In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the "you can see" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.';
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
 /** The narration line for a door that is not on the map yet: open it (and flag a discovery) only if it fits the room. */
-export const newDoorLine = (who, place, tools) => `What just happened: ${who} tries a door that is not among the exits. If such a door plausibly fits ${place} (its description and the area notes), narrate it opening and ${tools ? 'call ws_flag with action "discover" and a note naming the door' : 'end your reply with [ws_flag: discover | which door]'}; the engine adds the room behind it. If no such door fits, narrate that there is none. ${who} stays at ${place} for now.`;
+export const newDoorLine = (who, place, tools) => P('narration.new_door', { who, place, how_to_flag: P(tools ? 'narration.new_door_tools' : 'narration.new_door_tags') });
 export function factsText(loc, move, toolsOn, extra = {}) {
     const who = whoMoves();
     const lines = [
-        '[World state from the game engine. This is authoritative.]',
+        P('narration.header'),
         `Current location: ${loc.name}${loc.subregion?.name && loc.subregion.name !== loc.name ? `, ${loc.subregion.name}` : ''}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
         loc.effective_notes?.region ? `About ${loc.region?.name ?? 'the region'}: ${loc.effective_notes.region}` : '',
         loc.effective_notes?.subregion ? `About ${loc.subregion?.name ?? 'this area'}: ${loc.effective_notes.subregion}` : '',
@@ -1427,23 +1416,22 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         extra.weather ? `${extra.weather} Let the weather and temperature show in the narration where it fits; do not change them.` : '',
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
-    if (extra.dig && move && move.to === loc.address) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from ${move.from_name}, and went straight through it.${arr ? ` ${who} ${arr.text}.` : ''} Narrate breaking through and arriving in ${arr?.where ?? move.to_name}.`);
-    else if (move?.path?.length > 2) lines.push(`What just happened: ${who} travelled from ${move.path[0]} through ${move.path.slice(1, -1).join(', ')} to ${move.to_name}${move.stopped ? ' (the trip was cut short there)' : ''}.${arr ? ` ${who} ${arr.text}.` : ''} Narrate the journey briefly, in that order, ending with arriving in ${arr?.where ?? move.to_name}.`);
-    else if (move) lines.push(`What just happened: ${who} moved ${move.direction} from ${move.from_name} to ${move.to_name}.${arr ? ` ${who} ${arr.text}.` : ''} Describe arriving in ${arr?.where ?? move.to_name}.`);
-    else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, displayName(loc), extra.look));
-    else if (extra.door?.type === 'stuck') lines.push(`What just happened: ${who} tries to open the ${doorWord(extra.door.direction)}, but it ${extra.door.why}. It stays shut. ${who} stays at ${displayName(loc)}.`);
-    else if (extra.newDoor) lines.push(newDoorLine(who, displayName(loc), toolsOn));
-    else if (extra.door) lines.push(`What just happened: ${who} ${extra.door.type === 'open_door' ? 'opens' : 'closes'} the ${doorWord(extra.door.direction)}${isDirWord(extra.door.direction) ? '' : ' door'}. ${who} stays at ${displayName(loc)}.`);
-    else if (extra.dig) lines.push(`What just happened: ${who} broke through, making a new opening (${extra.dig.direction}) from here to ${extra.dig.to_name}. It exists now and is listed in the exits. ${who} has not gone through it yet and is still at ${displayName(loc)}. Narrate the breakthrough.`);
-    else if (extra.digFailed) lines.push(`What just happened: ${who} tried to break through, but nothing gave way. No new opening exists. ${who} is still at ${displayName(loc)}. Narrate the attempt failing.`);
-    else if (extra.lookAround || extra.look?.kind === 'around') lines.push(`What just happened: ${who} looks around ${displayName(loc)}. ${who} stays here.`);
+    const arrivalText = arr ? ` ${who} ${arr.text}.` : '', where = arr?.where ?? move?.to_name, place = displayName(loc);
+    if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
+    else if (move?.path?.length > 2) lines.push(P('narration.travel', { who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
+    else if (move) lines.push(P('narration.move', { who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
+    else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
+    else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
+    else if (extra.newDoor) lines.push(newDoorLine(who, place, toolsOn));
+    else if (extra.door) lines.push(P('narration.door', { who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
+    else if (extra.dig) lines.push(P('narration.dig_here', { who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
+    else if (extra.digFailed) lines.push(P('narration.dig_failed', { who, place }));
+    else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));
     if (!move && lines.at(-1) !== stayPutLine(who, displayName(loc))) lines.push(stayPutLine(who, displayName(loc)));
-    if (move?.traversal?.length && move.to === loc.address) lines.push(`On the way: ${move.traversal.join(' Then: ')} Work this into the narration of the move.`);
-    if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(EXITS_HINT);
-    lines.push(toolsOn
-        ? 'Do not invent locations or exits that are not listed.'
-        : `You only narrate. The game engine controls movement: never move ${who} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.`);
+    if (move?.traversal?.length && move.to === loc.address) lines.push(P('narration.on_the_way', { steps: move.traversal.join(' Then: ') }));
+    if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(P('narration.exits_hint'));
+    lines.push(toolsOn ? P('narration.rules_tools') : P('narration.rules', { who }));
     return lines.filter(Boolean).join('\n');
 }
 
@@ -2084,7 +2072,7 @@ export function broadcastMapState() {
         try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
     }, 150);
 }
-export const EXPAND_SYS = 'You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.';
+export const expandSys = () => P('expand.system');
 function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
@@ -2110,7 +2098,7 @@ function openMapChannel() {
         }
         if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
             const c = ctx(), d = ev.data;
-            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: EXPAND_SYS, responseLength: 300 })
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 })
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }
@@ -2162,8 +2150,8 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-export const FLAG_HINT = 'If something in the story permanently changes a place (it burns down, collapses, floods, a door is smashed or barricaded), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.';
-export const WAIT_HINT = 'If the characters spend a long time here without travelling (wait, rest, sleep the night), end your reply with [ws_wait: 2h] or [ws_wait: sleep until morning]. Never write it otherwise.';
+export const flagHint = () => P('narration.flag_hint');
+export const waitHint = () => P('narration.wait_hint');
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
@@ -2494,17 +2482,8 @@ export function parseJsonAnswer(text) {
     }
     return null;
 }
-export const SCOPE_SYS = 'You read a short piece of a role-play story and a list of places on a map. You decide which places the story changed in a lasting way (burned, collapsed, flooded, doors smashed or barricaded, walls knocked through, rooms destroyed). Reply with JSON only.';
-export const patchSys = pl => `You turn a lasting change in a story into a map patch. Reply with JSON only: {"ops": [...]}.
-ADDR is a room's full address copied exactly from the map, e.g. "riverton:drowned_rat/common_room". AREA is a region id ("riverton") or subregion id ("riverton:drowned_rat"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.
-Allowed ops (exactly what the map editor can do):
-${pl.opDocs()}
-Example, a whole inn turned into a palace: {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace"},{"op":"set_description","loc":"riverton:drowned_rat/common_room","text":"A gilded throne hall; an old brass rail shows under the gold leaf."},{"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."},{"op":"set_description","loc":"riverton:drowned_rat/courtyard","text":"..."}]}
-Any op may add "lasts":"3d" (or "12h") if the change is temporary. Use as few ops as possible. Descriptions are present tense, 1-3 sentences, about the place, not the characters.
-DESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now ("scorch marks blacken the beams", "an old brass rail shows under the gold leaf"). Never narrate the change itself: no "has been replaced by", "was transformed", "was once", "now". History goes in notes instead: a short append_notes on the place's area, e.g. {"op":"append_notes","area":"riverton:drowned_rat","text":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."}. Exception: a temporary change with "lasts" (smoke, a fresh fire) may mention the event.
-People and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule.
-Exit names (the "direction", e.g. "grate", "narrow door") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. If nothing lasting changed, reply {"ops": []}.
-If the story changed the map in a way none of these ops can express, do not force a wrong op: reply {"cant": "one short sentence saying what can't be shown on the map"}.`;
+export const scopeSys = () => P('change.scope_system');
+export const patchSys = pl => P('change.system', { edit_types: pl.opDocs() });
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -2513,7 +2492,7 @@ async function flagContext(f, rooms = []) {
 }
 const outlineText = c => c.outline.map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${o.exits.map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
 
-export const scopePrompt = (c1, { start, id, story, what }) => `Map around ${c1.area_name} (${c1.area}) in ${c1.region_name}. Each line: address = name [area]; exits.\n${outlineText(c1)}\n\nStory (messages #${start}-#${id}):\n${story}\n\n${what}\nWhich places did the story change in a lasting way? Reply {"rooms": [addresses], "areas": [area ids changed as a whole (renamed, or general notes changed), e.g. "${c1.area}"]}, or {"rooms": []} if nothing lasting changed.`;
+export const scopePrompt = (c1, { start, id, story, what }) => P('change.scope', { area_name: c1.area_name, area: c1.area, region_name: c1.region_name, outline: outlineText(c1), start, end: id, story, what });
 /** The two small model calls (which rooms; then the patch), checked by the server. Leaves the result on the flag. */
 async function analyzeFlag(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
@@ -2527,7 +2506,7 @@ async function analyzeFlag(id) {
         const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
         const c1 = await flagContext(f);
         const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
-        const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: SCOPE_SYS, responseLength: 200 }));
+        const a1 = parseJsonAnswer(await c.generateRaw({ prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
         const known = [...new Set(c1.outline.map(o => o.address))];
         const toKnown = a => { a = String(a).trim().toLowerCase(); if (known.includes(a)) return a; const t = a.slice(a.indexOf(':') + 1), hit = known.filter(k => k.endsWith(t.includes('/') ? `:${t}` : `/${t}`)); return hit.length === 1 ? hit[0] : null; };
         const areas = [...new Set((a1?.areas ?? []).map(x => String(x).trim().toLowerCase().replace(/\/.*$/, '')))].filter(a => /^[a-z0-9_]+(:[a-z0-9_]+)?$/.test(a)).slice(0, 3);
@@ -2564,10 +2543,9 @@ async function analyzeFlag(id) {
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
-export const DISCOVER_SYS = `You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. Reply with JSON only:
-{"name": "...", "description": "...", "direction": "exit name from the current room", "return_direction": "exit name back", "exit_description": "...", "return_description": "..."}
-name: short display name (e.g. "Guest Room"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. direction: a short hand-written exit name not already used by the current room (e.g. "east guest room", "green door"). return_direction: usually "out" or "hallway". exit_description / return_description: one sentence each about the door from each side.`;
-export const discoverPrompt = (k, { exits, near, story, start, id, note, err }) => `Region: ${k.region_name}. ${k.region_notes}\nArea: ${k.area_name}. ${k.area_notes}\n\nCurrent room: ${k.name} (${k.location})\n${k.description}\nIts exits:\n${exits}\n\nRooms one step away:\n${near}\n\nStory (messages #${start}-#${id}):\n${story}\n\n${note ? `The door: "${clip(note, 200)}".\n` : ''}${err ? `Your last answer did not fit: ${err}. Fix it.\n` : ''}Describe the room behind the door that was opened.`;
+export const discoverSys = () => P('discover.system');
+export const discoverPrompt = (k, { exits, near, story, start, id, note, err }) => P('discover.question', { region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
+    name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
 async function analyzeDiscovery(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
@@ -2584,7 +2562,7 @@ async function analyzeDiscovery(id) {
         const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err });
         let preview = null, ops = null, err = '';
         for (let tries = 0; tries < 2 && !preview; tries++) {
-            const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: DISCOVER_SYS, responseLength: 500 }));
+            const a = parseJsonAnswer(await c.generateRaw({ prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
             // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
             ops = [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
