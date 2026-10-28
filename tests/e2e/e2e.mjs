@@ -1574,6 +1574,21 @@ try {
     await page.evaluate(async ([mod, n, was]) => { const m = await import(mod), c = SillyTavern.getContext(); m.settings().moveMode = was; c.chat.splice(n - 2); await c.saveChat(); await c.reloadCurrentChat(); }, [wsMod, mode0.n, mode0.was]);
     await page.waitForTimeout(1500);
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
+    // /ws-reveal: stamps places as been-there (map + /ws-known + /ws-go use it); "off" and deleting the message undo it.
+    const rvl = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), n0 = c.chat.length;
+        const sc = [m.revealScope('region', ['a:x/1', 'a:y/2', 'b:z/3'], 'a:x/1'), m.revealScope('subregion', ['a:x/1', 'a:y/2'], 'a:x/1'), m.revealScope('a:y', ['a:x/1', 'a:y/2'], 'a:x/1'), m.revealScope('b', ['a:x/1', 'b:z/3'], 'a:x/1'), m.revealScope('a:x/1', ['a:x/1', 'a:x/2'], '')];
+        const known0 = await m.knownText();
+        const t = await c.executeSlashCommandsWithOptions('/ws-reveal all'); await new Promise(r => setTimeout(r, 800));
+        const msg = c.chat[c.chat.length - 1], all = msg.extra?.worldscrawl_reveal?.addresses ?? [];
+        const known1 = await m.knownText();
+        await c.executeSlashCommandsWithOptions('/ws-reveal off'); await new Promise(r => setTimeout(r, 500));
+        const known2 = await m.knownText();
+        await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 800));
+        return { sc, pipe: t.pipe, n: all.length, kind: msg.extra?.worldscrawl_notice_kind, b0: known0.split('. Seen')[0].split(',').length, b1: known1.split('. Seen')[0].split(',').length, b2: known2.split('. Seen')[0].split(',').length };
+    });
+    check('/ws-reveal scopes: region, subregion, a subregion id, a region id, a place id', JSON.stringify(rvl.sc) === JSON.stringify([['a:x/1', 'a:y/2'], ['a:x/1'], ['a:y/2'], ['b:z/3'], ['a:x/1']]), JSON.stringify(rvl.sc));
+    check('/ws-reveal all: one stamped message; every place counts as been-there; off undoes it', rvl.kind === 'reveal' && rvl.n > 10 && rvl.b1 >= rvl.n && rvl.b1 > rvl.b0 && rvl.b2 === rvl.b0 && /revealed/.test(rvl.pipe ?? ''), JSON.stringify(rvl));
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
     await ui.close();
     const popup = page.waitForEvent('popup', { timeout: 10000 }).catch(() => null);
