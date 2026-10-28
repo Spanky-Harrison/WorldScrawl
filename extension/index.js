@@ -1405,7 +1405,8 @@ async function bracketTarget(loc, b, opts) {
     if (!b.target || !opts.length) return null;
     const exact = opts.filter(o => sameName(o.match ?? o.key, b.target) || sameName(o.key, b.target));
     if (exact.length === 1) return exact[0];
-    return await askValid('bracket target', bracketTargetPrompt(loc, b, opts), pickKey(opts));
+    const pick = pickKey(opts);
+    return (await askValid('bracket target', bracketTargetPrompt(loc, b, opts), a => (/^none\b/i.test(String(a).trim()) ? false : pick(a)))) || null; // 'none': no retries
 }
 const failed = (loc, note) => ({ kind: 'bracket_failed', loc, note });
 /** Handle one bracket verb on the player's message. Returns a parseIntent-style result. */
