@@ -1038,7 +1038,7 @@ try {
     await queue([{ content: 'none' }]);
     await send('I [move] sideways', 1);
     lq = (await reqsNow()).slice(rL); bm = await lastChatMsg();
-    check('bracket [move] unknown target: one target-only question, then a clear note, no narration, no move', lq.length === 1 && promptOf(lq[0]).includes('Which of these does "sideways" mean') && bm.kind === 'text' && /no exit or known place called "sideways"/.test(bm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', lq.length + JSON.stringify(bm));
+    check('bracket [move] unknown target: one target-only question, then a clear note, no narration, no move', lq.length === 1 && promptOf(lq[0]).includes('Which of these does \\"sideways\\" mean') && bm.kind === 'text' && /no exit or known place called "sideways"/.test(bm.mes) && (await stored()) === 'riverton:drowned_rat/common_room', lq.length + JSON.stringify(bm) + (await stored()) + promptOf(lq[0] ?? {}).slice(0, 400));
     rL = (await reqsNow()).length;
     await queue([{ content: 'You open the door.' }]);
     await send('I [open] out', 1);
