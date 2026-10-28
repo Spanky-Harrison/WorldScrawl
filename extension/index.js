@@ -1046,9 +1046,11 @@ export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(an
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
 
 // ---- Narrative digging: "I smash a hole in the wall". Small sequential questions, each validated and retried alone.
-export const digSys = () => P('dig.system');
+/** The shared base reply line ({{reply}}) that every system prompt ends with: one, json or text. */
+export const baseReply = kind => P(`pick.base_${kind}`);
+export const digSys = () => P('dig.system', { reply: baseReply('json') });
 export const DIG_TRIES = 2;
-export const pickSys = () => P('pick.system');
+export const pickSys = () => P('pick.system', { reply: baseReply('one') });
 export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
 /** Ask one pick-one question; one retry if the answer matches nothing. */
 async function askValid(label, prompt, validate, systemPrompt = pickSys()) {
@@ -1247,7 +1249,7 @@ export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
 export const travelSys = () => P('travel.system');
 export const travelYesNoPrompt = (loc, said) => P('travel.question', { party: whoMoves(), place: loc.name, said });
-export const intentSys = () => P('intent.system');
+export const intentSys = () => P('intent.system', { reply: baseReply('one') });
 
 /**
  * Ask the model one multiple-choice question about the player's message.
@@ -2253,7 +2255,7 @@ export function broadcastMapState() {
         try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
     }, 150);
 }
-export const expandSys = () => P('expand.system');
+export const expandSys = () => P('expand.system', { reply: baseReply('text') });
 function openMapChannel() {
     const ch = new BroadcastChannel('worldscrawl');
     ch.addEventListener('message', ev => {
@@ -2673,8 +2675,8 @@ export function parseJsonAnswer(text) {
     }
     return null;
 }
-export const scopeSys = () => P('change.scope_system');
-export const patchSys = pl => P('change.system', { edit_types: pl.opDocs(), style: P('change.style') });
+export const scopeSys = () => P('change.scope_system', { reply: baseReply('json') });
+export const patchSys = pl => P('change.system', { reply: baseReply('json'), edit_types: pl.opDocs(), style: P('change.style') });
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -2735,7 +2737,7 @@ async function analyzeFlag(id) {
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
-export const discoverSys = () => P('discover.system', { style: P('discover.style') });
+export const discoverSys = () => P('discover.system', { reply: baseReply('json'), style: P('discover.style') });
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
 /** A discovery answer naming an existing place: one door pair (add_exit) to it. null when the answer is a new room. */
