@@ -59,6 +59,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'discover.question.retry': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: '', err: 'no name' }),
     'narration.flag_hint': ext.flagHint(),
     'narration.wait_hint': ext.waitHint(),
+    'narration.wait_tool': ext.render('narration.wait_tool'),
     'narration.exits_hint': ext.render('narration.exits_hint'),
     'narration.arrival_reminder': ext.arrivalReminder(loc, move),
     'narration.new_door.tools': ext.newDoorLine('You', 'Hall', true),

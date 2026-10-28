@@ -9,7 +9,7 @@ export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -27,6 +27,7 @@ const WORLD_KEY = 'worldscrawl_world'; // {id, version, rebase?, at?, from?}: wh
 const CHANGE_KEY = 'worldscrawl_change'; // {type: 'add_exit'|'remove_exit', ...} on the system message that made the change
 const MODES = ['commands', 'typed', 'tools'];
 const MOVE_KEY = 'worldscrawl_move'; // {direction, from, from_name, to, to_name} on the message that moved
+const WAITCARD_KEY = 'worldscrawl_waitcard'; // {swipe, seconds, sleep, label, until, amount}: a narrator wait waiting for Keep / Adjust / Discard
 const WAIT_KEY = 'worldscrawl_wait'; // {seconds, sleep, label, before}: on the message where time passed without moving
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
@@ -506,6 +507,7 @@ function stampLocation() {
 function applyTools() {
     const c = ctx();
     if (!toolsOn() || !isOn()) { TOOL_NAMES.forEach(n => { try { c.unregisterFunctionTool(n); } catch {} }); return; }
+    if (!hasPrompts()) { ensurePrompts().then(applyTools).catch(e => console.warn('[WorldScrawl]', e.message)); return; } // ws_wait's description is a prompt
     registerTools();
 }
 
@@ -547,7 +549,7 @@ function registerTools() {
             if (action === 'wait' || action === 'sleep') {
                 const w = await planWait(String(note ?? ''), action === 'sleep');
                 if (w.error) return `Could not pass time: ${w.error}`;
-                pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.`;
+                if (!(w.seconds >= MIN_NARRATOR_WAIT)) return 'Under 15 minutes: no time is added to the clock.'; pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.${waitAsk()}`;
             }
             if (action === 'discover') { pendingFlag = { kind: 'discover', hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will add the room behind that door after your reply.'; }
             pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
@@ -556,7 +558,7 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_wait',
         displayName: 'WorldScrawl: Wait or sleep',
-        description: 'Call this when the characters spend a long time where they are without travelling: waiting, resting, or sleeping. Give a duration ("2h", "1h30m", "2d") or a time to wait until ("morning", "dusk", "14:00"). The game clock moves on; the result says the new time.',
+        description: P('narration.wait_tool'),
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
@@ -568,7 +570,7 @@ function registerTools() {
         action: async ({ duration = '', until = '', sleep = false } = {}) => {
             const w = await planWait(waitArgs({ duration, until }), sleep === true || sleep === 'true');
             if (w.error) return `Could not pass time: ${w.error}`;
-            pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.`;
+            if (!(w.seconds >= MIN_NARRATOR_WAIT)) return 'Under 15 minutes: no time is added to the clock.'; pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.${waitAsk()}`;
         },
         formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
     });
@@ -2933,8 +2935,10 @@ export async function onReplyForFlags(id) {
     }
     if (pendingWait) {
         const w = pendingWait; pendingWait = null;
-        stampWait(msg, w); await c.saveChat?.();
-        await applyFacts(); renderAllExits(); broadcastMapState();
+        const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
+        if (what !== 'card' && what !== 'keep') console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`);
+        else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
+        else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
     if (flag) await flagMessage(id, flag);
 }
@@ -2968,6 +2972,48 @@ export async function planWait(args, sleep = false) {
     let afterText = '';
     try { afterText = calendarLib.describeDate(calendarLib.dateAt(now + seconds, t?.start_date ?? null, cal)); } catch {}
     return { seconds, sleep, label, until: p.until ?? null, afterText };
+}
+/** Narrator waits under this are ignored: no card, no clock change. */
+export const MIN_NARRATOR_WAIT = 15 * 60;
+/**
+ * What to do with a wait the narrator proposed, given the chat before its reply: 'short' (under 15 minutes: ignored),
+ * 'explicit' (the player's own turn already passed time: /ws-wait, [wait], [sleep]; ignored so it is not counted twice),
+ * 'keep' (Auto-keep waits) or 'card'. Explicit waits are stamped directly by their own code and never get a card.
+ */
+export function narratorWaitAction(chatBefore, w, autoKeep = false) {
+    if (!(w?.seconds >= MIN_NARRATOR_WAIT)) return 'short';
+    for (let i = chatBefore.length - 1; i >= 0; i--) {
+        const m = chatBefore[i];
+        if (m?.extra?.[WAIT_KEY]?.seconds > 0) return 'explicit';
+        if (m?.is_user && !m.extra?.worldscrawl_engine) break;
+    }
+    return autoKeep ? 'keep' : 'card';
+}
+/** A narrator wait waits for the player: Keep, Adjust or Discard on a card (unless Auto-keep waits is on). */
+const waitAsk = () => (settings().autoKeepWaits ? '' : ' (The player will confirm it.)');
+/** The amount as the player would type it: "until morning", "2h 30m". */
+export const waitAmount = w => (w.until ? `until ${w.until}` : calendarLib?.formatDuration ? calendarLib.formatDuration(w.seconds) : `${Math.round(w.seconds / 60)}m`);
+export function proposeWait(msg, w) {
+    msg.extra = msg.extra ?? {};
+    msg.extra[WAITCARD_KEY] = { swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w) };
+}
+/** Keep (amount unchanged) or Adjust (a new amount) a proposed wait: the same stamp as a narrator wait kept at once. */
+export async function keepWait(id, amount = null) {
+    const c = ctx(), msg = c.chat?.[id], p = msg?.extra?.[WAITCARD_KEY];
+    if (!p) return 'no wait to keep';
+    let w = p;
+    if (amount != null && String(amount).trim() && String(amount).trim().toLowerCase() !== String(p.amount).toLowerCase()) {
+        w = await planWait(String(amount), p.sleep);
+        if (w.error) { toastr.warning(`WorldScrawl: ${w.error}`); return w.error; }
+    }
+    stampWait(msg, w); delete msg.extra[WAITCARD_KEY];
+    await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    return '';
+}
+export async function discardWait(id) {
+    const c = ctx(), msg = c.chat?.[id];
+    if (msg?.extra) delete msg.extra[WAITCARD_KEY];
+    await c.saveChat?.(); renderPatchCards();
 }
 function stampWait(msg, w) {
     msg.extra = msg.extra ?? {};
@@ -3051,7 +3097,8 @@ export function renderPatchCards() {
         if (!isOn()) { el.querySelector('.worldscrawl_flag_btn')?.remove(); continue; }
         const f = msg.extra?.[FLAG_KEY];
         const kept = patchesOn(msg);
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length) continue;
+        const wc = msg.extra?.[WAITCARD_KEY], waitCard = wc && (wc.swipe ?? 0) === swipeOf(msg);
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -3095,6 +3142,19 @@ export function renderPatchCards() {
                         : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before keeping it'),
                     cardButton(form ? 'Keep edited' : 'Keep', () => keepFlag(id)), cardButton('Discard', () => { openForms.delete(`${id}|flag`); discardFlag(id); }));
             }
+        }
+        if (waitCard) {
+            const d = document.createElement('div'); d.className = 'worldscrawl_waitcard';
+            d.append(line(`⏳ The narrator passed time: ${wc.label}.`));
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.value = wc.amount; inp.className = 'text_pole worldscrawl_wait_amount'; inp.title = 'e.g. 45m, 2h, 1h30m, until dawn';
+            inp.style.cssText = 'width:9em;display:inline-block;margin:0 4px;padding:1px 4px;';
+            inp.addEventListener('click', e => e.stopPropagation());
+            d.append(cardButton('Keep', () => keepWait(id), `Let ${wc.amount} pass`), inp, cardButton('Adjust', () => keepWait(id, inp.value), 'Let the amount in the box pass instead'),
+                cardButton('Discard', () => discardWait(id), 'No time passes'));
+            const note = line('A shortened or discarded wait may disagree with the story text; swipe the reply to fix that.');
+            note.style.opacity = '0.7'; note.style.fontSize = '0.9em'; d.append(note);
+            card.append(d);
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
         const carrier = isCarrier(msg), showAll = !!settings().showEditMessages; // Debug > Show map edit messages: full message, list open
@@ -3177,6 +3237,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
       <label class="checkbox_label"><input id="worldscrawl_review_discoveries" type="checkbox"> Ask before adding a discovered room (show the Keep / Discard card)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
+      <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Keep the narrator's waits without asking (skip the Keep / Adjust / Discard card)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="typed"> Clicks, commands and typed moves</label>
@@ -3207,6 +3268,9 @@ function addSettingsPanel() {
     const autoKeep = document.getElementById('worldscrawl_auto_keep');
     autoKeep.checked = !!settings().autoKeep;
     autoKeep.addEventListener('change', () => { settings().autoKeep = autoKeep.checked; ctx().saveSettingsDebounced(); });
+    const akw = document.getElementById('worldscrawl_auto_keep_waits');
+    akw.checked = !!settings().autoKeepWaits;
+    akw.addEventListener('change', () => { settings().autoKeepWaits = akw.checked; ctx().saveSettingsDebounced(); });
     const reviewDisc = document.getElementById('worldscrawl_review_discoveries');
     reviewDisc.checked = !!settings().reviewDiscoveries;
     reviewDisc.addEventListener('change', () => { settings().reviewDiscoveries = reviewDisc.checked; ctx().saveSettingsDebounced(); });
