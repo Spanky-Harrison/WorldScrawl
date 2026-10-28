@@ -49,9 +49,9 @@ test('resolver: unknown subregion falls back to the region entrance, unknown reg
     assert.equal(resolve('riverton:nowhere/void').address, w.regions.get('riverton').entrance);
     assert.deepEqual([resolve('atlantis:x/y').address, resolve('atlantis:x/y').how], [w.start, 'start']);
 });
-test('resolver: redirects from before the stamp are ignored with since', () => {
+test('resolver: an active move redirects forward even for a position stamped after it (e.g. while it was off)', () => {
     const ch = [{ ...merge(), _msg: 2 }];
-    assert.equal(resolve(YARD, ch, { since: 5 }).how === 'merged', false);
+    assert.equal(resolve(YARD, ch, { since: 5 }).how, 'merged');
 });
 test('resolver: swiping away the change that made the room walks back the move history', () => {
     const r = resolve(MERGED, [], { history: ['riverton:gone/x', SQUARE, TAVERN] });
