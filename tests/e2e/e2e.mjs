@@ -1758,7 +1758,7 @@ try {
         const view = await ui.evaluate(() => ({ hidden: document.getElementById('windows').hidden, cards: document.querySelectorAll('.pe-card').length, close: !!document.querySelector('.toolview-close'), resize: getComputedStyle(document.querySelector('.pe-text')).resize, sel: document.querySelector('.pe-profile').value }));
         check('Prompt Editor takes over the view with a Close button; one card per prompt; textareas resize vertically; on Default', view.hidden && view.cards >= 60 && view.close && view.resize === 'vertical' && view.sel === 'Default', JSON.stringify(view));
         const grp = await ui.evaluate(() => [...document.querySelectorAll('details.pe-group')].map(d => ({ id: d.dataset.group, open: d.open, count: d.querySelector('.pe-count')?.textContent, flow: !!d.querySelector('.pe-flow')?.textContent.trim(), pieces: !!d.querySelector('details.pe-pieces') })));
-        check('prompts are in collapsed groups with flow text and a prompt count', grp.length === 8 && grp.every(g => !g.open && /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'narration')?.pieces, JSON.stringify(grp));
+        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 8 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces, JSON.stringify(grp));
         const openAll = () => ui.evaluate(() => document.querySelectorAll('details.pe-group, details.pe-pieces').forEach(d => { d.open = true; }));
         await openAll(); await ui.waitForTimeout(200);
         const lk = await ui.evaluate(() => { const c = document.querySelector('.pe-card[data-id="intent.system"]'); return { lock: !!c.querySelector('.pe-lock'), why: c.querySelector('.pe-locked')?.textContent, ro: c.querySelector('.pe-text').readOnly, shown: c.offsetHeight > 0 }; });
@@ -1790,7 +1790,7 @@ try {
         await card('dig.stay').locator('.pe-submit').click(); await ui.waitForTimeout(500);
         check('removing a required placeholder warns, and asks before saving (declined: not saved)', /said/.test(warn) && await card('dig.stay').locator('.pe-overridden').count() === 0, warn);
         await card('dig.stay').locator('.pe-undo').click();
-        const ec = await ui.locator('details.pe-group[data-group="expand"] .pe-edited-count').textContent();
+        const ec = await ui.locator('details.pe-group[data-group="style"] .pe-edited-count').textContent();
         check('a group shows how many of its prompts are edited', /1 edited/.test(ec), ec);
         // An older default under the override: the editor shows "default changed" with a diff.
         const fs = await import('node:fs'), f = '/tmp/st-ws/default-user/worldscrawl/prompts.json';

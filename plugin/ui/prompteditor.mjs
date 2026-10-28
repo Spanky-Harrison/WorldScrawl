@@ -57,7 +57,8 @@ const h = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag)
 export function promptEditor(root, io, ui = {}) {
     ui = { ask: (q, d) => prompt(q, d), confirm: t => confirm(t), unlocked: () => false, ...ui };
     let st = null, dirty = new Map(); // id -> unsaved text
-    const opened = new Set(); // group ids (and 'pieces:<group id>') the user opened; everything starts collapsed
+    const opened = new Set(); // group ids (and 'pieces:<group id>') the user opened; groups start collapsed unless the file says open: true
+    let seeded = false;
     const status = h('span', { class: 'pe-status', role: 'status' });
     const say = t => { status.textContent = t; };
     const head = h('div', { class: 'pe-profiles' }), list = h('div', { class: 'pe-list' });
@@ -140,6 +141,7 @@ export function promptEditor(root, io, ui = {}) {
             d.addEventListener('toggle', () => { if (q) return; if (d.open) opened.add(key); else opened.delete(key); });
             return d;
         };
+        if (!seeded && st.groups) { seeded = true; for (const g of st.groups) if (g.open) opened.add(g.id); }
         list.replaceChildren(...groupPrompts(hits, st.groups).map(({ group: g, main, pieces }) => {
             const all = [...main, ...pieces], edited = all.filter(e => ov(e.id)).length;
             return section(g.id, 'pe-group', [h('span', { class: 'pe-group-title' }, g.title),

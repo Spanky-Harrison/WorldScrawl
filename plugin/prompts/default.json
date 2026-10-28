@@ -3,6 +3,12 @@
   "about": "WorldScrawl prompts. Edit them in the map window: Tools > Prompt Editor. {{name}} is filled in by the game.",
   "groups": [
     {
+      "id": "style",
+      "title": "Writing style",
+      "open": true,
+      "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through names and describes the new room. Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
+    },
+    {
       "id": "intent",
       "title": "Player intent",
       "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'."
@@ -177,9 +183,9 @@
     {
       "id": "dig.name",
       "title": "Breaking through: new room name",
-      "description": "Step 3 of 5 (somewhere new only): a name for the new room. Asks for a name for the new room behind the opening.",
-      "group": "dig",
-      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
+      "description": "Used by Breaking through. Step 3 of 5 (somewhere new only): a name for the new room. Asks for a name for the new room behind the opening.",
+      "group": "style",
+      "process": "dig",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room. Name it in 2-3 words (like Dusty Crawlspace). Reply with just the name.",
       "placeholders": [
         {
@@ -196,9 +202,9 @@
     {
       "id": "dig.description",
       "title": "Breaking through: new room description",
-      "description": "Step 4 of 5 (somewhere new only): a one-sentence description of the new room. Asks for a one-sentence description of the new room.",
-      "group": "dig",
-      "locked": "The game reads the answer (a direction, a name or a yes/no) back; changing this can break breaking through.",
+      "description": "Used by Breaking through. Step 4 of 5 (somewhere new only): a one-sentence description of the new room. Asks for a one-sentence description of the new room.",
+      "group": "style",
+      "process": "dig",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nThe opening leads to a new room called {{name}}. Describe it in one short sentence. Reply with just the sentence.",
       "placeholders": [
         {
@@ -542,14 +548,16 @@
       "title": "Narration: first line",
       "description": "Step 1 of 5: the first line. First line of the world state given to the narrator each turn.",
       "group": "narration",
+      "locked": "The narrator relies on this marker to know the block is from the game.",
       "text": "[World state from the game engine. This is authoritative.]",
       "placeholders": []
     },
     {
       "id": "narration.move",
       "title": "Narration: a move",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): What just happened, for a one-step move.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): What just happened, for a one-step move.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} moved {{direction}} from {{from}} to {{to}}.{{arrival}} Describe arriving in {{where}}.",
       "placeholders": [
         {
@@ -576,8 +584,9 @@
     {
       "id": "narration.travel",
       "title": "Narration: a journey",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): What just happened, for a trip through several places.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): What just happened, for a trip through several places.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} travelled from {{from}} through {{via}} to {{to}}{{cut_short}}.{{arrival}} Narrate the journey briefly, in that order, ending with arriving in {{where}}.",
       "placeholders": [
         {
@@ -608,8 +617,9 @@
     {
       "id": "narration.travel_cut_short",
       "title": "Narration: a journey cut short",
-      "description": "Piece: Fills {{cut_short}} when the trip stopped early.",
-      "group": "narration",
+      "description": "Used by Narration. Piece: Fills {{cut_short}} when the trip stopped early.",
+      "group": "style",
+      "process": "narration",
       "piece": true,
       "text": " (the trip was cut short there)",
       "placeholders": []
@@ -617,8 +627,9 @@
     {
       "id": "narration.dig_through",
       "title": "Narration: broke through and went",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): broke through and went.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): broke through and went.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from {{from}}, and went straight through it.{{arrival}} Narrate breaking through and arriving in {{where}}.",
       "placeholders": [
         {
@@ -642,8 +653,9 @@
     {
       "id": "narration.dig_here",
       "title": "Narration: broke through, stayed",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): broke through, stayed.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): broke through, stayed.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. It exists now and is listed in the exits. {{party}} has not gone through it yet and is still at {{place}}. Narrate the breakthrough.",
       "placeholders": [
         {
@@ -663,8 +675,9 @@
     {
       "id": "narration.dig_failed",
       "title": "Narration: breaking through failed",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): breaking through failed.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): breaking through failed.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} tried to break through, but nothing gave way. No new opening exists. {{party}} is still at {{place}}. Narrate the attempt failing.",
       "placeholders": [
         {
@@ -678,8 +691,9 @@
     {
       "id": "narration.door_stuck",
       "title": "Narration: a stuck door",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): a stuck door.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): a stuck door.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} tries to open the {{door}}, but it {{why}}. It stays shut. {{party}} stays at {{place}}.",
       "placeholders": [
         {
@@ -699,8 +713,9 @@
     {
       "id": "narration.door",
       "title": "Narration: opening or closing a door",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): opening or closing a door.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): opening or closing a door.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} {{verb}} the {{door}}. {{party}} stays at {{place}}.",
       "placeholders": [
         {
@@ -721,8 +736,9 @@
     {
       "id": "narration.new_door",
       "title": "Narration: a door not on the map",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): a door not on the map.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): a door not on the map.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} tries a door that is not among the exits. If such a door plausibly fits {{place}} (its description and the area notes), narrate it opening and {{how_to_flag}}; the engine adds the room behind it. If no such door fits, narrate that there is none. {{party}} stays at {{place}} for now.",
       "placeholders": [
         {
@@ -760,8 +776,9 @@
     {
       "id": "narration.look_around",
       "title": "Narration: looking around",
-      "description": "Step 2 of 5 (one 'what just happened' line is picked): looking around.",
-      "group": "narration",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): looking around.",
+      "group": "style",
+      "process": "narration",
       "text": "What just happened: {{party}} looks around {{place}}. {{party}} stays here.",
       "placeholders": [
         {
@@ -775,8 +792,9 @@
     {
       "id": "narration.on_the_way",
       "title": "Narration: on the way",
-      "description": "Step 3 of 5 (after a move): things passed on the way. Things passed during a move.",
-      "group": "narration",
+      "description": "Used by Narration. Step 3 of 5 (after a move): things passed on the way. Things passed during a move.",
+      "group": "style",
+      "process": "narration",
       "text": "On the way: {{steps}} Work this into the narration of the move.",
       "placeholders": [
         {
@@ -788,8 +806,9 @@
     {
       "id": "narration.exits_hint",
       "title": "Narration: mention the exits",
-      "description": "Step 4 of 5 (after a move or looking around): mention the exits. Added after a move or looking around.",
-      "group": "narration",
+      "description": "Used by Narration. Step 4 of 5 (after a move or looking around): mention the exits. Added after a move or looking around.",
+      "group": "style",
+      "process": "narration",
       "text": "In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.",
       "placeholders": []
     },
@@ -798,6 +817,7 @@
       "title": "Narration: last line (tools on)",
       "description": "Step 5 of 5 (map tools on): the last line.",
       "group": "narration",
+      "locked": "Keeps the narrator from inventing places the map does not have.",
       "text": "Do not invent locations or exits that are not listed.",
       "placeholders": []
     },
@@ -806,6 +826,7 @@
       "title": "Narration: last line (tools off)",
       "description": "Step 5 of 5 (map tools off): the last line.",
       "group": "narration",
+      "locked": "Keeps the narrator from moving the party itself; the game controls movement.",
       "text": "You only narrate. The game engine controls movement: never move {{party}} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.",
       "placeholders": [
         {
@@ -818,6 +839,7 @@
       "title": "Narration: arrival reminder",
       "description": "Alongside (move and travel turns): a short reminder after the latest message. Short last-line reminder on move and travel turns.",
       "group": "narration",
+      "locked": "Tells the narrator where the turn ends; the game relies on it to keep the story and map in step.",
       "text": "[Engine: this turn ends in {{where}}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
       "placeholders": [
         {
@@ -846,18 +868,18 @@
     {
       "id": "expand.system",
       "title": "Expand with AI: system prompt",
-      "description": "Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields.",
-      "group": "expand",
-      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
+      "description": "Used by Expand with AI. Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields.",
+      "group": "style",
+      "process": "expand",
       "text": "You write short, vivid setting text for a text adventure map. Reply with only the text: no title, no quotes, no notes.",
       "placeholders": []
     },
     {
       "id": "expand.question",
       "title": "Expand with AI: the request",
-      "description": "Step 1 of 1: the request. {{context}} is the region, area and connected places, made by the game.",
-      "group": "expand",
-      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
+      "description": "Used by Expand with AI. Step 1 of 1: the request. {{context}} is the region, area and connected places, made by the game.",
+      "group": "style",
+      "process": "expand",
       "text": "{{context}}\nWrite the {{field}} for the {{kind}} \"{{name}}\".{{draft}}\nTwo to four sentences of plain prose, fitting the setting above. Reply with only the text.",
       "placeholders": [
         {
@@ -884,30 +906,30 @@
     {
       "id": "expand.field_description",
       "title": "Expand with AI: describing a description",
-      "description": "Piece: Fills {{field}} for a description.",
-      "group": "expand",
+      "description": "Used by Expand with AI. Piece: Fills {{field}} for a description.",
+      "group": "style",
+      "process": "expand",
       "piece": true,
-      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "description (what a visitor sees, hears and smells)",
       "placeholders": []
     },
     {
       "id": "expand.field_notes",
       "title": "Expand with AI: describing notes",
-      "description": "Piece: Fills {{field}} for notes.",
-      "group": "expand",
+      "description": "Used by Expand with AI. Piece: Fills {{field}} for notes.",
+      "group": "style",
+      "process": "expand",
       "piece": true,
-      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "notes (facts for the narrator: who is here, what goes on, secrets)",
       "placeholders": []
     },
     {
       "id": "expand.draft",
       "title": "Expand with AI: keep the draft",
-      "description": "Piece: Added when the field already has text.",
-      "group": "expand",
+      "description": "Used by Expand with AI. Piece: Added when the field already has text.",
+      "group": "style",
+      "process": "expand",
       "piece": true,
-      "locked": "The reply is put straight into the place form; changing this can spoil Expand with AI.",
       "text": "Expand on this draft, keeping everything in it: {{text}}",
       "placeholders": [
         {
