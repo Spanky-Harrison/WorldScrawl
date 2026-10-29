@@ -111,6 +111,11 @@ export function placeWeatherNow(loc, chat = ctx().chat ?? []) {
     try { return weatherLib.placeWeather(t.weather, loc.weather, weatherLib.absSeconds(d, t.calendar), t.calendar); } catch (e) { console.warn('[WorldScrawl] weather:', e.message); return null; }
 }
 /** Seconds of travel stamped on this chat's messages since its world's start_date. */
+/** Game seconds elapsed at message `index` (the shared clock lookup; kept waits and moves only, wait cards count once kept). */
+export function clockAt(index, chat = ctx().chat ?? []) {
+    const base = chatWorld(chat);
+    return calendarLib ? calendarLib.clockAt(chat, index, base?.rebase ? base.index : -1) : 0;
+}
 export function chatElapsed(chat = ctx().chat ?? []) {
     const base = chatWorld(chat);
     const from = base?.rebase ? base.index : -1;
@@ -498,7 +503,7 @@ export function narratedView(chat) {
     }
     const head = chat.slice(0, L + 1);
     const changes = chatChanges(head).map(c => { const k = `${c._msg}|${c.id}`; return flips.has(k) ? { ...c, off: flips.get(k) } : c; });
-    return { index: L, address, changes, now: chatElapsed(head) };
+    return { index: L, address, changes, now: clockAt(L, chat) };
 }
 /** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo). */
 async function aftermathNote(chat, loc) {

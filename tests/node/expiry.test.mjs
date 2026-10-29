@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
+import { clockAt, sumTravel } from '../../plugin/ui/calendar.mjs';
 
 const c = client(RIVERTON);
 const LANE = 'riverton:streets/market_lane', STABLE = 'riverton:drowned_rat/stable', KITCHEN = 'riverton:drowned_rat/kitchens';
@@ -166,4 +167,28 @@ test('aftermath: a one-time line when the room the narrator last saw is gone or 
     // Nothing changed (or already narrated): no line.
     assert.equal(am({ then: { changes: ch, now: H, address: LANE }, changes: ch, now: H, address: LANE }).note, '');
     assert.equal(am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: 10, address: SQUARE }).note, '');
+});
+
+test('a pending wait card does not cross an expiry until kept; Adjust rechecks; Discard never triggers it', () => {
+    const ch = [stall()];
+    const card = s => ({ mes: 'They rest.', extra: { worldscrawl_waitcard: { seconds: s } } });
+    const kept = s => ({ mes: 'They rest.', extra: { worldscrawl_wait: { seconds: s } } });
+    const at = chat => clockAt(chat, chat.length - 1);
+    const expiredAt = chat => !!resolve(BOOTH, ch, at(chat), [LANE]).expired;
+    const start = [{ mes: 'hi', extra: {} }];
+    assert.equal(expiredAt([...start, card(2 * H)]), false, 'pending card: no expiry yet');
+    assert.equal(expiredAt([...start, kept(2 * H)]), true, 'kept: the expiry happens');
+    assert.equal(expiredAt([...start, kept(10 * 60)]), false, 'adjusted down to 10 minutes: not crossed');
+    assert.equal(expiredAt([...start, { mes: 'They rest.', extra: {} }]), false, 'discarded: never');
+});
+test('clockAt: the game time at any message, from one memo that follows edits', () => {
+    const chat = [{ extra: {} }, { extra: { worldscrawl_move: { seconds: 60 } } }, { extra: { worldscrawl_wait: { seconds: 600 } } }, { extra: { worldscrawl_waitcard: { seconds: 9999 } } }, { extra: { worldscrawl_move: { seconds: 30 } } }];
+    assert.deepEqual(chat.map((_, i) => clockAt(chat, i)), [0, 60, 660, 660, 690]);
+    assert.equal(sumTravel(chat), 690);
+    chat[2].extra.worldscrawl_wait.seconds = 1200; // Adjust after the fact
+    assert.equal(clockAt(chat, 4), 1290);
+    chat.splice(1, 1); // deleted message
+    assert.equal(clockAt(chat, 3), 1230);
+    assert.equal(clockAt(chat, 3, 1), 30, 'counts only after a rebase point');
+    assert.equal(clockAt(chat, 99), 1230);
 });
