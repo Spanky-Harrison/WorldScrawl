@@ -38,16 +38,25 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
 - **No stand-ins.** A saved NPC appears only via their schedule, by following the party, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
-- **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, time_of_day, chance }`, the place and time of day they were met. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
-  - **Chance:** roughly **50%** when the party is in that area around that time of day, **lower (about 10%)** at other times.
-  - **By name:** when the player looks for them by name, they get a re-roll.
-  - **Deterministic rolls:** the sighting roll is seeded from the NPC id, the place and the game day (from `clockAt`), so swiping or regenerating can't flip the result. The by-name re-roll has its own seed, **per NPC + game day (not per attempt)**: repeated searches on the same day get the same answer, so it's effectively one search per day.
-  - **Stamped:** a successful appearance is stamped on the message (so deleting it undoes the appearance).
+- **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, hour, chance }`: the place and the hour they were met, and the peak chance. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
+  - **Graduated by hour.** The time they were met rounds down to its hour: seen at 4:17 PM peaks from 4 to 5 PM. The chance drops sharply per hour away from the peak, when the party is in that area:
+
+    | Hours from the peak hour | Chance |
+    |---|---|
+    | 0 (peak) | ~50% |
+    | 1 | ~20% |
+    | 2 | ~5% |
+    | 3 or more | ~2% |
+
+    Quarter-hour granularity was considered and rejected as too complex.
+  - **One roll per day.** Each NPC gets one roll (0-99) per game day, seeded deterministically from the NPC id, the place and the game day (from `clockAt`), and reused all day. Every check compares that same roll to the current hour's chance. So with a roll of 30, showing up an hour early (20%) misses her, while the same roll succeeds during the peak hour (50%). Swiping or regenerating can't flip a result.
+  - **Looking for them by name** adds a second roll for the day, seeded separately (per NPC per game day, not per attempt), and the better (lower) of the two rolls is used from then on. Searching again the same day changes nothing.
+  - **Stays for the hour.** Once she appears, the appearance is stamped on the message and she stays for the rest of that hour, so leaving and coming back doesn't make her vanish. Deleting the message undoes the appearance.
   - A one-off who gets a real schedule later (written by a creator or via Export to cast) stops using the sighting.
 
   ```json
   { "id": "maren", "name": "Maren", "line": "A traveling knife-grinder with a squeaky cart.",
-    "seen_at": { "place": "riverton/market-square", "time_of_day": "morning", "chance": 0.5 } }
+    "seen_at": { "place": "riverton/market-square", "hour": 16, "chance": 0.5 } }
   ```
 
 ### Following
@@ -214,6 +223,6 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
 7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
-9. **Sighting areas and times:** what counts as "in that area" (the same room, the same subregion?) and "around that time" (the same time-of-day bucket, or a window in hours)? Are 50% and 10% fixed, or per-NPC/creator settings?
+9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the party isn't at the sighting place (e.g. asking around for her elsewhere)?
 10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
 11. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
