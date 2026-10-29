@@ -325,10 +325,10 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const npc = isObj(body.npc) ? body.npc : body.record;
             if (!isObj(npc)) bad('npc', 'Input should be a valid dictionary', npc ?? null);
             let wrote;
-            try { wrote = writeCastNpc(lw.root, npc); } catch (e) { throw new HttpError(422, e.message); }
+            try { wrote = writeCastNpc(lw.root, npc, { update: body.update === true }); } catch (e) { throw new HttpError(422, e.message); }
             const fresh = new LoadedWorld(lw.id, lw.root);
             worlds.set(lw.id, fresh);
-            return { ok: true, id: wrote.id, file: wrote.file, renamed: wrote.renamed, record: wrote.record, map_version: fresh.version };
+            return { ok: true, id: wrote.id, file: wrote.file, renamed: wrote.renamed, updated: wrote.updated, record: wrote.record, map_version: fresh.version };
         },
         'GET /start': ({ q }) => { const w = get_world(q('world')).world; return w.to_dict(w.get(w.start)); },
         'GET /rooms': ({ q }) => {

@@ -72,7 +72,7 @@ There is never a single "party" entity. The player and companions are **individu
 
 ### Following
 
-A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the actor they follow is (usually the player), overriding their schedule, until told to stay (another stamp, which also puts them back on their schedule at that place, or at their normal entry).
+A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the actor they follow is (usually the player), overriding their schedule, until told to stay or wait. A **stay** stamp holds them at the place they are in when told, and does not send them back to the schedule. The hold lasts until the next schedule entry starts (or, for a one-off with no schedule, until that sighting hour ends), or until the player leaves and comes back to them, or until they are asked to follow again. Only then do they return to the schedule. The leaving-a-scene rule still applies, so when the hold ends while the player is with them they do not vanish; the narrator gets the overdue note instead.
 
 **Invented details.** The model will make up small facts (a scar, a sister's name, a favorite drink). With the long history gone, these must be saved or they get contradicted later. After each reply, the same flag step the map uses (`ws_flag`) lets the narrator report new facts about present NPCs; the engine stamps them as `npc_fact` on the reply. A "Character changed here" bar (Edit / Turn off / Undo) shows them, like "Map changed here".
 
@@ -158,7 +158,9 @@ worlds/riverton/
 
 One file per NPC. Copy the `cast/` folder out as a set, or any single file. Base records are clean templates; everything that changes in play is stamps.
 
-**Export to cast:** an NPC who grew during play (the farmer who got a name, a tattoo and a history) exists only as stamps in that chat. "Export to cast" writes his current state (base record + all active stamps) into a clean record file, either into the world's `cast/` or a standalone file. This is the same idea as the existing "save chat as a new world" render, scoped to one NPC.
+**Export to cast:** an NPC who grew during play (the farmer who got a name, a tattoo and a history) exists only as stamps in that chat. "Export to cast" writes his current state (base record + all active stamps) into a clean record file in the world's `cast/`. This is the same idea as the existing "save chat as a new world" render, scoped to one NPC.
+
+If that person **already came from a cast file with the same id**, the button is **Update &lt;name&gt;**. It shows a diff of the played record against the file, and on confirm writes that file in place. A person **created in play** never overwrites a file. A genuine clash with a different NPC (the id is already taken) writes `id-2`, `id-3`, and so on, and the old file stays.
 
 ## Schedule stub (phase 1)
 
@@ -279,8 +281,8 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 3. **Read-back range:** how far back can "since they first appeared" go in a long chat, and how is the first appearance found (asked of the model, or the earliest message mentioning them)?
 4. **Memory cap:** how many highlights per NPC before older ones are summarized, and who summarizes?
 5. **Depth decision:** a separate pick-one question, or folded into the existing intent call to save a round trip?
-6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
-7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
+6. **Export conflicts (decided):** a person who already came from a cast file with the same id is **Update &lt;name&gt;**: a diff, then write that file in place on confirm. A person created in play never overwrites. A genuine clash with a different NPC (the id is taken) gets `id-2`, `id-3`, and so on. Play-created ids are name slugs.
+7. **Following and stay (decided):** told to stay or wait, they hold the place they are in. They do not go back to the schedule until the next schedule entry starts, a one-off's sighting hour ends, the player leaves and comes back, or they are asked to follow again. The leaving-a-scene rule still applies when the hold ends. They do not drift (that is phase 4).
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
 9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the player isn't at the sighting place (e.g. asking around for her elsewhere)?
 10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
