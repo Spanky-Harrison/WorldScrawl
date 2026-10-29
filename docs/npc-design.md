@@ -34,11 +34,21 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 
 - **Passersby stay scenery:** no record, no card. Asking the barmaid for a drink does not create an NPC.
 - **Suggestion:** after about **3 replies involving the same person**, the engine suggests a **Keep / Adjust / Discard** card.
-- **Explicit:** the player can ask at any time with `[keep]` (in a message) or `/ws-npc`.
+- **Explicit:** the player can ask at any time with `[remember]` in a message (e.g. "I'm going to [remember] Maren") or `/ws-npc`.
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
 - **No stand-ins.** A saved NPC appears only via their schedule, by following the party, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
-- **One-offs:** a saved NPC met once gets a single schedule entry at the place they were met, but is still never auto-picked as an anonymous extra.
+- **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, time_of_day, chance }`, the place and time of day they were met. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
+  - **Chance:** roughly **50%** when the party is in that area around that time of day, **lower (about 10%)** at other times.
+  - **By name:** when the player looks for them by name, they get a re-roll.
+  - **Deterministic rolls:** the sighting roll is seeded from the NPC id, the place and the game day (from `clockAt`), so swiping or regenerating can't flip the result. The by-name re-roll has its own seed, **per NPC + game day (not per attempt)**: repeated searches on the same day get the same answer, so it's effectively one search per day.
+  - **Stamped:** a successful appearance is stamped on the message (so deleting it undoes the appearance).
+  - A one-off who gets a real schedule later (written by a creator or via Export to cast) stops using the sighting.
+
+  ```json
+  { "id": "maren", "name": "Maren", "line": "A traveling knife-grinder with a squeaky cart.",
+    "seen_at": { "place": "riverton/market-square", "time_of_day": "morning", "chance": 0.5 } }
+  ```
 
 ### Following
 
@@ -136,7 +146,7 @@ Real movement over time comes in phase 4, using the game clock (`clockAt`) to pi
 
 ## Phases
 
-1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[keep]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, met flag and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation.
+1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, met flag and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
 2. **Body and features:** body areas, features with short/long text, seen marks, simple coverage and coverage stamps, assembled descriptions.
 3. **Wardrobe:** garment library, tags, outfits by tags, tag-informed reactions.
 4. **Schedules and life off-screen:** NPCs move between places over game time, map changes re-check affected schedule entries (dependent stamps), NPC-only scenes as a common tool.
@@ -204,4 +214,6 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
 7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
-9. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
+9. **Sighting areas and times:** what counts as "in that area" (the same room, the same subregion?) and "around that time" (the same time-of-day bucket, or a window in hours)? Are 50% and 10% fixed, or per-NPC/creator settings?
+10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
+11. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
