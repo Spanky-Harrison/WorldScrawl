@@ -72,7 +72,7 @@ A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is pr
 | Tier | Sent when | Contents |
 |---|---|---|
 | **Present** | NPC is in the scene but not the focus | Name, 1-2 sentence description, current activity (from schedule) |
-| **Focused** | Player `[look]`s at or talks to them | Full visible appearance, manner, voice, `met` status, relevant memory highlights |
+| **Focused** | Player `[look]`s at or talks to them | Full visible appearance, manner, voice, disposition, relevant memory highlights |
 | **Deep** | The conversation goes there (history, secrets, relationships, what they think of the player) | Deep fields, only the relevant ones |
 
 The engine decides tiers **before generation**, as part of the per-message intent call we already make: one extra pick-one question ("who is the player addressing / looking at?", keys are NPC names, lenient matching, plus `nobody`) and a depth question (`present` / `focused` / `deep`). Start with simple rules: who the player named, touched or addressed.
@@ -94,9 +94,24 @@ The prompt gets the slices through new placeholders in `default.json` (e.g. `{{n
 
 ## Memory
 
-- **`met`** flag first: has this NPC met the party? (stamp)
+- **Disposition** (replaces the old `met` flag; phase 1), see below.
 - **Highlights:** short notes like "met the party at the inn; owes them a favor". Added by the flag step as `npc_memory` stamps, kept tight (a cap per NPC, oldest/least important summarized away later).
 - Fed only when the NPC is focused, or when the reply clearly concerns them.
+
+## Disposition (phase 1)
+
+How the NPC feels about someone, using the classic D&D attitudes: `unknown`, `hostile`, `unfriendly`, `indifferent`, `friendly`, `helpful`.
+
+- **A map keyed by the person,** e.g. `{"player": {"value": "friendly", "reason": "..."}}`. v1 only uses the `player` key, but companions and other NPCs can be added later without a migration.
+- **Starts as `unknown`.** On first meeting, a pick-one call (text keys, lenient matching, one retry) assigns one, leaning heavily toward `indifferent`, which is also the fallback.
+- **Creators can set a starting disposition** in the cast file (then no first-meeting call is needed).
+- **Changes are stamps** (`npc_disposition`) with a short reason, at most one step per reply (e.g. indifferent to friendly) unless something dramatic happens (an attack, a rescue).
+- **In the prompt:** the current disposition and its reason go in whenever the NPC is present (every tier).
+- **Later:** persuasion checks hook into it once stats exist (future work).
+
+```json
+"disposition": { "player": { "value": "friendly", "reason": "The party paid off her tab." } }
+```
 
 ## Body and features (phase 2)
 
@@ -169,9 +184,23 @@ When a map change (patch) touches a place, a small call checks the schedule entr
 
 Real movement over time comes in phase 4, using the game clock (`clockAt`) to pick the active entry and the snapshot cache (`snapcache.mjs`) to keep per-reply resolution cheap.
 
+## Waiting until (to-do, likely alongside phase 1)
+
+Waiting until an NPC shows up is the natural partner to sightings and schedules.
+
+- **`[wait]` always requires a duration or an end time.** A wait with no time gets a note asking how long (nothing is stamped).
+- **Optional end conditions can only end it early,** never extend it:
+  - **a specific NPC shows up:** step hour by hour through the deterministic sighting/schedule rolls (the same seeded rolls as normal play, so the result matches what would have happened by walking in at that hour);
+  - **a weather condition** (seeded, same hour-by-hour loop);
+  - **a temporary change ends:** `lasts` expiries are known exactly, so jump straight to them.
+- **Interruptions stop it early too,** such as an expiry or an arrival, as the wait already does today.
+- The wait stamp records where it actually stopped and why, so deleting the message undoes it.
+
+**Does `[wait] until 5pm` parse today?** Checked against master: the strict parser (`parseWait` in `plugin/ui/calendar.mjs`) only accepts the words dawn/morning/noon/dusk/evening/night/midnight or 24-hour `HH:MM`. `until 17:00` parses; `until 5pm`, `until 5 pm` and `until 5:00pm` are rejected with `time must look like "08:00"`. When the parser fails, `planWait` falls back to one small model call (`modelWait`, the `intent.wait_amount` prompt) that should turn "5pm" into `17:00`. So it works today, but only through an extra model call. Teaching the parser 12-hour times (`5pm`, `5:30 pm`) is a cheap fix to do with this work.
+
 ## Phases
 
-1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, met flag and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
+1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, disposition (map keyed by person, player only in v1) and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
 2. **Body and features:** body areas, features with short/long text, seen marks, simple coverage and coverage stamps, assembled descriptions.
 3. **Wardrobe:** garment library, tags, outfits by tags, tag-informed reactions.
 4. **Schedules and life off-screen:** NPCs move between places over game time, map changes re-check affected schedule entries (dependent stamps), NPC-only scenes as a common tool.
@@ -179,6 +208,7 @@ Real movement over time comes in phase 4, using the game clock (`clockAt`) to pi
 ## Future work (not designed yet)
 
 - **Hostile NPCs, and any NPC that needs stats once stats exist,** are an exception to hesitant creation. They'll likely need a record right away, even as passersby (a mugger in the street).
+- **Persuasion checks against disposition** once stats exist.
 - **Persuading or forcing an NPC to stay** becomes a real check once stats exist.
 - **Story engine:** recent-window setting (message count plus length cap), history pruning, and the scene summary.
 
@@ -199,6 +229,7 @@ A full NPC:
   "line": "The Drowned Rat's sharp-eyed landlady, forty-odd, sleeves always rolled.",
   "manner": "Brisk, dry humor, softens around children.",
   "voice": "Low, clipped; calls everyone 'love'.",
+  "disposition": { "player": { "value": "indifferent", "reason": "Starting attitude: strangers are customers." } },
   "deep": {
     "history": "Ran with river smugglers in her twenties.",
     "secrets": ["Still fences goods for the Kettle crew."],
@@ -226,7 +257,8 @@ A stamp (on the message where it happened, per swipe, next to location and patch
   { "type": "npc_fact", "id": "marta-ferris", "field": "deep.relationships.party", "text": "Thinks the party is trouble, but useful." },
   { "type": "npc_seen", "id": "marta-ferris", "feature": "tattoo" },
   { "type": "npc_coverage", "id": "marta-ferris", "uncover": ["arms"] },
-  { "type": "npc_memory", "id": "marta-ferris", "met": true, "note": "Gave the party a free room in exchange for a favor." }
+  { "type": "npc_disposition", "id": "marta-ferris", "who": "player", "value": "friendly", "reason": "The party paid off her tab." },
+  { "type": "npc_memory", "id": "marta-ferris", "note": "Gave the party a free room in exchange for a favor." }
 ] }
 ```
 
