@@ -6,9 +6,11 @@ Status: design only, no code. Covers phases 1-4 of NPC support.
 
 The engine holds the state, and each reply gets only the context it needs. The narrator never reads huge chat histories or lorebooks. It gets:
 
-1. a short window of recent messages (for tone, flow, who just said what),
-2. a short scene summary kept by the engine,
+1. recent chat for tone and flow,
+2. a short scene summary kept by the engine (later, with the story engine),
 3. context slices: where we are (the map already does this), who's here, and what about them matters for *this* reply.
+
+**Phase 1 does not prune chat history.** The full history is sent as it is today; phase 1 only *adds* NPC context, and the detail tiers limit how much NPC detail goes in. The recent-window setting (a message count plus a length cap) and real history pruning are deferred to the story engine.
 
 NPCs follow the same pattern the map uses: scenery becomes real when touched, grows as play goes on, and every change is undoable.
 
@@ -25,8 +27,22 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 | Level | What it is | How it gets there |
 |---|---|---|
 | **Scenery** | Not real. A word in a room description ("a farmer works the field"), like the upstairs doors of the Drowned Rat. No record. | Written by the creator or narrator. |
-| **Stub** | Name and one line. A real record. | The player interacts with scenery. The engine proposes an NPC; a **Keep / Adjust / Discard** card asks (incidental interactions can be discarded and stay scenery). Keep stamps an `npc_create` on that message. |
+| **Stub** | Name and one line (or more, see below). A real record. | Hesitant creation, see below. Keep stamps an `npc_create` on that message. |
 | **Full** | Detailed description, features, memory, schedule. | Grows through stamps as play adds detail. Creators can also author full NPCs directly. |
+
+### Hesitant creation
+
+- **Passersby stay scenery:** no record, no card. Asking the barmaid for a drink does not create an NPC.
+- **Suggestion:** after about **3 replies involving the same person**, the engine suggests a **Keep / Adjust / Discard** card.
+- **Explicit:** the player can ask at any time with `[keep]` (in a message) or `/ws-npc`.
+- **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
+- **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
+- **No stand-ins.** A saved NPC appears only via their schedule, by following the party, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
+- **One-offs:** a saved NPC met once gets a single schedule entry at the place they were met, but is still never auto-picked as an anonymous extra.
+
+### Following
+
+A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the party is, overriding their schedule, until told to stay (another stamp, which also puts them back on their schedule at that place, or at their normal entry).
 
 **Invented details.** The model will make up small facts (a scar, a sister's name, a favorite drink). With the long history gone, these must be saved or they get contradicted later. After each reply, the same flag step the map uses (`ws_flag`) lets the narrator report new facts about present NPCs; the engine stamps them as `npc_fact` on the reply. A "Character changed here" bar (Edit / Turn off / Undo) shows them, like "Map changed here".
 
@@ -47,7 +63,7 @@ The engine decides tiers **before generation**, as part of the per-message inten
 Slicing is the core of the vision, so it ships in phase 1 even while NPCs are only stubs. Phases 2-3 add layers to the same mechanism instead of rewiring it.
 
 Per reply the engine works out:
-- **Who's present:** NPCs whose current schedule entry resolves to the scene's place (plus any NPC stamped as following the party).
+- **Who's present:** NPCs whose current schedule entry resolves to the scene's place (plus any NPC tagged `following`). Only kept NPCs count; unsaved people are just part of the recent chat.
 - **Who's in focus:** from the intent call.
 - **Which memory notes go in:** only for focused NPCs, or present ones the reply concerns.
 
@@ -112,14 +128,23 @@ A schedule is a list of entries: `{ place, activity, from?, to? }`. A stationary
 
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
+### Map changes and schedules (phase 4)
+
+When a map change (patch) touches a place, a small call checks the schedule entries pointing there and picks, per entry: `keep` / `change activity` / `move` (text keys, lenient matching). The results are **schedule stamps that depend on the causing map change**: turning that change off, undoing it, or letting it expire removes them automatically through the dependency check, like other dependent changes. Example: the Drowned Rat burns down, so Hesk's entry changes to "standing in the ruins" instead of "pouring drinks"; undo the fire and Hesk is back behind the bar.
+
 Real movement over time comes in phase 4, using the game clock (`clockAt`) to pick the active entry and the snapshot cache (`snapcache.mjs`) to keep per-reply resolution cheap.
 
 ## Phases
 
-1. **Records and slicing:** NPC records (stub/full), placement, stub creation with the Keep/Discard card, invented-detail stamps, met flag and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation.
+1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[keep]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, met flag and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation.
 2. **Body and features:** body areas, features with short/long text, seen marks, simple coverage and coverage stamps, assembled descriptions.
 3. **Wardrobe:** garment library, tags, outfits by tags, tag-informed reactions.
-4. **Schedules and life off-screen:** NPCs move between places over game time, NPC-only scenes as a common tool.
+4. **Schedules and life off-screen:** NPCs move between places over game time, map changes re-check affected schedule entries (dependent stamps), NPC-only scenes as a common tool.
+
+## Future work (not designed yet)
+
+- **Hostile NPCs, and any NPC that needs stats once stats exist,** are an exception to hesitant creation. They'll likely need a record right away, even as passersby (a mugger in the street).
+- **Story engine:** recent-window setting (message count plus length cap), history pruning, and the scene summary.
 
 ## JSON examples
 
@@ -171,12 +196,12 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 
 ## Open questions
 
-1. **Stub creation prompt:** always ask with a card, or auto-keep when the player names or addresses someone and only ask for incidental ones?
-2. **Memory cap:** how many highlights per NPC before older ones are summarized, and who summarizes (an extra call on the flag step?).
-3. **Scene summary:** how is the engine's short scene summary kept stateless: stamped per message, or rebuilt from the recent window each time?
-4. **Recent window size:** fixed message count, token budget, or a setting?
-5. **Depth decision:** is one extra pick-one question per message enough, or do we fold it into the existing intent call to save a round trip?
-6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id?
-7. **NPC ids from play:** generated from the name (slug) with a suffix on clashes?
-8. **Following NPCs:** in phase 1, can an NPC join the party (a `follows` stamp overriding the schedule), or wait for phase 4?
-9. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
+1. **Suggestion threshold:** is ~3 replies right, and what counts as "the same person" before they have a name (the engine matching "the barmaid" across replies)?
+2. **Scene boundary for a remembered "no":** a location change, a time skip, or something the story engine decides later?
+3. **Read-back range:** how far back can "since they first appeared" go in a long chat, and how is the first appearance found (asked of the model, or the earliest message mentioning them)?
+4. **Memory cap:** how many highlights per NPC before older ones are summarized, and who summarizes?
+5. **Depth decision:** a separate pick-one question, or folded into the existing intent call to save a round trip?
+6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
+7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
+8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
+9. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
