@@ -52,7 +52,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
   - **One roll per day.** Each NPC gets one roll (0-99) per game day, seeded deterministically from the NPC id, the place and the game day (from `clockAt`), and reused all day. Every check compares that same roll to the current hour's chance. So with a roll of 30, showing up an hour early (20%) misses her, while the same roll succeeds during the peak hour (50%). Swiping or regenerating can't flip a result.
   - **Looking for them by name** adds a second roll for the day, seeded separately (per NPC per game day, not per attempt), and the better (lower) of the two rolls is used from then on. Searching again the same day changes nothing.
   - **Stays for the hour.** Once she appears, the appearance is stamped on the message and she stays for the rest of that hour, so leaving and coming back doesn't make her vanish. Deleting the message undoes the appearance.
-  - **No vanishing mid-scene.** An NPC in the current scene (e.g. mid-conversation) doesn't vanish when her hour ends. She leaves when the scene ends or when the narrator has her excuse herself, the same rule as for scheduled NPCs.
+  - **No vanishing mid-scene.** An NPC in the current scene doesn't vanish when her hour ends; see *Leaving a scene*.
   - A one-off who gets a real schedule later (written by a creator or via Export to cast) stops using the sighting.
 
   ```json
@@ -146,7 +146,19 @@ A schedule is a list of entries: `{ place, activity, from?, to? }`. A stationary
 2. Id points at an **expired** place (removed by a patch, e.g. the mill burned down): fall back to the NPC's **next valid entry**.
 3. Id is **truly missing** (never existed in this world, e.g. a cast imported from another world): the entry is marked **broken**, never a crash. Broken entries show in the editor; an NPC with no valid entry is off-map until fixed.
 
-**Leaving a scene.** When a scheduled NPC's entry ends (time window over, or a move in phase 4) while she is in the current scene, she doesn't vanish: she leaves when the scene ends or when the narrator has her excuse herself. The same rule applies to one-off sightings.
+### Leaving a scene
+
+This applies to schedules in general and to one-off sightings.
+
+- **The engine never removes an NPC who is in the current scene.** When their schedule (or their sighting hour) says they're due elsewhere, the narrator gets a one-line note instead, e.g. `Hesk is due at the forge (work)`.
+- **The note escalates** the more overdue she is: `Hesk is due at the forge (work)` becomes `Hesk is an hour late for work`, so a narrator can't keep her lingering forever. Persuasion or a `staying` stamp has to keep up with it (staying more than a little while past her time takes fresh persuasion).
+- **Importance.** Schedule entries take an optional `importance` field: `low` / `normal` / `high` (text keys, lenient matching). If it's left out, the model judges from the activity: "go to work" is insistent, "chill at home" is easygoing.
+- **The narrator decides** whether the NPC lingers, mentions needing to go, or excuses herself. Leaving is a stamp (`npc_leave`) on that reply, so deleting or swiping it brings her back.
+- **Staying.** The player can convince (or later force) her to stay: a `staying with the party` stamp overrides the schedule until she leaves or the scene ends. Once stats exist, persuading or forcing her can become a real check (see future work).
+
+```json
+{ "place": "riverton/forge", "activity": "work", "from": "08:00", "to": "17:00", "importance": "high" }
+```
 
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
@@ -166,6 +178,7 @@ Real movement over time comes in phase 4, using the game clock (`clockAt`) to pi
 ## Future work (not designed yet)
 
 - **Hostile NPCs, and any NPC that needs stats once stats exist,** are an exception to hesitant creation. They'll likely need a record right away, even as passersby (a mugger in the street).
+- **Persuading or forcing an NPC to stay** becomes a real check once stats exist.
 - **Story engine:** recent-window setting (message count plus length cap), history pruning, and the scene summary.
 
 ## JSON examples
