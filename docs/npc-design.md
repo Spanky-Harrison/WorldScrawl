@@ -20,7 +20,16 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **Simple JSON for creators.** A quick NPC is one sentence. Everything else is optional with defaults.
 - **Pick-one prompts** use text keys with lenient matching, like the existing intent and direction questions in `plugin/prompts/default.json`.
 - **UI reuses existing patterns:** the Keep / Adjust / Discard card (as in room discovery) and the Edit / Turn off / Undo bar (as in "Map changed here").
-- **Actor placeholders** are our own: `{{party}}` (with `{{who}}` as an alias), not SillyTavern's `{{user}}`/`{{char}}`.
+- **Actor placeholders** are our own: `{{party}}` (with `{{who}}` as an alias), rendered from the player's group (see *Actors, not a party*), not SillyTavern's `{{user}}`/`{{char}}`.
+
+## Actors, not a party
+
+There is never a single "party" entity. The player and companions are **individual actors**, each with an id like an NPC (the player is the default actor, `player`). A "party" is just actors grouped together via **following**: whoever is following the player is with them.
+
+- **Phase 1 prerequisite:** today's single party position stamp becomes **per-actor positions**, with the player as the default actor.
+- **This refactor ships as its own PR before any NPC code, with zero behavior change.** Every existing test passes, and old chats' position stamps (no actor id) load as the player's position.
+- `{{party}}` is rendered from that group (the player plus whoever is following them).
+- "The party" in this doc is shorthand for the player and whoever is following them, never a stored object.
 
 ## Lifecycle
 
@@ -37,10 +46,10 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **Explicit:** the player can ask at any time with `[remember]` in a message (e.g. "I'm going to [remember] Maren") or `/ws-npc`.
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
-- **No stand-ins.** A saved NPC appears only via their schedule, by following the party, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
+- **No stand-ins.** A saved NPC appears only via their schedule, by following the player, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
   - **Future story-engine hook:** a story engine (never the default engine) may *deliberately* place a saved NPC as an anonymous figure ("a guard") and reveal them later, as a twist. By default, saved NPCs are never reused as strangers by accident.
 - **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, hour, chance }`: the place and the hour they were met, and the peak chance. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
-  - **Graduated by hour.** The time they were met rounds down to its hour: seen at 4:17 PM peaks from 4 to 5 PM. The chance drops sharply per hour away from the peak, when the party is in that area:
+  - **Graduated by hour.** The time they were met rounds down to its hour: seen at 4:17 PM peaks from 4 to 5 PM. The chance drops sharply per hour away from the peak, when the player is in that area:
 
     | Hours from the peak hour | Chance |
     |---|---|
@@ -63,7 +72,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 
 ### Following
 
-A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the party is, overriding their schedule, until told to stay (another stamp, which also puts them back on their schedule at that place, or at their normal entry).
+A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the actor they follow is (usually the player), overriding their schedule, until told to stay (another stamp, which also puts them back on their schedule at that place, or at their normal entry).
 
 **Invented details.** The model will make up small facts (a scar, a sister's name, a favorite drink). With the long history gone, these must be saved or they get contradicted later. After each reply, the same flag step the map uses (`ws_flag`) lets the narrator report new facts about present NPCs; the engine stamps them as `npc_fact` on the reply. A "Character changed here" bar (Edit / Turn off / Undo) shows them, like "Map changed here".
 
@@ -88,14 +97,14 @@ Per reply the engine works out:
 - **Who's in focus:** from the intent call.
 - **Which memory notes go in:** only for focused NPCs, or present ones the reply concerns.
 
-**Scene focus** reuses the existing idea: focus follows the player by default (the party's location), and can move to an NPC-only scene ("meanwhile, at the mill"), where the slice is built for that place instead.
+**Scene focus** reuses the existing idea: focus follows the player by default (the player's position), and can move to an NPC-only scene ("meanwhile, at the mill"), where the slice is built for that place instead.
 
 The prompt gets the slices through new placeholders in `default.json` (e.g. `{{npcs_present}}`, `{{npc_focus}}`), documented the same way as the existing ones.
 
 ## Memory
 
 - **Disposition** (replaces the old `met` flag; phase 1), see below.
-- **Highlights:** short notes like "met the party at the inn; owes them a favor". Added by the flag step as `npc_memory` stamps, kept tight (a cap per NPC, oldest/least important summarized away later).
+- **Highlights:** short notes like "met the player at the inn; owes them a favor". Added by the flag step as `npc_memory` stamps, kept tight (a cap per NPC, oldest/least important summarized away later).
 - Fed only when the NPC is focused, or when the reply clearly concerns them.
 
 ## Disposition (phase 1)
@@ -110,7 +119,7 @@ How the NPC feels about someone, using the classic D&D attitudes: `unknown`, `ho
 - **Later:** persuasion checks hook into it once stats exist (future work).
 
 ```json
-"disposition": { "player": { "value": "friendly", "reason": "The party paid off her tab." } }
+"disposition": { "player": { "value": "friendly", "reason": "The player paid off her tab." } }
 ```
 
 ## Body and features (phase 2)
@@ -170,7 +179,7 @@ This applies to schedules in general and to one-off sightings.
 - **The note escalates** the more overdue she is: `Hesk is due at the forge (work)` becomes `Hesk is an hour late for work`, so a narrator can't keep her lingering forever. Persuasion or a `staying` stamp has to keep up with it (staying more than a little while past her time takes fresh persuasion).
 - **Importance.** Schedule entries take an optional `importance` field: `low` / `normal` / `high` (text keys, lenient matching). If it's left out, the model judges from the activity: "go to work" is insistent, "chill at home" is easygoing.
 - **The narrator decides** whether the NPC lingers, mentions needing to go, or excuses herself. Leaving is a stamp (`npc_leave`) on that reply, so deleting or swiping it brings her back.
-- **Staying.** The player can convince (or later force) her to stay: a `staying with the party` stamp overrides the schedule until she leaves or the scene ends. Once stats exist, persuading or forcing her can become a real check (see future work).
+- **Staying.** The player can convince (or later force) her to stay: a `staying` stamp (staying with the player's group) overrides the schedule until she leaves or the scene ends. Once stats exist, persuading or forcing her can become a real check (see future work).
 
 ```json
 { "place": "riverton/forge", "activity": "work", "from": "08:00", "to": "17:00", "importance": "high" }
@@ -200,6 +209,7 @@ Waiting until an NPC shows up is the natural partner to sightings and schedules.
 
 ## Phases
 
+0. **Per-actor positions** (prerequisite, its own PR, zero behavior change).
 1. **Records and slicing:** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, disposition (map keyed by person, player only in v1) and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
 2. **Body and features:** body areas, features with short/long text, seen marks, simple coverage and coverage stamps, assembled descriptions.
 3. **Wardrobe:** garment library, tags, outfits by tags, tag-informed reactions.
@@ -254,11 +264,11 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 
 ```json
 { "npc": [
-  { "type": "npc_fact", "id": "marta-ferris", "field": "deep.relationships.party", "text": "Thinks the party is trouble, but useful." },
+  { "type": "npc_fact", "id": "marta-ferris", "field": "deep.relationships.player", "text": "Thinks the player is trouble, but useful." },
   { "type": "npc_seen", "id": "marta-ferris", "feature": "tattoo" },
   { "type": "npc_coverage", "id": "marta-ferris", "uncover": ["arms"] },
-  { "type": "npc_disposition", "id": "marta-ferris", "who": "player", "value": "friendly", "reason": "The party paid off her tab." },
-  { "type": "npc_memory", "id": "marta-ferris", "note": "Gave the party a free room in exchange for a favor." }
+  { "type": "npc_disposition", "id": "marta-ferris", "who": "player", "value": "friendly", "reason": "The player paid off her tab." },
+  { "type": "npc_memory", "id": "marta-ferris", "note": "Gave the player a free room in exchange for a favor." }
 ] }
 ```
 
@@ -272,6 +282,6 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
 7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
-9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the party isn't at the sighting place (e.g. asking around for her elsewhere)?
+9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the player isn't at the sighting place (e.g. asking around for her elsewhere)?
 10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
 11. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
