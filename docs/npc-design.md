@@ -104,7 +104,7 @@ The prompt gets the slices through new placeholders in `default.json` (e.g. `{{n
 ## Memory
 
 - **Disposition** (replaces the old `met` flag; phase 1), see below.
-- **Highlights:** short notes like "met the party at the inn; owes them a favor". Added by the flag step as `npc_memory` stamps, kept tight (a cap per NPC, oldest/least important summarized away later).
+- **Highlights:** short notes like "met the player at the inn; owes them a favor". Added by the flag step as `npc_memory` stamps, kept tight (a cap per NPC, oldest/least important summarized away later).
 - Fed only when the NPC is focused, or when the reply clearly concerns them.
 
 ## Disposition (phase 1)
@@ -282,6 +282,6 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 6. **Export conflicts:** exporting an NPC whose id already exists in `cast/`: overwrite, version, or new id? And ids for NPCs created in play (name slug with a suffix on clashes?)
 7. **Following and stay:** when told to stay somewhere off their schedule, do they stay there indefinitely, or drift back to their schedule (phase 4)?
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
-9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the party isn't at the sighting place (e.g. asking around for her elsewhere)?
+9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the player isn't at the sighting place (e.g. asking around for her elsewhere)?
 10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
 11. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
