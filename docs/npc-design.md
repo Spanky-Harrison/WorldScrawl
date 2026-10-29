@@ -52,6 +52,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
   - **One roll per day.** Each NPC gets one roll (0-99) per game day, seeded deterministically from the NPC id, the place and the game day (from `clockAt`), and reused all day. Every check compares that same roll to the current hour's chance. So with a roll of 30, showing up an hour early (20%) misses her, while the same roll succeeds during the peak hour (50%). Swiping or regenerating can't flip a result.
   - **Looking for them by name** adds a second roll for the day, seeded separately (per NPC per game day, not per attempt), and the better (lower) of the two rolls is used from then on. Searching again the same day changes nothing.
   - **Stays for the hour.** Once she appears, the appearance is stamped on the message and she stays for the rest of that hour, so leaving and coming back doesn't make her vanish. Deleting the message undoes the appearance.
+  - **No vanishing mid-scene.** An NPC in the current scene (e.g. mid-conversation) doesn't vanish when her hour ends. She leaves when the scene ends or when the narrator has her excuse herself, the same rule as for scheduled NPCs.
   - A one-off who gets a real schedule later (written by a creator or via Export to cast) stops using the sighting.
 
   ```json
@@ -144,6 +145,8 @@ A schedule is a list of entries: `{ place, activity, from?, to? }`. A stationary
 1. Id resolves (directly or via redirect): use it.
 2. Id points at an **expired** place (removed by a patch, e.g. the mill burned down): fall back to the NPC's **next valid entry**.
 3. Id is **truly missing** (never existed in this world, e.g. a cast imported from another world): the entry is marked **broken**, never a crash. Broken entries show in the editor; an NPC with no valid entry is off-map until fixed.
+
+**Leaving a scene.** When a scheduled NPC's entry ends (time window over, or a move in phase 4) while she is in the current scene, she doesn't vanish: she leaves when the scene ends or when the narrator has her excuse herself. The same rule applies to one-off sightings.
 
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
