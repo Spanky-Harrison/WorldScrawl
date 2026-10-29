@@ -10,7 +10,7 @@ import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
 import { pickSearch, pickValid, pathOf } from './picker.mjs';
-import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb } from './mapdata.mjs';
+import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb, partyHere } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
 const channel = new BroadcastChannel('worldscrawl');
@@ -239,7 +239,7 @@ async function renderInspector(side, target, ctx) {
         const rows = [['Chat', st?.editorOnly ? 'none open (showing the default world)' : st?.chatName || '—'], ['Clock', st?.clock || '—']];
         if (st?.last_wait) rows.push(['Last wait', `${st.last_wait.label} (message #${st.last_wait.msg})`]);
         if (d.kind === 'room' && ctx.room) {
-            rows.push(['Party here', st?.location === ctx.room.address ? 'yes' : 'no']);
+            rows.push(['Party here', partyHere(st) === ctx.room.address ? 'yes' : 'no']);
             const w = ctx.info?.weather && st?.abs_seconds !== null && st?.abs_seconds !== undefined ? placeWeather(ctx.info.weather, ctx.room.weather, st.abs_seconds, ctx.info.calendar) : null;
             const u = ctx.info?.weather?.unit ?? 'F';
             if (w) {
@@ -388,7 +388,7 @@ export async function knownRooms(st) {
     const changes = st.changes ?? [];
     const dugTo = expandChanges(changes).filter(c => c.type === 'add_exit').map(c => c.to);
     curState = st;
-    const raw = new Map(await fetchRooms(st.world, [...st.stood, ...st.seen, st.location, ...dugTo], st));
+    const raw = new Map(await fetchRooms(st.world, [...st.stood, ...st.seen, partyHere(st), ...dugTo], st));
     for (const [a, v] of [...raw]) if (v === null) raw.delete(a);
     for (const [a, r] of newRooms(changes, raw)) raw.set(a, r);
     const reveals = await fetchReveals(st.world, st.doors_revealed ?? [], st);
@@ -554,7 +554,7 @@ function createMapWindow(win) {
         win.insertBefore(banner, body);
         side.replaceChildren();
         // Open at the field's value, else where the party is; the full map (no fog) loads in update().
-        const here = current?.here ?? state?.location;
+        const here = current?.here ?? partyHere(state);
         const at = spec.value ? layerFor(spec.kind, spec.value) : here ? layerFor(spec.kind, spec.kind === 'region' ? here.split(':')[0] : spec.kind === 'subregion' ? here.split('/')[0] : here) : null;
         pick.open = { layer: at ?? { level: 'world' }, focus: spec.value || null };
         update(state);
@@ -682,20 +682,21 @@ function createMapWindow(win) {
         if (st0 !== state) return; // a newer state arrived meanwhile
         if (current) current.st = st; else current = { st };
         const graph = buildGraph({ ...st, start: worldStart.get(st.world) ?? st.start }, rooms, { mark: !!(editor || pick) });
-        const key = `${editor ? 'E' : ''}${pick ? 'P' : ''}${st.chatId}|${st.location}`, moved_ = key !== lastKey;
+        const at = partyHere(st);
+        const key = `${editor ? 'E' : ''}${pick ? 'P' : ''}${st.chatId}|${at}`, moved_ = key !== lastKey;
         if (pick?.open) { // entering pick mode
             const o = pick.open; pick.open = null; layer = o.layer; current.st = st; lastKey = key;
-            render(graph, st.location, st.world);
+            render(graph, at, st.world);
             const n = o.focus && current.graph.nodes.find(x => entityOf(x) === o.focus);
             centreOn(n?.id ?? current.graph.nodes.find(x => x.here)?.id ?? current.graph.nodes[0]?.id);
             if (n) { world.querySelectorAll('.node').forEach(g => g.classList.toggle('selected', g.dataset.id === n.id)); pickSide(n); }
             return;
         }
-        if (moved_) layer = layerOf(graph, st.location); // follow the party: open the layer with the current room
+        if (moved_) layer = layerOf(graph, at); // follow the party: open the layer with the player's room
         current.st = st;
-        render(graph, st.location, st.world);
+        render(graph, at, st.world);
         if (moved_) { centreOn(current.graph.nodes.find(n => n.here)?.id); lastKey = key; } // auto-centre when the location (or chat) changes
-        lastHere = st.location;
+        lastHere = at;
     }
     const fn = st => update(st);
     listeners.add(fn);
