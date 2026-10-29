@@ -38,6 +38,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
 - **No stand-ins.** A saved NPC appears only via their schedule, by following the party, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
+  - **Future story-engine hook:** a story engine (never the default engine) may *deliberately* place a saved NPC as an anonymous figure ("a guard") and reveal them later, as a twist. By default, saved NPCs are never reused as strangers by accident.
 - **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, hour, chance }`: the place and the hour they were met, and the peak chance. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
   - **Graduated by hour.** The time they were met rounds down to its hour: seen at 4:17 PM peaks from 4 to 5 PM. The chance drops sharply per hour away from the peak, when the party is in that area:
 
