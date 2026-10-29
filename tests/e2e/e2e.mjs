@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core';
-const BASE = 'http://localhost:8767/';
-const FAKE = 'http://127.0.0.1:9098';
+const E2E_TMP = process.env.E2E_TMP || '/tmp';
+const BASE = `http://localhost:${process.env.E2E_PORT || 8767}/`;
+const FAKE = `http://127.0.0.1:${process.env.E2E_FAKE_PORT || 9098}`;
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} ${extra}`); if (!ok) failures++; };
 const pickSet = (loc, v) => loc.evaluate((el, x) => el.setValue(x), v); // a map pick field's value, as a pick sets it
@@ -79,15 +80,15 @@ try {
 
     // Point the extension at the test server and connect ST to the fake model with function calling on.
     await page.evaluate(() => { const c = SillyTavern.getContext(); c.extensionSettings.worldscrawl.serverUrl = ''; });
-    await page.evaluate(async () => {
+    await page.evaluate(async fake => {
         const $ = window.jQuery;
         $('#main_api').val('openai').trigger('change');
         $('#chat_completion_source').val('custom').trigger('change');
-        $('#custom_api_url_text').val('http://127.0.0.1:9098/v1').trigger('input');
+        $('#custom_api_url_text').val(fake + '/v1').trigger('input');
         $('#custom_model_id').val('fake-model').trigger('input');
         $('#stream_toggle').prop('checked', false).trigger('input');
         $('#openai_function_calling').prop('checked', true).trigger('input');
-    });
+    }, FAKE);
     await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
     await page.waitForTimeout(3000);
     await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
@@ -903,7 +904,7 @@ try {
     await page.evaluate(() => document.getElementById('worldscrawl_save').click()); await page.waitForTimeout(2000);
     const doomed = (await worldsNow()).find(w => w.name === 'Doomed');
     check('missing world: setup on Doomed (saved from My Riverton)', (await M(m => m.chatWorld()?.id)) === doomed?.id && (await M(m => m.chatWorld()?.from)) === mr?.id);
-    (await import('node:fs')).rmSync(`/tmp/ws-worlds/${doomed.id}`, { recursive: true, force: true });
+    (await import('node:fs')).rmSync(`${E2E_TMP}/ws-worlds/${doomed.id}`, { recursive: true, force: true });
     const emitCC = () => page.evaluate(async () => { const c = SillyTavern.getContext(); await c.eventSource.emit(c.eventTypes.CHAT_CHANGED); });
     await emitCC(); await page.waitForTimeout(2500);
     const mw = await page.evaluate(() => SillyTavern.getContext().chat.filter(m => m.extra?.worldscrawl_notice_kind === 'missing_world').map(m => m.mes));
@@ -1049,14 +1050,14 @@ try {
     check('I go out: move options offered and the party moves', promptOf(lq[0]).includes('- out: the player goes through the') && (await stored()) === 'riverton:streets/square', String(await stored()));
     // ---- Doors, in a test world: front door closed (Drowned Rat doors shut themselves), temple stays open (region), square east door: exit override.
     const fsD = await import('node:fs');
-    fsD.cpSync('/tmp/ws-worlds/riverton', '/tmp/ws-worlds/doorsworld', { recursive: true });
-    const rp = '/tmp/ws-worlds/doorsworld/regions/riverton.json', rj = JSON.parse(fsD.readFileSync(rp, 'utf8'));
+    fsD.cpSync(E2E_TMP + '/ws-worlds/riverton', E2E_TMP + '/ws-worlds/doorsworld', { recursive: true });
+    const rp = E2E_TMP + '/ws-worlds/doorsworld/regions/riverton.json', rj = JSON.parse(fsD.readFileSync(rp, 'utf8'));
     const exD = (sub, loc, d) => rj.subregions[sub].locations[loc].exits.find(e => e.direction === d);
     rj.stays_open = true; rj.subregions.drowned_rat.stays_open = false;
     Object.assign(exD('drowned_rat', 'common_room', 'out'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'in'), { view: 'closed' });
     Object.assign(exD('temple', 'nave', 'south'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'east'), { view: 'closed', stays_open: false });
     fsD.writeFileSync(rp, JSON.stringify(rj, null, 2));
-    fsD.writeFileSync('/tmp/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false, weather_regions: { riverside: { climate: 'temperate' } } }));
+    fsD.writeFileSync(E2E_TMP + '/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false, weather_regions: { riverside: { climate: 'temperate' } } }));
     await (await stFetch('/worlds')).json(); // rescan
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = 'doorsworld'; });
     await sw(true, true);
@@ -1902,7 +1903,7 @@ try {
         const ec = await ui.locator('details.pe-group[data-group="style"] .pe-edited-count').textContent();
         check('a group shows how many of its prompts are edited', /1 edited/.test(ec), ec);
         // An older default under the override: the editor shows "default changed" with a diff.
-        const fs = await import('node:fs'), f = '/tmp/st-ws/default-user/worldscrawl/prompts.json';
+        const fs = await import('node:fs'), f = E2E_TMP + '/st-ws/default-user/worldscrawl/prompts.json';
         const store = JSON.parse(fs.readFileSync(f, 'utf8')); const o = store.profiles.E2E.overrides['expand.system'];
         o.base_text = 'AN OLDER DEFAULT LINE\n' + o.base_text; o.base_hash = 'older'; fs.writeFileSync(f, JSON.stringify(store));
         await ui.click('.toolview-close');
