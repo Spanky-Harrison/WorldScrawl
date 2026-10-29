@@ -9,7 +9,7 @@ export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -111,6 +111,11 @@ export function placeWeatherNow(loc, chat = ctx().chat ?? []) {
     try { return weatherLib.placeWeather(t.weather, loc.weather, weatherLib.absSeconds(d, t.calendar), t.calendar); } catch (e) { console.warn('[WorldScrawl] weather:', e.message); return null; }
 }
 /** Seconds of travel stamped on this chat's messages since its world's start_date. */
+/** Game seconds elapsed at message `index` (the shared clock lookup; kept waits and moves only, wait cards count once kept). */
+export function clockAt(index, chat = ctx().chat ?? []) {
+    const base = chatWorld(chat);
+    return calendarLib ? calendarLib.clockAt(chat, index, base?.rebase ? base.index : -1) : 0;
+}
 export function chatElapsed(chat = ctx().chat ?? []) {
     const base = chatWorld(chat);
     const from = base?.rebase ? base.index : -1;
@@ -396,6 +401,7 @@ async function currentLocation() {
     syncWorld();
     await syncDoors();
     const stored = getStoredLocation();
+    if (stored && expiryPending?.from === stored && expiryPending.chat === chatKey()) { const t = await fetchLocationCached(expiryPending.to); if (t) return t; }
     if (stored) {
         const loc = await fetchLocationCached(stored);
         if (loc) return loc;
@@ -418,18 +424,102 @@ async function missingRoomFallback(stored) {
     let to = r?.ok && r.body?.address ? await fetchLocationCached(r.body.address) : null;
     if (!to) to = await fetchLocationCached(null);
     if (!to) throw new Error('WorldScrawl: /start failed.');
+    const c0 = ctx(), once = `${chatKey()}|${stored}|${(c0.chat ?? []).length}|${chatElapsed()}`;
+    if (r?.body?.expired && settings().narrateExpiries !== false && typeof c0.generate === 'function' && !expiryNarrated.has(once)) {
+        // Narrated expiry: pick where they end up first (own pick-one call, the way in by default), move them in memory,
+        // then one automatic narrator reply tells why and how; that reply carries the location stamp.
+        expiryNarrated.add(once);
+        const opts = expiryOptions(r.body.options ?? []), room = r.body.expired_room ?? { name: stored };
+        let dest = opts.find(o => o.address === to.address) ?? opts[0] ?? null;
+        await ensurePrompts();
+        if (opts.length > 1 && typeof c0.generateRaw === 'function') {
+            try { dest = await askValid('expiry', expiryPickPrompt(room, opts, dest?.key), pickKey(opts)) ?? dest; } catch (e) { console.warn('[WorldScrawl] expiry pick failed:', e.message); }
+        }
+        const picked = dest ? await fetchLocationCached(dest.address) : null;
+        if (picked) to = picked;
+        const via = (r.body.options ?? []).find(o => o.address === to.address)?.direction ?? '';
+        const p = expiryPending = { chat: chatKey(), from: stored, to: to.address, via, line: '' };
+        try { p.line = expiryNarrationLine(room, to, via, whoMoves(), excerptOf(c0.chat?.[room.change?.msg]?.mes)); } catch {}
+        console.warn(`[WorldScrawl] ${stored} expired; narrating the move to ${to.address}`);
+        setTimeout(() => { triggerExpiryNarration(p).catch(e => console.error('[WorldScrawl] expiry narration', e)); }, 0);
+        return to;
+    }
     console.warn(`[WorldScrawl] location ${stored} is not in world ${activeWorld || '(default)'}; resolved to ${to.address} (${r?.body?.how ?? 'start'})`);
     const c = ctx();
     const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: `[Engine: that place no longer exists in this world. You're now in ${displayName(to)}.]`,
-        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: stored, [LOC_KEY]: to.address } };
+        mes: r?.body?.expired ? expiredNotice(to, r.body.via) : `[Engine: that place no longer exists in this world. You're now in ${displayName(to)}.]`,
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: stored, ...(r?.body?.expired ? { worldscrawl_notice_expired: true } : {}), [LOC_KEY]: to.address } };
     c.chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
     return to;
 }
+// ---- Narrated expiries: one pending move per chat, held in memory until the automatic narrator reply stamps it.
+let expiryPending = null;
+const expiryNarrated = new Set();
+const chatKey = () => { try { return String(ctx().getCurrentChatId?.() ?? ''); } catch { return ''; } };
+/** The places a run-out room's exits still reach, as pick-one keys (the way they came in first). */
+export const expiryOptions = list => { const taken = new Set(); return list.map(o => ({ key: keyFor(o.name ?? o.address, taken), label: `${o.name ?? o.address}${o.direction ? ` (out through the ${o.direction})` : ''}`, address: o.address, direction: o.direction ?? '' })); };
+export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', { party: whoMoves(), place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description ?? '', options: optionLines(opts), default: def ?? opts[0]?.key ?? '' });
+/** A short excerpt of the message that made the place (about 240 characters, one line). */
+export const excerptOf = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 240 ? `${t.slice(0, 237).replace(/\s+\S*$/, '')}...` : t; };
+export function expiryNarrationLine(room, to, via, who, excerpt) {
+    const sum = room.change ? [room.change.note, ...(Array.isArray(room.change.summary) ? room.change.summary : [room.change.summary])].filter(Boolean).join('; ') : '';
+    return P('narration.expired', { place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description || '(none)', change: sum || '(unknown)', excerpt: excerpt || '(none)', party: who, to: displayName(to), via: via ? ` (out through the ${via})` : '' });
+}
+/** Fire the automatic narrator reply (like ST's own reply); if none arrives, fall back to the plain notice. */
+async function triggerExpiryNarration(p) {
+    if (expiryPending !== p || p.used) return; // a reply already in progress carries it
+    try { await ctx().generate('normal', { automatic_trigger: true }); } catch (e) { console.warn('[WorldScrawl] expiry narration failed:', e.message); }
+    if (expiryPending === p) { expiryPending = null; await postExpiredNotice(p.from, p.to, p.via); }
+}
+async function postExpiredNotice(from, toAddr, via) {
+    const c = ctx(), to = await fetchLocationCached(toAddr);
+    if (!to) return;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: expiredNotice(to, via),
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'missing', worldscrawl_notice_from: from, worldscrawl_notice_expired: true, [LOC_KEY]: to.address } };
+    c.chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+}
+/** The narrator reply that told the expiry gets the move's stamp (delete it to rewind). */
+async function stampExpiryReply(id) {
+    const p = expiryPending, c = ctx(), m = c.chat?.[id];
+    if (!p || p.chat !== chatKey() || !m || m.is_user || m.is_system) return;
+    m.extra = m.extra ?? {};
+    m.extra[LOC_KEY] = p.to; m.extra.worldscrawl_expiry_narrated = { from: p.from, to: p.to };
+    expiryPending = null;
+    await c.saveChat?.();
+}
+/** The map as the last narrator reply saw it: changes up to it (with later Turn off / Turn on reverted), its clock and room.
+ *  Limitation: a change undone (removed) after that reply is gone from the chat, so it can't be put back here. */
+export function narratedView(chat) {
+    let L = -1;
+    for (let i = chat.length - 1; i >= 0; i--) { const m = chat[i]; if (m && !m.is_user && !m.is_system) { L = i; break; } }
+    if (L < 0) return null;
+    let address = null;
+    for (let i = L; i >= 0 && !address; i--) address = chat[i]?.extra?.[LOC_KEY] ?? null;
+    if (!address) return null;
+    const flips = new Map();
+    for (let i = L + 1; i < chat.length; i++) {
+        const x = chat[i]?.extra;
+        if (x?.worldscrawl_notice_kind === 'toggle') for (const [mi, id] of x.worldscrawl_notice_changes ?? []) if (!flips.has(`${mi}|${id}`)) flips.set(`${mi}|${id}`, !!x.worldscrawl_notice_on);
+    }
+    const head = chat.slice(0, L + 1);
+    const changes = chatChanges(head).map(c => { const k = `${c._msg}|${c.id}`; return flips.has(k) ? { ...c, off: flips.get(k) } : c; });
+    return { index: L, address, changes, now: clockAt(L, chat) };
+}
+/** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo). */
+async function aftermathNote(chat, loc) {
+    if (!patchSig() && !chat.some(m => m?.extra?.worldscrawl_notice_kind === 'toggle')) return '';
+    const then = narratedView(chat);
+    if (!then) return '';
+    const r = await api('/aftermath', { method: 'POST', body: JSON.stringify({ then, address: loc.address, ...mapCtx() }) }).catch(() => null);
+    return r?.ok ? r.body?.note ?? '' : '';
+}
+/** A temporary change ran out with the party inside: they go back out the way they came in. */
+export const expiredNotice = (to, via) => `[Engine: the passage seals behind you. You're back in ${displayName(to)}${via ? ` (out through the ${via})` : ''}.]`;
 /** The narrator's one "you're now in X" note: a resolver move not yet followed by a narrated reply. */
 export function relocationNote(chat, loc, who) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
         const m = chat[i];
+        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return m.extra[LOC_KEY] === loc?.address ? `Note: the temporary place ${who} was in is gone (its time ran out); the passage sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
         if (m?.extra?.worldscrawl_notice_kind === 'missing') return m.extra[LOC_KEY] === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
         if (m && !m.is_system && !m.is_user) return '';
     }
@@ -1680,8 +1770,11 @@ async function applyFacts() {
         const d = gameDate();
         text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
         reminder = arrivalReminder(loc, move);
-        const rn = relocationNote(c.chat ?? [], loc, whoMoves());
+        const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
+        if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
+        const rn = ep ? '' : relocationNote(c.chat ?? [], loc, whoMoves());
         if (rn) text = `${text}\n${rn}`;
+        else if (!ep) { const am = await aftermathNote(c.chat ?? [], loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
         const wf = await waitFacts(c.chat ?? [], loc);
         if (wf) text = `${text}\n${wf}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
@@ -2788,7 +2881,9 @@ async function analyzeFlag(id) {
         await ensurePrompts();
         if (!f.loc) throw new Error('could not tell where the party is for this message');
         const story = storyText(chat, f.start, id);
-        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
+        const hereNow = await currentLocation().catch(() => null);
+        const after = hereNow ? await aftermathNote(ctx().chat ?? [], hereNow).catch(() => '') : '';
+        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`, after].filter(Boolean).join(' ');
         const c1 = await flagContext(f);
         const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
         const a1 = parseJsonAnswer(await askModel(c, 'which rooms', { prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
@@ -3266,11 +3361,12 @@ export function renderPatchCards() {
             const d = line(`🗺 Map changed here: ${what}`);
             const key = `${id}|${p.id}`, form = openForms.get(key);
             d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
-                cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)'),
+                ...(failedFor(id, p.id)?.inactive ? [] : [cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)')]),
                 cardButton('Undo', () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }, 'Remove this change (deleting the message does the same)'));
             box.append(d);
             const bad = failedFor(id, p.id);
-            if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; box.append(w); }
+            if (bad?.inactive) { const w = line(bad.inactive); w.className = 'worldscrawl_inactive'; w.style.opacity = '.6'; box.append(w); }
+            else if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; box.append(w); }
             if (form) {
                 const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
                 form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
@@ -3324,6 +3420,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
       <label class="checkbox_label"><input id="worldscrawl_review_discoveries" type="checkbox"> Ask before adding a discovered room (show the Keep / Discard card)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
+      <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Keep the narrator's waits without asking (skip the Keep / Adjust / Discard card)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
@@ -3355,6 +3452,9 @@ function addSettingsPanel() {
     const autoKeep = document.getElementById('worldscrawl_auto_keep');
     autoKeep.checked = !!settings().autoKeep;
     autoKeep.addEventListener('change', () => { settings().autoKeep = autoKeep.checked; ctx().saveSettingsDebounced(); });
+    const nex = document.getElementById('worldscrawl_narrate_expiries');
+    nex.checked = settings().narrateExpiries !== false;
+    nex.addEventListener('change', () => { settings().narrateExpiries = nex.checked; ctx().saveSettingsDebounced(); });
     const akw = document.getElementById('worldscrawl_auto_keep_waits');
     akw.checked = !!settings().autoKeepWaits;
     akw.addEventListener('change', () => { settings().autoKeepWaits = akw.checked; ctx().saveSettingsDebounced(); });
@@ -3390,8 +3490,9 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
+    if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { stampExpiryReply(Number(id)).catch(e => console.error('[WorldScrawl] expiry stamp', e)); });
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { onReplyForFlags(Number(id)).catch(e => console.error('[WorldScrawl] flag', e)); });
-    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; snapCarriers(); await applyChatState(); });
+    eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; expiryPending = null; snapCarriers(); await applyChatState(); });
     if (eventTypes.MESSAGE_DELETED) eventSource.on(eventTypes.MESSAGE_DELETED, () => { onMessagesDeleted().catch(e => console.error('[WorldScrawl] delete check', e)); });
     eventSource.on(eventTypes.MESSAGE_SWIPED, id => { if (Number(id) === 0 && isOn()) ensureStartStamp().then(() => setTimeout(renderAllExits, 0)); });
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => setTimeout(renderAllExits, 0));

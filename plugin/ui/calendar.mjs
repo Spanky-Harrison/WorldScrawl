@@ -174,14 +174,31 @@ export function defaultTravel(fromAddress, toAddress) {
  * deleting the message undoes them and swipes keep them.
  */
 export function sumTravel(chat, after = -1) {
-    let sum = 0;
-    (chat ?? []).forEach((m, i) => {
-        if (i <= after) return;
-        for (const k of ['worldscrawl_move', 'worldscrawl_wait']) { const s = m?.extra?.[k]?.seconds; if (Number.isFinite(s) && s > 0) sum += s; }
-    });
-    return sum;
+    return clockAt(chat, (chat?.length ?? 0) - 1, after);
 }
 
+/** Seconds one message adds to the game clock (a kept move or wait; a pending wait card adds nothing until kept). */
+export const messageSeconds = m => { let s = 0; for (const k of ['worldscrawl_move', 'worldscrawl_wait']) { const v = m?.extra?.[k]?.seconds; if (Number.isFinite(v) && v > 0) s += v; } return s; };
+/**
+ * The shared clock lookup: game seconds elapsed at message `index` (inclusive), counting only messages after `after`.
+ * Reads only the time stamps on the messages (never the map), with a per-chat prefix-sum memo checked against each
+ * message's own seconds, so expiries, NPC schedules and the like share one answer instead of replaying the chat.
+ */
+const clockCache = new WeakMap();
+export function clockAt(chat, index, after = -1) {
+    if (!Array.isArray(chat)) return 0;
+    const end = Math.min(index, chat.length - 1);
+    let c = clockCache.get(chat);
+    if (!c || c.after !== after) clockCache.set(chat, c = { after, secs: [], sums: [] });
+    let sum = 0, stale = false;
+    for (let i = 0; i <= end; i++) {
+        const sec = i <= after ? 0 : messageSeconds(chat[i]);
+        if (stale || c.secs[i] !== sec) { stale = true; c.secs[i] = sec; c.sums[i] = sum + sec; }
+        sum = c.sums[i];
+    }
+    if (stale) { c.secs.length = c.sums.length = end + 1; }
+    return end < 0 ? 0 : sum;
+}
 // ---- Waiting and sleeping. "/ws-wait 2h", "/ws-wait 1h30m", "/ws-wait 2d", "/ws-wait until dawn", "/ws-wait until 14:30".
 export const WAIT_TARGETS = ['dawn', 'morning', 'noon', 'dusk', 'evening', 'night', 'midnight'];
 export const SLEEP_DEFAULT = 8 * 3600;
