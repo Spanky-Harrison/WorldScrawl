@@ -232,6 +232,18 @@ export function waitWords(text, spd = 86400) {
     if (num != null) return null; // a number with no unit after it
     return any ? Math.round(total) : null;
 }
+/** "5pm", "5:30 pm", "12:00 a.m." -> "HH:MM" on a 24-hour clock, or null when it is not a 12-hour time. */
+export function parse12Hour(text, cal = GREGORIAN) {
+    const m = /^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?$/.exec(String(text ?? '').trim().toLowerCase());
+    if (!m) return null;
+    let h = +m[1];
+    const mi = +(m[2] ?? 0);
+    if (h < 1 || h > 12 || mi > 59) throw new Error(`time must look like "08:00" or "5:30 pm", got ${JSON.stringify(text)}`);
+    if (m[3] === 'a') h = h === 12 ? 0 : h;
+    else h = h === 12 ? 12 : h + 12;
+    if (h >= cal.hours_per_day) throw new Error(`time ${JSON.stringify(text)} is outside the day`);
+    return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+}
 export function parseWait(text, cal = GREGORIAN) {
     const s = String(text ?? '').trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^(?:for|about|around|roughly)\s+/, '');
     if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
@@ -241,6 +253,8 @@ export function parseWait(text, cal = GREGORIAN) {
         if (t === 'sunrise') return { until: 'dawn' };
         if (t === 'sunset') return { until: 'dusk' };
         if (WAIT_TARGETS.includes(t)) return { until: t };
+        const ampm = parse12Hour(t, cal);
+        if (ampm) return { until: ampm };
         parseClock(t, cal);
         return { until: t };
     }

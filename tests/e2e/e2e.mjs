@@ -1891,7 +1891,7 @@ try {
         const view = await ui.evaluate(() => ({ hidden: document.getElementById('windows').hidden, cards: document.querySelectorAll('.pe-card').length, close: !!document.querySelector('.toolview-close'), resize: getComputedStyle(document.querySelector('.pe-text')).resize, sel: document.querySelector('.pe-profile').value }));
         check('Prompt Editor takes over the view with a Close button; one card per prompt; textareas resize vertically; on Default', view.hidden && view.cards >= 60 && view.close && view.resize === 'vertical' && view.sel === 'Default', JSON.stringify(view));
         const grp = await ui.evaluate(() => [...document.querySelectorAll('details.pe-group')].map(d => ({ id: d.dataset.group, open: d.open, count: d.querySelector('.pe-count')?.textContent, flow: !!d.querySelector('.pe-flow')?.textContent.trim(), pieces: !!d.querySelector('details.pe-pieces') })));
-        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 9 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces, JSON.stringify(grp));
+        check('prompts are in groups (Writing style open, the rest collapsed) with flow text and a prompt count', grp.length === 10 && grp[0].id === 'style' && grp[0].open && grp.slice(1).every(g => !g.open) && grp.every(g => /\d+ prompts?/.test(g.count) && g.flow) && grp.find(g => g.id === 'style')?.pieces && grp.some(g => g.id === 'npc'), JSON.stringify(grp));
         const openAll = () => ui.evaluate(() => document.querySelectorAll('details.pe-group, details.pe-pieces').forEach(d => { d.open = true; }));
         await openAll(); await ui.waitForTimeout(200);
         const lk = await ui.evaluate(() => { const c = document.querySelector('.pe-card[data-id="intent.system"]'); return { lock: !!c.querySelector('.pe-lock'), why: c.querySelector('.pe-locked')?.textContent, ro: c.querySelector('.pe-text').readOnly, shown: c.offsetHeight > 0 }; });
@@ -2010,6 +2010,58 @@ try {
     const cacheStats = await (await stFetch('/cache')).json();
     check('map cache: Debug clear empties it', cacheRes.cleared === true && cacheRes.checkpoints > 0 && cacheStats.checkpoints === 0 && cacheStats.built === 0, JSON.stringify([cacheRes, cacheStats]));
     check('settings panel has an Open map window button', await page.locator('#worldscrawl_open_map').count() === 1);
+    // NPCs: cast file, remember card, a fact stamp's bar, and 12-hour waits parsed with no extra model call.
+    const cast0 = await (await stFetch('/cast')).json();
+    check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 2) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
+    const reqsBeforeNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Maren'));
+    await page.waitForTimeout(500);
+    const remembered = await page.evaluate(() => {
+        const ch = SillyTavern.getContext().chat;
+        const hit = [...ch].reverse().find(m => m.extra?.worldscrawl_remember?.status === 'review');
+        return { name: hit?.extra?.worldscrawl_remember?.name ?? '', card: !!document.querySelector('.worldscrawl_remembercard') };
+    });
+    check('/ws-npc shows a Remember card', remembered.card && remembered.name === 'Maren', JSON.stringify(remembered));
+    await queue([{ content: '{"name":"Maren","line":"A traveling knife-grinder with a squeaky cart.","manner":"","voice":""}' }]);
+    await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: 'Keep' }).click();
+    for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await page.waitForTimeout(250);
+    await page.waitForTimeout(800);
+    const created = await page.evaluate(() => {
+        const ch = SillyTavern.getContext().chat;
+        const stamps = ch.flatMap(m => m.extra?.worldscrawl_npc ?? []);
+        return stamps.find(s => s.type === 'npc_create');
+    });
+    check('Keep reads the story back into an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? ''), JSON.stringify(created));
+    // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
+    await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
+    await send('I look at Maren\'s hands.', 2);
+    const factBar = await page.evaluate(() => {
+        const ch = SillyTavern.getContext().chat;
+        const m = [...ch].reverse().find(x => (x.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'));
+        const s = (m?.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_fact');
+        const text = [...document.querySelectorAll('.worldscrawl_npcchange')].map(el => el.textContent ?? '').join('\n');
+        return { text, fact: s?.text ?? '', stripped: !!m && !/ws_npc/.test(m.mes ?? '') };
+    });
+    check('a fact tag becomes a Character changed here bar and leaves the story', /Character changed here: Maren: a scar/.test(factBar.text) && factBar.fact === 'a scar on her knuckle' && factBar.stripped, JSON.stringify(factBar));
+    const factRow = page.locator('.worldscrawl_npcchange', { hasText: 'a scar' });
+    await factRow.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
+    await page.waitForTimeout(400);
+    check('Turn off keeps the fact but stops using it', await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.off === true))));
+    await factRow.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click();
+    await page.waitForTimeout(400);
+    check('Undo removes the fact stamp', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'))));
+    const beforeWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    expected += 1;
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm'));
+    await waitReqs();
+    const five = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = [...ch].reverse().find(m => m.extra?.worldscrawl_wait); return u?.extra?.worldscrawl_wait ?? null; });
+    const afterWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    check('/ws-wait until 5pm parses with no extra model call', five?.until === '17:00' && five.seconds > 0 && afterWait === beforeWait + 1, JSON.stringify({ five, calls: afterWait - beforeWait }));
+    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).click();
+    await page.waitForTimeout(600);
+    const exportWorld = await M(m => m.effectiveWorld());
+    const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    check('Export to cast writes Maren without replacing Hesk', cast1.npcs?.some(n => n.id === 'hesk') && cast1.npcs?.some(n => n.id === 'maren' && /knife-grinder/.test(n.line ?? '')), JSON.stringify({ world: exportWorld, ids: cast1.npcs?.map(n => n.id) }));
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {

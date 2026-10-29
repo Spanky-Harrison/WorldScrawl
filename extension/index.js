@@ -8,6 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -33,7 +34,7 @@ const WAITCARD_KEY = 'worldscrawl_waitcard'; // {swipe, seconds, sleep, label, u
 const WAIT_KEY = 'worldscrawl_wait'; // {seconds, sleep, label, before}: on the message where time passed without moving
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
-const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag', 'ws_wait'];
+const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag', 'ws_wait', 'ws_npc'];
 const PATCH_KEY = 'worldscrawl_patches'; // [{type: 'patch', ops, relocate, swipe, ...}] on the message where a map change settled
 const FLAG_KEY = 'worldscrawl_flag'; // {swipe, loc, note, start, status, proposal}: a flagged message's review card
 const FLAGHINT_KEY = 'worldscrawl_flaghint';
@@ -89,9 +90,10 @@ const worldLiving = new Map(); // id -> true for living saves (can be saved over
 const listedWorlds = new Set(); // ids in the latest GET /worlds (the server rescans its folder on each list)
 const missingWorlds = new Set(); // world ids the server says no longer exist
 const worldTimes = new Map(); // id -> {calendar, start_date} (from GET /worlds and saves)
+const worldCasts = new Map(); // id -> { npcs, places: Set, names, labels }
 const rememberWorlds = body => {
     if (body?.default) defaultWorldId = body.default;
-    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); } }
+    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); if (Array.isArray(w.cast)) worldCasts.set(w.id, { npcs: w.cast, places: new Set(w.places ?? []), names: w.place_names ?? [], labels: w.place_labels ?? {} }); } }
 };
 
 // ---- Game clock. Travel and waiting take time: each move or wait stamps its seconds on its message (move.seconds, wait.seconds), so swipes keep
@@ -661,6 +663,30 @@ function registerTools() {
         },
         formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
     });
+    registerFunctionTool({
+        name: 'ws_npc',
+        displayName: 'WorldScrawl: A person here',
+        description: P('narration.npc_tool'),
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#', type: 'object',
+            properties: {
+                action: { type: 'string', description: 'fact, memory, disposition, leave, staying, follow, stay, seek, or detail.' },
+                id: { type: 'string', description: 'The person\'s id from the people-here list.' },
+                text: { type: 'string', description: 'The fact, memory note, or what detail is needed.' },
+                value: { type: 'string', description: 'For disposition: hostile, unfriendly, indifferent, friendly, or helpful.' },
+                reason: { type: 'string', description: 'For disposition: why it changed.' },
+            },
+            required: ['action', 'id'],
+        },
+        action: async (args = {}) => {
+            if (String(args.action ?? '').toLowerCase() === 'detail') return npcDetail(String(args.id ?? ''));
+            const stamp = toolNpcStamp(args);
+            if (!stamp) return 'Nothing to record.';
+            pendingNpc.push(stamp);
+            return 'Noted. It will be kept on this reply.';
+        },
+        formatMessage: () => 'Noting a person...',
+    });
 }
 
 /** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
@@ -1078,9 +1104,14 @@ export function whoMoves() {
     out = String(out ?? '').replace(/\{\{[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
     return out || 'You';
 }
-/** The party is not stored. It is the player, then whoever is following them. Nobody follows yet, so this is just the player. */
+/** The party is not stored. It is the player, then whoever is following them. */
 export function partyMembers() {
-    return [{ id: PLAYER, name: whoMoves() }];
+    let extra = [];
+    try {
+        const chat = ctx().chat ?? [];
+        if (chat.length) extra = followersAt(chat, chat.length - 1, castPack()?.npcs ?? []).filter(f => (f.who || PLAYER) === PLAYER);
+    } catch { extra = []; }
+    return [{ id: PLAYER, name: whoMoves() }, ...extra.map(f => ({ id: f.id, name: f.name }))];
 }
 /**
  * {{party}} and its alias {{who}}: the names of the party. Today the group is only the player, so this is whoMoves()
@@ -1590,6 +1621,7 @@ export const VERBS = [
     { id: 'wait', words: ['wait'], slash: '/ws-wait <time>', help: 'let time pass here, e.g. [wait] 2h or [wait] until morning' },
     { id: 'sleep', words: ['sleep'], slash: '/ws-sleep [time]', help: 'sleep here (8h unless you say), e.g. [sleep] until morning' },
     { id: 'help', words: ['help'], slash: '/ws-help', help: 'list these commands' },
+    { id: 'remember', words: ['remember'], slash: '/ws-npc <name>', help: 'remember a person from the story, e.g. I [remember] Maren' },
 ];
 const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));
 const TARGET_FILLER = new Set(['to', 'the', 'a', 'an', 'at', 'through', 'into', 'in', 'toward', 'towards', 'out', 'of', 'my', 'way']);
@@ -1636,6 +1668,7 @@ export async function bracketIntent(msg, b) {
     const loc = await currentLocation();
     const exitsSeen = loc.exits.filter(e => !e.hidden || revealsDestination(e));
     if (b.verb === 'help') return { kind: 'help', loc };
+    if (b.verb === 'remember') { await offerRemember(msg, b.target); return { kind: 'remember', loc }; }
     if (b.verb === 'move' || b.verb === 'travel') {
         if (!b.target) return failed(loc, `[${b.word}] needs where to: an exit or a place you know.`);
         const taken = new Set(), cands = await travelCandidates(loc);
@@ -1816,6 +1849,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         ...glimpseLines(loc, extra.open),
         extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
         extra.weather ? `${extra.weather} Let the weather and temperature show in the narration where it fits; do not change them.` : '',
+        (extra.npcs_present || extra.npc_focus) ? P('narration.npcs', { npcs_present: extra.npcs_present || '(none)', npc_focus: extra.npc_focus || '', how_to_report: P(toolsOn ? 'narration.npc_tools' : 'narration.npc_tags') }) : '',
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     const arrivalText = arr ? ` ${who} ${arr.text}.` : '', where = arr?.where ?? move?.to_name, place = displayName(loc);
@@ -1837,6 +1871,231 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     return lines.filter(Boolean).join('\n');
 }
 
+const REMEMBER_KEY = 'worldscrawl_remember';
+const FOCUS_KEY = 'worldscrawl_focus';
+let pendingNpc = []; // ws_npc tool calls, stamped on the reply
+function castPack() {
+    const id = activeWorld || defaultWorldId;
+    return (id && worldCasts.get(id)) || (defaultWorldId && worldCasts.get(defaultWorldId)) || null;
+}
+function chatRelocate(chat) {
+    const out = {};
+    for (const m of chat ?? []) for (const p of m?.extra?.[PATCH_KEY] ?? []) {
+        if (!p || p.off === true) continue;
+        for (const [k, v] of Object.entries(p.relocate ?? {})) out[k] = v;
+    }
+    return out;
+}
+function npcClock(chat, i) {
+    const elapsed = clockAt(Math.max(0, i), chat);
+    const t = worldTimes.get(activeWorld || defaultWorldId);
+    if (!calendarLib || !t) return { day: 0, hour: 8, minute: 0, minutes: 8 * 60, elapsed };
+    try {
+        const d = calendarLib.dateAt(elapsed, t.start_date, t.calendar);
+        return { day: d.day_number, hour: d.hour, minute: d.minute, minutes: d.hour * 60 + d.minute, elapsed };
+    } catch { return { day: 0, hour: 8, minute: 0, minutes: 8 * 60, elapsed }; }
+}
+function npcEnv(chat, loc) {
+    const pack = castPack();
+    const relocate = chatRelocate(chat);
+    const addresses = pack?.places ?? new Set();
+    const end = Math.max(0, (chat?.length ?? 1) - 1);
+    const exists = a => !!a && addresses.has(a) && !Object.prototype.hasOwnProperty.call(relocate, a);
+    const rawAt = i => (i >= end && loc?.address ? loc.address : (positionOf(chat, Math.min(Math.max(i, 0), end), PLAYER)?.address || loc?.address || ''));
+    return {
+        exists, relocate,
+        names: a => pack?.labels?.[a] || (loc?.address === a ? (loc.display_name || loc.name || a) : a),
+        playerAt: i => { const raw = rawAt(i); const r = resolveSchedulePlace(raw, { exists, relocate }); return r.ok ? r.address : raw; },
+        actorAt: (i, id) => positionOf(chat, Math.min(Math.max(i, 0), end), id)?.address || '',
+        clock: i => npcClock(chat, Math.min(Math.max(i, 0), end)),
+    };
+}
+function addNpcStamp(msg, stamp) {
+    msg.extra = msg.extra ?? {};
+    msg.extra[NPC_KEY] = [...(Array.isArray(msg.extra[NPC_KEY]) ? msg.extra[NPC_KEY] : []), { ...stamp, swipe: swipeOf(msg) }];
+}
+/** People-here text for the narrator. Empty when nobody saved is in the scene, so turns without them stay as they were. */
+function npcPromptBits(loc) {
+    const pack = castPack();
+    const chat = ctx().chat ?? [];
+    if (!pack?.npcs?.length || !chat.length || !calendarLib) return {};
+    try {
+        const present = presentAt(chat, chat.length - 1, pack.npcs, npcEnv(chat, loc));
+        if (!present.length) return {};
+        const ui = lastUserIndex(chat);
+        const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
+        const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
+        return npcSlices(present, focus);
+    } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
+}
+const DRAMATIC_RE = /\b(attacks?|stab(?:s|bed)?|rescues?|sav(?:e|es|ed)|kills?)\b/i;
+const DISPO_OPTS = [
+    { key: 'indifferent', label: 'the usual answer; no reason to feel strongly either way' },
+    { key: 'unfriendly', label: 'cold, short or suspicious' },
+    { key: 'friendly', label: 'warm, glad to see them' },
+    { key: 'helpful', label: 'goes out of their way to help' },
+    { key: 'hostile', label: 'wants to harm them' },
+];
+async function askDisposition(person, said) {
+    await ensurePrompts();
+    const prompt = P('npc.disposition', { name: person.name, line: person.line, party: partyText(), said: String(said ?? '').slice(0, 800), options: optionLines(DISPO_OPTS) });
+    const hit = await askValid('disposition', prompt, pickKey(DISPO_OPTS));
+    return hit?.key ?? 'indifferent';
+}
+async function askWho(loc, said, present) {
+    await ensurePrompts();
+    const opts = [...present.map(p => ({ key: p.id, label: p.name })), { key: 'nobody', label: 'nobody in particular' }];
+    const prompt = P('npc.who', { party: partyText(), place: displayName(loc), said: String(said ?? '').slice(0, 800), options: optionLines(opts) });
+    const hit = await askValid('who', prompt, pickKey(opts));
+    return hit?.key && hit.key !== 'nobody' ? hit.key : null;
+}
+/** Before the narrator speaks: sighting stamps, a first attitude, and who is in focus. One pick-one, one retry, then indifferent. */
+async function prepareNpcs(userMsg) {
+    const pack = castPack();
+    const chat = ctx().chat ?? [];
+    if (!pack?.npcs?.length || !userMsg || !chat.length) return;
+    if (userMsg.extra?.worldscrawl_npc_ready) return;
+    userMsg.extra = userMsg.extra ?? {};
+    userMsg.extra.worldscrawl_npc_ready = true;
+    await loadCalendar();
+    const loc = await currentLocation().catch(() => null);
+    if (!loc || !calendarLib) return;
+    const env = npcEnv(chat, loc);
+    const index = chat.length - 1;
+    const clock = env.clock(index);
+    const here = env.playerAt(index);
+    const frame = framesOf(chat, index, pack.npcs);
+    const now = frame[frame.length - 1];
+    const said = userMsg.mes ?? '';
+    const seeking = /\b(find|seek|where is|look for|ask after|ask about)\b/i.test(said);
+    if (now) for (const n of now.values()) {
+        const oneOff = n.seen_at && !(n.schedule ?? []).some(e => !e.broken);
+        if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day });
+        const check = sightCheck(n, clock, here, env, { appearances: n.appearances, seeks: n.seeks, useRoll: true });
+        if (check.present && check.needsStamp) addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: check.place, day: clock.day, hour: clock.hour });
+    }
+    let present = presentAt(chat, index, pack.npcs, env);
+    for (const p of present) {
+        if (p.disposition?.player?.value !== 'unknown' || (p.fromCast ?? []).includes(PLAYER)) continue;
+        const value = await askDisposition(p, said);
+        addNpcStamp(userMsg, { type: 'npc_disposition', id: p.id, who: PLAYER, value, reason: value === 'indifferent' ? 'No strong impression.' : '', ...(DRAMATIC_RE.test(said) ? { dramatic: true } : {}) });
+    }
+    present = presentAt(chat, index, pack.npcs, env);
+    const rules = focusRules(said, present);
+    let focus = rules;
+    if (rules.ambiguous && present.length) {
+        const id = await askWho(loc, said, present);
+        focus = { id, depth: id ? (rules.depth === 'deep' ? 'deep' : 'focused') : 'present', ambiguous: false };
+    }
+    userMsg.extra[FOCUS_KEY] = { id: focus.id ?? null, depth: focus.depth ?? 'present', swipe: swipeOf(userMsg) };
+}
+function knownNpcNames(chat) {
+    const pack = castPack();
+    const names = [...(pack?.names ?? []), ...(pack?.npcs ?? []).flatMap(n => [n.name, n.id])];
+    const frames = framesOf(chat, chat.length - 1, pack?.npcs ?? []);
+    const end = frames[frames.length - 1];
+    if (end) for (const n of end.values()) names.push(n.name, n.id);
+    return names;
+}
+async function offerRemember(msg, name) {
+    const who = String(name ?? '').trim();
+    if (!who) { toastr.info('WorldScrawl: say who to remember, e.g. /ws-npc Maren'); return; }
+    const chat = ctx().chat ?? [];
+    const known = knownNpcNames(chat);
+    if (known.some(n => normName(n) === normName(who) || nameIn(who, n))) { toastr.info(`WorldScrawl: ${who} is already remembered.`); return; }
+    msg.extra = msg.extra ?? {};
+    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: who, status: 'review' };
+    await ctx().saveChat?.();
+    renderPatchCards();
+}
+async function keepRemember(id, edited = null) {
+    const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
+    if (!card || card.status === 'kept') return;
+    await ensurePrompts();
+    const chat = c.chat ?? [];
+    const name = edited?.name?.trim() || card.name;
+    const loc = await currentLocation().catch(() => null);
+    let got = edited?.line ? { name, line: edited.line.trim(), manner: '', voice: '', facts: [] } : null;
+    if (!got) {
+        const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
+        const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
+        const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
+        for (let t = 0; t < 2 && !got; t++) {
+            try { got = readRememberAnswer(parseJsonAnswer(await c.generateRaw({ prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 300 }))); } catch { got = null; }
+        }
+        if (!got) got = { name, line: 'Met in this scene.', manner: '', voice: '', facts: [] };
+    }
+    const taken = new Set(knownNpcNames(chat));
+    addNpcStamp(msg, { type: 'npc_create', id: freeId(got.name, taken), name: got.name, line: got.line, manner: got.manner, voice: got.voice, facts: got.facts });
+    card.status = 'kept'; card.name = got.name;
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
+    toastr.success(`WorldScrawl: ${got.name} remembered. Delete this message to undo it.`);
+    await applyFacts();
+    renderPatchCards();
+}
+async function discardRemember(id) {
+    const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
+    if (!card) return;
+    addNpcStamp(msg, { type: 'npc_decline', name: card.name });
+    card.status = 'declined';
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
+    renderPatchCards();
+}
+function maybeSuggest(id) {
+    const chat = ctx().chat ?? [];
+    const pack = castPack();
+    const msg = chat[id];
+    if (!pack || !msg || msg.extra?.[REMEMBER_KEY]) return;
+    const known = knownNpcNames(chat);
+    const declined = declinesInScene(chat, id, i => positionOf(chat, i, PLAYER)?.address || '');
+    const messages = chat.slice(0, id + 1).filter(m => m && !m.is_system && m.mes).map(m => ({ text: m.mes }));
+    const sug = suggestNames(messages, { known, declined: [...declined], places: pack.names ?? [], threshold: SUGGEST_AFTER });
+    const hit = sug.find(s => !chat.some(m => normName(m?.extra?.[REMEMBER_KEY]?.name ?? '') === s.key));
+    if (!hit) return;
+    msg.extra = msg.extra ?? {};
+    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.label, status: 'review', suggested: true };
+}
+async function exportNpc(id) {
+    const chat = ctx().chat ?? [];
+    const pack = castPack();
+    const npc = npcAt(chat, chat.length - 1, pack?.npcs ?? [], id);
+    const record = npc ? exportRecord(npc) : null;
+    if (!record) { toastr.warning('WorldScrawl: that person is not in this chat.'); return; }
+    const r = await api('/cast/export', { method: 'POST', body: JSON.stringify({ npc: record }) });
+    if (!r.ok) { toastr.warning(typeof r.body?.detail === 'string' ? r.body.detail : 'Could not export.'); return; }
+    rememberWorlds((await api('/worlds').catch(() => null))?.body);
+    toastr.success(`WorldScrawl: wrote cast/${r.body.file}${r.body.renamed ? ` (as ${r.body.id}, the old file was kept)` : ''}.`);
+}
+function npcDetail(id) {
+    const chat = ctx().chat ?? [];
+    const npc = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], id);
+    if (!npc) return 'No saved person with that id is here.';
+    const bits = [npc.line];
+    if (npc.manner) bits.push(`Manner: ${npc.manner}`);
+    if (npc.voice) bits.push(`Voice: ${npc.voice}`);
+    if (npc.memory?.length) bits.push(`Memory: ${npc.memory.join('; ')}`);
+    if (npc.deep?.history) bits.push(`History: ${npc.deep.history}`);
+    if (npc.deep?.secrets?.length) bits.push(`Secrets: ${npc.deep.secrets.join('; ')}`);
+    if (npc.deep?.relationships) bits.push(`Relationships: ${Object.entries(npc.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
+    return bits.filter(Boolean).join('\n');
+}
+function toolNpcStamp(args = {}) {
+    const action = String(args.action ?? '').toLowerCase();
+    const id = String(args.id ?? '').trim();
+    if (!id) return null;
+    if (action === 'fact') return args.text ? { type: 'npc_fact', id, field: 'fact', text: String(args.text) } : null;
+    if (action === 'memory') return args.text ? { type: 'npc_memory', id, note: String(args.text) } : null;
+    if (action === 'disposition') return { type: 'npc_disposition', id, who: PLAYER, value: args.value, reason: String(args.reason ?? args.text ?? '') };
+    if (action === 'leave') return { type: 'npc_leave', id };
+    if (action === 'staying') return { type: 'npc_staying', id, elapsed: chatElapsed() };
+    if (action === 'follow') return { type: 'npc_follow', id, who: PLAYER };
+    if (action === 'stay') return { type: 'npc_stay', id };
+    if (action === 'seek') return { type: 'npc_seek', id, day: npcClock(ctx().chat ?? [], (ctx().chat ?? []).length - 1).day };
+    return null;
+}
+
 async function applyFacts() {
     await ensurePrompts();
     const c = ctx();
@@ -1849,7 +2108,7 @@ async function applyFacts() {
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
         await loadCalendar();
         const d = gameDate();
-        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides() });
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), ...npcPromptBits(loc) });
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
@@ -1902,6 +2161,7 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             if (r.kind === 'dig_failed') toastr.warning(`WorldScrawl: ${DIG_FAILED_NOTICE}`);
             renderAllExits();
         }
+        if ((!type || type === 'normal') && last?.is_user) await prepareNpcs(last);
         await applyFacts();
     } catch (e) { console.error('[WorldScrawl] interceptor failed', e); }
 };
@@ -2136,6 +2396,20 @@ function registerSlashCommands() {
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'how long, or "until <time>"', typeList: [ARGUMENT_TYPE.STRING], isRequired: !sleep })],
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-help', callback: async () => { await addNotice({ kind: 'text', text: helpText() }); return ''; }, helpString: 'WorldScrawl: list the commands ([move], [look], ... and their slash commands). Answered here; the narrator is not called.' }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-npc',
+        callback: whenOn(async (_a, name) => {
+            const chat = ctx().chat ?? [];
+            let id = chat.length - 1;
+            while (id > 0 && chat[id]?.is_system) id--;
+            const msg = chat[id];
+            if (!msg) { toastr.info('WorldScrawl: open a chat first.'); return ''; }
+            await offerRemember(msg, String(name ?? ''));
+            return '';
+        }),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person to remember, e.g. Maren', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: remember a person from the story (a Keep / Adjust / Discard card). A no lasts until the scene changes.',
+    }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-off', callback: async () => { const t = await setEnabled(false); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl off in this chat (as if uninstalled; nothing already stamped is changed).' }));
@@ -3203,6 +3477,8 @@ function syncSwipeExtra(msg) {
     if (!si) return;
     si.extra = si.extra ?? {};
     if (msg.extra[PATCH_KEY]) si.extra[PATCH_KEY] = msg.extra[PATCH_KEY]; else delete si.extra[PATCH_KEY];
+    if (msg.extra[NPC_KEY]) si.extra[NPC_KEY] = msg.extra[NPC_KEY]; else delete si.extra[NPC_KEY];
+    if (msg.extra[REMEMBER_KEY]) si.extra[REMEMBER_KEY] = msg.extra[REMEMBER_KEY]; else delete si.extra[REMEMBER_KEY];
 }
 async function undoFlag(id) {
     const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
@@ -3266,6 +3542,21 @@ export async function onReplyForFlags(id) {
     }
     if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); flag = null; }
     if (flag) await flagMessage(id, flag);
+    const taken = takeNpcTags(msg.mes ?? '');
+    const stamped = [...(pendingNpc.splice(0)), ...taken.stamps];
+    if (taken.text !== (msg.mes ?? '') || stamped.length) {
+        if (taken.text !== (msg.mes ?? '')) {
+            msg.mes = taken.text;
+            if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+            try { c.updateMessageBlock?.(id, msg); } catch {}
+        }
+        const clock = npcClock(c.chat, id);
+        for (const s of stamped) addNpcStamp(msg, s.type === 'npc_staying' ? { ...s, elapsed: s.elapsed ?? clock.elapsed } : s);
+        syncSwipeExtra(msg);
+        await c.saveChat?.();
+    }
+    maybeSuggest(id);
+    if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }
 }
 /** Did the player's turn just before reply `id` fail to break through? Then the reply must not add a room or passage. */
 export function digFailedBefore(chat, id) {
@@ -3465,7 +3756,9 @@ export function renderPatchCards() {
         const f = msg.extra?.[FLAG_KEY];
         const kept = patchesOn(msg);
         const wc = msg.extra?.[WAITCARD_KEY], waitCard = wc && (wc.swipe ?? 0) === swipeOf(msg);
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard) continue;
+        const remember = msg.extra?.[REMEMBER_KEY], rememberCard = remember && remember.status === 'review' && (remember.swipe ?? 0) === swipeOf(msg);
+        const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_seek', 'npc_decline'].includes(s.type));
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -3522,6 +3815,57 @@ export function renderPatchCards() {
                 cardButton('Discard', () => discardWait(id), 'No time passes'));
             const note = line('A shortened or discarded wait may disagree with the story text; swipe the reply to fix that.');
             note.style.opacity = '0.7'; note.style.fontSize = '0.9em'; d.append(note);
+            card.append(d);
+        }
+        if (rememberCard) {
+            const d = document.createElement('div'); d.className = 'worldscrawl_remembercard';
+            d.append(line(remember.suggested ? `Remember ${remember.name}? They have come up a few times.` : `Remember ${remember.name}?`));
+            const nameInp = document.createElement('input');
+            nameInp.type = 'text'; nameInp.value = remember.name; nameInp.className = 'text_pole worldscrawl_remember_name';
+            nameInp.style.cssText = 'width:10em;display:inline-block;margin:0 4px;padding:1px 4px;';
+            nameInp.addEventListener('click', e => e.stopPropagation());
+            const lineInp = document.createElement('input');
+            lineInp.type = 'text'; lineInp.placeholder = 'one sentence (optional)'; lineInp.className = 'text_pole worldscrawl_remember_line';
+            lineInp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
+            lineInp.addEventListener('click', e => e.stopPropagation());
+            d.append(cardButton('Keep', () => keepRemember(id)), nameInp, lineInp,
+                cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Keep the name and the sentence in the boxes'),
+                cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.'));
+            card.append(d);
+        }
+        const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
+        for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
+        let exported = new Set();
+        for (const s of npcStamps) {
+            const who = npcNames.get(s.id) || s.name || s.id;
+            const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
+            d.className = 'worldscrawl_npcchange';
+            if (s.off) d.style.opacity = '0.6';
+            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
+            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
+                d.append(' ', cardButton('Edit', () => {
+                    const inp = document.createElement('input');
+                    inp.type = 'text'; inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? ''); inp.className = 'text_pole';
+                    inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
+                    inp.addEventListener('click', e => e.stopPropagation());
+                    const save = cardButton('Save', () => {
+                        if (s.type === 'npc_create') { s.line = inp.value.trim() || s.line; if (s.name) npcNames.set(s.id, s.name); }
+                        else s[textKey] = inp.value.trim();
+                        syncSwipeExtra(msg); ctx().saveChat?.(); renderPatchCards();
+                    });
+                    d.append(inp, save);
+                }, 'Edit this note'));
+            }
+            d.append(' ', cardButton(s.off ? 'Turn on' : 'Turn off', () => { s.off = !s.off; syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); }, s.off ? 'Use this note again' : 'Keep the note here but stop using it'));
+            d.append(' ', cardButton('Undo', () => {
+                msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
+                if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
+                syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards();
+            }, 'Remove this note (deleting the message does the same)'));
+            if (!s.off && s.id && !exported.has(s.id)) {
+                exported.add(s.id);
+                d.append(' ', cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder'));
+            }
             card.append(d);
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.

@@ -21,6 +21,15 @@ test('wait durations: h/m/s, days, plain hours, no upper cap', () => {
     assert.deepEqual(parseWait('until morning'), { until: 'morning' });
     assert.deepEqual(parseWait('until sunrise'), { until: 'dawn' });
     assert.deepEqual(parseWait('until 14:30'), { until: '14:30' });
+    assert.deepEqual(parseWait('until 5pm'), { until: '17:00' });
+    assert.deepEqual(parseWait('until 5 pm'), { until: '17:00' });
+    assert.deepEqual(parseWait('until 5:00pm'), { until: '17:00' });
+    assert.deepEqual(parseWait('until 5:30 pm'), { until: '17:30' });
+    assert.deepEqual(parseWait('until 12am'), { until: '00:00' });
+    assert.deepEqual(parseWait('until 12 pm'), { until: '12:00' });
+    assert.deepEqual(parseWait('until 5:30 a.m.'), { until: '05:30' });
+    assert.throws(() => parseWait('until 13pm'));
+    assert.equal(untilSeconds(0, parseWait('until 5pm').until, { year: 1, month: 'January', day: 1, time: '08:00' }), 9 * H);
     assert.equal(SLEEP_DEFAULT, 8 * H);
 });
 

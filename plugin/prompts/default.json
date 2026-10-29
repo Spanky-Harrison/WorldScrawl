@@ -36,7 +36,12 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it: the arrival reminder goes after the latest message on move turns, and when map tools are off the two 'how to flag' hints tell the narrator to end a reply with [ws_flag: …] or [ws_wait: …] tags, which start 'Map changes', 'New room behind a door' or a wait. Whether a mentioned room may be flagged as a discovery follows the 'Proactive room discovery' setting (off: only a door actually opened or entered; on: rooms the narration mentions too); the matching off/on pieces fill {{discover}}."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it: the arrival reminder goes after the latest message on move turns, and when map tools are off the two 'how to flag' hints tell the narrator to end a reply with [ws_flag: …] or [ws_wait: …] tags, which start 'Map changes', 'New room behind a door' or a wait. Whether a mentioned room may be flagged as a discovery follows the 'Proactive room discovery' setting (off: only a door actually opened or entered; on: rooms the narration mentions too); the matching off/on pieces fill {{discover}}. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+    },
+    {
+      "id": "npc",
+      "title": "People",
+      "flow": "Runs when a saved person might be part of the turn. Step 1, only when the player's words do not already name one person who is here: a pick-one question asks who they are addressing or looking at (the keys are those people's ids, plus nobody). How deeply that person is described is decided from the words (a look or a talk is focused; a question about their past is deep), not a second question. The first time someone with no starting attitude is met, a separate pick-one assigns one, leaning toward indifferent. Remembering someone is its own JSON question: it reads the story since they showed up and answers with a name and one line. The narrator reports new facts with the ws_npc tool, or with a [ws_npc: …] tag when tools are off."
     },
     {
       "id": "change",
@@ -115,7 +120,11 @@
     "change": "the summary of the map change that made the place",
     "excerpt": "a short excerpt of the chat message that made the place",
     "default": "the key to use when unsure (the way the party came in)",
-    "discover": "The discovery wording, filled in by the game: the 'Proactive room discovery' off or on piece (the scene can override the setting)."
+    "discover": "The discovery wording, filled in by the game: the 'Proactive room discovery' off or on piece (the scene can override the setting).",
+    "npcs_present": "The saved people in this scene, one short line each: name, what they are doing, and how they feel about the player.",
+    "npc_focus": "The person the player is addressing, with manner, voice and memory, plus history when the talk goes deep. Empty when nobody is the focus.",
+    "how_to_report": "How the narrator reports a new fact about a person: the ws_npc tool, or the [ws_npc] tag when tools are off.",
+    "line": "One sentence about a person: who they are, as already said in the story or the cast file."
   },
   "prompts": [
     {
@@ -1502,6 +1511,101 @@
           "name": "error",
           "generated": true
         }
+      ]
+    },
+    {
+      "id": "narration.npcs",
+      "title": "Narration: people here",
+      "description": "Alongside (when a saved person is in the scene): who is here, and the detail for whoever is the focus.",
+      "group": "narration",
+      "locked": "The game fills these from the cast and the stamps. Saved people are never unnamed strangers.",
+      "text": "People here (saved people only — anyone not listed is scenery, not one of them):\n{{npcs_present}}\n{{npc_focus}}\n{{how_to_report}}",
+      "placeholders": [
+        { "name": "npcs_present" },
+        { "name": "npc_focus", "optional": true },
+        { "name": "how_to_report", "generated": true }
+      ]
+    },
+    {
+      "id": "narration.npc_tags",
+      "title": "Narration: how to report a person (tags)",
+      "description": "Piece: fills {{how_to_report}} when map tools are off.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game reads these [ws_npc: …] tags.",
+      "placeholders": [],
+      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. A memory highlight is [ws_npc: memory | their-id | the note]. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they stop coming along, [ws_npc: stay | their-id]. Do not use a saved person as an unnamed stranger."
+    },
+    {
+      "id": "narration.npc_tools",
+      "title": "Narration: how to report a person (tools)",
+      "description": "Piece: fills {{how_to_report}} when map tools are on.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game reads the ws_npc tool.",
+      "placeholders": [],
+      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text. Use action \"memory\", \"leave\", \"staying\", \"follow\" or \"stay\" the same way. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
+    },
+    {
+      "id": "narration.npc_tool",
+      "title": "Narration: the ws_npc tool description",
+      "description": "Alongside (map tools on): the description of the ws_npc tool.",
+      "group": "narration",
+      "locked": "Names the ws_npc actions the game reads.",
+      "placeholders": [],
+      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact, memory and detail, put the text in text. For disposition, value is hostile, unfriendly, indifferent, friendly or helpful, and reason is why. Use detail only when you would otherwise invent something important."
+    },
+    {
+      "id": "npc.who",
+      "title": "People: who is being addressed",
+      "description": "Step 1 of 1 (only when the message does not already name one person here): who the player is addressing or looking at.",
+      "group": "npc",
+      "locked": "The game reads the answer as one person's id, or nobody.",
+      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWho is the player addressing or looking at?\n{{options}}\n\nReply with just the key.",
+      "placeholders": [
+        { "name": "party" },
+        { "name": "place" },
+        { "name": "said" },
+        { "name": "options", "generated": true }
+      ]
+    },
+    {
+      "id": "npc.disposition",
+      "title": "People: first attitude",
+      "description": "Step 1 of 1 (the first time a saved person with no starting attitude is met): how they feel about the player.",
+      "group": "npc",
+      "locked": "The game reads the answer as one attitude key. Indifferent is the fallback.",
+      "text": "{{name}} is here. {{line}}\n{{party}} just did this:\n{{said}}\n\nHow does {{name}} feel about {{party}}? Choose indifferent unless the scene is clearly warmer or colder.\n{{options}}\n\nReply with just the key.",
+      "placeholders": [
+        { "name": "name" },
+        { "name": "line" },
+        { "name": "party" },
+        { "name": "said" },
+        { "name": "options", "generated": true }
+      ]
+    },
+    {
+      "id": "npc.remember_system",
+      "title": "People: remembering, system prompt",
+      "description": "Step 1 of 1: the system prompt for the remember question. The game reads the JSON.",
+      "group": "npc",
+      "locked": "The game reads the JSON answer with these keys.",
+      "text": "You keep a short record of a person the story has already described. {{reply}}: {\"name\": \"...\", \"line\": \"one sentence\", \"manner\": \"...\", \"voice\": \"...\"}. manner and voice may be empty. Use only what the story said. Do not invent a past.",
+      "placeholders": [
+        { "name": "reply", "generated": true }
+      ]
+    },
+    {
+      "id": "npc.remember",
+      "title": "People: read what the story already said",
+      "description": "Step 1 of 1: the remember question. It reads the story since the person showed up.",
+      "group": "npc",
+      "locked": "The game reads the JSON answer with these keys.",
+      "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nReply with JSON only.",
+      "placeholders": [
+        { "name": "name" },
+        { "name": "place" },
+        { "name": "story" }
       ]
     }
   ]
