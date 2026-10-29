@@ -151,6 +151,7 @@ A schedule is a list of entries: `{ place, activity, from?, to? }`. A stationary
 This applies to schedules in general and to one-off sightings.
 
 - **The engine never removes an NPC who is in the current scene.** When their schedule (or their sighting hour) says they're due elsewhere, the narrator gets a one-line note instead, e.g. `Hesk is due at the forge (work)`.
+- **The note escalates** the more overdue she is: `Hesk is due at the forge (work)` becomes `Hesk is an hour late for work`, so a narrator can't keep her lingering forever. Persuasion or a `staying` stamp has to keep up with it (staying more than a little while past her time takes fresh persuasion).
 - **Importance.** Schedule entries take an optional `importance` field: `low` / `normal` / `high` (text keys, lenient matching). If it's left out, the model judges from the activity: "go to work" is insistent, "chill at home" is easygoing.
 - **The narrator decides** whether the NPC lingers, mentions needing to go, or excuses herself. Leaving is a stamp (`npc_leave`) on that reply, so deleting or swiping it brings her back.
 - **Staying.** The player can convince (or later force) her to stay: a `staying with the party` stamp overrides the schedule until she leaves or the scene ends. Once stats exist, persuading or forcing her can become a real check (see future work).
