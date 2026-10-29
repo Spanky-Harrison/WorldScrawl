@@ -10,7 +10,7 @@ import { handlePrompts } from '../../plugin/prompts.mjs';
 const DEF = new URL('../../plugin/prompts/default.json', import.meta.url).pathname;
 const def = JSON.parse(fs.readFileSync(DEF, 'utf8'));
 const byId = Object.fromEntries(def.prompts.map(e => [e.id, e]));
-const PREFIX = { pick: ['pick.'], intent: ['intent.', 'travel.'], dig: ['dig.'], look: ['look.'], door: ['door.'], narration: ['narration.'], change: ['change.'], discover: ['discover.'], expand: ['expand.'] };
+const PREFIX = { pick: ['pick.'], intent: ['intent.', 'travel.'], dig: ['dig.'], look: ['look.'], door: ['door.'], narration: ['narration.'], npc: ['npc.'], change: ['change.'], discover: ['discover.'], expand: ['expand.'] };
 
 test('Writing style first, then one group per process, each with a title and a plain flow description', () => {
     assert.deepEqual(def.groups.map(g => g.id), ['style', ...Object.keys(PREFIX)]);

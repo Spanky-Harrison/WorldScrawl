@@ -11,6 +11,7 @@ import { inspect, inspectIndex } from './inspect.mjs';
 import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
+import { castFiles, loadCast, worldPlaces, writeCastNpc } from './cast.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
 import { opActive, parseLasts } from './ui/patches.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -26,7 +27,7 @@ export class HttpError extends Error {
 /** Short hash of world.json + every region file. Changes whenever the map files change. */
 export function map_version(root) {
     const h = crypto.createHash('sha256');
-    for (const p of [path.join(root, 'world.json'), ...regionFiles(root)]) {
+    for (const p of [path.join(root, 'world.json'), ...regionFiles(root), ...castFiles(root)]) {
         h.update(Buffer.from(path.basename(p), 'utf8'));
         h.update(fs.readFileSync(p));
     }
@@ -76,10 +77,14 @@ class LoadedWorld {
         if (isFile(kf)) {
             try { this.knowledge = clean_knowledge(JSON.parse(fs.readFileSync(kf, 'utf8')), this.world); } catch (e) { log.warning(`world ${wid}: ignoring knowledge.json (${e.message})`); }
         }
+        this.cast = loadCast(root, this.world); // bad cast files are listed, never fatal
+        for (const p of this.cast.problems) log.warning(`world ${wid}: ${p}`);
     }
     info() {
+        const places = worldPlaces(this.world);
         return { id: this.id, name: this.name, start_region: this.world.start.split(':')[0], start: this.world.start,
-            map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living, ...this.time() };
+            map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living, ...this.time(),
+            cast: this.cast.npcs, cast_problems: this.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels };
     }
     /** The world's calendar (default Gregorian) and start_date (missing fields filled in). */
     time() {
@@ -308,6 +313,22 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'GET /worlds': () => {
             rescan(); // folders added/removed by hand show up without a restart
             return { default: defaultId, worlds: [...worlds.values()].map(lw => lw.info()) };
+        },
+        'GET /cast': ({ q }) => {
+            const lw = get_world(q('world'));
+            const places = worldPlaces(lw.world);
+            return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels };
+        },
+        'POST /cast/export': ({ q, body }) => {
+            needBody(body);
+            const lw = get_world(q('world'));
+            const npc = isObj(body.npc) ? body.npc : body.record;
+            if (!isObj(npc)) bad('npc', 'Input should be a valid dictionary', npc ?? null);
+            let wrote;
+            try { wrote = writeCastNpc(lw.root, npc); } catch (e) { throw new HttpError(422, e.message); }
+            const fresh = new LoadedWorld(lw.id, lw.root);
+            worlds.set(lw.id, fresh);
+            return { ok: true, id: wrote.id, file: wrote.file, renamed: wrote.renamed, record: wrote.record, map_version: fresh.version };
         },
         'GET /start': ({ q }) => { const w = get_world(q('world')).world; return w.to_dict(w.get(w.start)); },
         'GET /rooms': ({ q }) => {

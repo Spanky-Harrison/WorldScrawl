@@ -1,0 +1,26 @@
+{
+  "id": "hesk",
+  "name": "Hesk",
+  "line": "The Drowned Rat's landlady, a sharp-tongued widow with copper braids who can silence a brawl with one look.",
+  "manner": "Watches the room, wastes no words, and does not soften until she has taken your measure.",
+  "voice": "Low and quick; she does not repeat herself.",
+  "disposition": {
+    "player": {
+      "value": "indifferent",
+      "reason": "Strangers are customers until they make trouble."
+    }
+  },
+  "schedule": [
+    {
+      "place": "riverton:drowned_rat/common_room",
+      "activity": "pouring drinks",
+      "from": "16:00",
+      "to": "02:00",
+      "importance": "high"
+    },
+    {
+      "place": "riverton:drowned_rat/upstairs",
+      "activity": "asleep"
+    }
+  ]
+}
