@@ -9,7 +9,7 @@ export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, reviewDiscoveries: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, proactiveDiscovery: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -627,11 +627,11 @@ function registerTools() {
     registerFunctionTool({
         name: 'ws_flag',
         displayName: 'WorldScrawl: Flag a map change',
-        description: 'Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action "discover" when the characters open a door that is not a listed exit, either one the room description mentions or one that plausibly fits the room (e.g. another door along a hallway). The engine handles it after your reply. Do not call it for ordinary events.',
+        description: flagToolText(),
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep'], description: '"change" (default): a place changed permanently. "discover": the characters open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room, e.g. one of the guest rooms off a hallway; the engine adds the room behind it. "wait" or "sleep": the characters spend time here without travelling (resting, waiting, sleeping the night).' },
+            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep'], description: flagActionText() },
                 location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
@@ -1193,6 +1193,46 @@ async function nearbyRooms(loc) {
     const r = await api('/nearby', { method: 'POST', body: JSON.stringify({ from: loc.address, depth: 3, limit: 12, ...mapCtx() }) });
     return r.ok ? r.body.rooms : [];
 }
+// ---- Duplicate-room guard: a "new" place that closely matches a place within about 3 steps is that place.
+const dupWords = n => String(n ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(w => w && !['the', 'a', 'an', 'of'].includes(w)).map(w => w.length > 3 ? w.replace(/(?:es|s)$/, '') : w);
+const edit1 = (a, b) => { // at most one insert, delete or substitution
+    if (a === b) return true; if (Math.abs(a.length - b.length) > 1) return false;
+    let i = 0; while (i < a.length && a[i] === b[i]) i++;
+    return a.slice(i + (a.length >= b.length ? 1 : 0)) === b.slice(i + (b.length >= a.length ? 1 : 0));
+};
+/** Do two place names mean the same place? Same words (any order, "the"/plurals ignored), or one typo in one long word. */
+export function closeName(a, b) {
+    const x = dupWords(a), y = dupWords(b);
+    if (!x.length || x.length !== y.length) return false;
+    const xs = [...x].sort(), ys = [...y].sort();
+    if (xs.join(' ') === ys.join(' ')) return true;
+    const diff = x.map((w, i) => [w, y[i]]).filter(([u, v]) => u !== v);
+    return diff.length === 1 && diff[0][0].length >= 5 && diff[0][1].length >= 5 && edit1(diff[0][0], diff[0][1]);
+}
+/** The nearest of `rooms` (from /nearby: {address, name, steps}) whose name closely matches `name`, within maxSteps; null if none. */
+export function duplicatePlace(name, rooms, { maxSteps = 3, not = [] } = {}) {
+    const hits = (rooms ?? []).filter(r => r?.name && !not.includes(r.address) && (r.steps ?? 0) <= maxSteps && closeName(name, r.name));
+    return hits.sort((a, b) => (a.steps ?? 9) - (b.steps ?? 9))[0] ?? null;
+}
+/**
+ * A change's create_place ops whose new room duplicates a nearby place become door pairs to that place instead
+ * (one add_exit per exit of the new room; "new:<ref>" pointers to it then name the existing place).
+ * Returns {ops, merged: [{name, to, to_name, steps}]}; ops unchanged when nothing matched.
+ */
+export function mergeDuplicates(ops, rooms, opts = {}) {
+    const merged = [], refs = {};
+    let out = [];
+    for (const o of ops ?? []) {
+        const dup = o?.op === 'create_place' && Array.isArray(o.exits) && o.exits.length ? duplicatePlace(o.name, rooms, opts) : null;
+        if (!dup || o.exits.some(x => x.to === dup.address)) { out.push(o); continue; }
+        merged.push({ name: o.name, to: dup.address, to_name: dup.name, steps: dup.steps });
+        if (o.ref) refs[`new:${o.ref}`] = dup.address;
+        for (const x of o.exits) out.push({ op: 'add_exit', loc: dup.address, to: x.to, direction: x.direction, return_direction: x.return_direction,
+            ...(x.door != null ? { door: x.door } : {}), ...(x.travel_time ? { travel_time: x.travel_time } : {}), ...(x.description ? { description: x.description } : {}), ...(x.return_description ? { return_description: x.return_description } : {}) });
+    }
+    if (Object.keys(refs).length) out = JSON.parse(JSON.stringify(out), (k, v) => typeof v === 'string' && refs[v] ? refs[v] : v);
+    return { ops: merged.length ? out : ops, merged };
+}
 export const NEW_PLACE = 'new';
 /** The places a new opening can lead to: nearby rooms keyed by name (`new` is never a place key). */
 export const digOptions = rooms => roomOptions(rooms, new Set([NEW_PLACE]));
@@ -1278,7 +1318,9 @@ async function narrativeDig(msg, loc) {
     for (let i = 0; i < DIG_TRIES && !made; i++) {
         const raw = await ctx().generateRaw({ prompt: digPrompt(loc, saidAll, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
         const a = parseJsonAnswer(raw);
-        const pre = readDigAnswer(a, { loc, opts, canNew });
+        let pre = readDigAnswer(a, { loc, opts, canNew });
+        const dupe = pre.ok && pre.dest.name ? opts.find(o => o.room && duplicatePlace(pre.dest.name, [o.room])) : null;
+        if (dupe) { console.log(`[WorldScrawl] dig: "${pre.dest.name}" is ${dupe.room.name}, already on the map: linking it`); pre = readDigAnswer({ ...a, new: undefined, existing: dupe.key }, { loc, opts, canNew }); }
         const target = pre.ok && pre.dest.room ? await fetchLocationCached(pre.dest.room.address) : null;
         r = pre.ok && pre.dest.room ? (target ? readDigAnswer(a, { loc, opts, canNew, target }) : { ok: false, error: 'that place is unknown' }) : pre;
         if (r.ok) { const m = await makeDig(loc, r); if (m.ok) made = m; else r = { ok: false, error: m.error }; }
@@ -1528,6 +1570,8 @@ export const VERBS = [
     { id: 'look', words: ['look'], slash: null, help: 'look around, at an exit, or out a window, e.g. [look] out the window' },
     { id: 'open', words: ['open'], slash: '/ws-open <exit>', help: 'open a door here, e.g. [open] trapdoor' },
     { id: 'close', words: ['close', 'shut'], slash: '/ws-close <exit>', help: 'close a door here, e.g. [close] door' },
+    { id: 'bar', words: ['bar'], slash: '/ws-bar [exit]', help: 'bar a door from the side its bar is on, e.g. [bar] the cellar door' },
+    { id: 'unbar', words: ['unbar'], slash: '/ws-unbar [exit]', help: 'lift the bar on a door, e.g. [unbar] door' },
     { id: 'dig', words: ['dig', 'break', 'break through'], slash: '/ws-dig <exit> <place>', help: 'break a new opening, e.g. I [break through] the wall' },
     { id: 'wait', words: ['wait'], slash: '/ws-wait <time>', help: 'let time pass here, e.g. [wait] 2h or [wait] until morning' },
     { id: 'sleep', words: ['sleep'], slash: '/ws-sleep [time]', help: 'sleep here (8h unless you say), e.g. [sleep] until morning' },
@@ -1550,7 +1594,15 @@ export function parseBracket(text) {
 }
 /** Bracketed verbs read as plain words for the narrator ("I [move] north" -> "I move north"). */
 export const unbracket = text => String(text ?? '').replace(/\[([^\[\]]{1,40})\]/g, (all, w) => (VERB_OF.has(w.trim().toLowerCase().replace(/\s+/g, ' ')) ? w.trim() : all));
-export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}`;
+/** Slash commands with no bracket verb (listed by /ws-help after the verbs). */
+export const SLASH_ONLY = [
+    ['/ws-change [what changed]', 'the map changed in the latest message (fire, collapse...): work out the change'],
+    ['/ws-exits', 'show the exits from here'], ['/ws-known', 'list the places this chat knows'],
+    ['/ws-reveal all|region|subregion|<id>|off', 'mark places as visited so you can travel there'],
+    ['/ws-removeexit <exit>', 'remove an exit from this room'], ['/ws-map', 'open the map window'],
+    ['/ws-save-world <name>', "save this chat's world as a new world"], ['/ws-on, /ws-off', 'turn WorldScrawl on or off in this chat'],
+];
+export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}\nSlash commands only:\n${SLASH_ONLY.map(([c, h]) => `- ${c}: ${h}`).join('\n')}`;
 export const bracketTargetPrompt = (loc, b, opts) => P('intent.bracket_target', { party: whoMoves(), place: displayName(loc), verb: b.word, target: b.target, options: optionLines(opts) });
 /** Exact match first (an exit name, then a place), else one small target-only question; null when nothing fits. */
 async function bracketTarget(loc, b, opts) {
@@ -1597,6 +1649,21 @@ export async function bracketIntent(msg, b) {
         const hit = list.length === 1 && !b.target ? opts[0] : await bracketTarget(loc, b, opts);
         if (!hit) return failed(loc, list.length ? `[${b.word}] ${b.target}: doors you can ${b.verb} here: ${list.map(x => x.direction).join(', ')}.` : `[${b.word}]: no door to ${b.verb} here.`);
         return await narrativeDoor(msg, loc, [hit.exit], b.verb === 'open' ? 'open_door' : 'close_door');
+    }
+    if (b.verb === 'bar' || b.verb === 'unbar') {
+        const bars = exitsSeen.filter(e => e.door && barrierOf(e)?.barred_from), mine = bars.filter(barHere);
+        const list = mine.filter(e => (b.verb === 'bar') !== isBarredNow(e));
+        const opts = doorOptions(list).map(o => ({ ...o, match: o.exit.direction }));
+        const hit = list.length === 1 && !b.target ? opts[0] : await bracketTarget(loc, b, opts);
+        if (!hit) {
+            const far = b.target && bars.find(e => !barHere(e) && sameName(e.direction, b.target));
+            return failed(loc, far ? `[${b.word}] ${b.target}: the bar on that door is on the other side.`
+                : list.length ? `[${b.word}] ${b.target}: doors you can ${b.verb} here: ${list.map(x => x.direction).join(', ')}.` : `[${b.word}]: no door to ${b.verb} here${mine.length ? ` (${mine.map(x => x.direction).join(', ')} ${mine.length === 1 ? 'is' : 'are'} already ${b.verb === 'bar' ? 'barred' : 'unbarred'})` : ' with a bar on this side'}.`);
+        }
+        const e = hit.exit;
+        msg.extra[CHANGE_KEY] = [...changesOf(msg), ...(b.verb === 'bar' ? [...(isOpenNow(e) ? [doorChange('close_door', loc, e)] : []), doorChange('bar_door', loc, e)] : [doorChange('unbar_door', loc, e)])];
+        msg.extra.worldscrawl_door = { type: `${b.verb}_door`, direction: e.direction };
+        return { kind: 'door', loc };
     }
     if (b.verb === 'dig') return await narrativeDig(msg, loc);
     if (b.verb === 'wait' || b.verb === 'sleep') {
@@ -1745,7 +1812,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
     else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
     else if (extra.newDoor) lines.push(newDoorLine(who, place, toolsOn));
-    else if (extra.door) lines.push(P('narration.door', { party: who, verb: extra.door.type === 'open_door' ? 'opens' : 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
+    else if (extra.door) lines.push(P('narration.door', { party: who, verb: ({ open_door: 'opens', close_door: 'closes', bar_door: 'bars', unbar_door: 'unbars' })[extra.door.type] ?? 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));
@@ -2453,6 +2520,14 @@ function openMapChannel() {
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }
+        if (ev.data?.type === 'change_open' || ev.data?.type === 'change_save') { // the map editor tab for one kept change
+            const d = ev.data, bad = changeEditMismatch(d.session);
+            const reply = r => ch.postMessage({ type: `${d.type}_result`, req: d.req, ...r });
+            if (bad) { if (d.type === 'change_save') toastr.warning(`WorldScrawl: edit not saved. ${bad}`); reply({ ok: false, errors: [{ i: null, error: bad }], stale: true }); }
+            else (d.type === 'change_open' ? changeEditSession(d.session) : restampChange(Number(d.session.msg), d.session.change, Array.isArray(d.ops) ? d.ops : []))
+                .then(r => reply({ ...r, ...(r.ok && d.type === 'change_save' ? { hash: opsHash((ctx().chat[Number(d.session.msg)].extra?.[PATCH_KEY] ?? []).find(x => x.id === d.session.change)?.ops) } : {}) }))
+                .catch(e => reply({ ok: false, errors: [{ i: null, error: e.message }] }));
+        }
         if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
     });
     return ch;
@@ -2501,7 +2576,9 @@ export async function openWorldFolder(id = '') {
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-export const flagHint = () => P('narration.flag_hint');
+export const flagHint = (on = proactiveDiscovery()) => P('narration.flag_hint', { discover: P(on ? 'narration.discover_proactive' : 'narration.discover_strict') });
+export const flagToolText = (on = proactiveDiscovery()) => P('narration.flag_tool', { discover: P(on ? 'narration.flag_tool_proactive' : 'narration.flag_tool_strict') });
+export const flagActionText = (on = proactiveDiscovery()) => P('narration.flag_action', { discover: P(on ? 'narration.flag_action_proactive' : 'narration.flag_action_strict') });
 export const waitHint = () => P('narration.wait_hint');
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
@@ -2592,27 +2669,64 @@ async function openEditor(key, ops, context = {}) {
 }
 /** Re-stamp a kept change with edited ops (same message, same id); the rest of the chat's changes must still fit. */
 async function saveKeptEdit(id, pid, form) {
+    const r = await restampChange(id, pid, form.getOps());
+    if (!r.ok) { form.setErrors(r.errors); return; }
+    openForms.delete(`${id}|${pid}`);
+    renderPatchCards();
+}
+/** {ok, summary} or {ok:false, errors}. Shared by the in-chat editor and the map editor tab. */
+export async function restampChange(id, pid, ops) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], p = (msg?.extra?.[PATCH_KEY] ?? []).find(x => x.id === pid);
-    if (!p) return;
-    const ops = form.getOps();
+    if (!p) return { ok: false, errors: [{ i: null, error: 'That change is no longer on its message.' }] };
     const before = chatChanges(chat.slice(0, id));
     const r = await previewOps(ops, { changes: before, now: chatElapsed(chat.slice(0, id + 1)) });
-    if (!r.ok) { form.setErrors(r.errors); return; }
-    const old = { ops: p.ops, summary: p.summary, relocate: p.relocate };
+    if (!r.ok) return { ok: false, errors: r.errors };
+    const old = { ops: p.ops, summary: p.summary, relocate: p.relocate, inherit: p.inherit, names: p.names, edited: p.edited };
     Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, edited: Date.now() });
     const all = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
     if (!all.ok) {
         Object.assign(p, old);
-        form.setErrors([{ i: null, error: `A later change no longer fits with this edit: ${all.body?.detail?.error ?? all.status}` }]);
-        return;
+        return { ok: false, errors: [{ i: null, error: `A later change no longer fits with this edit: ${all.body?.detail?.error ?? all.status}` }] };
     }
     syncSwipeExtra(msg);
-    openForms.delete(`${id}|${pid}`);
     await c.saveChat?.();
     exitsCache.clear();
     toastr.success('WorldScrawl: change updated.');
     await applyFacts();
     renderAllExits();
+    renderPatchCards();
+    broadcastMapState();
+    return { ok: true, summary: p.summary ?? [] };
+}
+
+// ---- Edit in the map editor tab: Edit on a "Map changed here" bar opens plugin/ui/?edit=... in a new tab. The URL names
+// the chat, message, swipe, change id and a hash of the change's ops; the tab asks this tab for the change ('change_open')
+// and posts the edited ops back ('change_save'). Both are only answered when all of these still match.
+export const opsHash = ops => { let h = 5381; for (const ch of JSON.stringify(ops ?? [])) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(36); };
+const currentChatId = () => { const c = ctx(); return c.chatId ?? c.getCurrentChatId?.() ?? null; };
+export const changeEditUrl = (id, p, chat = ctx().chat ?? [], chatId = currentChatId()) =>
+    `${MAP_URL}?${new URLSearchParams({ edit: '1', chat: String(chatId ?? ''), msg: String(id), swipe: String(chat[id]?.swipe_id ?? 0), change: String(p.id), hash: opsHash(p.ops) })}`;
+/** Why an edit session no longer fits this chat ('' = it does). */
+export function changeEditMismatch(d, chat = ctx().chat ?? [], chatId = currentChatId()) {
+    if (!d || String(d.chat ?? '') !== String(chatId ?? '')) return 'That chat is not the one open in SillyTavern now.';
+    const msg = chat[Number(d.msg)];
+    if (!msg) return 'That message is no longer in the chat.';
+    if (String(msg.swipe_id ?? 0) !== String(d.swipe ?? 0)) return 'That message is showing a different swipe now.';
+    const p = patchesOn(msg).find(x => x.id === d.change) ?? (msg.extra?.[PATCH_KEY] ?? []).find(x => x.id === d.change);
+    if (!p) return 'That change is no longer on its message.';
+    if (opsHash(p.ops) !== d.hash) return 'That change was edited since this editor opened. Close this tab and press Edit again.';
+    return '';
+}
+export function editChangeInTab(id, p, fallback = () => {}) {
+    try { mapChannel ??= openMapChannel(); } catch {}
+    const w = typeof window !== 'undefined' ? window.open(changeEditUrl(id, p), '_blank') : null;
+    if (!w) { toastr.warning('WorldScrawl: the browser blocked the editor tab, so it opens here instead.'); fallback(); }
+}
+async function changeEditSession(d) {
+    const chat = ctx().chat ?? [], id = Number(d.msg), msg = chat[id];
+    const p = (msg.extra?.[PATCH_KEY] ?? []).find(x => x.id === d.change);
+    const before = chatChanges(chat.slice(0, id));
+    return { ok: true, ops: p.ops, summary: p.summary ?? [], note: p.note ?? '', before, with: [...before, { ...p, _msg: id }], now: chatElapsed(chat.slice(0, id + 1)), world: activeWorld || defaultWorldId || '', mes: String(msg.mes ?? '').slice(0, 300) };
 }
 /** Which kept changes can't apply any more (a change they built on was turned off): [{msg, id, error}], refreshed in the background. */
 let changeStatus = { key: null, failed: [], busy: null };
@@ -2869,7 +2983,27 @@ export function flagCardView(f, id) {
     if (f.status === 'kept' || f.status === 'discarded') return null;
     return { text: `🗺 Map change failed: unexpected state "${f.status}".`, buttons: ['Retry', 'Dismiss'] };
 }
-export const USER_FLAG_NOTE = "That's your own message: flag the narrator's reply instead.";
+export const USER_FLAG_NOTE = "That's your own message: the narrator's reply will be checked with it when it arrives.";
+/** The narrator reply right after message id (skipping engine notices), or -1 if a player message or the end comes first. */
+export function replyAfter(chat, id) {
+    for (let i = Number(id) + 1; i < (chat?.length ?? 0); i++) { const m = chat[i]; if (!m || m.is_system) continue; return m.is_user ? -1 : i; }
+    return -1;
+}
+/** Scene overrides: a future story engine can flip settings for the current scene (stored on the chat, so they follow it).
+ * setSceneOverride('proactiveDiscovery', true|false), or null to fall back to the setting. */
+export const SCENE_KEY = 'worldscrawl_scene';
+export function sceneOverrides() { try { return ctx().chatMetadata?.[SCENE_KEY] ?? {}; } catch { return {}; } }
+export function setSceneOverride(key, value) {
+    const c = ctx(); if (!c.chatMetadata) return false;
+    const o = { ...(c.chatMetadata[SCENE_KEY] ?? {}) };
+    if (value == null) delete o[key]; else o[key] = value;
+    c.chatMetadata[SCENE_KEY] = o; c.saveMetadata?.(); discoveryChanged(); return true;
+}
+globalThis.worldscrawlScene = { get: sceneOverrides, set: setSceneOverride };
+/** Proactive room discovery for this scene: the scene override wins, then the setting (off by default). */
+export function proactiveDiscovery() { const o = sceneOverrides().proactiveDiscovery; return typeof o === 'boolean' ? o : !!settings().proactiveDiscovery; }
+function discoveryChanged() { try { if (hasPrompts() && isOn()) { applyTools(); applyNudge(); } } catch (e) { console.warn('[WorldScrawl]', e?.message); } }
+let pendingUserFlag = null; // a flagged player message waiting for the narrator's reply
 async function analyzeFlag(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
     if (!f) return;
@@ -2898,7 +3032,8 @@ async function analyzeFlag(id) {
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
         const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
-        let ops = null, err = '', preview = null;
+        let ops = null, err = '', preview = null, merged = [];
+        const nearHere = f.loc ? await nearbyRooms({ address: f.loc }).catch(() => []) : [];
         for (let tries = 0; tries < 2; tries++) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
             const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
@@ -2906,6 +3041,11 @@ async function analyzeFlag(id) {
             if (ans?.nothing) { f.status = 'nothing'; return; }
             ops = ans?.ops ?? null;
             if (!ops) { err = 'the answer was not {"ops": [...]} JSON'; continue; }
+            const md = mergeDuplicates(ops, nearHere); // a "new" room that is a place a few steps away: connect to that place instead
+            if (md.merged.length) {
+                const rm = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: md.ops }, ...mapCtx() }) });
+                if (rm.ok) { preview = rm.body; ops = rm.body.ops ?? md.ops; merged = md.merged; break; }
+            }
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
@@ -2916,7 +3056,8 @@ async function analyzeFlag(id) {
             else f.status = 'error';
             return;
         }
-        f.proposal = { ops, summary: preview.summary, relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
+        const mergedLines = merged.map(m => `Connected to ${m.to_name} (already on the map, ${m.steps} step${m.steps === 1 ? '' : 's'} away) instead of adding a new "${m.name}".`);
+        f.proposal = { ops, summary: [...preview.summary, ...mergedLines], relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
         if (settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
@@ -2959,14 +3100,18 @@ async function analyzeDiscovery(id) {
         const story = clip(storyText(chat, f.start, id), 4000);
         // Places nearby that are not connected here yet: the door may lead to one of them instead of a new room.
         const linked = new Set([k.location, ...k.neighbors.map(n => n.address), ...k.exits.map(x => x.to)]);
-        const existing = roomOptions((await nearbyRooms({ address: k.location })).filter(r => !linked.has(r.address)));
+        const nearAll = await nearbyRooms({ address: k.location });
+        const existing = roomOptions(nearAll.filter(r => !linked.has(r.address)));
         const q = err => discoverPrompt(k, { exits, near, story, start: f.start, id, note: f.note, err, existing });
         let preview = null, ops = null, err = '';
         for (let tries = 0; tries < 2 && !preview; tries++) {
             const a = parseJsonAnswer(await askModel(c, 'discovery', { prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
-            const ex = existingDiscovery(a, existing, k.location);
+            let ex = existingDiscovery(a, existing, k.location);
             if (ex?.error) { err = ex.error; continue; }
+            const dup = !ex && typeof a.name === 'string' ? duplicatePlace(a.name, [...nearAll, ...k.neighbors.map(n => ({ address: n.address, name: n.name, steps: 1 }))], { not: [k.location] }) : null;
+            if (dup && linked.has(dup.address)) { f.status = 'nothing'; f.error = `${dup.name} is already connected here, so no new room was added`; return; }
+            if (dup) { const o = existing.find(e => e.room.address === dup.address); if (o) { ex = existingDiscovery({ ...a, existing: o.key }, existing, k.location); if (ex?.error) ex = null; else console.log(`[WorldScrawl] discovery: "${a.name}" is ${dup.name}, already on the map: connecting it`); } }
             // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
             ops = ex ? [ex.op] : [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
@@ -2976,7 +3121,7 @@ async function analyzeDiscovery(id) {
         f.note = f.note || clip(preview.summary[0], 120);
         f.proposal = { ops, summary: preview.summary, relocate: preview.relocate ?? {}, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
-        if (!settings().reviewDiscoveries || settings().autoKeep) await keepFlag(id, { quiet: true });
+        await keepFlag(id, { quiet: true }); // a discovery is added at once; its 'Map changed here' bar offers Edit / Turn off / Undo
     } catch (e) {
         f.status = 'error'; f.error = e.message;
     } finally {
@@ -2997,8 +3142,11 @@ export async function flagMessage(id, { note = '', hint = '', start = null, sour
     const msg = chat[id];
     if (!msg || (msg.is_system && !msg.extra?.worldscrawl_notice)) return 'Pick a story message to flag.';
     msg.extra = msg.extra ?? {};
-    if (msg.is_user && source === 'button') { // the change call reads the story up to the narrator's reply: a player line alone gives it nothing
+    if (msg.is_user && source === 'button') { // the change call reads the story up to the narrator's reply: flag that reply, from this message on
+        const r = replyAfter(chat, id);
+        if (r >= 0) return flagMessage(r, { note, hint, start: id, source, kind });
         msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc: locationAt(id) ?? null, source, start: id, status: 'user' };
+        pendingUserFlag = { chat: chatKey(), start: id, note, hint };
         renderPatchCards();
         return USER_FLAG_NOTE;
     }
@@ -3071,6 +3219,11 @@ export async function onReplyForFlags(id) {
     if (!msg || msg.is_user || msg.is_system) return;
     let flag = null;
     if (pendingFlag) { flag = pendingFlag; pendingFlag = null; }
+    if (pendingUserFlag) {
+        const u = pendingUserFlag; pendingUserFlag = null;
+        const um = c.chat?.[u.start];
+        if (u.chat === chatKey() && um?.extra?.[FLAG_KEY]?.status === 'user' && replyAfter(c.chat, u.start) === id) { delete um.extra[FLAG_KEY]; flag ??= { note: u.note, hint: u.hint, start: u.start, source: 'button' }; renderPatchCards(); }
+    }
     const m = FLAG_TAG.exec(msg.mes ?? '');
     if (m) {
         msg.mes = msg.mes.replace(FLAG_TAG, '').trimEnd();
@@ -3190,6 +3343,28 @@ export async function keepWait(id, amount = null) {
     stampWait(msg, w); delete msg.extra[WAITCARD_KEY];
     await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     return '';
+}
+/** Which temporary changes a re-timed wait now runs past (crossed) or no longer reaches (uncrossed), keyed by change and op. */
+export function waitExpiryDelta(changes, start, oldSec, newSec, expiredBetween) {
+    const key = g => `${g.id ?? ''}#${g.op ?? g.index ?? ''}#${g.note}`;
+    const was = expiredBetween(changes, start, start + oldSec), now = expiredBetween(changes, start, start + newSec);
+    const wk = new Set(was.map(key)), nk = new Set(now.map(key));
+    return { crossed: now.filter(g => !wk.has(key(g))), uncrossed: was.filter(g => !nk.has(key(g))) };
+}
+/** Re-time an already-kept wait. The clock moves, so expiries are rechecked: the map is rebuilt from the chat (the server keeps no state). */
+export async function editKeptWait(id, amount) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], old = msg?.extra?.[WAIT_KEY];
+    if (!old) return { error: 'no kept wait on that message' };
+    const w = await planWait(String(amount), old.sleep);
+    if (w.error) return { error: w.error };
+    const lib = await loadPatchLib();
+    const start = chatElapsed(chat.slice(0, id + 1)) - old.seconds;
+    const delta = lib?.expiredBetween ? waitExpiryDelta(chatChanges(chat), start, old.seconds, w.seconds, lib.expiredBetween) : { crossed: [], uncrossed: [] };
+    stampWait(msg, w);
+    await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    if (delta.crossed.length) toastr.info(`WorldScrawl: now runs out during the wait: ${delta.crossed.map(g => g.note).join('; ')}`);
+    if (delta.uncrossed.length) toastr.info(`WorldScrawl: still in place after the shorter wait: ${delta.uncrossed.map(g => g.note).join('; ')}`);
+    return delta;
 }
 export async function discardWait(id) {
     const c = ctx(), msg = c.chat?.[id];
@@ -3360,7 +3535,7 @@ export function renderPatchCards() {
             }
             const d = line(`🗺 Map changed here: ${what}`);
             const key = `${id}|${p.id}`, form = openForms.get(key);
-            d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => openEditor(key, p.ops), 'Change this kept change (it stays on this message)'),
+            d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => editChangeInTab(id, p, () => openEditor(key, p.ops)), 'Change this kept change in the map editor (a new tab); it stays on this message'),
                 ...(failedFor(id, p.id)?.inactive ? [] : [cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)')]),
                 cardButton('Undo', () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }, 'Remove this change (deleting the message does the same)'));
             box.append(d);
@@ -3418,7 +3593,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Map changes</div>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
-      <label class="checkbox_label"><input id="worldscrawl_review_discoveries" type="checkbox"> Ask before adding a discovered room (show the Keep / Discard card)</label>
+      <label class="checkbox_label" title="Off: a room is only discovered when a door that isn't on the map is actually opened or entered. On: rooms the narration mentions (a hallway lined with guest rooms) may be added too."><input id="worldscrawl_proactive_discovery" type="checkbox"> Proactive room discovery (add rooms the narration mentions)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Keep the narrator's waits without asking (skip the Keep / Adjust / Discard card)</label>
@@ -3458,9 +3633,9 @@ function addSettingsPanel() {
     const akw = document.getElementById('worldscrawl_auto_keep_waits');
     akw.checked = !!settings().autoKeepWaits;
     akw.addEventListener('change', () => { settings().autoKeepWaits = akw.checked; ctx().saveSettingsDebounced(); });
-    const reviewDisc = document.getElementById('worldscrawl_review_discoveries');
-    reviewDisc.checked = !!settings().reviewDiscoveries;
-    reviewDisc.addEventListener('change', () => { settings().reviewDiscoveries = reviewDisc.checked; ctx().saveSettingsDebounced(); });
+    const proDisc = document.getElementById('worldscrawl_proactive_discovery');
+    proDisc.checked = !!settings().proactiveDiscovery;
+    proDisc.addEventListener('change', () => { settings().proactiveDiscovery = proDisc.checked; ctx().saveSettingsDebounced(); discoveryChanged(); });
     const flagTags = document.getElementById('worldscrawl_flag_tags');
     flagTags.checked = !!settings().flagTags;
     flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });

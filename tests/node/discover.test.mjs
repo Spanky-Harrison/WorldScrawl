@@ -119,7 +119,7 @@ test('undescribed doors: prompts allow a door that plausibly fits, the intent of
     const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
     const { DEFAULT_PROMPTS } = await import('./useprompts.mjs');
     const pt = id => DEFAULT_PROMPTS.prompts.find(e => e.id === id).text;
-    const hint = pt('narration.flag_hint');
+    const hint = pt('narration.discover_strict');
     assert.match(hint, /plausibly fits the room/);
     assert.match(hint, /If no such door fits, there is none: do not flag it/);
     const sys = pt('discover.system');

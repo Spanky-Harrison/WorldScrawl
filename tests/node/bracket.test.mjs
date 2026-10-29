@@ -32,5 +32,8 @@ test('unbracket: only known verbs lose their brackets', () => {
 test('help lists every verb, with its slash command', () => {
     const h = helpText();
     for (const v of VERBS) assert.ok(h.includes(`[${v.words[0]}]`), v.id);
-    assert.ok(h.includes('/ws-help') && h.includes('/ws-go') && h.includes('/ws-open'));
+    assert.ok(h.includes('/ws-help') && h.includes('/ws-go') && h.includes('/ws-open') && h.includes('/ws-bar') && h.includes('/ws-unbar'));
+    for (const c of ['/ws-change', '/ws-exits', '/ws-known', '/ws-reveal', '/ws-removeexit', '/ws-map', '/ws-save-world', '/ws-on']) assert.ok(h.includes(c), c);
+    assert.equal(parseBracket('I [bar] the door').verb, 'bar');
+    assert.equal(parseBracket('I [unbar] the cellar door').target, 'cellar door');
 });

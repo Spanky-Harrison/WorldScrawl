@@ -1159,6 +1159,34 @@ try {
     check('doors: trapdoor still open from the cellar side', (await stored()) === 'riverton:drowned_rat/cellar' && (await openDoors()) === 'courtyard|trapdoor', await openDoors());
     await go('trapdoor', 'in');
     check('doors: trapdoor shut after leaving both rooms', (await openDoors()) === '', await openDoors());
+    // ---- Barred doors: a map edit puts a bar on the courtyard side of the trapdoor; [bar]/[unbar] from that side.
+    await go('back');
+    const BAR_YARD = 'riverton:drowned_rat/courtyard';
+    check('barred: in the courtyard', (await stored()) === BAR_YARD, String(await stored()));
+    const barMsg = await page.evaluate(async yard => { const c = SillyTavern.getContext(); c.chat.push({ name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: 'Map edit: bar on the trapdoor',
+        extra: { worldscrawl_patches: [{ type: 'patch', id: 'e2e_bar', note: 'bar', at: Date.now(), ops: [{ op: 'set_exit', loc: yard, direction: 'trapdoor', fields: { barrier: { barred_from: 'this_side' } } }] }] } }); await c.saveChat(); await c.reloadCurrentChat(); return c.chat.length - 1; }, BAR_YARD);
+    await page.waitForTimeout(2500);
+    const barState = () => M(m => [...m.barStates().values()].map(c => c.type).join(','));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'You lift the bar.' }]);
+    await send('I [unbar] the trapdoor', 1);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('bracket [unbar]: no intent question, unbar_door stamped, narrator told', lq.length === 1 && lk.extra.worldscrawl_door?.type === 'unbar_door' && changesOfE(lk).map(c => c.type).join() === 'unbar_door' && promptOf(lq[0]).includes('unbars the trapdoor') && (await barState()) === 'unbar_door', lq.length + JSON.stringify(lk.extra) + (await barState()) + promptOf(lq[0] ?? {}).slice(-400));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'You drop the bar back in place.' }]);
+    await send('I [bar] trapdoor', 1);
+    lk = await lastU();
+    check('bracket [bar]: bar_door stamped', (await reqsNow()).length - rL === 1 && lk.extra.worldscrawl_door?.type === 'bar_door' && (await barState()) === 'bar_door', JSON.stringify(lk.extra) + await barState());
+    rL = (await reqsNow()).length;
+    await send('I [bar] the trapdoor', 0);
+    bm = await lastChatMsg();
+    check('bracket [bar] on an already barred door: a clear note, no model call', (await reqsNow()).length === rL && bm.kind === 'text' && /already barred/.test(bm.mes), JSON.stringify(bm));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-unbar trapdoor')); await page.waitForTimeout(1000);
+    check('/ws-unbar: lifted again', (await barState()) === 'unbar_door', await barState());
+    const stuckFar = await M(m => m.isStuck({ door: 'x', barrier: { barred_from: 'other_side' } }, new Map(), new Map()));
+    check('a door barred from the far side is stuck (will not open from here)', stuckFar === true);
+    await page.evaluate(async id => { const c = SillyTavern.getContext(); c.chat.splice(id, 1); await c.saveChat(); await c.reloadCurrentChat(); }, barMsg);
+    await page.waitForTimeout(2500);
     // ---- /ws-known: been there vs seen, readable names, no hidden destinations.
     const kn2 = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-known')).pipe);
     check('/ws-known lists been-there and seen places by name', /^Been there: .*Common Room.*\. Seen: /.test(kn2) && !/riverton:/.test(kn2), kn2);
@@ -1310,12 +1338,28 @@ try {
     await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(1500);
     const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
     check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
+    // Edit on a kept change opens the map editor in its own tab: one tab per touched place, place forms, no op dropdown.
+    const edTab = page.context().waitForEvent('page', { timeout: 15000 });
     await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
-    await card.locator('.wspf-text').first().waitFor({ timeout: 10000 });
-    await card.locator('.wspf-text').first().fill('Rebuilt, smelling of fresh pine.');
-    await card.locator('.worldscrawl_card_btn', { hasText: 'Save change' }).click(); await page.waitForTimeout(1500);
+    const ed = await edTab;
+    const edErrors = []; ed.on('pageerror', e => { edErrors.push(e.message); console.log('[editor pageerror]', e.message); });
+    await ed.waitForSelector('.change-editor .ce-place', { timeout: 20000 }).catch(() => {});
+    const ed0 = await ed.evaluate(() => ({ url: location.search, tabs: [...document.querySelectorAll('.ce-tab')].map(t => t.dataset.target), desc: document.querySelector('.ce-place .placeform > .pf-row[data-field="description"] textarea')?.value, opSelect: !!document.querySelector('.wspf-op'), raw: !!document.querySelector('.ce-raw-box textarea') }));
+    check('kept change Edit: opens the editor tab for this message\'s change, one tab per touched place, place form starts after the change, no op dropdown, Raw JSON there', /edit=1/.test(ed0.url) && new RegExp(`msg=${flagId}`).test(ed0.url) && ed0.tabs.length === 1 && ed0.tabs[0] === CR && ed0.desc === 'Charred beams and ash.' && !ed0.opSelect && ed0.raw, JSON.stringify(ed0));
+    await ed.fill('.ce-place .placeform > .pf-row[data-field="description"] textarea', 'Rebuilt, smelling of fresh pine.');
+    await ed.waitForTimeout(800);
+    await ed.click('.ce-save');
+    try { await ed.waitForFunction(() => /Saved on message/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
     const kept2 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
-    check('kept change can be re-edited and re-stamped on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops[0].text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2));
+    check('editor tab Save: the SillyTavern tab re-stamps the change on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops.at(-1).text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2) + await ed.evaluate(() => document.querySelector('.change-editor')?.innerText.slice(-300)));
+    await page.evaluate(id => { const p = SillyTavern.getContext().chat[id].extra.worldscrawl_patches[0]; p.ops = [{ ...p.ops.at(-1), text: 'Changed in the chat meanwhile.' }]; }, flagId);
+    await ed.click('.ce-save');
+    try { await ed.waitForFunction(() => /Not saved/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
+    const edStale = await ed.evaluate(() => document.querySelector('.change-editor')?.innerText ?? '');
+    const kept3 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('editor tab Save refused with a note when the change was edited since it opened', /edited since/.test(edStale) && kept3[0].ops.length === 1 && kept3[0].ops[0].text === 'Changed in the chat meanwhile.', edStale.slice(-300) + JSON.stringify(kept3));
+    check('editor tab: no page errors', !edErrors.length, edErrors.join(' | '));
+    await ed.close();
     await card.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click(); await page.waitForTimeout(1000);
     check('Undo removes the edited change', await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId));
     // Edit live from the map window's inspector.
@@ -1632,18 +1676,18 @@ try {
     }, [wsMod, nDisc, DROOM]);
     check('discovery: turning it off while standing in it moves the party to the hallway', offDisc.off === true && offDisc.loc === UPST, JSON.stringify(offDisc));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n - 1); await c.saveChat(); await c.reloadCurrentChat(); }, nDisc); await page.waitForTimeout(1500);
-    // With "Ask before adding a discovered room" on, a review card comes instead.
-    await queue([{ content: ROOMJ }]);
-    const rev = await page.evaluate(async ([mod, UPST]) => {
-        const m = await import(mod), c = SillyTavern.getContext(); m.settings().reviewDiscoveries = true;
-        c.chat.push({ name: 'Narrator', is_user: false, mes: 'The door opens.', extra: { worldscrawl_location: UPST } }); await c.saveChat();
-        const id = c.chat.length - 1; await m.flagMessage(id, { kind: 'discover', note: 'end door', source: 'tag' });
-        for (let k = 0; k < 40 && c.chat[id].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
-        m.settings().reviewDiscoveries = false;
-        return { id, status: c.chat[id].extra.worldscrawl_flag?.status, stamped: !!c.chat[id].extra.worldscrawl_patches };
+    // Flagging the player's own message checks the narrator's reply right after it (from the player's message on).
+    await queue([{ content: '{"rooms": [], "areas": []}' }]);
+    const uf = await page.evaluate(async ([mod, UPST]) => {
+        const m = await import(mod), c = SillyTavern.getContext();
+        c.chat.push({ name: 'User', is_user: true, mes: 'I kick the wall.', extra: { worldscrawl_location: UPST, worldscrawl_intent_checked: true } });
+        c.chat.push({ name: 'Narrator', is_user: false, mes: 'The plaster cracks.', extra: { worldscrawl_location: UPST } }); await c.saveChat();
+        const u = c.chat.length - 2, n = u + 1; const t = await m.flagMessage(u);
+        for (let k = 0; k < 40 && c.chat[n].extra.worldscrawl_flag?.status === 'working'; k++) await new Promise(r => setTimeout(r, 250));
+        return { u, t, userFlag: !!c.chat[u].extra.worldscrawl_flag, reply: c.chat[n].extra.worldscrawl_flag };
     }, [wsMod, UPST]);
-    check('discovery review setting: a Keep / Discard card, nothing stamped yet', rev.status === 'review' && !rev.stamped, JSON.stringify(rev));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, rev.id); await page.waitForTimeout(1500);
+    check('flagging the player\'s message flags the narrator reply after it, from the player\'s message on', !uf.userFlag && uf.reply?.start === uf.u && uf.reply?.status === 'nothing', JSON.stringify(uf));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, uf.u); await page.waitForTimeout(1500);
     // The change call: "can't express this" is shown plainly; three new rooms off a hub come back as one reviewable change.
     const changeFlag = async (answers) => { await queue(answers); return page.evaluate(async ([mod, UPST]) => {
         const m = await import(mod), c = SillyTavern.getContext();
