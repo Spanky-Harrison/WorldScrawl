@@ -36,7 +36,7 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it: the arrival reminder goes after the latest message on move turns, and when map tools are off the two 'how to flag' hints tell the narrator to end a reply with [ws_flag: …] or [ws_wait: …] tags, which start 'Map changes', 'New room behind a door' or a wait."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it: the arrival reminder goes after the latest message on move turns, and when map tools are off the two 'how to flag' hints tell the narrator to end a reply with [ws_flag: …] or [ws_wait: …] tags, which start 'Map changes', 'New room behind a door' or a wait. Whether a mentioned room may be flagged as a discovery follows the 'Proactive room discovery' setting (off: only a door actually opened or entered; on: rooms the narration mentions too); the matching off/on pieces fill {{discover}}."
     },
     {
       "id": "change",
@@ -46,7 +46,7 @@
     {
       "id": "discover",
       "title": "New room behind a door",
-      "flow": "Runs when the narrator opens a door that isn't on the map yet and flags it as a discovery (from the 'door not on the map' narration). Step 1: the model gets the region and area notes, the current room, its exits, nearby rooms and the story, and answers in JSON with the new room and the door pair. If places nearby are not yet connected to this room, they are listed as short keys (the existing piece) and the model may instead answer with one of them; then only the door pair to that place is added. The new room's name and description follow the Writing style entry 'New room behind a door: how it is named and described'. The game turns that into the same 'create place' edit the editor uses and test-applies it; if it doesn't fit, Step 1 is asked once more with the retry piece. The room is added at once, as if it had always been there, unless 'review discoveries' is on."
+      "flow": "Runs when the narrator opens a door that isn't on the map yet and flags it as a discovery (from the 'door not on the map' narration). Step 1: the model gets the region and area notes, the current room, its exits, nearby rooms and the story, and answers in JSON with the new room and the door pair. If places nearby are not yet connected to this room, they are listed as short keys (the existing piece) and the model may instead answer with one of them; then only the door pair to that place is added. The new room's name and description follow the Writing style entry 'New room behind a door: how it is named and described'. The game turns that into the same 'create place' edit the editor uses and test-applies it; if it doesn't fit, Step 1 is asked once more with the retry piece. The room is added at once, as if it had always been there; its 'Map changed here' bar offers Edit, Turn off and Undo."
     },
     {
       "id": "expand",
@@ -114,7 +114,8 @@
     "ended": "how a temporary change ran out, e.g. \"Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)\"",
     "change": "the summary of the map change that made the place",
     "excerpt": "a short excerpt of the chat message that made the place",
-    "default": "the key to use when unsure (the way the party came in)"
+    "default": "the key to use when unsure (the way the party came in)",
+    "discover": "The discovery wording, filled in by the game: the 'Proactive room discovery' off or on piece (the scene can override the setting)."
   },
   "prompts": [
     {
@@ -962,10 +963,103 @@
     {
       "id": "narration.flag_hint",
       "title": "Narration: how to flag map changes",
-      "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries.",
+      "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
       "group": "narration",
       "locked": "The exact [ws_flag: …] tag format the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters open a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room (e.g. another guest room off a hallway), end your reply with [ws_flag: discover | which door]. If no such door fits, there is none: do not flag it. Never write it otherwise.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Never write it otherwise.",
+      "placeholders": [
+        {
+          "name": "discover",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.discover_strict",
+      "title": "Narration: flagging a discovery (Proactive room discovery off)",
+      "description": "Piece: fills {{discover}} in 'how to flag map changes' when Proactive room discovery is off: only a door that is actually opened or entered counts.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
+      "text": "If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.discover_proactive",
+      "title": "Narration: flagging a discovery (Proactive room discovery on)",
+      "description": "Piece: fills {{discover}} in 'how to flag map changes' when Proactive room discovery is on: rooms the narration mentions may be added too.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
+      "text": "If the characters open or go through a door that is not one of the exits, or your narration names a room or passage off this place that is not on the map yet (e.g. the guest rooms along a hallway), and it fits the room, end your reply with [ws_flag: discover | which door or room]; the engine adds it to the map. If nothing like that fits, do not flag it.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.flag_tool",
+      "title": "Narration: the ws_flag tool description (tools on)",
+      "description": "Alongside (map tools on): the description of the ws_flag tool, telling the narrator when to flag a map change or a discovery.",
+      "group": "narration",
+      "locked": "Names the ws_flag tool's 'discover' action, which the game reads.",
+      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} The engine handles it after your reply. Do not call it for ordinary events.",
+      "placeholders": [
+        {
+          "name": "discover",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.flag_tool_strict",
+      "title": "Narration: ws_flag discovery wording (Proactive room discovery off)",
+      "description": "Piece: fills {{discover}} in the ws_flag tool description when Proactive room discovery is off.",
+      "group": "narration",
+      "piece": true,
+      "locked": "Names the 'discover' action the game reads.",
+      "text": "only when the characters actually open or go through a door that is not a listed exit, either one the room description mentions or one that plausibly fits the room. A door only mentioned in the scenery (a hallway lined with guest rooms) is not a discovery.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.flag_tool_proactive",
+      "title": "Narration: ws_flag discovery wording (Proactive room discovery on)",
+      "description": "Piece: fills {{discover}} in the ws_flag tool description when Proactive room discovery is on.",
+      "group": "narration",
+      "piece": true,
+      "locked": "Names the 'discover' action the game reads.",
+      "text": "when the characters open or go through a door that is not a listed exit, or when your narration names a room or passage off this place that is not on the map yet and fits it (e.g. the guest rooms along a hallway).",
+      "placeholders": []
+    },
+    {
+      "id": "narration.flag_action",
+      "title": "Narration: the ws_flag action argument (tools on)",
+      "description": "Alongside (map tools on): the description of ws_flag's action argument.",
+      "group": "narration",
+      "locked": "Names the action values change, discover, wait and sleep, which the game reads.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night).",
+      "placeholders": [
+        {
+          "name": "discover",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.flag_action_strict",
+      "title": "Narration: ws_flag discover action (Proactive room discovery off)",
+      "description": "Piece: fills {{discover}} in the action argument when Proactive room discovery is off.",
+      "group": "narration",
+      "piece": true,
+      "locked": "Names the 'discover' action the game reads.",
+      "text": "the characters actually open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room; the engine adds the room behind it. Never for a door only mentioned in the scenery.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.flag_action_proactive",
+      "title": "Narration: ws_flag discover action (Proactive room discovery on)",
+      "description": "Piece: fills {{discover}} in the action argument when Proactive room discovery is on.",
+      "group": "narration",
+      "piece": true,
+      "locked": "Names the 'discover' action the game reads.",
+      "text": "the characters open or go through a door (or stairs, hatch...) that is not one of the exits, or the narration names a room or passage off this place that is not on the map yet, e.g. one of the guest rooms off a hallway; the engine adds it.",
       "placeholders": []
     },
     {

@@ -4,6 +4,7 @@ import { changeText } from './patches.mjs';
 import { placeWeather, fmtTemp } from './weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
+import { sessionFromUrl, openChangeEditor } from './changeedit.mjs';
 import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
 import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
@@ -754,7 +755,22 @@ buildMenus();
 buildTopBar();
 guardViewButtons(document.getElementById('windowButtons'));
 setEditor(editor);
-toggleWindow(WINDOWS[0], true);
+// ?edit=1&...: this tab is the editor for one map change from a SillyTavern message (opened by its Edit button).
+const changeSession = sessionFromUrl(location.search);
+const askST = (type, payload, ms = 20000) => new Promise(res => {
+    const req = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const on = ev => { if (ev.data?.type === `${type}_result` && ev.data.req === req) { channel.removeEventListener('message', on); clearTimeout(t); res(ev.data); } };
+    const t = setTimeout(() => { channel.removeEventListener('message', on); res(null); }, ms);
+    channel.addEventListener('message', on);
+    channel.postMessage({ type, req, ...payload });
+});
+if (changeSession) {
+    document.title = 'WorldScrawl: edit map change';
+    const host = $('section', { class: 'wswindow change-editor-window', id: 'window-change' });
+    document.getElementById('windows').append(host);
+    openChangeEditor(document, host, changeSession, { ask: askST, post: (path, b) => postJson(`${API}${path}`, b), buildEditForm, renderDiff })
+        .catch(e => host.replaceChildren($('p', {}, `The change editor failed: ${e.message}`)));
+} else toggleWindow(WINDOWS[0], true);
 themeFromSettings();
 channel.postMessage({ type: 'hello' });
 setTimeout(() => { if (!state) { setStatus('SillyTavern not connected'); onState({ type: 'state', on: false }); state = null; } }, 2000);
