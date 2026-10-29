@@ -8,7 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -2057,16 +2057,17 @@ function maybeSuggest(id) {
     msg.extra = msg.extra ?? {};
     msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.label, status: 'review', suggested: true };
 }
-async function exportNpc(id) {
+async function exportNpc(id, { update = false } = {}) {
     const chat = ctx().chat ?? [];
     const pack = castPack();
     const npc = npcAt(chat, chat.length - 1, pack?.npcs ?? [], id);
     const record = npc ? exportRecord(npc) : null;
     if (!record) { toastr.warning('WorldScrawl: that person is not in this chat.'); return; }
-    const r = await api('/cast/export', { method: 'POST', body: JSON.stringify({ npc: record }) });
+    const r = await api('/cast/export', { method: 'POST', body: JSON.stringify({ npc: record, ...(update ? { update: true } : {}) }) });
     if (!r.ok) { toastr.warning(typeof r.body?.detail === 'string' ? r.body.detail : 'Could not export.'); return; }
     rememberWorlds((await api('/worlds').catch(() => null))?.body);
-    toastr.success(`WorldScrawl: wrote cast/${r.body.file}${r.body.renamed ? ` (as ${r.body.id}, the old file was kept)` : ''}.`);
+    const where = `cast/${r.body.file}`;
+    toastr.success(r.body.updated ? `WorldScrawl: updated ${where}.` : `WorldScrawl: wrote ${where}${r.body.renamed ? ` (as ${r.body.id}, the old file was kept)` : ''}.`);
 }
 function npcDetail(id) {
     const chat = ctx().chat ?? [];
@@ -3551,7 +3552,15 @@ export async function onReplyForFlags(id) {
             try { c.updateMessageBlock?.(id, msg); } catch {}
         }
         const clock = npcClock(c.chat, id);
-        for (const s of stamped) addNpcStamp(msg, s.type === 'npc_staying' ? { ...s, elapsed: s.elapsed ?? clock.elapsed } : s);
+        for (const s of stamped) {
+            let stamp = s;
+            if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
+            else if (s.type === 'npc_stay' && !s.place) {
+                const place = positionOf(c.chat, id, PLAYER)?.address || '';
+                if (place) stamp = { ...s, place };
+            }
+            addNpcStamp(msg, stamp);
+        }
         syncSwipeExtra(msg);
         await c.saveChat?.();
     }
@@ -3864,7 +3873,25 @@ export function renderPatchCards() {
             }, 'Remove this note (deleting the message does the same)'));
             if (!s.off && s.id && !exported.has(s.id)) {
                 exported.add(s.id);
-                d.append(' ', cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder'));
+                const live = npcAt(ch, ch.length - 1, castPack()?.npcs ?? [], s.id);
+                const castNpc = (castPack()?.npcs ?? []).find(n => n.id === s.id && n.ok !== false && n.from !== 'play');
+                if (live?.from === 'cast' && castNpc) {
+                    d.append(' ', cardButton(`Update ${who}`, () => {
+                        d.querySelector('.worldscrawl_castdiff')?.remove();
+                        const now = npcAt(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? [], s.id);
+                        const diff = recordDiff(castNpc, now);
+                        const box = document.createElement('div');
+                        box.className = 'worldscrawl_castdiff';
+                        box.style.cssText = 'margin-top:4px;';
+                        const pre = document.createElement('pre');
+                        pre.style.cssText = 'white-space:pre-wrap;margin:4px 0;font-size:0.9em;';
+                        pre.textContent = diff.changed ? diff.text : 'Nothing has changed since the cast file.';
+                        box.append(pre);
+                        if (diff.changed) box.append(cardButton('Confirm', () => exportNpc(s.id, { update: true }), 'Write this record over the cast file'));
+                        box.append(cardButton('Cancel', () => { box.remove(); }, 'Leave the cast file as it is'));
+                        d.append(box);
+                    }, 'Show what would change in the cast file, then write it in place'));
+                } else d.append(' ', cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
             }
             card.append(d);
         }

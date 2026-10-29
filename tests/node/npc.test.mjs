@@ -10,13 +10,14 @@ test('the extension copy of npc.mjs matches the plugin one', () => {
     const copy = fs.readFileSync(new URL('extension/npc.mjs', root), 'utf8');
     assert.equal(copy.split('\n').slice(1).join('\n'), plugin);
 });
-import { NPC_KEY, SUGGEST_AFTER, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, suggestNames, takeNpcTags, validateRecord } from '../../plugin/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, suggestNames, takeNpcTags, validateRecord } from '../../plugin/npc.mjs';
 import { loadCast, writeCastNpc } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath } from './helpers.mjs';
 
 const BAR = 'riverton:drowned_rat/common_room';
 const UP = 'riverton:drowned_rat/upstairs';
 const FORGE = 'riverton:smithy/forge';
+const SQUARE = 'riverton:streets/square';
 const places = new Set([BAR, UP, FORGE]);
 const exists = a => places.has(a);
 const names = a => ({ [BAR]: 'Common Room', [UP]: 'Upstairs Rooms', [FORGE]: 'the forge' })[a] ?? a;
@@ -140,19 +141,56 @@ test('she does not vanish mid-scene; the note escalates, and a staying stamp cov
     assert.deepEqual(gone, []);
 });
 
-test('following uses the player\'s place and overrides the schedule until told to stay', () => {
+test('told to stay holds this place until the next entry, a return, or follow', () => {
     const cast = [hesk()];
     const chat = [
         msg('Come with me.', npc([{ type: 'npc_follow', id: 'hesk', who: 'player' }])),
-        msg('Wait here.', npc([{ type: 'npc_stay', id: 'hesk' }])),
+        msg('Wait here.', npc([{ type: 'npc_stay', id: 'hesk', place: FORGE }])),
     ];
     const along = presentAt(chat, 0, cast, envOf(FORGE, clock(9)));
     assert.equal(along[0].kind, 'follow');
     assert.equal(along[0].place, FORGE);
     assert.deepEqual(followersAt(chat, 0, cast).map(f => f.id), ['hesk']);
-    const back = presentAt(chat, 1, cast, envOf(i => (i === 0 ? FORGE : UP), clock(9)));
-    assert.equal(back.find(p => p.id === 'hesk').kind, 'schedule');
+    const held = presentAt(chat, 1, cast, envOf(FORGE, clock(9)));
+    assert.equal(held[0].kind, 'stay');
+    assert.equal(held[0].place, FORGE);
+    assert.equal(held[0].overdue, '');
     assert.equal(followersAt(chat, 1, cast).length, 0);
+    chat.push(msg('I step away.'));
+    const away = presentAt(chat, 2, cast, envOf(i => (i < 2 ? FORGE : SQUARE), clock(9)));
+    assert.equal(away.find(p => p.id === 'hesk'), undefined);
+    const shift = [chat[0], chat[1], msg('The evening shift starts.')];
+    const due = presentAt(shift, 2, cast, envOf(FORGE, i => clock(i < 2 ? 9 : 16)));
+    assert.equal(due[0].id, 'hesk');
+    assert.notEqual(due[0].kind, 'stay');
+    assert.match(due[0].overdue, /due at/);
+    const trip = [
+        msg('Come.', npc([{ type: 'npc_follow', id: 'hesk' }])),
+        msg('Wait.', npc([{ type: 'npc_stay', id: 'hesk', place: FORGE }])),
+        msg('I leave.'),
+        msg('I come back.'),
+    ];
+    const back = presentAt(trip, 3, cast, envOf(i => (i === 2 ? SQUARE : FORGE), clock(9)));
+    assert.equal(back[0].id, 'hesk');
+    assert.match(back[0].overdue, /due at/);
+    trip.push(msg('Come along.', npc([{ type: 'npc_follow', id: 'hesk' }])));
+    const again = presentAt(trip, 4, cast, envOf(i => (i === 2 ? SQUARE : i === 4 ? BAR : FORGE), clock(9)));
+    assert.equal(again[0].kind, 'follow');
+    assert.equal(again[0].place, BAR);
+    assert.equal(again[0].overdue, '');
+    const maren = validateRecord({ id: 'maren', name: 'Maren', line: 'A knife-grinder.', seen_at: { place: BAR, hour: 16, chance: 0.5 } }, { file: 'maren.json', places });
+    const day = 3;
+    const sight = [
+        msg('She is here.', npc([{ type: 'npc_appear', id: 'maren', place: BAR, day, hour: 16 }, { type: 'npc_follow', id: 'maren' }])),
+        msg('Wait.', npc([{ type: 'npc_stay', id: 'maren', place: FORGE }])),
+        msg('The hour turns.'),
+    ];
+    const hour = presentAt(sight, 1, [maren], envOf(FORGE, clock(16, 30, day)));
+    assert.equal(hour[0].kind, 'stay');
+    assert.equal(hour[0].overdue, '');
+    const later = presentAt(sight, 2, [maren], envOf(FORGE, i => clock(i < 2 ? 16 : 17, 10, day)));
+    assert.equal(later[0].id, 'maren');
+    assert.match(later[0].overdue, /hour here has passed/);
 });
 
 test('sightings: one roll per day, hourly falloff, a stamp for the hour, and a better by-name roll', () => {
@@ -283,4 +321,21 @@ test('keeping pulls a record, and export writes a new file instead of overwritin
     assert.equal(bad.status_code, 422);
     const direct = writeCastNpc(dir, { id: 'old-tom', name: 'Old Tom', line: 'A stooped farmer.' });
     assert.equal(direct.id, 'old-tom');
+    const heskFile = JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8'));
+    const played = exportRecord({ ...heskFile, facts: ['a knife under the bar'] });
+    const diff = recordDiff(heskFile, played);
+    assert.equal(diff.changed, true);
+    assert.match(diff.text, /facts/);
+    assert.match(diff.text, /a knife under the bar/);
+    const updated = c.post('/cast/export', { json: { npc: played, update: true } });
+    assert.equal(updated.status_code, 200);
+    assert.equal(updated.json().updated, true);
+    assert.equal(updated.json().id, 'hesk');
+    assert.equal(updated.json().renamed, false);
+    assert.equal(fs.existsSync(path.join(dir, 'cast', 'hesk-2.json')), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8')).facts, ['a knife under the bar']);
+    const clash = writeCastNpc(dir, { id: 'hesk', name: 'Someone Else', line: 'Not the landlady.' });
+    assert.equal(clash.id, 'hesk-2');
+    assert.equal(clash.updated, false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8')).name, 'Hesk');
 });

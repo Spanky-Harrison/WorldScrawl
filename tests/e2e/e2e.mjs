@@ -2062,6 +2062,18 @@ try {
     const exportWorld = await M(m => m.effectiveWorld());
     const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
     check('Export to cast writes Maren without replacing Hesk', cast1.npcs?.some(n => n.id === 'hesk') && cast1.npcs?.some(n => n.id === 'maren' && /knife-grinder/.test(n.line ?? '')), JSON.stringify({ world: exportWorld, ids: cast1.npcs?.map(n => n.id) }));
+    await queue([{ content: 'stay' }, { content: 'She taps the bar. [ws_npc: fact | hesk | a knife under the bar]' }]);
+    await send('I ask what Hesk keeps under the bar.', 2);
+    const knife = page.locator('.worldscrawl_npcchange', { hasText: 'a knife under the bar' });
+    await knife.locator('.worldscrawl_card_btn', { hasText: 'Update Hesk' }).click();
+    await page.waitForTimeout(200);
+    const diffText = await knife.locator('.worldscrawl_castdiff').innerText();
+    check('Update Hesk shows a diff against the cast file', /facts/.test(diffText) && /a knife under the bar/.test(diffText), diffText);
+    await knife.locator('.worldscrawl_card_btn', { hasText: 'Confirm' }).click();
+    await page.waitForTimeout(600);
+    const cast2 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    const heskNow = cast2.npcs?.find(n => n.id === 'hesk');
+    check('Update writes Hesk in place and does not add hesk-2', heskNow?.facts?.includes('a knife under the bar') && cast2.npcs?.some(n => n.id === 'maren') && !cast2.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast2.npcs?.map(n => n.id)));
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {

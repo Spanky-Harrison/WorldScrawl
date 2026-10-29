@@ -290,7 +290,7 @@ function blankFrom(rec) {
         deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
-        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, appearances: [], seeks: [], stays: [],
+        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [],
     };
 }
 
@@ -299,7 +299,7 @@ function snapshot(state) {
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
         fromCast: new Set(n.fromCast), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(),
-        following: n.following ? { ...n.following } : null, schedule: n.schedule, seen_at: n.seen_at,
+        following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
     });
     return out;
 }
@@ -351,8 +351,14 @@ function applyStamp(state, s, index) {
         n.disposition[who] = { value, reason: str(s.reason, 240) ?? '' };
         return;
     }
-    if (s.type === 'npc_follow') { n.following = { who: str(s.who, 40) || PLAYER, at: index }; return; }
-    if (s.type === 'npc_stay') { n.following = null; return; }
+    if (s.type === 'npc_follow') { n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
+    if (s.type === 'npc_stay') {
+        n.following = null;
+        const place = str(s.place, 200);
+        // No place (a stamp from before holds existed): back on the schedule, as that older stamp meant.
+        n.held = place ? { place, at: index } : null;
+        return;
+    }
     if (s.type === 'npc_staying') { n.stays.push({ at: index, elapsed: Number.isFinite(s.elapsed) ? s.elapsed : 0 }); return; }
     if (s.type === 'npc_appear') {
         if (typeof s.place !== 'string' || !Number.isInteger(s.day) || !Number.isInteger(s.hour)) return;
@@ -388,12 +394,51 @@ export function sceneStart(end, playerAt) {
     return 0;
 }
 
+function entryKey(sched) {
+    if (!sched?.entry) return '';
+    const e = sched.entry;
+    return `${e.place}|${e.from ?? ''}|${e.to ?? ''}|${e.activity ?? ''}`;
+}
+
+/** The player left the held place and has come back by message `j`. */
+function rejoined(npc, j, env) {
+    const h = npc.held;
+    if (!h?.place || j <= h.at) return false;
+    let left = false;
+    for (let i = h.at + 1; i <= j; i++) {
+        const at = env.playerAt?.(i);
+        if (!at) continue;
+        if (at !== h.place) left = true;
+        else if (left) return true;
+    }
+    return false;
+}
+
+/**
+ * A stay stamp holds them at that place until the schedule entry in force changes (the next one
+ * started, or the old one ended), a one-off's hour ends, or the player comes back after leaving.
+ * Following again clears the hold. Until then they do not return to the schedule.
+ */
+function holdActive(npc, j, env) {
+    const h = npc.held;
+    if (!h?.place || j < h.at) return false;
+    if (rejoined(npc, j, env)) return false;
+    const then = env.clock?.(h.at) ?? {};
+    const now = env.clock?.(j) ?? then;
+    const thenSched = scheduleAt(npc, then, env);
+    const nowSched = scheduleAt(npc, now, env);
+    if (entryKey(thenSched) !== entryKey(nowSched)) return false;
+    if (!thenSched && npc.seen_at && !npc.seen_at.broken && (now.day !== then.day || now.hour !== then.hour)) return false;
+    return true;
+}
+
 function duePlace(npc, j, env, { useRoll = false } = {}) {
     if (npc.following) {
         const who = npc.following.who || PLAYER;
         const address = who === PLAYER ? env.playerAt(j) : (env.actorAt?.(j, who) || env.playerAt(j));
         return address ? { address, activity: `with ${who === PLAYER ? 'the player' : who}`, kind: 'follow', entry: null } : null;
     }
+    if (holdActive(npc, j, env)) return { address: npc.held.place, activity: 'waiting', kind: 'stay', entry: null };
     const clock = env.clock(j);
     const sched = scheduleAt(npc, clock, env);
     if (sched) return sched;
@@ -453,7 +498,9 @@ export function presentAt(chat, index, cast, env) {
             if (stamps.some(s => s.type === 'npc_follow')) ban = false;
             if (ban) continue;
             const due = duePlace(then, j, env);
-            if (due?.address && due.address === env.playerAt(j)) inScene = true;
+            const hereJ = env.playerAt(j);
+            if (due?.address && due.address === hereJ) inScene = true;
+            else if (then.held?.place && then.held.place === hereJ && rejoined(then, j, env)) inScene = true;
         }
         if (!inScene) continue;
         const now = frames[end].get(npc.id);
@@ -588,6 +635,34 @@ export function exportRecord(npc) {
     if (schedule.length) out.schedule = schedule;
     else if (npc.seen_at && !npc.seen_at.broken) out.seen_at = { place: npc.seen_at.place, hour: npc.seen_at.hour, chance: npc.seen_at.chance ?? 0.5 };
     return out;
+}
+
+function diffLine(field, from, to, lines) {
+    const a = from ?? '', b = to ?? '';
+    if (a === b) return;
+    lines.push({ field, from: a, to: b });
+}
+
+/** What changed between a cast file and the record play would write. Empty when they match. */
+export function recordDiff(before, after) {
+    const a = exportRecord(before) ?? (isObj(before) ? before : {});
+    const b = exportRecord(after) ?? (isObj(after) ? after : {});
+    const lines = [];
+    for (const k of ['name', 'line', 'manner', 'voice']) diffLine(k, a[k] ?? '', b[k] ?? '', lines);
+    const whos = new Set([...Object.keys(a.disposition ?? {}), ...Object.keys(b.disposition ?? {})]);
+    const disp = d => (d ? `${d.value}${d.reason ? ` (${d.reason})` : ''}` : '');
+    for (const who of [...whos].sort()) diffLine(`disposition.${who}`, disp(a.disposition?.[who]), disp(b.disposition?.[who]), lines);
+    const list = xs => (xs ?? []).join('; ');
+    diffLine('facts', list(a.facts), list(b.facts), lines);
+    diffLine('memory', list(a.memory), list(b.memory), lines);
+    diffLine('deep.history', a.deep?.history ?? '', b.deep?.history ?? '', lines);
+    diffLine('deep.secrets', list(a.deep?.secrets), list(b.deep?.secrets), lines);
+    const rels = new Set([...Object.keys(a.deep?.relationships ?? {}), ...Object.keys(b.deep?.relationships ?? {})]);
+    for (const k of [...rels].sort()) diffLine(`deep.relationships.${k}`, a.deep?.relationships?.[k] ?? '', b.deep?.relationships?.[k] ?? '', lines);
+    diffLine('schedule', JSON.stringify(a.schedule ?? []), JSON.stringify(b.schedule ?? []), lines);
+    diffLine('seen_at', JSON.stringify(a.seen_at ?? null), JSON.stringify(b.seen_at ?? null), lines);
+    const text = lines.map(l => `${l.field}\n- ${l.from || '(empty)'}\n+ ${l.to || '(empty)'}`).join('\n');
+    return { changed: lines.length > 0, lines, text };
 }
 
 const ROLE_STOP = new Set(['door', 'doors', 'room', 'rooms', 'way', 'ways', 'bar', 'fire', 'ale', 'beer', 'wine', 'night', 'day', 'time', 'man', 'woman', 'men', 'women', 'one', 'other', 'same', 'next', 'back', 'front', 'side', 'floor', 'wall', 'table', 'chair', 'doorway', 'stairs', 'staircase', 'place', 'world', 'story', 'thing', 'things', 'people', 'person', 'player', 'inn', 'tavern', 'street', 'square', 'window', 'windows', 'gate', 'yard', 'cellar', 'kitchen', 'stable', 'upstairs', 'downstairs', 'common', 'village', 'river', 'water', 'light', 'dark', 'coin', 'coins', 'money', 'drink', 'food', 'hand', 'hands', 'head', 'face', 'eyes', 'voice', 'house', 'shop', 'road', 'sign', 'door', 'counter']);

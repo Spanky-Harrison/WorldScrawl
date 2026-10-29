@@ -1534,7 +1534,7 @@
       "piece": true,
       "locked": "The game reads these [ws_npc: …] tags.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. A memory highlight is [ws_npc: memory | their-id | the note]. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they stop coming along, [ws_npc: stay | their-id]. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. A memory highlight is [ws_npc: memory | their-id | the note]. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tools",
@@ -1544,7 +1544,7 @@
       "piece": true,
       "locked": "The game reads the ws_npc tool.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text. Use action \"memory\", \"leave\", \"staying\", \"follow\" or \"stay\" the same way. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text. Use action \"memory\", \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tool",

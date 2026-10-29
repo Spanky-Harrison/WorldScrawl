@@ -62,28 +62,37 @@ export function loadCast(root, world = null) {
 }
 
 /**
- * Write one NPC into cast/. An id that already has a file gets a new id (`id-2`), never an overwrite.
+ * Write one NPC into cast/.
+ * `update` overwrites the file that already has this same id (a person who came from that cast file).
+ * Otherwise an id that is already taken gets a new id (`id-2`), and the old file is kept.
  * Returns the record that was written (re-validated). Throws when the record itself is not usable.
  */
-export function writeCastNpc(root, npc) {
+export function writeCastNpc(root, npc, { update = false } = {}) {
     const record = exportRecord(npc) ?? (isObj(npc) ? npc : null);
     if (!record) throw new Error('nothing to export');
     const taken = new Set();
+    const byId = new Map();
     const dir = path.join(root, 'cast');
     fs.mkdirSync(dir, { recursive: true });
     for (const f of castFiles(root)) {
+        const base = path.basename(f, '.json');
+        taken.add(base);
         try {
             const raw = loadJson(f);
-            if (isObj(raw) && typeof raw.id === 'string') taken.add(raw.id);
+            if (isObj(raw) && typeof raw.id === 'string') {
+                taken.add(raw.id);
+                if (!byId.has(raw.id)) byId.set(raw.id, f);
+            }
         } catch { /* a broken file still occupies its name */ }
-        taken.add(path.basename(f, '.json'));
     }
     let id = NPC_ID.test(record.id ?? '') ? record.id : freeId(record.name, taken);
-    if (taken.has(id)) id = freeId(id, taken);
+    const existing = byId.get(id);
+    const updated = !!(update && existing);
+    if (!updated && taken.has(id)) id = freeId(id, taken);
     const out = { ...record, id };
     const checked = validateRecord(out, { file: `${id}.json`, places: null });
     if (!checked.ok) throw new Error(checked.problems.join('; ') || 'the NPC record is not valid');
-    const file = path.join(dir, `${id}.json`);
+    const file = updated ? existing : path.join(dir, `${id}.json`);
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
-    return { id, file: path.basename(file), renamed: id !== record.id, record: out };
+    return { id, file: path.basename(file), renamed: id !== record.id, updated, record: out };
 }
