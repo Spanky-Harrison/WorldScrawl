@@ -1,6 +1,7 @@
 // The blanket position resolver: turns any location into a real room of the effective map.
-// Used for the player after every effective-map rebuild, and exported for computed positions
-// (e.g. future NPC schedules).
+// Used for each actor after every effective-map rebuild (the player is the default actor), and for
+// computed positions (e.g. future NPC schedules). One world serves every actor; the snapshot cache
+// (plugin/snapcache.mjs) is that world, so resolving a second actor does not replay the map.
 //
 // Fallback chain, first hit wins:
 //   1. 'here'        the address exists.
@@ -36,7 +37,7 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
     // Reverse: rooms that were folded into the missing address (or into where it leads).
     for (const target of new Set([address, fwd])) {
         const back = Object.keys(allRelocate).filter(k => follow(k, allRelocate) === target || allRelocate[k] === target).sort();
-        const hit = (history ?? []).find(h => back.includes(h) && ok(h)) ?? back.find(ok); // the piece the party came from first
+        const hit = (history ?? []).find(h => back.includes(h) && ok(h)) ?? back.find(ok); // the piece this actor came from first
         if (hit) return done(hit, 'restored');
     }
     // Exits of the room in the last state where it existed.
@@ -44,7 +45,7 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
         const prev = typeof before === 'function' ? before(a) : null;
         const loc = prev?.locations.get(a);
         if (!loc) continue;
-        // Back out through the exit the party came in by: the newest earlier position that one of its exits led to.
+        // Back out through the exit this actor came in by: the newest earlier position that one of its exits led to.
         for (const h of history ?? []) {
             const x = ok(h) && loc.exits.find(e => e.to === h);
             if (x) return { ...done(h, 'came_from'), via: x.direction };
@@ -63,6 +64,21 @@ export function resolvePosition(w, address, { relocate = {}, allRelocate = reloc
     const re = reg?.entrance;
     if (ok(re)) return done(re, 'region');
     return done(w.start, 'start');
+}
+
+/**
+ * Resolve every actor against one already-built world. `actors` is {actorId: address}.
+ * `opts` is the resolvePosition options, or (actorId) => options when each actor has its own history.
+ * The same world the snapshot cache rebuilt: a full replay of the changes yields the same positions.
+ */
+export function resolveActors(w, actors, opts = {}) {
+    const optFor = typeof opts === 'function' ? opts : () => opts;
+    const out = {};
+    for (const [id, address] of Object.entries(actors ?? {})) {
+        if (typeof id !== 'string' || !id || typeof address !== 'string' || !address) continue;
+        out[id] = resolvePosition(w, address, optFor(id) ?? {});
+    }
+    return out;
 }
 
 /** Merge the relocate maps of apply_changes' info.patches (only patches from message index `since` on). */

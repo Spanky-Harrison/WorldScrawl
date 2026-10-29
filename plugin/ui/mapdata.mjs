@@ -1,5 +1,12 @@
 // Pure helpers for the play-mode map: which rooms the chat knows, and where to draw them. No DOM; unit-tested in node.
 
+/** Where the party marker goes: the player's position. `location` is that same address; `positions.player` is it once positions are per actor. The id matches PLAYER in actors.mjs (this file cannot import outside plugin/ui/). */
+export const partyHere = state => {
+    const p = state?.positions;
+    const at = p && typeof p.player === 'string' && p.player ? p.player : null;
+    return at ?? (typeof state?.location === 'string' && state.location ? state.location : null);
+};
+
 /** Chat changes with each two-way dig split into its two one-way exits. */
 export function expandChanges(changes = []) {
     return (changes ?? []).flatMap(c => c?.type !== 'dig' ? [c]
@@ -61,19 +68,21 @@ const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0].slice
 /**
  * The play-mode graph. Only discovered places: rooms stood in (full detail and exits) and rooms seen
  * (name, area and a one-line summary; never their exits). An exit that does not reveal where it leads is a
- * stub node carrying only its label. state: {location, stood[], seen[], doors_open[]}; rooms: address -> known room.
+ * stub node carrying only its label. state: {location, positions?: {player}, stood[], seen[], doors_open[]}; rooms: address -> known room.
+ * The party marker (`here`) is the player. `location` is that address when `positions` is absent.
  * An exit pair is one line: a hidden or obscured side whose other side is in a room stood in (the player has been
  * to its destination) joins that room instead of becoming a stub. With mark (the editor and pick mode) a revealed
  * hidden or obscured side carries obscured: true, drawn as a "?" on that end.
  */
 export function buildGraph(state, rooms, { mark = false } = {}) {
     const stood = new Set(state?.stood ?? []), nodes = new Map(), edges = [];
-    if (state?.location) stood.add(state.location);
+    const here = partyHere(state);
+    if (here) stood.add(here);
     const open = state?.doors_open ?? [], shut = state?.doors_closed ?? [];
     const sub = r => ({ id: r?.subregion?.id ?? '', name: r?.subregion?.name ?? '' });
     for (const a of stood) {
         const r = rooms.get(a);
-        if (r) nodes.set(a, { id: a, kind: 'stood', name: r.name, subregion: sub(r), ...areaOf(a, r.region), description: r.description ?? '', pos: r.pos ?? null, here: a === state.location,
+        if (r) nodes.set(a, { id: a, kind: 'stood', name: r.name, subregion: sub(r), ...areaOf(a, r.region), description: r.description ?? '', pos: r.pos ?? null, here: a === here,
             subEntrance: r.subregion?.entrance ?? '', regionEntrance: r.region?.entrance ?? '' });
     }
     const addSeen = (a, name, s, summary = '', reg = null, r = null) => {

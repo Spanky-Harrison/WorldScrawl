@@ -1,13 +1,15 @@
 // WorldScrawl: engine-driven movement on the WorldScrawl map server. The engine (this extension) owns
-// the party's location; the model only interprets what the player meant (one multiple-choice question)
+// where each actor is; the model only interprets what the player meant (one multiple-choice question)
 // and narrates. Optional, off by default: the old ws_look/ws_move tools.
-// The party's location is stored on chat messages (message.extra.worldscrawl_location) so that
-// deleting or swiping messages rolls the location back with them.
+// Positions are stamped on chat messages (message.extra.worldscrawl_location) so that deleting or swiping
+// a message rolls them back. A string stamp is the player's position (old chats, and still what we write
+// when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
+// is the player (id "player") plus whoever is following them, and nobody follows yet.
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
+import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
-const LOC_KEY = 'worldscrawl_location';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
 const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, proactiveDiscovery: false, flagTags: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
@@ -248,14 +250,14 @@ const changesOf = m => { const c = m?.extra?.[CHANGE_KEY]; return Array.isArray(
 /**
  * door id -> the last open_door / close_door change still in force at the end of `chat`. A door with no entry is in
  * its starting state (barrier.starts_open). One that doesn't stay open goes back to its starting state once the
- * party is in neither room.
+ * party (the player, until someone follows them) is in neither room.
  */
 export function doorOverrides(chat = ctx().chat ?? []) {
     const st = new Map();
     for (const m of chat) {
         for (const c of changesOf(m)) if ((c.type === 'open_door' || c.type === 'close_door') && c.door) st.set(c.door, c);
         const ex = m?.extra ?? {};
-        for (const p of [...(ex[MOVE_KEY]?.via ?? []), ex[LOC_KEY]].filter(Boolean))
+        for (const p of [...(ex[MOVE_KEY]?.via ?? []), ...partyAddresses(ex[LOC_KEY])].filter(Boolean))
             for (const [d, c] of st) { const rs = c.rooms ?? [c.from, c.to]; if (!c.stays_open && !rs.includes(roomToken(p)) && !rs.includes(p)) st.delete(d); }
     }
     return st;
@@ -375,25 +377,20 @@ async function api(path, options = {}) {
     return { ok: res.ok, status: res.status, body };
 }
 
-/** Latest location stored on a message, or null if this chat has none yet. */
+/** Latest player position stored on a message (after merge redirects), or null if this chat has none yet. */
 export function getStoredLocation() {
     const st = storedStamp();
     return st ? relocateFrom(st.address, st.index, ctx().chat ?? []) : null;
 }
-/** Earlier stamped positions before message `before`, newest first, without repeats (the move history). */
-function stampHistory(before) {
-    const chat = ctx().chat ?? [], out = [];
-    for (let i = before - 1; i >= 0 && out.length < 200; i--) { const a = chat[i]?.extra?.[LOC_KEY]; if (a && !out.includes(a)) out.push(a); }
-    return out;
+/** Earlier stamped positions for one actor before message `before`, newest first, without repeats (the move history). */
+function stampHistory(before, actor = PLAYER) {
+    return actorHistory(ctx().chat ?? [], before, actor);
 }
-/** The raw location stamp (before merge redirects) and the message it is on. */
-function storedStamp() {
+/** The raw player position (before merge redirects) and the message it was stamped on. */
+function storedStamp(actor = PLAYER) {
     const chat = ctx().chat ?? [];
-    for (let i = chat.length - 1; i >= 0; i--) {
-        const loc = chat[i]?.extra?.[LOC_KEY];
-        if (loc) return { address: loc, index: i };
-    }
-    return null;
+    const p = positionOf(chat, chat.length - 1, actor);
+    return p ? { address: p.address, index: p.index } : null;
 }
 
 /** Current location, from the in-memory cache (one shared request per address; /start fetched once). */
@@ -439,7 +436,7 @@ async function missingRoomFallback(stored) {
         if (picked) to = picked;
         const via = (r.body.options ?? []).find(o => o.address === to.address)?.direction ?? '';
         const p = expiryPending = { chat: chatKey(), from: stored, to: to.address, via, line: '' };
-        try { p.line = expiryNarrationLine(room, to, via, whoMoves(), excerptOf(c0.chat?.[room.change?.msg]?.mes)); } catch {}
+        try { p.line = expiryNarrationLine(room, to, via, partyText(), excerptOf(c0.chat?.[room.change?.msg]?.mes)); } catch {}
         console.warn(`[WorldScrawl] ${stored} expired; narrating the move to ${to.address}`);
         setTimeout(() => { triggerExpiryNarration(p).catch(e => console.error('[WorldScrawl] expiry narration', e)); }, 0);
         return to;
@@ -458,7 +455,7 @@ const expiryNarrated = new Set();
 const chatKey = () => { try { return String(ctx().getCurrentChatId?.() ?? ''); } catch { return ''; } };
 /** The places a run-out room's exits still reach, as pick-one keys (the way they came in first). */
 export const expiryOptions = list => { const taken = new Set(); return list.map(o => ({ key: keyFor(o.name ?? o.address, taken), label: `${o.name ?? o.address}${o.direction ? ` (out through the ${o.direction})` : ''}`, address: o.address, direction: o.direction ?? '' })); };
-export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', { party: whoMoves(), place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description ?? '', options: optionLines(opts), default: def ?? opts[0]?.key ?? '' });
+export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', { party: partyText(), place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description ?? '', options: optionLines(opts), default: def ?? opts[0]?.key ?? '' });
 /** A short excerpt of the message that made the place (about 240 characters, one line). */
 export const excerptOf = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 240 ? `${t.slice(0, 237).replace(/\s+\S*$/, '')}...` : t; };
 export function expiryNarrationLine(room, to, via, who, excerpt) {
@@ -494,7 +491,7 @@ export function narratedView(chat) {
     for (let i = chat.length - 1; i >= 0; i--) { const m = chat[i]; if (m && !m.is_user && !m.is_system) { L = i; break; } }
     if (L < 0) return null;
     let address = null;
-    for (let i = L; i >= 0 && !address; i--) address = chat[i]?.extra?.[LOC_KEY] ?? null;
+    for (let i = L; i >= 0 && !address; i--) address = playerAddress(chat[i]?.extra?.[LOC_KEY]);
     if (!address) return null;
     const flips = new Map();
     for (let i = L + 1; i < chat.length; i++) {
@@ -519,8 +516,8 @@ export const expiredNotice = (to, via) => `[Engine: the passage seals behind you
 export function relocationNote(chat, loc, who) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
         const m = chat[i];
-        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return m.extra[LOC_KEY] === loc?.address ? `Note: the temporary place ${who} was in is gone (its time ran out); the passage sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
-        if (m?.extra?.worldscrawl_notice_kind === 'missing') return m.extra[LOC_KEY] === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the temporary place ${who} was in is gone (its time ran out); the passage sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing') return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
         if (m && !m.is_system && !m.is_user) return '';
     }
     return '';
@@ -547,9 +544,9 @@ export async function ensureStartStamp() {
     const start = (seedLoc && await fetchLocationCached(seedLoc)) || await fetchLocationCached(null);
     if (!start || c.chat?.[0] !== first || getStoredLocation()) return;
     first.extra = first.extra ?? {};
-    first.extra[LOC_KEY] = start.address;
+    first.extra[LOC_KEY] = placeStamp(first.extra[LOC_KEY], PLAYER, start.address);
     // keep it on the greeting's swipes too, so swiping the greeting doesn't drop it
-    for (const sw of first.swipe_info ?? []) { if (sw) { sw.extra = sw.extra ?? {}; sw.extra[LOC_KEY] = start.address; } }
+    for (const sw of first.swipe_info ?? []) { if (sw) { sw.extra = sw.extra ?? {}; sw.extra[LOC_KEY] = placeStamp(sw.extra[LOC_KEY], PLAYER, start.address); } }
     await c.saveChat();
 }
 
@@ -589,7 +586,7 @@ function stampLocation() {
     const msg = chat?.[chat.length - 1];
     if (msg) {
         msg.extra = msg.extra ?? {};
-        msg.extra[LOC_KEY] = pendingLocation;
+        msg.extra[LOC_KEY] = placeStamp(msg.extra[LOC_KEY], PLAYER, pendingLocation);
     }
     pendingLocation = null;
 }
@@ -680,7 +677,8 @@ const lastUserIndex = chat => { for (let i = chat.length - 1; i >= 0; i--) if (c
 
 function stamp(msg, loc, move) {
     msg.extra = msg.extra ?? {};
-    msg.extra[LOC_KEY] = loc.address;
+    // Player-only stays a string stamp. An actor already placed on this message is kept.
+    msg.extra[LOC_KEY] = placeStamp(msg.extra[LOC_KEY], PLAYER, loc.address);
     if (move) msg.extra[MOVE_KEY] = move;
 }
 
@@ -841,7 +839,7 @@ function chatAddresses() {
     const out = [], chat = ctx().chat ?? [];
     chat.forEach((m, i) => {
         const add = a => out.push(relocateFrom(a, i, chat));
-        const loc = m?.extra?.[LOC_KEY];
+        const loc = playerAddress(m?.extra?.[LOC_KEY]);
         if (loc) add(loc);
         for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) add(a);
         if (m?.extra?.worldscrawl_notice_loc) add(m.extra.worldscrawl_notice_loc);
@@ -857,7 +855,8 @@ export function previousAddress(current, chat = ctx().chat ?? []) {
         const m = chat[i]?.extra;
         const mv = m?.[MOVE_KEY];
         if (mv && mv.to === current) { const via = mv.via ?? []; return via.length > 1 ? via[via.length - 2] : mv.from; }
-        if (m?.[LOC_KEY] && m[LOC_KEY] !== current) return m[LOC_KEY];
+        const loc = playerAddress(m?.[LOC_KEY]);
+        if (loc && loc !== current) return loc;
     }
     return null;
 }
@@ -1079,6 +1078,21 @@ export function whoMoves() {
     out = String(out ?? '').replace(/\{\{[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
     return out || 'You';
 }
+/** The party is not stored. It is the player, then whoever is following them. Nobody follows yet, so this is just the player. */
+export function partyMembers() {
+    return [{ id: PLAYER, name: whoMoves() }];
+}
+/**
+ * {{party}} and its alias {{who}}: the names of the party. Today the group is only the player, so this is whoMoves()
+ * and every prompt that says {{party}} reads the same as it did.
+ */
+export function partyText() {
+    const names = partyMembers().map(a => a.name).filter(Boolean);
+    if (names.length === 0) return 'You';
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
 
 async function goAction(arg) {
     const c = ctx();
@@ -1141,7 +1155,7 @@ async function goTarget(t) {
             if (!res.ok) { await addNotice({ loc: here, noRoute: t.label ?? t.name }); renderAllExits(); return ''; }
         }
         if (!res.ok) { toastr.warning(`${res.error} Exits: ${res.valid.join(', ') || 'none'}`); return res.error; }
-        const who = whoMoves();
+        const who = partyText();
         const note = moveNote(who, res.move, exit ?? here.exits.find(e => e.direction.toLowerCase() === String(res.move.direction ?? '').toLowerCase()));
         await c.executeSlashCommandsWithOptions(`/send ${note}`);
         const msg = c.chat[c.chat.length - 1];
@@ -1237,7 +1251,7 @@ export const NEW_PLACE = 'new';
 /** The places a new opening can lead to: nearby rooms keyed by name (`new` is never a place key). */
 export const digOptions = rooms => roomOptions(rooms, new Set([NEW_PLACE]));
 export function digPrompt(loc, said, opts, used, canNew, err = '') {
-    return P('dig.question', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said,
+    return P('dig.question', { party: partyText(), place: displayName(loc), description: loc.description ?? '', said,
         places: optionLines(opts) || '- (none)', new_place: canNew ? P('dig.new', { style: P('dig.style') }) + '\n' : '', used: used.join(', ') || 'none',
         retry: err ? P('dig.retry', { error: err }) + '\n' : '' });
 }
@@ -1360,7 +1374,7 @@ export function lookOptions(exits, withWindow = true) {
     return [{ key: 'around', label: AROUND }, ...exits.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })), ...(withWindow ? [{ key: 'window', label: NO_EXIT }] : [])];
 }
 export function lookTargetPrompt(loc, said, exits, withWindow = true) {
-    return P('look.target', { party: whoMoves(), place: displayName(loc), said, options: optionLines(lookOptions(exits, withWindow)) });
+    return P('look.target', { party: partyText(), place: displayName(loc), said, options: optionLines(lookOptions(exits, withWindow)) });
 }
 export const DOOR_LOOK = ['listen', 'peek', 'open', 'look'];
 export const closedDoorPrompt = (said, e) => P('look.closed_door', { said, direction: e.direction });
@@ -1371,7 +1385,7 @@ export const roomOptions = (rooms, taken = new Set()) => {
     return rooms.map(r => ({ key: keyFor(n[normKey(r.name ?? r.display_name)] > 1 ? r.display_name : (r.name ?? r.display_name), taken), label: `${r.display_name}: ${r.summary}`, room: r }));
 };
 export function viewPickPrompt(loc, said, rooms) {
-    return P('look.view', { party: whoMoves(), place: displayName(loc), description: loc.description ?? '', said, places: optionLines(roomOptions(rooms)) });
+    return P('look.view', { party: partyText(), place: displayName(loc), description: loc.description ?? '', said, places: optionLines(roomOptions(rooms)) });
 }
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
 async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
@@ -1423,7 +1437,7 @@ async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
     return { kind: 'look', loc };
 }
 export const doorOptions = list => { const taken = new Set(); return list.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })); };
-export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: whoMoves(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: optionLines(doorOptions(list)) });
+export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: partyText(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: optionLines(doorOptions(list)) });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
@@ -1440,7 +1454,7 @@ async function narrativeDoor(msg, loc, list, type) {
 export const DIG_FAILED_NOTICE = 'Nothing gave way: no new opening was made.';
 
 export const travelSys = () => P('travel.system');
-export const travelYesNoPrompt = (loc, said) => P('travel.question', { party: whoMoves(), place: loc.name, said });
+export const travelYesNoPrompt = (loc, said) => P('travel.question', { party: partyText(), place: loc.name, said });
 export const intentSys = () => P('intent.system', { reply: baseReply('one') });
 
 /**
@@ -1455,7 +1469,7 @@ export function intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOp
         + (canOpen ? opt('new_opening', OPEN) : '') + (canLook ? opt('look', LOOK) : '') + (canOpenDoor ? opt('open_door', OPEN_DOOR) : '')
         + (canCloseDoor ? opt('close_door', CLOSE_DOOR) : '') + (canNewDoor ? opt('new_door', NEW_DOOR) : '') + opt('stay', STAY)
         + (onlyLook ? '\n' : opt('elsewhere', ELSEWHERE) + opt('unclear', UNCLEAR) + '\n');
-    return P('intent.question', { party: whoMoves(), place: displayName(loc), exits: exitLines.join('\n') || '- (none)', said, option_lines: lines, options: options.join(', ') });
+    return P('intent.question', { party: partyText(), place: displayName(loc), exits: exitLines.join('\n') || '- (none)', said, option_lines: lines, options: options.join(', ') });
 }
 async function parseIntent(msg) {
     await ensurePrompts();
@@ -1603,7 +1617,7 @@ export const SLASH_ONLY = [
     ['/ws-save-world <name>', "save this chat's world as a new world"], ['/ws-on, /ws-off', 'turn WorldScrawl on or off in this chat'],
 ];
 export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}\nSlash commands only:\n${SLASH_ONLY.map(([c, h]) => `- ${c}: ${h}`).join('\n')}`;
-export const bracketTargetPrompt = (loc, b, opts) => P('intent.bracket_target', { party: whoMoves(), place: displayName(loc), verb: b.word, target: b.target, options: optionLines(opts) });
+export const bracketTargetPrompt = (loc, b, opts) => P('intent.bracket_target', { party: partyText(), place: displayName(loc), verb: b.word, target: b.target, options: optionLines(opts) });
 /** Exact match first (an exit name, then a place), else one small target-only question; null when nothing fits. */
 async function bracketTarget(loc, b, opts) {
     if (!b.target || !opts.length) return null;
@@ -1790,7 +1804,7 @@ export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?
 /** The narration line for a door that is not on the map yet: open it (and flag a discovery) only if it fits the room. */
 export const newDoorLine = (who, place, tools) => P('narration.new_door', { party: who, place, how_to_flag: P(tools ? 'narration.new_door_tools' : 'narration.new_door_tags') });
 export function factsText(loc, move, toolsOn, extra = {}) {
-    const who = whoMoves();
+    const who = partyText();
     const lines = [
         P('narration.header'),
         `Current location: ${loc.name}${loc.subregion?.name && loc.subregion.name !== loc.name ? `, ${loc.subregion.name}` : ''}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
@@ -1839,7 +1853,7 @@ async function applyFacts() {
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
-        const rn = ep ? '' : relocationNote(c.chat ?? [], loc, whoMoves());
+        const rn = ep ? '' : relocationNote(c.chat ?? [], loc, partyText());
         if (rn) text = `${text}\n${rn}`;
         else if (!ep) { const am = await aftermathNote(c.chat ?? [], loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
         const wf = await waitFacts(c.chat ?? [], loc);
@@ -2279,14 +2293,11 @@ function fetchRaw(address) {
     return exitsCache.get(key);
 }
 
-/** Location in effect at message `id`: latest stamped at or before it, else null (= start). */
-function locationAt(id) {
+/** The player's location in effect at message `id`: latest stamp at or before it, else null (= start). */
+function locationAt(id, actor = PLAYER) {
     const chat = ctx().chat ?? [];
-    for (let i = Math.min(id, chat.length - 1); i >= 0; i--) {
-        const loc = chat[i]?.extra?.[LOC_KEY];
-        if (loc) return relocateFrom(loc, i, chat.slice(0, id + 1));
-    }
-    return null;
+    const p = positionOf(chat, id, actor);
+    return p ? relocateFrom(p.address, p.index, chat.slice(0, id + 1)) : null;
 }
 
 export function exitsText(loc) {
@@ -2456,7 +2467,7 @@ export function themeVars(el = document.documentElement) {
     return out;
 }
 let mapChannel = null;
-/** The state the map window shows: this chat's world, where the party is, what it knows, open doors and changes. */
+/** The state the map window shows: this chat's world, where the player is (the party marker), what it knows, open doors and changes. */
 export async function mapState() {
     const c = ctx();
     const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars(), showEditMessages: !!settings().showEditMessages };
@@ -2470,7 +2481,7 @@ export async function mapState() {
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
         abs_seconds: (() => { try { const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(); return weatherLib && t && d ? weatherLib.absSeconds(d, t.calendar) : null; } catch { return null; } })(),
         last_wait: (() => { const ch = c.chat ?? []; for (let i = ch.length - 1; i >= 0; i--) { const w = ch[i]?.extra?.[WAIT_KEY]; if (w?.seconds > 0) return { msg: i, label: w.label, sleep: !!w.sleep, recent: i >= lastUserIndex(ch) }; } return null; })(),
-        location: here?.address ?? null, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), ...mapCtx() };
+        location: here?.address ?? null, positions: here?.address ? { [PLAYER]: here.address } : {}, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), ...mapCtx() };
 }
 let broadcastTimer = null;
 export function broadcastMapState() {
@@ -3390,7 +3401,7 @@ export async function waitCommand(args, sleep = false) {
     if (w.error) { toastr.warning(`WorldScrawl: ${w.error}`); return w.error; }
     engineBusy = true;
     try {
-        const who = whoMoves(), dur = calendarLib.formatDuration(w.seconds);
+        const who = partyText(), dur = calendarLib.formatDuration(w.seconds);
         const note = waitNote(who, w);
         await c.executeSlashCommandsWithOptions(`/send ${note}`);
         const msg = c.chat[c.chat.length - 1];
@@ -3413,7 +3424,7 @@ async function waitFacts(chat, loc) {
     const r = recentWait(chat);
     if (!r || !calendarLib) return '';
     const t = worldTimes.get(activeWorld || defaultWorldId), after = chatElapsed(chat.slice(0, r.i + 1)), before = after - r.w.seconds;
-    const who = whoMoves(), dur = calendarLib.formatDuration(r.w.seconds);
+    const who = partyText(), dur = calendarLib.formatDuration(r.w.seconds);
     const lines = [];
     try {
         const d0 = calendarLib.dateAt(before, t?.start_date ?? null, t?.calendar ?? null), d1 = calendarLib.dateAt(after, t?.start_date ?? null, t?.calendar ?? null);

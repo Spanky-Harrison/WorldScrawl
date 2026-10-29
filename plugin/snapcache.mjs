@@ -1,6 +1,8 @@
 // Map snapshot cache: a throwaway, always-rebuildable copy of the built map, so long chats don't replay every change on
 // every request. Nothing is saved anywhere: the chat stays the only source of truth, and clearing the cache (Debug >
 // Clear map cache, POST /cache/clear, or a server restart) only costs one full replay.
+// Actor positions are not in this snapshot. They are stamps on messages, resolved afterwards against this one built
+// world (every actor shares it). A world served from the cache matches a full replay of the same changes.
 //
 // Keys. A snapshot after the first i changes is keyed by a hash chain over the world id + version and the active changes
 // (each change's stamp: message index _msg, swipe, id, ops... hashed as stable JSON). The active changes are the chat's

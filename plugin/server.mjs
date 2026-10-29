@@ -438,10 +438,11 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         },
         'POST /resolve': ({ q, body }) => {
             // Blanket position resolver: any stored location -> a real room of the effective map.
+            // One address (the player, as every existing caller sends) or `actors`: {actorId: address}, all against
+            // the same built world. The snapshot cache makes that one world; a second actor does not replay it.
             needBody(body);
             const wid = q('world'), changes = field(body, 'changes', 'list', []), now = nowOf(body);
-            const address = field(body, 'address', 'str');
-            const since = typeof body.since === 'number' ? body.since : null;
+            const histOf = list => (Array.isArray(list) ? list.filter(h => typeof h === 'string').slice(0, 200) : []);
             const e = changed_for(wid, changes, now);
             const all = changed_for(wid, changes, null);
             const before = a => {
@@ -451,25 +452,41 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 for (let k = changes.length - (changes.some(c => c?.off) ? 0 : 1); k >= 0; k--) { let pw; try { pw = changed_for(wid, onAgain.slice(0, k), null).w; } catch { continue; } if (pw.locations.has(a)) return pw; }
                 return null;
             };
-            const r = resolvePosition(e.w, address, { relocate: { ...relocateMap(e.info.patches), ...relocateMap(e.info.patches, since) }, // every active move applies forward, whenever the position was stamped (a moved place is the same place)
-                 allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history: Array.isArray(body.history) ? body.history.filter(h => typeof h === 'string').slice(0, 200) : [] });
-            const loc = e.w.locations.get(r.address);
-            // A temporary change ran out under the party (the room exists with no clock): "the passage seals behind you".
-            if (r.moved && now !== null && all.w.locations.has(address)) r.expired = true;
-            if (r.expired) {
-                // For the narrated exit: the room that ran out (name, description), the change that made it, and the places
-                // its exits still reach now (the way they came in first: the default).
-                const old = all.w.locations.get(address);
-                const made = changes.map((c, i) => [c, i]).reverse().find(([c]) => c?.type === 'patch' && Array.isArray(c.ops) && c.ops.some(o => !opActive(o, c, now)
-                    && (o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address))));
-                r.expired_room = { address, name: old ? World.place_label(old.name, all.w.sub_of(old).name) : address, description: old?.description ?? '',
-                    ...(made ? { change: { msg: made[0]._msg ?? null, note: made[0].note ?? '', summary: made[0].summary ?? (all.info.patches ?? []).filter(p => p.msg === (made[0]._msg ?? null) && p.id === (made[0].id ?? null)).flatMap(p => p.summary ?? []), ...(expiredText(wid, made[0], now) ? { ended: expiredText(wid, made[0], now) } : {}) } } : {}) };
-                const seen = new Set();
-                r.options = (old?.exits ?? []).filter(x => e.w.locations.has(x.to) && !seen.has(x.to) && seen.add(x.to))
-                    .map(x => { const l = e.w.locations.get(x.to); return { address: x.to, direction: x.direction, name: World.place_label(l.name, e.w.sub_of(l).name) }; })
-                    .sort((x, y) => (x.address === r.address ? -1 : y.address === r.address ? 1 : 0));
+            const one = (address, since, history) => {
+                const r = resolvePosition(e.w, address, { relocate: { ...relocateMap(e.info.patches), ...relocateMap(e.info.patches, since) }, // every active move applies forward, whenever the position was stamped (a moved place is the same place)
+                    allRelocate: relocateMap(changes.map((c, i) => all.info.patches.find(p => p.index === i) ?? (c?.type === 'patch' && c.relocate && typeof c.relocate === 'object' ? { relocate: c.relocate } : null)).filter(Boolean)), before, history });
+                const loc = e.w.locations.get(r.address);
+                // A temporary change ran out under this actor (the room exists with no clock): "the passage seals behind you".
+                if (r.moved && now !== null && all.w.locations.has(address)) r.expired = true;
+                if (r.expired) {
+                    // For the narrated exit: the room that ran out (name, description), the change that made it, and the places
+                    // its exits still reach now (the way they came in first: the default).
+                    const old = all.w.locations.get(address);
+                    const made = changes.map((c, i) => [c, i]).reverse().find(([c]) => c?.type === 'patch' && Array.isArray(c.ops) && c.ops.some(o => !opActive(o, c, now)
+                        && (o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address))));
+                    r.expired_room = { address, name: old ? World.place_label(old.name, all.w.sub_of(old).name) : address, description: old?.description ?? '',
+                        ...(made ? { change: { msg: made[0]._msg ?? null, note: made[0].note ?? '', summary: made[0].summary ?? (all.info.patches ?? []).filter(p => p.msg === (made[0]._msg ?? null) && p.id === (made[0].id ?? null)).flatMap(p => p.summary ?? []), ...(expiredText(wid, made[0], now) ? { ended: expiredText(wid, made[0], now) } : {}) } } : {}) };
+                    const seen = new Set();
+                    r.options = (old?.exits ?? []).filter(x => e.w.locations.has(x.to) && !seen.has(x.to) && seen.add(x.to))
+                        .map(x => { const l = e.w.locations.get(x.to); return { address: x.to, direction: x.direction, name: World.place_label(l.name, e.w.sub_of(l).name) }; })
+                        .sort((x, y) => (x.address === r.address ? -1 : y.address === r.address ? 1 : 0));
+                }
+                return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
+            };
+            if (isObj(body.actors)) {
+                const sinceOf = id => (isObj(body.sinces) && typeof body.sinces[id] === 'number' ? body.sinces[id] : (typeof body.since === 'number' ? body.since : null));
+                const actors = {};
+                for (const [id, address] of Object.entries(body.actors)) {
+                    if (typeof id !== 'string' || !id || typeof address !== 'string' || !address) continue;
+                    const history = histOf(isObj(body.histories) ? body.histories[id] : (id === 'player' ? body.history : []));
+                    actors[id] = one(address, sinceOf(id), history);
+                }
+                // The player's result stays at the top level too, so a caller that still reads .address sees the player.
+                return actors.player ? { ...actors.player, actors } : { actors };
             }
-            return { ...r, name: loc?.name ?? r.address, display_name: loc ? World.place_label(loc.name, e.w.sub_of(loc).name) : r.address };
+            const address = field(body, 'address', 'str');
+            const since = typeof body.since === 'number' ? body.since : null;
+            return one(address, since, histOf(body.history));
         },
         'POST /move': ({ q, body }) => {
             needBody(body);
