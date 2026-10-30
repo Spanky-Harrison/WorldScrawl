@@ -72,4 +72,5 @@ export const cases = ({ ext, patches, placeform }) => ({
     'narration.stay_put': ext.stayPutLine('You', 'Hall'),
     ...Object.fromEntries(looks.map((l, i) => [`narration.look.${i}`, ext.lookText('You', 'Hall', l)])),
     ...Object.fromEntries(facts.map(([m, t, x], i) => [`narration.facts.${i}`, ext.factsText(loc, m, t, x)])),
+    ...Object.fromEntries([false, true].map(t => [`narration.lore_index.${t ? 'tools' : 'tags'}`, ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Inn', text: 'Run by {{npc:hesk}}.' }, { level: 'region', name: 'Riverton', text: 'A river town.' }] }, t).lore_index])),
 });

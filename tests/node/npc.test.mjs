@@ -348,16 +348,32 @@ test('absent note: Hesk off-shift in the common room is named as not here, from 
     const evening = absentAt(chat, 0, cast, envOf(BAR, clock(18)), { present: presentAt(chat, 0, cast, envOf(BAR, clock(18))) });
     assert.deepEqual(evening, []);
     assert.deepEqual(absentAt(chat, 0, cast, envOf(FORGE, clock(8)), { present: [] }), [], 'not her place, not in the notes');
-    const named = absentAt(chat, 0, [validateRecord({ id: 'tom', name: 'Tom', line: 'A smith.' }, { file: 'tom.json', places })], envOf(FORGE, clock(8)), { notes: 'Tom works here.', present: [] });
+    const tom = [validateRecord({ id: 'tom', name: 'Tom', line: 'A smith.' }, { file: 'tom.json', places })];
+    const named = absentAt(chat, 0, tom, envOf(FORGE, clock(8)), { lore: 'The forge is run by {{npc:tom}}.', present: [] });
     assert.deepEqual(named, ["Tom isn't here right now; do not portray Tom."], 'no schedule: no place invented');
+    assert.deepEqual(absentAt(chat, 0, tom, envOf(FORGE, clock(8)), { lore: 'Tom works here.', present: [] }), [], 'a plain name is not a token: no presence line');
 });
 
-test('world load warns when place notes name a cast NPC', () => {
+test('absent note at 08:00: a fallback entry names where; a timed-only schedule names nowhere', () => {
+    const chat = [msg('I sit at the bar.')];
+    assert.deepEqual(absentAt(chat, 0, [hesk()], envOf(BAR, clock(8)), { present: [] }),
+        ["Hesk isn't here right now (asleep, Upstairs Rooms); do not portray Hesk."], 'Hesk: her fallback entry (asleep upstairs) is in force');
+    const pell = validateRecord({ id: 'pell', name: 'Pell', line: 'The evening fiddler.', schedule: [{ place: BAR, activity: 'fiddling', from: '18:00', to: '23:00' }] }, { file: 'pell.json', places });
+    assert.equal(pell.ok, true);
+    assert.deepEqual(absentAt(chat, 0, [pell], envOf(BAR, clock(8)), { present: [] }),
+        ["Pell isn't here right now; do not portray Pell."], 'timed entry only, out of hours: no location invented');
+});
+
+test('world load warns about plain cast names or aliases in lore/descriptions, and unknown token ids', () => {
     const world = { regions: new Map(), locations: new Map(), subregions: new Map([['riverton:drowned_rat', { name: 'The Drowned Rat', notes: 'Run by Hesk, a widow.' }]]) };
     const w = castNameWarnings(world, [hesk()]);
-    assert.equal(w.length, 1);
-    assert.match(w[0], /^The Drowned Rat notes mentions? cast NPC Hesk by name; the narrator may portray Hesk off-shift/);
-    assert.deepEqual(castNameWarnings({ ...world, subregions: new Map([['x', { name: 'X', notes: 'run by its landlady' }]]) }, [hesk()]), []);
+    assert.deepEqual(w, ['The Drowned Rat lore names cast NPC Hesk in plain text; did you mean {{npc:hesk}}?']);
+    assert.deepEqual(castNameWarnings({ ...world, subregions: new Map([['x', { name: 'X', notes: 'run by {{npc:hesk}}' }]]) }, [hesk()]), [], 'a token is fine');
+    const alias = { ...hesk(), raw: { aliases: ['the Widow Hesk', 'Copper'] } };
+    assert.deepEqual(castNameWarnings({ ...world, subregions: new Map(), locations: new Map([['a', { name: 'Bar', description: 'Copper glares from behind the bar.' }]]) }, [alias]),
+        ['Bar description names cast NPC Copper in plain text; did you mean {{npc:hesk}}?']);
+    assert.deepEqual(castNameWarnings({ ...world, subregions: new Map([['x', { name: 'X', notes: 'run by {{npc:hsk}}' }]]) }, [hesk()]),
+        ['X lore has {{npc:hsk}}, but no cast NPC has the id "hsk"; it shows as "hsk".']);
 });
 
 test('shipped worlds: no place notes name a cast NPC', async () => {

@@ -51,7 +51,7 @@ export function openAction(doc, pane, action, ctx, io) {
     const area = (v = '') => { const t = $('textarea', { rows: 3 }); t.value = v; return t; };
     const select = (opts, v) => { const s = $('select', {}, ...opts.map(([k, l]) => $('option', { value: k }, l))); if (v !== undefined) s.value = v; return s; };
     const aiBtn = (ta, spec) => {
-        const b = $('button', { type: 'button', class: 'pf-ai mw-ai', title: 'Expand with AI (sees only the parent notes and the places the exits lead to)' }, 'Expand with AI');
+        const b = $('button', { type: 'button', class: 'pf-ai mw-ai', title: 'Expand with AI (sees only the parent lore and the places the exits lead to)' }, 'Expand with AI');
         b.addEventListener('click', async () => {
             b.disabled = true; const was = b.textContent; b.textContent = 'Writing…';
             try { const t = await io.aiText({ ...spec(), text: ta.value }); if (t) { ta.value = t; ta.dispatchEvent(new Event('input')); } } catch (e) { b.title = `Expand failed: ${e.message}`; } finally { b.disabled = false; b.textContent = was; }
@@ -150,14 +150,14 @@ export function openAction(doc, pane, action, ctx, io) {
             const n = input(), notes = area(), sn = input(), snotes = area(), p = placeFields(() => '', true, 'Starting place');
             build = () => { if (!n.value.trim()) throw new Error('Region name is required.'); if (!sn.value.trim()) throw new Error('First subregion name is required.');
                 return [{ op: 'create_region', name: n.value.trim(), ...(notes.value.trim() ? { notes: notes.value.trim() } : {}), subregion: { name: sn.value.trim(), ...(snotes.value.trim() ? { notes: snotes.value.trim() } : {}), place: p.get() } }]; };
-            header('Create region', $('p', { class: 'muted' }, 'A region needs its first subregion and a starting place.'), row('Region name', n, { 'data-field': 'region_name' }), row('Region notes', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'region', name: n.value, area: '', rooms: [] })),
-                row('First subregion name', sn, { 'data-field': 'sub_name' }), row('Subregion notes', snotes), ...p.els);
+            header('Create region', $('p', { class: 'muted' }, 'A region needs its first subregion and a starting place.'), row('Region name', n, { 'data-field': 'region_name' }), row('Region lore', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'region', name: n.value, area: '', rooms: [] })),
+                row('First subregion name', sn, { 'data-field': 'sub_name' }), row('Subregion lore', snotes), ...p.els);
             break;
         }
         case 'create_subregion': {
             const n = input(), notes = area(), p = placeFields(() => t, true, 'First place');
             build = () => { if (!n.value.trim()) throw new Error('Subregion name is required.'); return [{ op: 'create_subregion', region: t, name: n.value.trim(), ...(notes.value.trim() ? { notes: notes.value.trim() } : {}), place: p.get() }]; };
-            header(`Create subregion in ${findRegion(o, t)?.name ?? t}`, row('Subregion name', n, { 'data-field': 'sub_name' }), row('Notes', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'subregion', name: n.value, area: t, rooms: [] })), ...p.els);
+            header(`Create subregion in ${findRegion(o, t)?.name ?? t}`, row('Subregion name', n, { 'data-field': 'sub_name' }), row('Lore', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'subregion', name: n.value, area: t, rooms: [] })), ...p.els);
             break;
         }
         case 'create_place': {

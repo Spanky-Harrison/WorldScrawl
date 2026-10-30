@@ -1,10 +1,14 @@
 // Loads and validates the static world map (worlds/<id>/world.json + worlds/<id>/regions/*.json).
 //
 // Region file layout:
-//   {name, notes?, start: "sub/loc", entrance?: "sub" | "sub/loc",
-//    subregions: {sub_id: {name, notes?, inherit_notes?: bool (default true),
-//                          locations: {loc_id: {name, description, inherit_region_notes?: bool,
-//                                               inherit_subregion_notes?: bool, exits: [...]}}}}}
+//   {name, lore?, start: "sub/loc", entrance?: "sub" | "sub/loc",
+//    subregions: {sub_id: {name, lore?, inherit_lore?: bool (default true),
+//                          locations: {loc_id: {name, description, lore?, inherit_region_lore?: bool,
+//                                               inherit_subregion_lore?: bool, exits: [...]}}}}}
+// "description" is what the senses take in (fed on moves and looks); "lore" is background knowledge (history, who
+// runs the place), fed only when asked for (see docs/lore.md). Legacy files say "notes" / "inherit_notes" /
+// "inherit_region_notes" / "inherit_subregion_notes": read the same. In memory (and in map patches) the key stays
+// "notes" so old chats' set_notes / append_notes ops keep working; liftLore / lowerLore convert at the file edge.
 // Map-only hint (optional): pos?: {x, y} on a location.
 // Full address: "region:sub/loc". Exit "to": "loc" (same subregion), "sub/loc" (same region) or "region:sub/loc".
 import crypto from 'node:crypto';
@@ -190,6 +194,12 @@ export class World {
         const useSub = loc.inherit_subregion_notes === null ? true : loc.inherit_subregion_notes;
         return { region: useRegion ? region.notes : null, subregion: useSub ? sub.notes : null };
     }
+    /** The lore chain for a room, innermost first: [{level: 'room'|'subregion'|'region', name, text}] (inherit rules applied, empty ones dropped). */
+    lore_chain(loc) {
+        const n = this.effective_notes(loc), sub = this.sub_of(loc), region = this.regions.get(loc.region);
+        return [['room', loc.name, loc.notes], ['subregion', sub.name, n.subregion], ['region', region.name, n.region]]
+            .filter(([, , t]) => typeof t === 'string' && t.trim()).map(([level, name, text]) => ({ level, name, text }));
+    }
     static place_label(name, subName) { return subName && subName !== name ? `${name} (${subName})` : name; }
     inherited_stays_open(loc) {
         for (const v of [this.sub_of(loc).stays_open, this.regions.get(loc.region).stays_open]) if (v !== null) return v;
@@ -227,7 +237,7 @@ export class World {
             name: loc.name,
             display_name: World.place_label(loc.name, sub.name),
             description: loc.description,
-            effective_notes: this.effective_notes(loc), expandable: loc.expandable !== false,
+            lore: loc.notes ?? null, effective_notes: this.effective_notes(loc), lore_chain: this.lore_chain(loc), expandable: loc.expandable !== false,
             exits: loc.exits.map(e => this._exit_dict(e, loc)),
             views: loc.views.map(a => this.view_dict(a)),
             weather: this.place_weather(loc),
@@ -370,6 +380,24 @@ export function regionFiles(root) {
     return fs.readdirSync(dir).filter(n => n.endsWith('.json') && isFile(path.join(dir, n))).sort().map(n => path.join(dir, n));
 }
 
+const LORE_KEYS = [['lore', 'notes'], ['inherit_lore', 'inherit_notes'], ['inherit_region_lore', 'inherit_region_notes'], ['inherit_subregion_lore', 'inherit_subregion_notes']];
+const eachPlace = (raw, fn) => {
+    for (const r of Object.values(raw ?? {})) {
+        if (!isObj(r)) continue;
+        fn(r);
+        for (const s of Object.values(isObj(r.subregions) ? r.subregions : {})) {
+            if (!isObj(s)) continue;
+            fn(s);
+            for (const l of Object.values(isObj(s.locations) ? s.locations : {})) if (isObj(l)) fn(l);
+        }
+    }
+    return raw;
+};
+/** File keys -> memory keys, in place: "lore" -> "notes" (lore wins when a file has both), inherit_*_lore likewise. */
+export const liftLore = raw => eachPlace(raw, o => { for (const [file, mem] of LORE_KEYS) if (has(o, file)) { o[mem] = o[file]; delete o[file]; } });
+/** Memory keys -> file keys, on a copy: what a saved world writes. */
+export const lowerLore = raw => eachPlace(JSON.parse(JSON.stringify(raw)), o => { for (const [file, mem] of LORE_KEYS) if (has(o, mem)) { o[file] = o[mem]; delete o[mem]; } });
+
 /** The hand-written files as plain JSON: [world.json, {region_id: region file}]. */
 export function read_world_raw(root) {
     const worldFile = path.join(root, 'world.json');
@@ -380,13 +408,14 @@ export function read_world_raw(root) {
     if (!files.length) throw new WorldError(`no region files found in ${path.join(root, 'regions')}`);
     const raw = {};
     for (const p of files) Object.defineProperty(raw, path.basename(p, '.json'), { value: loadJson(p), enumerable: true, writable: true, configurable: true });
-    return [worldJson, raw];
+    return [worldJson, liftLore(raw)];
 }
 
 export const load_world = root => build_world(...read_world_raw(root));
 
 /** Validate and build a World from plain JSON (as read from a world folder, possibly with changes applied). */
 export function build_world(worldJson, rawRegions) {
+    liftLore(rawRegions);
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
     const worldExpandable = optionalBool(worldJson, 'expandable', 'world.json');
@@ -476,7 +505,7 @@ export function build_world(worldJson, rawRegions) {
                 const address = `${rid}:${sid}/${lid}`;
                 rawViews.push([where, rid, sid, address, views]);
                 locations.set(address, {
-                    address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), exits,
+                    address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), notes: requireStr(loc, 'notes', where, true), exits,
                     inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
                     expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });

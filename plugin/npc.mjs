@@ -518,10 +518,10 @@ export function presentAt(chat, index, cast, env) {
 }
 
 /**
- * Saved people who belong here (a schedule stop at this place, or named in its notes) but are not in the scene now.
- * One line each, from the schedule entry in force; with none, no place is named (never invented).
+ * Saved people who belong here (a schedule stop at this place, or a {{npc:id}} token in the lore being fed, `lore`)
+ * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented).
  */
-export function absentAt(chat, index, cast, env, { notes = '', present = [] } = {}) {
+export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {}) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length) return [];
     const frames = framesOf(chat, end, cast);
@@ -529,11 +529,12 @@ export function absentAt(chat, index, cast, env, { notes = '', present = [] } = 
     const here = env.playerAt(end);
     const clock = env.clock(end);
     const ids = new Set((present ?? []).map(p => p.id));
+    const named = new Set(npcTokenIds(lore));
     const out = [];
     for (const npc of frames[end].values()) {
         if (ids.has(npc.id) || npc.following) continue;
         const stops = (npc.schedule ?? []).filter(e => e && !e.broken).some(e => resolveSchedulePlace(e.place, env).address === here);
-        if (!stops && !nameIn(notes, npc.name)) continue;
+        if (!stops && !named.has(String(npc.id).toLowerCase())) continue;
         const sched = scheduleAt(npc, clock, env);
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
@@ -955,3 +956,80 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_seek') return `Looking for ${who}`;
     return who;
 }
+
+// ---- Place lore (docs/lore.md). A place has a sensory description (fed on moves and looks) and lore: background
+// knowledge, fed only when the narrator asks with [ws_flag: lore | Place] (or the ws_flag tool's "lore" action) or the
+// player writes [lore]. The narrator always sees a one-line index of the lore on file. Cast NPCs are written as
+// {{npc:castId}} tokens in lore and descriptions; the engine renders them as names before SillyTavern's macros run.
+export const NPC_TOKEN = /\{\{\s*npc\s*:\s*([^{}\s]*)\s*\}\}/gi;
+/** The cast ids in a text's {{npc:id}} tokens, in order, unique. */
+export const npcTokenIds = text => [...new Set([...String(text ?? '').matchAll(NPC_TOKEN)].map(m => m[1].toLowerCase()))];
+/**
+ * {{npc:id}} -> that NPC's name. An unknown id renders as the bare id ("someone" when empty) and is passed to `onUnknown`.
+ * `cast` is a list of {id, name} (or a Map id -> name).
+ */
+export function renderNpcTokens(text, cast, onUnknown = null) {
+    const byId = cast instanceof Map ? cast : new Map((cast ?? []).filter(n => n?.id).map(n => [String(n.id).toLowerCase(), n.name]));
+    return String(text ?? '').replace(NPC_TOKEN, (_all, id) => {
+        const name = byId.get(String(id).toLowerCase());
+        if (name) return name;
+        onUnknown?.(id);
+        return id || 'someone';
+    });
+}
+
+export const LORE_KEY = 'worldscrawl_lore';
+/** The narrator's [ws_flag: lore | Place] tags: the places come back, the text without the tags. */
+export const LORE_FLAG_TAG = /\s*\[ws_flag:\s*lore\s*(?:\|\s*([^\]|]{0,80}))?\]/gi;
+export function takeLoreFlags(text) {
+    const places = [];
+    const cleaned = String(text ?? '').replace(LORE_FLAG_TAG, (_all, n) => { places.push(String(n ?? '').trim()); return ''; });
+    return { places, text: cleaned };
+}
+/** "Lore on file: The Drowned Rat, Riverton" for a lore chain (innermost first); '' when there is none. */
+export const loreIndexLine = chain => (chain?.length ? `Lore on file: ${chain.map(c => c.name).join(', ')}` : '');
+/** The chain entries a request names: "" / "here" / "all" -> every one; else the entry whose name matches. */
+export function loreFor(chain, place) {
+    const p = normName(place);
+    if (!p || ['here', 'all', 'this place', 'everything'].includes(p)) return [...(chain ?? [])];
+    const exact = (chain ?? []).filter(c => normName(c.name) === p);
+    if (exact.length) return exact;
+    return (chain ?? []).filter(c => nameIn(place, c.name) || nameIn(c.name, place)).slice(0, 1);
+}
+/**
+ * A lore request, stamped on the message it came from: {swipe, place, level, address, source: 'flag' | 'bracket'}.
+ * `place` is the place's name as matched in the lore chain (or as asked, when nothing matched; then level is '').
+ */
+export function addLoreRequest(msg, req) {
+    msg.extra = msg.extra ?? {};
+    const list = Array.isArray(msg.extra[LORE_KEY]) ? msg.extra[LORE_KEY] : [];
+    msg.extra[LORE_KEY] = [...list, { swipe: msg.swipe_id ?? 0, place: String(req.place ?? ''), level: String(req.level ?? ''), address: String(req.address ?? ''), source: req.source === 'bracket' ? 'bracket' : 'flag' }];
+}
+/** The lore requests on message m (its shown swipe). */
+export const loreRequestsOn = m => (Array.isArray(m?.extra?.[LORE_KEY]) ? m.extra[LORE_KEY] : []).filter(r => r && (r.swipe ?? 0) === (m?.swipe_id ?? 0));
+/**
+ * Every lore request in a chat, oldest first, for the inspector's lore-request log:
+ * [{index, place, level, address, source: 'flag' | 'bracket'}] (index = the message it is stamped on).
+ */
+export function loreRequests(chat) {
+    const out = [];
+    (chat ?? []).forEach((m, index) => { for (const r of loreRequestsOn(m)) out.push({ index, place: r.place, level: r.level, address: r.address, source: r.source }); });
+    return out;
+}
+/**
+ * The lore to feed at message `index`: chain entries (innermost first) asked for by a request in this scene at this
+ * place. A request sticks until the player's place changes. `extra` are requests not stamped yet (this turn's [lore]).
+ */
+export function activeLore(chat, index, chain, playerAt, extra = []) {
+    if (!chain?.length) return [];
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    const here = playerAt(end);
+    const from = chat?.length ? sceneStartOf(chat, end, playerAt) : 0;
+    const asked = [...extra];
+    for (let i = from; i <= end && i < (chat?.length ?? 0); i++) for (const r of loreRequestsOn(chat[i])) if (!r.address || r.address === here) asked.push(r);
+    const levels = new Set();
+    for (const r of asked) for (const c of (r.level ? chain.filter(c => c.level === r.level) : loreFor(chain, r.place))) levels.add(c.level);
+    return chain.filter(c => levels.has(c.level));
+}
+/** The fed-lore block for the narrator ('' when nothing is fed), tokens left in (render afterwards). */
+export const loreBlock = fed => (fed?.length ? `Background knowledge (lore; what locals know, not what the senses show; use it only where it fits):\n${fed.map(c => `- ${c.name}: ${c.text}`).join('\n')}` : '');

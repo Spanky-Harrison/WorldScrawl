@@ -3,19 +3,19 @@
   "weather_region": "riverside",
   "temp_offset": -3,
   "exposure": "outdoor",
-  "notes": "Larkspur is a hillside market town about two hours' walk east of Riverton, built of honey-coloured stone around hot springs. It lives on wool, dye and visitors who come for the baths; its folk are cheerful, fond of gossip and festivals, and quick to overcharge anyone from the river.",
+  "lore": "Larkspur is a hillside market town about two hours' walk east of Riverton, built of honey-coloured stone around hot springs. It lives on wool, dye and visitors who come for the baths; its folk are cheerful, fond of gossip and festivals, and quick to overcharge anyone from the river.",
   "start": "green/green",
   "entrance": "green",
   "subregions": {
     "west_road": {
       "name": "West Road",
       "exposure": "outdoor",
-      "notes": "The road between Larkspur and Riverton winds through sheep pasture and over a stone bridge; it's about a two-hour walk.",
+      "lore": "The road between Larkspur and Riverton winds through sheep pasture and over a stone bridge; it's about a two-hour walk.",
       "locations": {
         "road": {
           "name": "West Road",
           "description": "A dusty road climbing out of the sheep pastures toward Larkspur's honey-coloured roofs. A stone bridge crosses a beck, and a signpost points west: Riverton, two hours on foot.",
-          "inherit_region_notes": true,
+          "inherit_region_lore": true,
           "exits": [
             { "type": "open", "direction": "west", "to": "riverton:east_road/road", "travel_time": "2h", "sight": "none", "sound": "none", "description": "The long road west winds away through farmland until it drops out of sight. Riverton is about two hours' walk." },
             { "type": "open", "direction": "east", "to": "green/green", "travel_time": "5m", "description": "Up the hill into Larkspur." }
@@ -28,7 +28,7 @@
       "exposure": "outdoor",
       "entrance": "green",
       "label_rooms": true,
-      "notes": "Steep stone streets hung with dyed wool drying on lines, steaming gutters fed by the springs, and the smell of sulphur and lavender.",
+      "lore": "Steep stone streets hung with dyed wool drying on lines, steaming gutters fed by the springs, and the smell of sulphur and lavender.",
       "locations": {
         "green": {
           "name": "Larkspur Green",
@@ -66,7 +66,7 @@
       "indoor_temp": 78,
       "insulation": "cozy",
       "entrance": "hall",
-      "notes": "The town's pride: hot mineral baths run by Odessa Vey, a tall, statuesque bath-mistress with dark curls pinned up, a towel over one bare shoulder and a warm, unhurried voice. Her attendants are lithe, cheerful girls in linen shifts.",
+      "lore": "The town's pride: hot mineral baths run by Odessa Vey, a tall, statuesque bath-mistress with dark curls pinned up, a towel over one bare shoulder and a warm, unhurried voice. Her attendants are lithe, cheerful girls in linen shifts.",
       "locations": {
         "hall": {
           "name": "Entrance Hall",
@@ -110,7 +110,7 @@
       "name": "Wren's Apothecary",
       "exposure": "sheltered",
       "indoor_temp": 66,
-      "notes": "A herb shop run by Wren, a petite, freckled redhead with ink-stained fingers and a mischievous smile, who sells remedies, perfumes and, to the right people, stronger things.",
+      "lore": "A herb shop run by Wren, a petite, freckled redhead with ink-stained fingers and a mischievous smile, who sells remedies, perfumes and, to the right people, stronger things.",
       "locations": {
         "shop": {
           "name": "Wren's Apothecary",
@@ -134,7 +134,7 @@
       "name": "Hollin Dyeworks",
       "exposure": "sheltered",
       "insulation": "drafty",
-      "notes": "The dyeworks that colour Larkspur's wool, run by Maren Hollin, a strong, sun-browned woman with blue-stained forearms, a bold laugh and a kerchief over her black hair, with a crew of brawny, good-humoured dye-girls.",
+      "lore": "The dyeworks that colour Larkspur's wool, run by Maren Hollin, a strong, sun-browned woman with blue-stained forearms, a bold laugh and a kerchief over her black hair, with a crew of brawny, good-humoured dye-girls.",
       "locations": {
         "yard": {
           "name": "Dyeworks Yard",
@@ -158,7 +158,7 @@
       "name": "Sable's Bindery",
       "exposure": "sheltered",
       "indoor_temp": 66,
-      "notes": "A bookbinder and scribe's shop run by Sable, a slim, elegant woman with silver-streaked hair in a long braid, reading spectacles and a dry wit, who also writes letters for those who can't.",
+      "lore": "A bookbinder and scribe's shop run by Sable, a slim, elegant woman with silver-streaked hair in a long braid, reading spectacles and a dry wit, who also writes letters for those who can't.",
       "locations": {
         "shop": {
           "name": "Sable's Bindery",
@@ -174,7 +174,7 @@
       "exposure": "sheltered",
       "indoor_temp": 68,
       "entrance": "foyer",
-      "notes": "A small, gaudy playhouse that puts on comedies and festival masques, run by Celandine Rook, a glamorous, full-figured actress-manager with a husky voice and a fondness for scandal. Her troupe of actresses is young, pretty and always short of money.",
+      "lore": "A small, gaudy playhouse that puts on comedies and festival masques, run by Celandine Rook, a glamorous, full-figured actress-manager with a husky voice and a fondness for scandal. Her troupe of actresses is young, pretty and always short of money.",
       "locations": {
         "foyer": {
           "name": "Foyer",

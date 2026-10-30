@@ -124,6 +124,9 @@
     "npcs_present": "The saved people in this scene, one short line each: name, what they are doing, and how they feel about the player.",
     "npc_focus": "The person the player is addressing, with manner, voice and memory, plus history when the talk goes deep. Empty when nobody is the focus.",
     "how_to_report": "How the narrator reports a new fact about a person: the ws_npc tool, or the [ws_npc] tag when tools are off.",
+    "lore_places": "the names of the places here with lore on file, innermost first",
+    "how": "how to ask for lore (the tags or tools piece)",
+    "lore": "the lore asked for, one place per line",
     "line": "One sentence about a person: who they are, as already said in the story or the cast file."
   },
   "prompts": [
@@ -1042,12 +1045,62 @@
       "title": "Narration: the ws_flag action argument (tools on)",
       "description": "Alongside (map tools on): the description of ws_flag's action argument.",
       "group": "narration",
-      "locked": "Names the action values change, discover, wait, sleep and npc, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved.",
+      "locked": "Names the action values change, discover, wait, sleep, npc and lore, which the game reads.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"lore\": location is the name of a place listed under \"Lore on file\"; the tool answers with what locals know about it, and it stays in your notes while the characters remain here.",
       "placeholders": [
         {
           "name": "discover",
           "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.lore_index",
+      "title": "Narration: the lore index line",
+      "description": "Alongside: one line naming the places here that have lore on file (background knowledge that is only fed when asked for), and how to ask.",
+      "group": "narration",
+      "locked": "Names the places the [ws_flag: lore | …] tag or the ws_flag lore action can ask for.",
+      "text": "Lore on file: {{lore_places}}. {{how}}",
+      "placeholders": [
+        {
+          "name": "lore_places"
+        },
+        {
+          "name": "how",
+          "generated": true
+        }
+      ]
+    },
+    {
+      "id": "narration.lore_how_tags",
+      "title": "Narration: how to ask for lore (tags)",
+      "description": "Piece: fills {{how}} in the lore index line when map tools are off.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The exact [ws_flag: lore | …] tag the game looks for.",
+      "text": "If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.lore_how_tools",
+      "title": "Narration: how to ask for lore (tools)",
+      "description": "Piece: fills {{how}} in the lore index line when map tools are on.",
+      "group": "narration",
+      "piece": true,
+      "locked": "Names the ws_flag tool's 'lore' action, which the game reads.",
+      "text": "If the scene needs what locals know about one of them (its history, who runs it, its reputation), call ws_flag with action \"lore\" and location set to its name.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.lore_block",
+      "title": "Narration: lore that was asked for",
+      "description": "Alongside: the lore the narrator or the player asked for, while the characters stay in that place.",
+      "group": "narration",
+      "locked": "Marks the lore as background knowledge, not what the senses show.",
+      "text": "Background knowledge (lore): what locals know, not what the senses show here. Use it only where it fits; do not recite it.\n{{lore}}",
+      "placeholders": [
+        {
+          "name": "lore"
         }
       ]
     },

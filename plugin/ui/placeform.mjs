@@ -27,8 +27,8 @@ export const ROOM_FIELDS = [
     { k: 'name', type: 'text', label: 'Name', required: true },
     { k: 'description', type: 'textarea', label: 'Description', required: true, ai: true },
     { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
-    { k: 'inherit_region_notes', type: 'bool', label: 'Uses the region notes' },
-    { k: 'inherit_subregion_notes', type: 'bool', label: 'Uses the subregion notes' },
+    { k: 'inherit_region_notes', type: 'bool', label: 'Uses the region lore' },
+    { k: 'inherit_subregion_notes', type: 'bool', label: 'Uses the subregion lore' },
     { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
     { k: 'insulation', type: 'choice', label: 'Insulation', options: ENUMS.insulation },
     { k: 'indoor_temp', type: 'number', label: 'Indoor temperature' },
@@ -37,10 +37,10 @@ export const ROOM_FIELDS = [
 export const AREA_FIELDS = {
     subregion: [
         { k: 'name', type: 'text', label: 'Name', required: true },
-        { k: 'notes', type: 'textarea', label: 'Notes', ai: true },
+        { k: 'notes', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
-        { k: 'inherit_notes', type: 'bool', label: 'Rooms use the region notes' },
+        { k: 'inherit_notes', type: 'bool', label: 'Rooms use the region lore' },
         { k: 'label_rooms', type: 'bool', label: 'Room names carry the subregion name', dflt: false },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },
         { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
@@ -50,7 +50,7 @@ export const AREA_FIELDS = {
     ],
     region: [
         { k: 'name', type: 'text', label: 'Name', required: true },
-        { k: 'notes', type: 'textarea', label: 'Notes', ai: true },
+        { k: 'notes', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },

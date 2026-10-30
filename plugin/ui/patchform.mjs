@@ -7,7 +7,7 @@ import { OPS, parseLasts, newRoomId } from './patches.mjs';
 export const EXIT_OPS = ['block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit'];
 export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
-    set_notes: 'Rewrite area notes', update_area: 'Rename area / rewrite its notes', append_notes: 'Add to area notes',
+    set_notes: 'Rewrite area lore', update_area: 'Rename area / rewrite its lore', append_notes: 'Add to area lore',
     block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
     remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms',
     set_fields: 'Change settings', set_exit: 'Exit: change settings', add_exit: 'Exit: add (with the way back)', move_location: 'Move place to another subregion', move_area: 'Move subregion to another region',
@@ -168,9 +168,9 @@ export function buildPatchForm(doc, opts = {}) {
             box.append(head);
             const set = k => v => { d[k] = v; };
             for (const [k, req] of OP_FIELDS[d.op] ?? []) {
-                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Notes' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)', target: 'Room, area (region:subregion) or region', value: 'true, false or inherit' }[k] ?? k}${req ? '' : ' (optional)'}`;
+                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Lore' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)', target: 'Room, area (region:subregion) or region', value: 'true, false or inherit' }[k] ?? k}${req ? '' : ' (optional)'}`;
                 if (k === 'text') box.append(field(lab, d.op === 'set_name' ? input(d.text, set('text')) : area(d.text, set('text'))));
-                else if (k === 'notes') box.append(field('New notes (optional)', area(d.notes, set('notes'))));
+                else if (k === 'notes') box.append(field('New lore (optional)', area(d.notes, set('notes'))));
                 else if (k === 'description') box.append(field(lab, area(d.description, set('description'))));
                 else if (k === 'loc') box.append(field(lab, roomPick(d.loc, v => { d.loc = v; render(); })));
                 else if (k === 'area') box.append(field(d.op === 'merge' ? 'Area for the merged place (optional)' : lab.replace(' (region or region:subregion)', ''), areaPick(d.area, set('area'), d.op === 'merge' ? '— same as the kept place —' : undefined)));

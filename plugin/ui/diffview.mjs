@@ -66,7 +66,7 @@ export function fieldDiffs(before = {}, after = {}, relocate = {}) {
         const o = before?.[key] ?? null, n = after?.[key] ?? null, area = !!(o?.area || n?.area || !key.includes('/'));
         const fields = [];
         const text = (field, label) => { const a = String(o?.[field] ?? ''), b = String(n?.[field] ?? ''); if (a || b) fields.push({ field, label, kind: 'text', old: a, new: b, changed: a !== b }); };
-        text('name', 'Name'); text('description', 'Description'); text('notes', 'Notes');
+        text('name', 'Name'); text('description', 'Description'); text('notes', 'Lore');
         if (!area) {
             const oe = (o?.exits ?? []).filter(isObj), ne = (n?.exits ?? []).filter(isObj);
             const dirs = [...new Set([...oe, ...ne].map(e => e.direction))];
