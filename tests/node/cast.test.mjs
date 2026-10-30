@@ -119,7 +119,7 @@ test('inspector: why someone is where they are, who is at a place, the narrator 
     const cast = client(RIVERTON).get('/cast').json().npcs;
     const chat = [{ mes: 'You walk into the Drowned Rat.', is_user: true, extra: {} }, { mes: 'Hesk wipes the bar. A man called Bram Tull nods. Bram Tull drinks.', is_user: false, extra: { worldscrawl_npc_flags: [{ swipe: 0, names: ['Bram Tull'] }] } },
         { mes: 'Hello Hesk', is_user: true, extra: {} }, { mes: 'Bram Tull leaves. Hesk shrugs.', is_user: false, extra: { worldscrawl_npc_flags: [{ swipe: 0, names: ['Bram Tull', 'Hesk'] }] } }];
-    const env = inspEnv(12);
+    const env = inspEnv(18); // 16:00–02:00 she is at the bar; the rest of the day she is off the map
     const hesk = framesOf(chat, 3, cast)[3].get('hesk');
     const w = npcWhy(hesk, 3, env);
     assert.equal(w.clock.day, 3);

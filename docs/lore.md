@@ -29,3 +29,5 @@ Loading a world warns when lore or a description names a cast NPC (or one of the
 ## Later
 
 Keyword serving (feeding lore when the story mentions a place's name or a keyword) is not done. It may come later; for now lore is only fed when asked for.
+
+Stub regions (`elsewhere.json`; see [npc-design.md](npc-design.md)) can carry `lore`, and it is served the same way as place lore. A later story-engine flag, `[ws_flag: rumor | Place | text]`, would record rumors about those stub regions together with who said them, kept as rumors and not as facts, so whoever builds the place later chooses which turn out true. Travel time between a stub region and the map is out of scope until the off-screen-life phase.

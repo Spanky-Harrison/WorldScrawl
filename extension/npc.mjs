@@ -4,6 +4,7 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 export const NPC_KEY = 'worldscrawl_npc';
+export const FOUND_KEY = 'worldscrawl_found';
 export const PLAYER = 'player';
 export const SUGGEST_AFTER = 3;
 export const MEMORY_CAP = 8;
@@ -112,7 +113,7 @@ function str(v, max) {
  * sighting place that is not in the world as broken. A place that exists here can still expire later;
  * that is decided when the schedule is resolved, not here.
  */
-export function validateRecord(raw, { file = 'npc', places = null } = {}) {
+export function validateRecord(raw, { file = 'npc', places = null, nearIndex = null } = {}) {
     const problems = [];
     const errors = [];
     const fail = m => { problems.push(m); errors.push(m); };
@@ -161,7 +162,7 @@ export function validateRecord(raw, { file = 'npc', places = null } = {}) {
     const schedule = [];
     if (raw.schedule != null) {
         if (!Array.isArray(raw.schedule)) fail(`${file}: "schedule" must be a list`);
-        else raw.schedule.forEach((e, i) => schedule.push(validateEntry(e, `${file} schedule[${i}]`, places, note)));
+        else raw.schedule.forEach((e, i) => schedule.push(validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex)));
     }
     let seen_at = null;
     if (raw.seen_at != null) {
@@ -187,20 +188,23 @@ export function validateRecord(raw, { file = 'npc', places = null } = {}) {
     return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
 }
 
-function validateEntry(e, where, places, fail) {
+function validateEntry(e, where, places, fail, nearIndex = null) {
     if (!isObj(e)) { fail(`${where}: must be an object`); return { place: '', activity: '', broken: true, problem: 'not an object' }; }
     const place = str(e.place, 200) ?? '';
     const activity = str(e.activity, 200) ?? '';
+    const whereLabel = str(e.where, 80) ?? '';
+    const near = str(e.near, 200) ?? '';
     const problems = [];
-    if (!place) problems.push('place is required');
+    // A place puts them on the map. No place is a placeless entry: off the map, with activity required.
     if (!activity) problems.push('activity is required');
+    if (!place && !activity) problems.push('activity is required');
     let fromMin = null, toMin = null, from = null, to = null;
-    if (e.from != null) {
+    if (e.from != null && String(e.from).trim()) {
         fromMin = parseHm(e.from);
         if (fromMin == null) problems.push('from must look like "08:00"');
         else from = String(e.from).trim();
     }
-    if (e.to != null) {
+    if (e.to != null && String(e.to).trim()) {
         toMin = parseHm(e.to);
         if (toMin == null) problems.push('to must look like "17:00"');
         else to = String(e.to).trim();
@@ -210,14 +214,29 @@ function validateEntry(e, where, places, fail) {
         importance = matchEnum(e.importance, IMPORTANCE);
         if (!importance) problems.push('importance must be low, normal or high');
     }
+    let nearNote = '';
+    if (!place && near && nearIndex) {
+        const resolved = resolveNear(near, nearIndex);
+        if (resolved.kind === 'text' && resolved.warn === 'typo') {
+            nearNote = 'probably a typo';
+            fail(`${where}: near "${near}" matches no place and no stub region (a single word; probably a typo)`);
+        } else if (resolved.kind === 'text') nearNote = 'not in the list';
+    }
     let broken = problems.length > 0;
     let problem = problems.join('; ');
-    if (!broken && places && place && !places.has(place)) {
+    if (!broken && place && places && !places.has(place)) {
         broken = true;
         problem = 'place is not in this world';
         fail(`${where}: ${problem} (${place})`);
     } else if (broken) fail(`${where}: ${problem}`);
-    return { place, activity, ...(from ? { from } : {}), ...(to ? { to } : {}), fromMin, toMin, ...(importance ? { importance } : {}), ...(broken ? { broken: true, problem } : {}) };
+    return {
+        ...(place ? { place } : {}), activity,
+        ...(!place && whereLabel ? { where: whereLabel } : {}),
+        ...(!place && near ? { near } : {}),
+        ...(nearNote ? { nearNote } : {}),
+        ...(from ? { from } : {}), ...(to ? { to } : {}), fromMin, toMin,
+        ...(importance ? { importance } : {}), ...(broken ? { broken: true, problem } : {}),
+    };
 }
 
 function cleanDeep(raw, file, fail) {
@@ -259,7 +278,50 @@ export function resolveSchedulePlace(place, { exists, relocate = {} } = {}) {
     return { ok: false, how: 'missing', from: place };
 }
 
-/** The schedule entry in force at `clock.minutes`, or null when nothing valid is in force (off the map). */
+/**
+ * What a schedule `near` string points at, in order: a real map address (room, subregion `region:sub`, or region id),
+ * a stub-region id, or plain text. `index` is {rooms, subs, regions, stubs (Map), nameOf, exists, relocate}.
+ * A single word that matches nothing is `warn: 'typo'` (a load warning). Multi-word text is `warn: 'note'`
+ * (an inspector note only: "not in the list").
+ */
+export function resolveNear(near, index = null) {
+    const raw = typeof near === 'string' ? near.trim() : '';
+    if (!raw) return { kind: 'none' };
+    const nameOf = index?.nameOf ?? (a => a);
+    if (typeof index?.exists === 'function') {
+        const r = resolveSchedulePlace(raw, { exists: index.exists, relocate: index.relocate ?? {} });
+        if (r.ok) return { kind: 'map', scope: 'room', address: r.address, name: nameOf(r.address) };
+    } else if (index?.rooms?.has?.(raw)) return { kind: 'map', scope: 'room', address: raw, name: nameOf(raw) };
+    if (index?.subs?.has?.(raw)) return { kind: 'map', scope: 'subregion', address: raw, name: nameOf(raw) };
+    if (index?.regions?.has?.(raw)) return { kind: 'map', scope: 'region', address: raw, name: nameOf(raw) };
+    const stub = index?.stubs?.get?.(raw);
+    if (stub && !index?.regions?.has?.(raw)) return { kind: 'stub', id: raw, name: stub.name || raw, about: stub.about || '', lore: stub.lore || '' };
+    return { kind: 'text', text: raw, warn: /\s/.test(raw) ? 'note' : 'typo' };
+}
+
+/** True when room address `here` is the mapped place `near` (a room, anywhere in that subregion, or anywhere in that region). */
+export function withinNear(here, near) {
+    if (!here || !near || near.kind !== 'map') return false;
+    if (near.scope === 'room') return here === near.address;
+    if (near.scope === 'subregion') return here === near.address || here.startsWith(`${near.address}/`);
+    if (near.scope === 'region') return here.split(':')[0] === near.address;
+    return false;
+}
+
+/** Index for resolveNear from a loaded world (rooms, subregions, regions, stub regions). */
+export function nearIndexFrom(world) {
+    if (!world?.locations) return null;
+    const rooms = new Set(world.locations.keys());
+    const subs = new Set(world.subregions?.keys?.() ?? []);
+    const regions = new Set(world.regions?.keys?.() ?? []);
+    const stubs = world.elsewhere instanceof Map ? world.elsewhere : new Map();
+    const nameOf = a => world.locations.get(a)?.name || world.subregions?.get(a)?.name || world.regions?.get(a)?.name || stubs.get(a)?.name || a;
+    return { rooms, subs, regions, stubs, nameOf, exists: a => rooms.has(a), relocate: {} };
+}
+
+const nearOf = (entry, env) => resolveNear(entry?.near, env?.index ? { ...env.index, exists: env.exists ?? env.index.exists, relocate: env.relocate ?? env.index.relocate ?? {} } : null);
+
+/** The schedule entry in force at `clock.minutes`. A placeless entry is off the map (address null) unless a found stamp for its `where` label names a room. */
 export function scheduleAt(npc, clock, env) {
     const entries = (npc?.schedule ?? []).filter(e => e && !e.broken);
     if (!entries.length) return null;
@@ -270,10 +332,106 @@ export function scheduleAt(npc, clock, env) {
     const matching = timed.filter(e => inTimeWindow(minutes, e.fromMin, e.toMin, day));
     const order = [...matching, ...open, ...timed.filter(e => !matching.includes(e))];
     for (const entry of order) {
+        if (!entry.place) {
+            const where = entry.where ?? '';
+            const near = nearOf(entry, env);
+            const hit = npc.found?.[where];
+            if (hit?.place) {
+                const r = resolveSchedulePlace(hit.place, env);
+                if (r.ok) return { address: r.address, how: 'found', activity: entry.activity, entry, kind: 'schedule', where, near, offmap: false };
+            }
+            return { address: null, offmap: true, how: 'offmap', activity: entry.activity, entry, kind: 'schedule', where, near };
+        }
         const r = resolveSchedulePlace(entry.place, env);
         if (r.ok) return { address: r.address, how: r.how, activity: entry.activity, entry, kind: 'schedule' };
     }
     return null;
+}
+
+/** Narrator line for someone whose current entry keeps them off the map. */
+export function offmapAbsentLine(npc, sched) {
+    const name = npc?.name || 'Someone';
+    const activity = sched?.activity || sched?.entry?.activity || 'away';
+    const where = sched?.where || sched?.entry?.where || '';
+    const near = sched?.near;
+    let place = '';
+    if (near?.kind === 'map') place = `in ${near.name || near.address}`;
+    else if (near?.kind === 'stub') place = `in ${near.name}${near.about ? `, ${near.about}` : ''}`;
+    else if (near?.kind === 'text' && near.text) place = near.text;
+    const hint = [where, place].filter(Boolean).join(', ');
+    return `${name}: ${activity}, somewhere off the map${hint ? ` (${hint})` : ''}`;
+}
+
+/** How a resolved near reads in the inspector: "map: The Drowned Rat (riverton:drowned_rat)". */
+export function nearPhrase(near) {
+    if (!near || near.kind === 'none') return 'nowhere named';
+    if (near.kind === 'map') return `map: ${near.name || near.address} (${near.address}, ${near.scope})`;
+    if (near.kind === 'stub') return `stub: ${near.name}${near.about ? ` — ${near.about}` : ''}`;
+    const note = near.warn === 'typo' ? 'probably a typo' : 'not in the list';
+    return `text: ${near.text} (${note})`;
+}
+
+/**
+ * Inspector view of who is off the map, the stub-region list (and who is off in each), and found-flag outcomes.
+ * `play` is npcPlayState's rows (each may carry why.schedule and foundAttempts).
+ */
+export function offMapReport(play, elsewhere = []) {
+    const people = [];
+    for (const n of play ?? []) {
+        const s = n.why?.schedule;
+        if (!s?.offmap) continue;
+        people.push({ id: n.id, name: n.name, activity: s.activity ?? '', where: s.where ?? '', near: s.near ?? { kind: 'none' }, how: nearPhrase(s.near) });
+    }
+    const stubs = (elsewhere ?? []).map(s => ({
+        id: s.id, name: s.name, about: s.about ?? '', lore: !!s.lore, shadowed: !!s.shadowed,
+        who: people.filter(p => p.near?.kind === 'stub' && p.near.id === s.id).map(p => ({ id: p.id, name: p.name, activity: p.activity, where: p.where })),
+    }));
+    const found = [];
+    for (const n of play ?? []) for (const a of n.foundAttempts ?? []) found.push({ id: n.id, name: n.name, ...a });
+    return { people, stubs, found };
+}
+
+/**
+ * Whether a found flag may put `npc` in `room` for the placeless entry in force.
+ * Accepted only when `near` is a map address and `room` is within it. A stub or plain-text near cannot be found.
+ */
+export function judgeFound(npc, clock, room, env) {
+    const name = npc?.name || 'They';
+    const sched = scheduleAt(npc, clock, env);
+    if (!sched) return { ok: false, reason: `${name} has no schedule in force.` };
+    const placeless = sched.offmap || sched.how === 'found';
+    if (!placeless) {
+        const where = placeLabel(env, sched.address);
+        return { ok: false, reason: `${name} is already on the map (${where}${sched.activity ? `, ${sched.activity}` : ''}).` };
+    }
+    const near = sched.near;
+    const where = sched.where ?? '';
+    if (!near || near.kind === 'none') return { ok: false, where, reason: `${name} is off the map with no "near", so they can't be found in a room.` };
+    if (near.kind === 'stub') return { ok: false, where, reason: `${name} is off in ${near.name}${near.about ? `, ${near.about}` : ''}, which is not on the map, so they can't be found in a room.` };
+    if (near.kind === 'text') return { ok: false, where, reason: `${name} is off the map (${near.text}), not near a mapped place, so they can't be found in a room.` };
+    if (!room) return { ok: false, where, reason: 'There is no current room to find them in.' };
+    if (!withinNear(room, near)) return { ok: false, where, reason: `${name} is near ${near.name || near.address}, and this room is not within it.` };
+    return { ok: true, where, place: room, reason: `Accepted: this room is within ${near.name || near.address} (${near.scope}).` };
+}
+
+/** An edited found room still has to be on the map and within the `where` label's near. */
+export function foundEditOk(npc, where, place, env) {
+    const label = String(where ?? '').trim();
+    const entry = (npc?.schedule ?? []).find(e => e && !e.broken && !e.place && (e.where ?? '') === label);
+    if (!entry) return { ok: false, reason: 'No off-map entry uses that where.' };
+    const near = nearOf(entry, env);
+    if (near.kind !== 'map') return { ok: false, reason: 'That where is not near a mapped place.' };
+    const r = resolveSchedulePlace(place, env);
+    if (!r.ok) return { ok: false, reason: 'That room is not on the map.' };
+    if (!withinNear(r.address, near)) return { ok: false, reason: `That room is not within ${near.name || near.address}.` };
+    return { ok: true, place: r.address };
+}
+
+/** The npc_name stamp a [name] / [ws_flag: name] records, or why the name matched nobody. */
+export function nameStampFor(npcs, name, { who = PLAYER, source = 'bracket' } = {}) {
+    const n = npcForName(npcs, name);
+    if (!n) return { ok: false, reason: `No saved person is called "${String(name ?? '').trim()}".` };
+    return { ok: true, id: n.id, name: n.name, stamp: { type: 'npc_name', id: n.id, who, source: source === 'bracket' ? 'bracket' : 'flag' } };
 }
 
 function sightPlaceOf(npc, env) {
@@ -318,7 +476,7 @@ function blankFrom(rec) {
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
-        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [],
+        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [], found: {},
     };
 }
 
@@ -328,6 +486,7 @@ function snapshot(state) {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
         fromCast: new Set(n.fromCast), knownBy: { ...n.knownBy }, invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(),
         following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
+        found: Object.fromEntries(Object.entries(n.found ?? {}).map(([k, v]) => [k, { ...v }])),
     });
     return out;
 }
@@ -385,6 +544,14 @@ function applyStamp(state, s, index) {
         return;
     }
     if (s.type === 'npc_name') { n.knownBy[str(s.who, 40) || PLAYER] = s.source === 'bracket' ? 'name bracket' : 'name flag'; return; }
+    if (s.type === 'npc_found') {
+        const place = str(s.place, 200);
+        if (!place) return;
+        const where = typeof s.where === 'string' ? s.where.trim() : '';
+        n.found = n.found ?? {};
+        n.found[where] = { place, at: index };
+        return;
+    }
     if (s.type === 'npc_follow') { n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
     if (s.type === 'npc_stay') {
         n.following = null;
@@ -431,7 +598,7 @@ export function sceneStart(end, playerAt) {
 function entryKey(sched) {
     if (!sched?.entry) return '';
     const e = sched.entry;
-    return `${e.place}|${e.from ?? ''}|${e.to ?? ''}|${e.activity ?? ''}`;
+    return `${e.place ?? ''}|${e.where ?? ''}|${e.from ?? ''}|${e.to ?? ''}|${e.activity ?? ''}`;
 }
 
 /** The player left the held place and has come back by message `j`. */
@@ -542,7 +709,8 @@ export function presentAt(chat, index, cast, env) {
         let overdue = '';
         if (!now.following && (!due || due.address !== here)) {
             const sched = scheduleAt(now, clock, env);
-            if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
+            if (sched?.offmap) overdue = stayCovers(now, scene, clock) ? '' : offmapAbsentLine(now, sched);
+            else if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
             else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${now.name}'s hour here has passed.`;
         }
         out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: nameKnown(now, chat, end) });
@@ -567,9 +735,11 @@ export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {
     const out = [];
     for (const npc of frames[end].values()) {
         if (ids.has(npc.id) || npc.following) continue;
-        const stops = (npc.schedule ?? []).filter(e => e && !e.broken).some(e => resolveSchedulePlace(e.place, env).address === here);
-        if (!stops && !named.has(String(npc.id).toLowerCase())) continue;
         const sched = scheduleAt(npc, clock, env);
+        const stops = (npc.schedule ?? []).filter(e => e && !e.broken && e.place).some(e => resolveSchedulePlace(e.place, env).address === here);
+        const nearHere = !!(sched?.offmap && withinNear(here, sched.near));
+        if (!stops && !named.has(String(npc.id).toLowerCase()) && !nearHere) continue;
+        if (sched?.offmap) { out.push(offmapAbsentLine(npc, sched)); continue; }
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
         out.push(`${npc.name} isn't here right now${where}; do not portray ${npc.name}.`);
@@ -614,14 +784,22 @@ export function npcPlayState(chat, cast, env) {
     let declined = new Set();
     try { declined = declinesInScene(chat, end, i => env.playerAt(i)); } catch { /* no position */ }
     const stamps = new Map();
+    const attempts = new Map();
     chat.forEach((msg, i) => {
-        const list = msg?.extra?.[NPC_KEY];
-        if (!Array.isArray(list)) return;
         const swipe = msg.swipe_id ?? null;
-        for (const s of list) {
+        const list = msg?.extra?.[NPC_KEY];
+        if (Array.isArray(list)) for (const s of list) {
             if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
             if (!stamps.has(s.id)) stamps.set(s.id, []);
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id) });
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id) });
+        }
+        const found = msg?.extra?.[FOUND_KEY];
+        if (Array.isArray(found)) for (const f of found) {
+            if (!f || (swipe != null && f.swipe != null && f.swipe !== swipe)) continue;
+            const id = f.id || '';
+            if (!id) continue;
+            if (!attempts.has(id)) attempts.set(id, []);
+            attempts.get(id).push({ msg: i, ok: !!f.ok, reason: f.reason ?? '', where: f.where ?? '', place: f.place ?? '', source: f.source ?? '' });
         }
     });
     const out = [];
@@ -629,7 +807,7 @@ export function npcPlayState(chat, cast, env) {
         let due = null;
         try { due = duePlace(n, end, env); } catch { /* no clock */ }
         out.push({ ...publicNpc(n), held: n.held ? { ...n.held } : null, position: due ? { place: due.address, kind: due.kind, activity: due.activity ?? '' } : null,
-            present: present.has(n.id), stamps: stamps.get(n.id) ?? [], record: exportRecord(n), why: npcWhy(n, end, env, { declined }) });
+            present: present.has(n.id), stamps: stamps.get(n.id) ?? [], foundAttempts: attempts.get(n.id) ?? [], record: exportRecord(n), why: npcWhy(n, end, env, { declined }) });
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -657,8 +835,13 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
         const e = sched?.entry;
         const timed = e && (e.fromMin != null || e.toMin != null);
         const inside = timed && inTimeWindow(clock.minutes ?? 0, e.fromMin, e.toMin, env?.dayMinutes ?? DAY_MINUTES);
+        const near = sched?.near ?? null;
         out.schedule = { entry: i, address: sched?.address ?? null, how: sched?.how ?? null, activity: sched?.activity ?? '',
-            why: i < 0 ? 'No entry resolves to a place in this world.' : inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `No timed entry covers now; entry ${i + 1} has no times and fills the rest of the day.` : `No entry covers now; entry ${i + 1} is the first that resolves.`,
+            offmap: !!sched?.offmap, where: e?.where ?? '', near,
+            why: i < 0 ? 'No entry resolves to a place in this world.'
+                : sched?.offmap ? `Off the map: ${e?.activity || 'away'}${e?.where ? ` (${e.where})` : ''}. Near ${nearPhrase(near)}.`
+                    : sched?.how === 'found' ? `Found in this chat (${e?.where || 'that where'} → ${sched.address}). ${inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `Entry ${i + 1} has no times and fills the rest of the day.` : `Entry ${i + 1} is in force.`}`
+                        : inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `No timed entry covers now; entry ${i + 1} has no times and fills the rest of the day.` : `No entry covers now; entry ${i + 1} is the first that resolves.`,
             broken: entries.map((x, k) => (x?.broken ? k : -1)).filter(k => k >= 0) };
     }
     if (n.seen_at) {
@@ -681,7 +864,7 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
     out.memory = [...(n.memory ?? [])];
     out.reason = n.following ? `Following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`
         : out.held?.active ? 'Told to stay; the hold is still on.'
-            : due?.kind === 'schedule' ? out.schedule?.why ?? 'On their schedule.'
+            : due?.kind === 'schedule' ? (out.schedule?.offmap ? out.schedule.why : out.schedule?.why ?? 'On their schedule.')
                 : due?.kind === 'sight' ? `Sighting: rolled ${out.sighting?.used} under ${out.sighting?.now}.`
                     : out.sighting?.active ? `Not on a schedule; today's sighting roll is ${out.sighting.used} against ${out.sighting.now}${out.sighting.wouldShow ? ' (would show, waiting for the hour)' : ' (no-show)'}.`
                         : 'Nowhere this hour.';
@@ -704,7 +887,9 @@ export function whoAt(chat, index, cast, env, place) {
     for (const n of last.values()) {
         const w = npcWhy(n, end, env);
         let due = null; try { due = duePlace(n, end, env, { useRoll: true }); } catch { /* no clock */ }
-        const pointsHere = (n.schedule ?? []).some(e => e && !e.broken && (resolveSchedulePlace(e.place, env).address ?? e.place) === place) || (n.seen_at && !n.seen_at.broken && (resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place) === place) || n.held?.place === place;
+        const pointsHere = (n.schedule ?? []).some(e => e && !e.broken && e.place && (resolveSchedulePlace(e.place, env).address ?? e.place) === place)
+            || (n.schedule ?? []).some(e => e && !e.broken && !e.place && withinNear(place, nearOf(e, env)))
+            || (n.seen_at && !n.seen_at.broken && (resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place) === place) || n.held?.place === place;
         const here = due?.address === place;
         if (!here && !pointsHere && !present.has(n.id)) continue;
         let reason = w.reason;
@@ -712,6 +897,7 @@ export function whoAt(chat, index, cast, env, place) {
             if (n.following) reason = `Not here: following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`;
             else if (w.held?.active && n.held.place !== place) reason = 'Not here: told to stay somewhere else.';
             else if (w.sighting?.active && w.sighting.resolved === place && !w.sighting.wouldShow) reason = `No-show today: rolled ${w.sighting.used}, needed under ${w.sighting.now}${w.sighting.sought ? ' (with a by-name roll)' : ''}.`;
+            else if (w.schedule?.offmap) reason = `Not here: ${offmapAbsentLine(n, { activity: w.schedule.activity, where: w.schedule.where, near: w.schedule.near })}`;
             else if (w.schedule && w.schedule.address !== place) reason = `Not here: ${w.schedule.why} (${placeLabel(env, w.schedule.address ?? '') || 'nowhere'}${w.schedule.activity ? `, ${w.schedule.activity}` : ''})`;
             else reason = `Not here now. ${w.reason}`;
         }
@@ -948,10 +1134,17 @@ export function exportRecord(npc) {
     if (npc.deep?.relationships && Object.keys(npc.deep.relationships).length) deep.relationships = { ...npc.deep.relationships };
     if (Object.keys(deep).length) out.deep = deep;
     const schedule = (npc.schedule ?? []).filter(e => e && !e.broken).map(e => {
-        const row = { place: e.place, activity: e.activity };
+        const row = { activity: e.activity };
+        if (e.place) row.place = e.place;
+        else {
+            if (e.where) row.where = e.where;
+            if (e.near) row.near = e.near;
+        }
         if (e.from) row.from = e.from;
         if (e.to) row.to = e.to;
         if (e.importance) row.importance = e.importance;
+        // place first when they have one, so a saved file reads like the other entries
+        if (row.place) { const { place, activity, ...rest } = row; return { place, activity, ...rest }; }
         return row;
     });
     if (schedule.length) out.schedule = schedule;
@@ -1005,6 +1198,13 @@ export const NAME_FLAG_TAG = /\s*\[ws_flag:\s*name\s*\|\s*([^\]|]{1,60})\]/gi;
 export function takeNameFlags(text) {
     const names = [];
     const cleaned = String(text ?? '').replace(NAME_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
+    return { names, text: cleaned };
+}
+/** The narrator's [ws_flag: found | Name] tags: the names, the text without them. */
+export const FOUND_FLAG_TAG = /\s*\[ws_flag:\s*found\s*\|\s*([^\]|]{1,80})\]/gi;
+export function takeFoundFlags(text) {
+    const names = [];
+    const cleaned = String(text ?? '').replace(FOUND_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
     return { names, text: cleaned };
 }
 /** The saved person a name flag means: exact name or id first, then a name contained either way. Null when none or several. */
@@ -1122,6 +1322,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_staying') return `${who} is staying`;
     if (s.type === 'npc_create') return `${who} remembered`;
     if (s.type === 'npc_name') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} learned ${who}'s name`;
+    if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
     if (s.type === 'npc_seek') return `Looking for ${who}`;
     return who;
@@ -1216,7 +1417,12 @@ export function activeLore(chat, index, chain, playerAt, extra = []) {
     }
     const from = n ? sceneStartOf(chat, end, playerAt) : 0;
     for (let i = from; i <= end && i < n; i++) for (const r of loreRequestsOn(chat[i])) if (!r.level && (!r.address || r.address === here)) add(r);
-    return chain.filter(c => levels.has(c.level));
+    // Stub-region lore (level "elsewhere") stays for the scene: the player cannot stand inside a place that is not on the map.
+    const elseIds = new Set();
+    const stub = r => { if (r?.level === 'elsewhere' && r.address) elseIds.add(r.address); };
+    for (const r of extra) stub(r);
+    for (let i = from; i <= end && i < n; i++) for (const r of loreRequestsOn(chat[i])) stub(r);
+    return chain.filter(c => levels.has(c.level) || (c.level === 'elsewhere' && elseIds.has(c.id ?? c.address)));
 }
 /** The fed-lore block for the narrator ('' when nothing is fed), tokens left in (render afterwards). */
 export const loreBlock = fed => (fed?.length ? `Background knowledge (lore; what locals know, not what the senses show; use it only where it fits):\n${fed.map(c => `- ${c.name}: ${c.text}`).join('\n')}` : '');

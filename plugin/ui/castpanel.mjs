@@ -3,7 +3,7 @@
 // io: { load() -> GET /cast, outline() -> POST /edit/outline, save(npc, original, originalFile), del({id, file}),
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses) }
-import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows } from './castdata.mjs';
+import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 import { groupEntries, renderEntry } from './activitylog.mjs';
 
@@ -24,7 +24,7 @@ export function castPanel(doc, io) {
     const who = $('div', { class: 'cast-who' });
     const peopleBox = $('div', { class: 'cast-people' });
     const viewBox = $('div', { class: 'cast-view' });
-    const VIEWS = [['people', 'People'], ['narrator', 'What the narrator was told'], ['unsaved', 'Not saved yet'], ['activity', 'Activity log']];
+    const VIEWS = [['people', 'People'], ['offmap', 'Off the map'], ['narrator', 'What the narrator was told'], ['unsaved', 'Not saved yet'], ['activity', 'Activity log']];
     const viewBar = $('div', { class: 'tabs cast-views' });
     const drawViews = () => viewBar.replaceChildren(...VIEWS.map(([k, l]) => $('button', { type: 'button', class: `tab${k === view ? ' active' : ''}`, 'data-view': k, onclick: () => { view = k; drawViews(); drawView(); } }, l)));
     peopleBox.append($('div', { class: 'cast-filters' }, q, $('div', {}, status, ' ', disp), placeBox), who, list, detail);
@@ -41,9 +41,26 @@ export function castPanel(doc, io) {
     }
     function drawView() {
         peopleBox.hidden = view !== 'people'; viewBox.hidden = view === 'people';
+        if (view === 'offmap') drawOffmap();
         if (view === 'narrator') drawNarrator();
         if (view === 'unsaved') drawUnsaved();
         if (view === 'activity') drawActivity();
+    }
+    function drawOffmap() {
+        const report = insp()?.offmap;
+        const stubs = report?.stubs ?? data?.elsewhere ?? [];
+        if (!stubs.length && !report?.people?.length) { viewBox.replaceChildren($('p', { class: 'muted' }, 'This world has no stub regions, and nobody is off the map.')); return; }
+        const whoLine = p => (p.activity || 'away') + (p.where ? ' (' + p.where + ')' : '');
+        const jump = (id, name) => $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(id, 'play') }, name);
+        const kids = [$('p', { class: 'muted' }, 'Stub regions are places in the fiction that are not on the map yet. A real region with the same id takes over, and nothing is rewritten.')];
+        for (const s of stubs) {
+            const who = s.who?.length ? s.who.map(w => $('li', { 'data-id': w.id }, jump(w.id, w.name), ' — ' + whoLine(w))) : [$('li', { class: 'muted' }, 'Nobody is off in here right now.')];
+            kids.push($('div', { class: 'cast-stub', 'data-stub': s.id }, $('b', {}, s.name), s.shadowed ? ' (on the map now)' : '', $('div', { class: 'muted' }, s.about || ''), s.lore ? $('div', { class: 'muted' }, 'Lore on file (ask with [lore]).') : null, $('ul', {}, ...who)));
+        }
+        const others = (report?.people ?? []).filter(p => p.near?.kind !== 'stub');
+        if (others.length) kids.push($('div', {}, $('b', {}, 'Off the map, not in a stub'), $('ul', {}, ...others.map(p => $('li', { 'data-id': p.id }, jump(p.id, p.name), ' — ' + whoLine(p), $('div', { class: 'muted' }, p.how || ''))))));
+        if (report?.found?.length) kids.push($('div', {}, $('b', {}, 'Found flags'), $('ul', { class: 'cast-foundflags' }, ...report.found.map(f => $('li', { class: f.ok ? 'ok' : 'bad', 'data-id': f.id }, (f.name || '') + ': ' + (f.ok ? 'accepted' : 'rejected') + (f.source ? ' (' + f.source + ')' : '') + ' — ' + (f.reason || ''))))));
+        viewBox.replaceChildren(...kids);
     }
     function drawActivity() {
         const msgs = io.activity?.() ?? [];
@@ -128,7 +145,8 @@ export function castPanel(doc, io) {
                 ...[['Looks', rec.looks], ['Body', rec.body], ['Outfit', rec.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
                 ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
             pane.append(kv(pairs));
-            const places = (r.rec?.schedule ?? []).map(e => $('li', {}, placeLink(e.place, e.broken), ` ${e.activity}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
+            const places = (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
+                ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near ? ` near ${e.near}` : ''}${e.nearNote ? ` · ${e.nearNote}` : ''}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
             if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
             if (places.length) pane.append($('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places));
             if (r.problems.length) pane.append($('b', {}, 'Problems'), $('ul', { class: 'warnings' }, ...r.problems.map(p => $('li', {}, p))));
@@ -170,8 +188,27 @@ export function castPanel(doc, io) {
                     $('button', { type: 'button', class: 'crumb', onclick: () => out.querySelector('.cast-diff')?.remove() }, 'Cancel')));
             } }, `Update ${r.name}`));
         }
+        const founds = activeFounds(r.play);
+        if (r.rec?.ok && founds.length) {
+            const perm = $('div', { class: 'cast-permanent' });
+            for (const f of founds) perm.append($('button', { type: 'button', class: 'crumb cast-makepermanent', 'data-where': f.where, onclick: () => makePermanent(r, f, perm) },
+                `Make this permanent${f.where ? ` (${f.where})` : ''}: ${placeName(f.place)}`));
+            box.append(perm);
+        }
         box.append(out);
         return box;
+    }
+    async function makePermanent(r, found, box) {
+        const raw = r.rec?.raw ?? r.rec;
+        if (!raw) return;
+        const next = permanentSchedule(raw.schedule ?? r.rec.schedule ?? [], found.where, found.place);
+        if (!next.changed) { say('Nothing to write: no off-map entry uses that where.', true); return; }
+        box.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+            const res = await io.save({ ...raw, schedule: next.schedule }, r.id, r.rec.file);
+            say(`Saved cast/${res.file}: ${found.where || 'that where'} is now ${placeName(found.place)}.`);
+            await refresh(`file:${res.file}`);
+        } catch (e) { say(`Not saved: ${e.message}`, true); box.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
     }
     async function doExport(r, update, out) {
         out.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -237,18 +274,24 @@ export function castPanel(doc, io) {
         const schedBox = $('div', { class: 'cf-schedule' });
         const drawSched = () => {
             schedBox.replaceChildren(...f.schedule.map((e, i) => {
-                const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.place });
-                pk.addEventListener('change', () => { e.place = pk.value; check(); });
+                const off = $('input', { type: 'checkbox', class: 'cf-offmap' }); off.checked = !!e.offmap;
+                off.addEventListener('change', () => { e.offmap = off.checked; if (off.checked) e.place = ''; drawSched(); check(); });
+                const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.offmap ? '' : e.place });
+                pk.addEventListener('change', () => { e.place = pk.value; if (pk.value) e.offmap = false; drawSched(); check(); });
                 const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
+                const wh = $('input', { type: 'text', class: 'pf-input cf-where', placeholder: 'where (her own room)' }); wh.value = e.where; wh.addEventListener('input', () => { e.where = wh.value; check(); });
+                const nr = $('input', { type: 'text', class: 'pf-input cf-near', placeholder: 'near (a place, a stub, or words)' }); nr.value = e.near; nr.addEventListener('input', () => { e.near = nr.value; check(); });
                 const tm = k => { const t = $('input', { type: 'time', class: `pf-input cf-${k}` }); t.value = e[k]; t.addEventListener('input', () => { e[k] = t.value; check(); }); t.addEventListener('change', () => { e[k] = t.value; check(); }); return t; };
                 const imp = $('select', { class: 'pf-input cf-importance' }, $('option', { value: '' }, 'importance'), ...IMPORTANCE.map(x => $('option', { value: x }, x))); imp.value = e.importance; imp.addEventListener('change', () => { e.importance = imp.value; check(); });
-                return $('div', { class: 'cf-sched', 'data-i': i }, $('div', { class: 'cf-schedtop' }, pk, $('button', { type: 'button', class: 'pf-x cf-schedx', title: 'Remove this entry', onclick: () => { f.schedule.splice(i, 1); drawSched(); check(); } }, '✕')),
-                    err(`schedule.${i}.place`), $('div', { class: 'cf-schedrow' }, act, tm('from'), '–', tm('to'), imp),
+                return $('div', { class: 'cf-sched', 'data-i': i }, $('div', { class: 'cf-schedtop' }, $('label', { class: 'cf-offlabel' }, off, ' Off the map'), pk, $('button', { type: 'button', class: 'pf-x cf-schedx', title: 'Remove this entry', onclick: () => { f.schedule.splice(i, 1); drawSched(); check(); } }, '✕')),
+                    err(`schedule.${i}.place`),
+                    e.offmap ? $('div', { class: 'cf-schedrow' }, wh, nr) : null,
+                    $('div', { class: 'cf-schedrow' }, act, tm('from'), '–', tm('to'), imp),
                     err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`));
-            }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ place: '', activity: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
+            }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
         };
         drawSched();
-        if (!chatMode) form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, 'Entries are checked in order; one with no times fills the rest of the day.'), schedBox);
+        if (!chatMode) form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'), schedBox);
         // Sighting: a place they are sometimes seen, at an hour, with a chance.
         const seenBox = $('div', { class: 'cf-seen' });
         const drawSeen = () => {

@@ -2,7 +2,7 @@
 // and skipped. The world still loads.
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_ID, NPC_TOKEN, exportRecord, freeId, nameIn, npcTokenIds, validateRecord } from './npc.mjs';
+import { NPC_ID, NPC_TOKEN, exportRecord, freeId, nameIn, nearIndexFrom, npcTokenIds, validateRecord } from './npc.mjs';
 import { isDir, isFile, isObj, loadJson } from './world.mjs';
 
 export function castFiles(root) {
@@ -22,7 +22,12 @@ export function worldPlaces(world) {
         if (l?.name) names.push(l.name);
         if (l?.address && l?.name) labels[l.address] = l.name;
     }
-    return { addresses, names: [...new Set(names)], labels };
+    const subs = [];
+    for (const [id, s] of world?.subregions?.entries?.() ?? []) { subs.push(id); if (s?.name) { names.push(s.name); labels[id] = s.name; } }
+    const regions = [];
+    for (const [id, r] of world?.regions?.entries?.() ?? []) { regions.push(id); if (r?.name) { names.push(r.name); labels[id] = r.name; } }
+    const elsewhere = [...(world?.elsewhere?.values?.() ?? [])].map(s => ({ id: s.id, name: s.name, about: s.about ?? '', ...(s.lore ? { lore: s.lore } : {}), shadowed: !!world?.regions?.has?.(s.id) }));
+    return { addresses, names: [...new Set(names)], labels, subs, regions, elsewhere };
 }
 
 /**
@@ -66,7 +71,7 @@ export function loadCast(root, world = null) {
         let raw;
         try { raw = loadJson(file); } catch (e) { problems.push(e.message); continue; }
         if (!isObj(raw)) { problems.push(`${base}: not an object`); continue; }
-        const rec = validateRecord(raw, { file: base, places: addresses });
+        const rec = validateRecord(raw, { file: base, places: addresses, nearIndex: world ? nearIndexFrom(world) : null });
         rec.file = base;
         rec.raw = raw;
         if (rec.id && seen.has(rec.id)) {
@@ -173,12 +178,18 @@ export function tidyRecord(raw) {
     }
     if (Array.isArray(raw.schedule)) {
         const sched = raw.schedule.filter(isObj).map(e => {
-            const x = { place: s(e.place), activity: s(e.activity) };
+            const x = { activity: s(e.activity) };
+            if (s(e.place)) x.place = s(e.place);
+            else {
+                if (s(e.where)) x.where = s(e.where);
+                if (s(e.near)) x.near = s(e.near);
+            }
             if (s(e.from)) x.from = s(e.from);
             if (s(e.to)) x.to = s(e.to);
             if (s(e.importance)) x.importance = s(e.importance);
+            if (x.place) { const { place, activity, ...rest } = x; return { place, activity, ...rest }; }
             return x;
-        });
+        }).filter(e => e.activity);
         if (sched.length) out.schedule = sched;
     }
     if (isObj(raw.seen_at) && s(raw.seen_at.place)) out.seen_at = { place: s(raw.seen_at.place), hour: raw.seen_at.hour, chance: raw.seen_at.chance ?? 0.5 };
@@ -190,7 +201,7 @@ export function tidyRecord(raw) {
  * The id must be free (other than the NPC's own), the record must validate, and every place must be in this world.
  * A rename writes <new id>.json and removes the old file. Returns {id, file, record}.
  */
-export function saveCastNpc(root, raw, { original = null, originalFile = null, places = null } = {}) {
+export function saveCastNpc(root, raw, { original = null, originalFile = null, places = null, nearIndex = null } = {}) {
     if (!isObj(raw)) throw new Error('nothing to save');
     const record = tidyRecord(raw);
     if (!NPC_ID.test(record.id ?? '')) throw new Error('id must be a short slug: lowercase letters, digits, - or _');
@@ -199,7 +210,7 @@ export function saveCastNpc(root, raw, { original = null, originalFile = null, p
     if (original && !oldFile) throw new Error(`no cast file for ${original}`);
     const ownBase = oldFile ? path.basename(oldFile, '.json') : null;
     if (record.id !== original && taken.has(record.id) && record.id !== ownBase) throw new Error(`id ${record.id} is already taken`);
-    const checked = validateRecord(record, { file: `${record.id}.json`, places });
+    const checked = validateRecord(record, { file: `${record.id}.json`, places, nearIndex });
     const problems = checked.problems;
     if (!checked.ok || problems.length) throw new Error(problems.join('; ') || 'the NPC record is not valid');
     const dir = path.join(root, 'cast');

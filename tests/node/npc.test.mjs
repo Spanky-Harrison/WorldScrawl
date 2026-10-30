@@ -48,7 +48,8 @@ test('a one-sentence cast record validates, and a bad file is marked instead of 
     const bad = validateRecord({ id: 'Nope', name: '', schedule: [{ activity: 'loitering' }, { place: 'nope/where', activity: 'gone', from: '25:00', importance: 'urgent' }] }, { file: 'other.json' });
     assert.equal(bad.ok, false);
     assert.ok(bad.problems.length >= 2);
-    assert.equal(bad.schedule[0].broken, true);
+    assert.equal(bad.schedule[0].broken, undefined, 'no place and an activity is a placeless entry, not a broken one');
+    assert.equal(bad.schedule[0].activity, 'loitering');
     assert.equal(bad.schedule[1].broken, true);
     const dir = tmpPath();
     fs.mkdirSync(path.join(dir, 'cast'));

@@ -133,6 +133,7 @@ function inspectBase(w, raw, target) {
     const out = (kind, title, rawObj, resolved, refs) => ({ target: t, kind, title, raw: rawObj, resolved, warnings: warningsFor(w, refs).map(x => ({ message: x.message })) });
     if (t === 'world' || t === '') {
         const rows = [row('start', w.start, 'own'), row('regions', w.regions.size, 'derived'), row('rooms', w.locations.size, 'derived'),
+            ...[...(w.elsewhere?.entries?.() ?? [])].map(([id, s]) => row(`elsewhere.${id}`, `${s.name}${s.about ? `: ${s.about}` : ''}${s.lore ? ' (lore on file)' : ''}`, w.regions.has(id) ? 'stub, resolves onto the region on the map' : 'elsewhere.json')),
             row('temperature_unit', w.weather?.unit ?? 'F', has(worldJson, 'temperature_unit') ? 'own' : 'default'),
             row('calendar', has(worldJson, 'calendar') ? 'custom' : 'Gregorian', has(worldJson, 'calendar') ? 'own' : 'default')];
         return { ...out('world', worldJson.name ?? 'World', worldJson, rows, ['world']), warnings: (w.warnings ?? []).map(x => ({ message: x.message })) };
