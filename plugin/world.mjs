@@ -180,6 +180,7 @@ export class World {
     constructor(start, regions, subregions, locations) {
         this.start = start; this.regions = regions; this.subregions = subregions; this.locations = locations; // Maps
         this.doors = new Map(); // door id -> {rooms: [a, b], stays_open}
+        this.elsewhere = new Map(); // stub regions (elsewhere.json): id -> {id, name, about, lore}
     }
     get(address) { return this.locations.get(address) ?? null; }
     /** Seconds a step through exit e (from room src) takes: its travel_time, else the default for where it leads. */
@@ -386,7 +387,40 @@ export function read_world_raw(root) {
     return [worldJson, raw];
 }
 
-export const load_world = root => build_world(...read_world_raw(root));
+/**
+ * Stub regions: places that exist in the fiction but not on the map (worlds/<id>/elsewhere.json).
+ * `{ "wickerton": { "name": "Wickerton", "about": "...", "lore": "optional" } }`.
+ * A real region with the same id wins later; nothing here is rewritten.
+ */
+export function loadElsewhere(root) {
+    const file = path.join(root, 'elsewhere.json');
+    const warnings = [];
+    const map = new Map();
+    if (!isFile(file)) return { map, warnings };
+    const data = loadJson(file);
+    if (!isObj(data)) throw new WorldError('elsewhere.json: must be an object of id -> {name, about, lore?}');
+    for (const [id, row] of Object.entries(data)) {
+        checkSlug(id, `elsewhere.json: ${repr(id)}`);
+        if (!isObj(row)) throw new WorldError(`elsewhere.json: ${repr(id)} must be {name, about, lore?}`);
+        const name = typeof row.name === 'string' && strip(row.name) ? strip(row.name) : '';
+        const about = typeof row.about === 'string' ? strip(row.about) : '';
+        const lore = typeof row.lore === 'string' && strip(row.lore) ? strip(row.lore) : '';
+        if (!name) throw new WorldError(`elsewhere.json: ${repr(id)} needs a "name"`);
+        if (!about) warnings.push({ message: `elsewhere.json: ${repr(id)} has no "about"`, refs: ['world', `elsewhere:${id}`] });
+        for (const k of Object.keys(row)) if (!['name', 'about', 'lore'].includes(k)) warnings.push({ message: `elsewhere.json: ${repr(id)} has unknown field ${repr(k)}`, refs: ['world', `elsewhere:${id}`] });
+        map.set(id, { id, name, about, lore });
+    }
+    return { map, warnings };
+}
+
+export function attachElsewhere(world, root) {
+    const { map, warnings } = loadElsewhere(root);
+    world.elsewhere = map;
+    world.warnings = [...(world.warnings ?? []), ...warnings];
+    return world;
+}
+
+export const load_world = root => attachElsewhere(build_world(...read_world_raw(root)), root);
 
 /** Validate and build a World from plain JSON (as read from a world folder, possibly with changes applied). */
 export function build_world(worldJson, rawRegions) {

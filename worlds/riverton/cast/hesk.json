@@ -28,8 +28,9 @@
       "importance": "high"
     },
     {
-      "place": "riverton:drowned_rat/upstairs",
-      "activity": "asleep"
+      "activity": "asleep",
+      "where": "her own room",
+      "near": "riverton:drowned_rat"
     }
   ]
 }

@@ -217,6 +217,8 @@ export async function editorState(st) {
 }
 const idx0 = () => '';
 const fmtVal = v => v === null || v === undefined ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+/** Whether room `here` is inside a resolved schedule near (map address only). */
+const nearCovers = (here, near) => near?.kind === 'map' && (near.scope === 'room' ? here === near.address : near.scope === 'subregion' ? here.startsWith(`${near.address}/`) : near.scope === 'region' ? here.split(':')[0] === near.address : false);
 const fmtSecs = s => s >= 3600 ? `${+(s / 3600).toFixed(2)}h` : s >= 60 ? `${+(s / 60).toFixed(2)}m` : `${s}s`;
 /** The inspector panel for one target, inside `side`. ctx: {st, room (server room dict, for rooms), exit (server exit dict), onExit(ref)}. */
 async function renderInspector(side, target, ctx) {
@@ -275,7 +277,18 @@ async function renderInspector(side, target, ctx) {
         const tbl = $('table', { class: 'resolved' });
         for (const [k, v] of rows) tbl.append($('tr', {}, $('th', {}, k), $('td', {}, v)));
         addColResizer(tbl);
-        return [tbl];
+        const off = st?.npc_inspect?.offmap;
+        const extra = [];
+        if (off && (d.kind === 'world' || d.kind === 'room')) {
+            const here = d.kind === 'room' ? (ctx.room?.address ?? '') : '';
+            const people = (off.people ?? []).filter(p => !here || nearCovers(here, p.near));
+            if (d.kind === 'world' || people.length) {
+                extra.push($('b', {}, 'Off the map'), people.length ? $('ul', { class: 'warnings cast-offmap' }, ...people.map(p => $('li', { 'data-id': p.id }, `${p.name}: ${p.activity || 'away'}${p.where ? ` (${p.where})` : ''} — ${p.how || ''}`))) : $('p', { class: 'muted' }, 'Nobody is off the map right now.'));
+            }
+            if (d.kind === 'world' && off.stubs?.length) extra.push($('b', {}, 'Stub regions'), $('ul', { class: 'warnings cast-stubs' }, ...off.stubs.map(s => $('li', { 'data-stub': s.id }, `${s.name}${s.shadowed ? ' (on the map now)' : ''}${s.about ? `: ${s.about}` : ''}${s.who?.length ? ` — off in here: ${s.who.map(w => w.name).join(', ')}` : ' — nobody off in here'}`))));
+            if (off.found?.length && d.kind === 'world') extra.push($('b', {}, 'Found flags'), $('ul', { class: 'warnings cast-foundflags' }, ...off.found.map(f => $('li', { class: f.ok ? '' : 'bad' }, `${f.name}: ${f.ok ? 'accepted' : 'rejected'} — ${f.reason}`))));
+        }
+        return [tbl, ...extra];
     };
     const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Turn one off to take it off the map for now, or delete its message to undo it.' : 'Map changes from this chat that touch this. Turn one off to take it off the map for now, or delete its message to undo it.'),
         $('ul', { class: 'warnings' }, ...changes.map(c => {

@@ -12,9 +12,10 @@ import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
 import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCastNpc } from './cast.mjs';
+import { nearIndexFrom } from './npc.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
 import { opActive, parseLasts } from './ui/patches.mjs';
-import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
+import { World, WorldError, attachElsewhere, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
 export const VERSION_HEADER = 'X-WorldScrawl-Map-Version';
@@ -27,7 +28,8 @@ export class HttpError extends Error {
 /** Short hash of world.json + every region file. Changes whenever the map files change. */
 export function map_version(root) {
     const h = crypto.createHash('sha256');
-    for (const p of [path.join(root, 'world.json'), ...regionFiles(root), ...castFiles(root)]) {
+    const elsewhere = path.join(root, 'elsewhere.json');
+    for (const p of [path.join(root, 'world.json'), ...(isFile(elsewhere) ? [elsewhere] : []), ...regionFiles(root), ...castFiles(root)]) {
         h.update(Buffer.from(path.basename(p), 'utf8'));
         h.update(fs.readFileSync(p));
     }
@@ -68,7 +70,7 @@ class LoadedWorld {
     constructor(wid, root) {
         this.id = wid; this.root = root;
         this.raw = read_world_raw(root);
-        this.world = build_world(...this.raw);
+        this.world = attachElsewhere(build_world(...this.raw), root);
         this.version = map_version(root);
         this.name = typeof this.raw[0].name === 'string' && has(this.raw[0], 'name') ? this.raw[0].name : wid;
         this.living = this.raw[0].living === true; // living saves may be saved over; missing/false = protected
@@ -84,7 +86,8 @@ class LoadedWorld {
         const places = worldPlaces(this.world);
         return { id: this.id, name: this.name, start_region: this.world.start.split(':')[0], start: this.world.start,
             map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living, ...this.time(),
-            cast: this.cast.npcs, cast_problems: this.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels };
+            cast: this.cast.npcs, cast_problems: this.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels,
+            subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
     }
     /** The world's calendar (default Gregorian) and start_date (missing fields filled in). */
     time() {
@@ -317,7 +320,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'GET /cast': ({ q }) => {
             const lw = get_world(q('world'));
             const places = worldPlaces(lw.world);
-            return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels };
+            return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
         },
         'POST /cast/export': ({ q, body }) => {
             needBody(body);
@@ -338,7 +341,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const original = typeof body.original === 'string' && body.original ? body.original : null;
             const originalFile = typeof body.original_file === 'string' && body.original_file ? body.original_file : null;
             let wrote;
-            try { wrote = saveCastNpc(lw.root, body.npc, { original, originalFile, places: worldPlaces(lw.world).addresses }); } catch (e) { throw new HttpError(422, e.message); }
+            try { wrote = saveCastNpc(lw.root, body.npc, { original, originalFile, places: worldPlaces(lw.world).addresses, nearIndex: nearIndexFrom(lw.world) }); } catch (e) { throw new HttpError(422, e.message); }
             const fresh = new LoadedWorld(lw.id, lw.root);
             worlds.set(lw.id, fresh);
             return { ok: true, id: wrote.id, file: wrote.file, record: wrote.record, map_version: fresh.version };
@@ -702,6 +705,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             writeJson(path.join(tmp, 'world.json'), wj);
             for (const [rid, data] of Object.entries(raw)) writeJson(path.join(tmp, 'regions', `${rid}.json`), data);
             if (know !== null) writeJson(path.join(tmp, 'knowledge.json'), know);
+            const elsewhereFile = path.join(base.root, 'elsewhere.json');
+            if (isFile(elsewhereFile)) fs.copyFileSync(elsewhereFile, path.join(tmp, 'elsewhere.json'));
             if (over === null) {
                 if (fs.existsSync(target)) throw new HttpError(409, `World ${repr(wid)} already exists.`);
                 fs.renameSync(tmp, target);

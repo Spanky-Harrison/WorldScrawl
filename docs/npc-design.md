@@ -187,6 +187,26 @@ This applies to schedules in general and to one-off sightings.
 { "place": "riverton/forge", "activity": "work", "from": "08:00", "to": "17:00", "importance": "high" }
 ```
 
+### Placeless entries, stub regions, and finding someone
+
+A schedule entry may omit `place`. It then needs `activity`, and may have:
+
+- `where`: a short label, such as "her own room" or "at home".
+- `near`: where that is, in this order: a real map address (`riverton:drowned_rat`, a room, or a region id); an id from the world's stub list; or plain text ("a fishing camp up the river"), passed to the narrator as written.
+- `from`, `to`, and `importance`, as on a placed entry.
+
+While that entry is in force the person is off the map: never present in any scene. The narrator gets an absent line built from it, for example `Hesk: asleep, somewhere off the map (her own room, in The Drowned Rat)`. A single word in `near` that matches neither a map address nor a stub id is a load warning (probably a typo). Multi-word text is not a warning; the inspector only notes that it is not in the list.
+
+**Stub regions** are places that exist in the fiction but not on the map. `worlds/<world>/elsewhere.json`:
+
+```json
+{ "wickerton": { "name": "Wickerton", "about": "a farming town three hours' ride north of Riverton", "lore": "optional" } }
+```
+
+The narrator gets `about` when it is relevant (an absent line, a rejected find). Optional `lore` is served exactly like place lore: only when the narrator asks with `[ws_flag: lore | Wickerton]` or the player writes `[lore] Wickerton`. If a real region with the same id is later built, references resolve onto the map and nothing is rewritten. Travel time between a stub and the map is out of scope (the future off-screen-life phase).
+
+**Finding someone.** The narrator's `[ws_flag: found | Name]` and the player's `[found] Name` (or `/ws-found Name`) put that person in the current room for their current placeless entry. It is accepted only when `near` is a map address and the current room is within it. A stub or plain-text `near` is rejected, with the reason shown on the message. The stamp is keyed to the entry's `where` label, not to one entry: every entry of that person with the same `where` then resolves to that room in this chat. The message shows a notice with Edit and Undo, the same shape as a discovered room. In the Cast editor, **Make this permanent** writes that room into the base schedule as a normal placed entry. Deleting the message undoes the find.
+
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
 ### Map changes and schedules (phase 4)
@@ -258,7 +278,7 @@ A full NPC:
   },
   "schedule": [
     { "place": "riverton/drowned-rat/taproom", "activity": "pouring drinks", "from": "16:00", "to": "02:00" },
-    { "place": "riverton/drowned-rat/upstairs", "activity": "asleep" }
+    { "activity": "asleep", "where": "her own room", "near": "riverton:drowned_rat" }
   ]
 }
 ```

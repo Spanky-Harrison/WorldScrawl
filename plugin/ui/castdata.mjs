@@ -82,7 +82,10 @@ export function formFromRecord(rec = null) {
         facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], memory: Array.isArray(raw.memory) ? raw.memory.map(x => (typeof x === 'string' ? x : x?.note ?? '')) : [],
         disposition: s(d.value) || '', reason: s(d.reason),
         others: Object.fromEntries(Object.entries(raw.disposition ?? {}).filter(([k]) => k !== 'player')),
-        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => ({ place: s(e?.place), activity: s(e?.activity), from: s(e?.from), to: s(e?.to), importance: s(e?.importance) })),
+        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => ({
+            place: s(e?.place), offmap: !s(e?.place) && !!(s(e?.activity) || s(e?.where) || s(e?.near)),
+            activity: s(e?.activity), where: s(e?.where), near: s(e?.near), from: s(e?.from), to: s(e?.to), importance: s(e?.importance),
+        })),
         seen: raw.seen_at && typeof raw.seen_at === 'object' ? { place: s(raw.seen_at.place), hour: raw.seen_at.hour ?? '', chance: raw.seen_at.chance ?? 0.5 } : null,
     };
 }
@@ -101,7 +104,20 @@ export function recordFromForm(f) {
     const disp = { ...(f.others ?? {}) };
     if (s(f.disposition)) disp.player = { value: s(f.disposition), ...(s(f.reason) ? { reason: s(f.reason) } : {}) };
     if (Object.keys(disp).length) out.disposition = disp;
-    const sched = (f.schedule ?? []).map(e => ({ place: s(e.place), activity: s(e.activity), ...(s(e.from) ? { from: s(e.from) } : {}), ...(s(e.to) ? { to: s(e.to) } : {}), ...(s(e.importance) ? { importance: s(e.importance) } : {}) }));
+    const sched = (f.schedule ?? []).map(e => {
+        const placed = !e.offmap && !!s(e.place);
+        const x = { activity: s(e.activity) };
+        if (placed) x.place = s(e.place);
+        else {
+            if (s(e.where)) x.where = s(e.where);
+            if (s(e.near)) x.near = s(e.near);
+        }
+        if (s(e.from)) x.from = s(e.from);
+        if (s(e.to)) x.to = s(e.to);
+        if (s(e.importance)) x.importance = s(e.importance);
+        if (x.place) { const { place, activity, ...rest } = x; return { place, activity, ...rest }; }
+        return x;
+    }).filter(e => e.activity);
     if (sched.length) out.schedule = sched;
     if (f.seen && s(f.seen.place)) out.seen_at = { place: s(f.seen.place), hour: Number(f.seen.hour), chance: Number(f.seen.chance) };
     const deep = {};
@@ -138,9 +154,10 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
     if (!s(f.line)) p.line = 'One line about who they are is required.';
     if (s(f.disposition) && !DISPOSITIONS.includes(s(f.disposition))) p.disposition = `One of ${DISPOSITIONS.join(', ')}.`;
     (f.schedule ?? []).forEach((e, i) => {
-        if (!s(e.place)) p[`schedule.${i}.place`] = 'Choose a place on the map.';
+        if (e.offmap) { /* a placeless entry: off the map, place not required */ }
+        else if (!s(e.place)) p[`schedule.${i}.place`] = 'Choose a place on the map, or tick Off the map.';
         else if (places && !places.has(s(e.place))) p[`schedule.${i}.place`] = `${e.place} is not in this world. Choose another place.`;
-        if (!s(e.activity)) p[`schedule.${i}.activity`] = 'What are they doing there?';
+        if (!s(e.activity)) p[`schedule.${i}.activity`] = e.offmap ? 'What are they doing off the map?' : 'What are they doing there?';
         if (s(e.from) && !hmOk(e.from)) p[`schedule.${i}.from`] = 'A time like 08:00.';
         if (s(e.to) && !hmOk(e.to)) p[`schedule.${i}.to`] = 'A time like 17:00.';
         if (s(e.importance) && !IMPORTANCE.includes(s(e.importance))) p[`schedule.${i}.importance`] = 'low, normal or high.';
@@ -163,7 +180,8 @@ export function playSummary(play, placeName = a => a) {
     if (!play) return [];
     const rows = [];
     const pos = play.position;
-    rows.push(['Where', pos?.place ? `${placeName(pos.place)}${pos.activity ? ` (${pos.activity})` : ''}` : 'off the map right now']);
+    const off = play.why?.schedule?.offmap ? play.why.schedule : null;
+    rows.push(['Where', off ? `off the map — ${off.activity || 'away'}${off.where ? ` (${off.where})` : ''}` : pos?.place ? `${placeName(pos.place)}${pos.activity ? ` (${pos.activity})` : ''}` : 'off the map right now']);
     rows.push(['Status', play.following ? `following ${play.following.who === 'player' ? 'you' : play.following.who}` : play.held ? `staying at ${placeName(play.held.place)}` : KIND[pos?.kind] ?? 'on their own schedule']);
     if (play.present) rows.push(['Scene', 'in your scene now']);
     const d = play.disposition?.player;
@@ -216,6 +234,35 @@ export function chatStamps(play, f) {
 const stampText = x => (x.type === 'npc_memory' ? `memory: ${x.note}` : x.type === 'npc_disposition' ? `toward the player: ${x.value}${x.reason ? ` (${x.reason})` : ''}` : `${x.field === 'fact' ? 'fact' : x.field}: ${x.text}`);
 export const chatStampLines = stamps => stamps.map(stampText);
 
+/** Latest found room per `where` label (off stamps are ignored; a later stamp for the same label wins). */
+export function activeFounds(play) {
+    const map = new Map();
+    for (const s of play?.stamps ?? []) {
+        if (s?.type !== 'npc_found' || s.off || !s.place) continue;
+        map.set(s.where ?? '', { where: s.where ?? '', place: s.place, msg: s.msg });
+    }
+    return [...map.values()];
+}
+/**
+ * Write a found room into the base schedule: every placeless entry with that `where` label becomes a normal placed entry.
+ * Returns {schedule, changed}.
+ */
+export function permanentSchedule(schedule, where, place) {
+    const label = String(where ?? '').trim();
+    let changed = 0;
+    const out = (schedule ?? []).map(e => {
+        if (!e || typeof e !== 'object' || String(e.place ?? '').trim()) return e;
+        if (String(e.where ?? '').trim() !== label) return e;
+        changed++;
+        const x = { place, activity: e.activity ?? '' };
+        if (e.from) x.from = e.from;
+        if (e.to) x.to = e.to;
+        if (e.importance) x.importance = e.importance;
+        return x;
+    });
+    return { schedule: out, changed };
+}
+
 /** Inspector rows for one person: [label, text], from npcPlayState's `why`. */
 export function whyRows(play, placeName = a => a) {
     const w = play?.why;
@@ -223,12 +270,20 @@ export function whyRows(play, placeName = a => a) {
     const pad = n => String(n ?? 0).padStart(2, '0');
     const rows = [];
     if (w.clock) rows.push(['Game time', `day ${w.clock.day}, ${pad(w.clock.hour)}:${pad(w.clock.minute)}`]);
-    rows.push(['Where', w.place ? `${placeName(w.place)}${play.position?.activity ? ` (${play.position.activity})` : ''}` : 'nowhere this hour']);
+    const off = w.schedule?.offmap ? w.schedule : null;
+    rows.push(['Where', off ? `off the map — ${off.activity || 'away'}${off.where ? ` (${off.where})` : ''}` : w.place ? `${placeName(w.place)}${play.position?.activity ? ` (${play.position.activity})` : ''}` : 'nowhere this hour']);
+    if (off) {
+        rows.push(['Where hint', off.where || '(no label)']);
+        rows.push(['Near', off.near ? `${off.near.kind === 'map' ? 'map' : off.near.kind === 'stub' ? 'stub' : off.near.kind === 'text' ? 'text' : 'none'}: ${off.near.kind === 'text' ? off.near.text : (off.near.name || off.near.address || '')}${off.near.kind === 'map' ? ` (${off.near.address})` : ''}${off.near.about ? ` — ${off.near.about}` : ''}${off.near.kind === 'text' ? ` (${off.near.warn === 'typo' ? 'probably a typo' : 'not in the list'})` : ''}` : 'nowhere named']);
+    }
     rows.push(['Why', w.reason || '']);
     rows.push(['Record', `${w.tier}${w.from === 'play' ? ', created in this chat' : ', from the cast file'}`]);
     rows.push(['Following', w.following ? (w.following.who === 'player' ? 'the player' : w.following.who) : 'no']);
     if (w.held) rows.push(['Staying', `${placeName(w.held.place)} (since #${w.held.at}${w.held.active ? ', still holding' : ', hold over'})`]);
-    if (w.schedule) rows.push(['Schedule', w.schedule.entry >= 0 ? `entry ${w.schedule.entry + 1}: ${w.schedule.activity || ''} at ${placeName(w.schedule.address)}${w.schedule.how && w.schedule.how !== 'exact' ? ` (${w.schedule.how})` : ''}. ${w.schedule.why}` : w.schedule.why]);
+    if (w.schedule) rows.push(['Schedule', w.schedule.offmap ? w.schedule.why : w.schedule.entry >= 0 ? `entry ${w.schedule.entry + 1}: ${w.schedule.activity || ''} at ${placeName(w.schedule.address)}${w.schedule.how && w.schedule.how !== 'here' && w.schedule.how !== 'exact' ? ` (${w.schedule.how})` : ''}. ${w.schedule.why}` : w.schedule.why]);
+    const founds = activeFounds(play);
+    if (founds.length) rows.push(['Found', founds.map(f => `${f.where || '(no label)'} → ${placeName(f.place)} (message #${f.msg})`).join('; ')]);
+    if (play.foundAttempts?.length) rows.push(['Found flags', play.foundAttempts.map(a => `${a.ok ? 'accepted' : 'rejected'}${a.source ? ` (${a.source})` : ''}: ${a.reason}`).join(' · ')]);
     if (w.sighting) {
         const g = w.sighting;
         rows.push(['Sighting', g.active ? `${placeName(g.resolved)} around ${g.hour}:00, peak ${Math.round(g.chance * 100)}%. Today (day ${g.day}): chance now ${g.now}, roll ${g.roll}${g.seekRoll != null ? `, by-name roll ${g.seekRoll}` : ''} → ${g.wouldShow ? 'shows' : 'no-show'}${g.stamped ? ' (appearance stamped)' : ''}` : `${g.place}: ${g.note}`]);
