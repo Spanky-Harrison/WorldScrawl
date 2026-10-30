@@ -269,7 +269,7 @@ try {
     await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = ''; });
     check('/ws-go moves party', (await stored()) === 'riverton:temple/nave', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('notes: temple drops region notes (inherit_notes false)', narr.includes('About Temple of the Tides: A hushed') && !narr.includes('About Riverton:'), narr.slice(0, 300));
+    check('lore: temple index lists only the temple (inherit_lore false), lore itself not fed', narr.includes('Lore on file: Temple of the Tides.') && !narr.includes('A hushed, holy place') && !narr.includes('About Riverton:'), narr.slice(0, 300));
     const ex = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
     check('/ws-exits lists exits', ex === 'Exits: south (Village Square), grate', String(ex));
     const before = (await (await fetch(`${FAKE}/__requests`)).json()).length;
@@ -327,7 +327,7 @@ try {
     await waitReqs();
     check('game message button moves party', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('notes: quiet upstairs keeps region notes, drops tavern notes (location override)', narr.includes('About Riverton: Riverton is a small') && !narr.includes("Riverton's oldest tavern") && narr.includes('the location description wins'));
+    check('lore: quiet upstairs indexes region lore only (location override), nothing fed', narr.includes('Lore on file: Riverton.') && !narr.includes("Riverton's oldest tavern") && !narr.includes('Background knowledge (lore)'));
     await queue([{ content: 'Down again.' }]); expected += 1;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go down')); await waitReqs();
 
@@ -405,7 +405,24 @@ try {
     for (const d of tour) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
     check('tour back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('notes: tavern gets region + subregion notes', narr.includes('About Riverton:') && narr.includes("About The Drowned Rat: Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Lore on file: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    await queue([{ content: 'Hesk eyes you.' }]);
+    await send('[lore] The Drowned Rat', 1);
+    narr = JSON.stringify((await lastReq()).messages);
+    check('lore: [lore] feeds the tavern lore as background knowledge, {{npc:hesk}} as a name', narr.includes('Background knowledge (lore)') && narr.includes("Riverton's oldest tavern") && narr.includes('Hesk') && !narr.includes('{{npc:') && !narr.includes('Riverton is a small'), narr.slice(0, 400));
+    const lr = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
+    check('lore: the [lore] request is stamped {swipe, place, level, address, source}', lr.length === 1 && lr[0].source === 'bracket' && lr[0].place === 'The Drowned Rat' && lr[0].level === 'subregion' && lr[0].address === 'riverton:drowned_rat/common_room', JSON.stringify(lr));
+    await queue([{ content: 'She pours an ale. [ws_flag: lore | Riverton]' }]);
+    await send('I order an ale.', 1);
+    narr = JSON.stringify((await lastReq()).messages);
+    check('lore: still fed later in the scene', narr.includes("Riverton's oldest tavern"));
+    const loreMes = await page.evaluate(() => SillyTavern.getContext().chat.at(-1).mes);
+    check('lore: the narrator flag tag is stripped from the reply', loreMes === 'She pours an ale.', loreMes);
+    await queue([{ content: 'You sip.' }]);
+    await send('I sip it.', 1);
+    narr = JSON.stringify((await lastReq()).messages);
+    const lr2 = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
+    check('lore: the narrator flag feeds region lore the next turn', lr2.some(r => r.source === 'flag' && r.level === 'region') && narr.includes('Background knowledge (lore)') && /- Riverton: /.test(narr), JSON.stringify(lr2));
     const lastNotice = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
 
     // Typed "upstairs rooms": the model answers the bare name, which matches both -> which one?

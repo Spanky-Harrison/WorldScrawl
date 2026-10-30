@@ -9,7 +9,7 @@ import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitT
 import { messageActivity, logActivity } from './activity.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -631,8 +631,8 @@ function registerTools() {
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep', 'npc'], description: flagActionText() },
-                location: { type: 'string', description: 'The place that changed (its name).' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
+            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep', 'npc', 'lore'], description: flagActionText() },
+                location: { type: 'string', description: 'The place that changed (its name); for "lore", the place whose lore you want.' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
         action: async ({ action = 'change', location = '', note = '' } = {}) => {
@@ -640,6 +640,13 @@ function registerTools() {
                 const w = await planWait(String(note ?? ''), action === 'sleep');
                 if (w.error) return `Could not pass time: ${w.error}`;
                 if (!(w.seconds >= MIN_NARRATOR_WAIT)) return 'Under 15 minutes: no time is added to the clock.'; pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.${waitAsk()}`;
+            }
+            if (action === 'lore') {
+                const loc = await currentLocation(), chain = loc?.lore_chain ?? [];
+                const hits = loreFor(chain, String(location || note || ''));
+                if (!hits.length) return chain.length ? `No lore on file for that. Lore on file: ${chain.map(c => c.name).join(', ')}.` : 'No lore on file here.';
+                pendingLoreFlags.push(...hits.map(h => h.name));
+                return renderTokens(P('narration.lore_block', { lore: hits.map(c => `- ${c.name}: ${c.text}`).join('\n') }));
             }
             if (action === 'npc') { const n = String(note || location || '').trim().slice(0, 60); if (n) pendingNpcFlags.push(n); return 'Noted.'; }
             if (action === 'discover') { pendingFlag = { kind: 'discover', hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will add the room behind that door after your reply.'; }
@@ -1628,6 +1635,7 @@ export const VERBS = [
     { id: 'dig', words: ['dig', 'break', 'break through'], slash: '/ws-dig <exit> <place>', help: 'break a new opening, e.g. I [break through] the wall' },
     { id: 'wait', words: ['wait'], slash: '/ws-wait <time>', help: 'let time pass here, e.g. [wait] 2h or [wait] until morning' },
     { id: 'sleep', words: ['sleep'], slash: '/ws-sleep [time]', help: 'sleep here (8h unless you say), e.g. [sleep] until morning' },
+    { id: 'lore', words: ['lore'], slash: null, help: 'bring up what locals know about this place (its lore) for the rest of the scene, e.g. [lore] or [lore] The Drowned Rat' },
     { id: 'help', words: ['help'], slash: '/ws-help', help: 'list these commands' },
     { id: 'remember', words: ['remember'], slash: '/ws-npc <name>', help: 'remember a person from the story, e.g. I [remember] Maren' },
 ];
@@ -1677,6 +1685,12 @@ export async function bracketIntent(msg, b) {
     const exitsSeen = loc.exits.filter(e => !e.hidden || revealsDestination(e));
     if (b.verb === 'help') return { kind: 'help', loc };
     if (b.verb === 'remember') { await offerRemember(msg, b.target); return { kind: 'remember', loc }; }
+    if (b.verb === 'lore') {
+        const chain = loc.lore_chain ?? [];
+        if (!chain.length) return failed(loc, `[${b.word}]: no lore on file here.`);
+        if (!requestLore(msg, loc, b.target ?? '', 'bracket').length) { msg.extra[LORE_KEY] = (msg.extra[LORE_KEY] ?? []).slice(0, -1); return failed(loc, `[${b.word}] ${b.target}: lore on file here: ${chain.map(c => c.name).join(', ')}.`); }
+        return { kind: 'lore', loc };
+    }
     if (b.verb === 'move' || b.verb === 'travel') {
         if (!b.target) return failed(loc, `[${b.word}] needs where to: an exit or a place you know.`);
         const taken = new Set(), cands = await travelCandidates(loc);
@@ -1849,10 +1863,9 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     const lines = [
         P('narration.header'),
         `Current location: ${loc.name}${loc.subregion?.name && loc.subregion.name !== loc.name ? `, ${loc.subregion.name}` : ''}${loc.region?.name ? ` (${loc.region.name})` : ''}`,
-        loc.effective_notes?.region ? `About ${loc.region?.name ?? 'the region'}: ${loc.effective_notes.region}` : '',
-        loc.effective_notes?.subregion ? `About ${loc.subregion?.name ?? 'this area'}: ${loc.effective_notes.subregion}` : '',
         `This location: ${loc.description ?? ''}`,
-        (loc.effective_notes?.region || loc.effective_notes?.subregion) ? 'If this location\'s own description contradicts the broader notes above, the location description wins.' : '',
+        extra.lore_index || '',
+        extra.lore_fed || '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
         ...glimpseLines(loc, extra.open),
         extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
@@ -1876,7 +1889,39 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (move?.traversal?.length && move.to === loc.address) lines.push(P('narration.on_the_way', { steps: move.traversal.join(' Then: ') }));
     if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(P('narration.exits_hint'));
     lines.push(toolsOn ? P('narration.rules_tools') : P('narration.rules', { party: who }));
-    return lines.filter(Boolean).join('\n');
+    return renderTokens(lines.filter(Boolean).join('\n'));
+}
+/** {{npc:id}} -> the cast name (before ST macros run); an unknown id shows as the bare id, with a console warning. */
+export function renderTokens(text) {
+    const pack = castPack();
+    return renderNpcTokens(text, pack?.npcs ?? [], id => console.warn(`[WorldScrawl] {{npc:${id}}}: no cast NPC has that id; shown as "${id || 'someone'}".`));
+}
+/** Where the player stood at message i (for lore scenes; works without a cast). */
+function lorePlayerAt(chat, loc) {
+    const end = Math.max(0, (chat?.length ?? 1) - 1);
+    return i => (i >= end && loc?.address ? loc.address : (positionOf(chat, Math.min(Math.max(i, 0), end), PLAYER)?.address || loc?.address || ''));
+}
+/** The lore chain entries fed this turn (asked for by flag or [lore] in this scene, at this place). */
+export function fedLore(loc, extra = []) {
+    const chat = ctx().chat ?? [];
+    try { return activeLore(chat, chat.length - 1, loc?.lore_chain ?? [], lorePlayerAt(chat, loc), extra); } catch (e) { console.warn('[WorldScrawl] lore', e.message); return []; }
+}
+/** The lore index line and the fed-lore block for factsText. */
+export function loreBits(loc, toolsOn) {
+    const chain = loc?.lore_chain ?? [];
+    if (!chain.length) return {};
+    const fed = fedLore(loc);
+    return {
+        lore_index: P('narration.lore_index', { lore_places: chain.map(c => c.name).join(', '), how: P(toolsOn ? 'narration.lore_how_tools' : 'narration.lore_how_tags') }),
+        lore_fed: fed.length ? P('narration.lore_block', { lore: fed.map(c => `- ${c.name}: ${c.text}`).join('\n') }) : '',
+    };
+}
+/** Stamp a lore request for `place` (a name, or ''/"here" for all) on msg. Returns the matched chain entries. */
+function requestLore(msg, loc, place, source) {
+    const hits = loreFor(loc?.lore_chain ?? [], place);
+    if (hits.length) for (const h of hits) addLoreRequest(msg, { place: h.name, level: h.level, address: loc.address, source });
+    else addLoreRequest(msg, { place, level: '', address: loc?.address ?? '', source });
+    return hits;
 }
 
 const REMEMBER_KEY = 'worldscrawl_remember';
@@ -1930,8 +1975,8 @@ function npcPromptBits(loc) {
     try {
         const env = npcEnv(chat, loc);
         const present = presentAt(chat, chat.length - 1, pack.npcs, env);
-        const notes = [loc?.effective_notes?.region, loc?.effective_notes?.subregion, loc?.notes, loc?.description].filter(Boolean).join('\n');
-        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { notes, present });
+        const lore = fedLore(loc).map(c => c.text).join('\n'); // presence lines only for {{npc:id}} in lore being fed
+        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
         if (!present.length && !absent.length) return {};
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
@@ -2198,7 +2243,7 @@ async function applyFacts() {
         const um = ui >= 0 ? c.chat[ui].extra ?? {} : {};
         await loadCalendar();
         const d = gameDate();
-        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), ...npcPromptBits(loc) });
+        text = factsText(loc, move, toolsOn(), { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), ...loreBits(loc, toolsOn()), ...npcPromptBits(loc) });
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
@@ -2979,6 +3024,7 @@ const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
 let pendingNpcFlags = []; // names from ws_flag action npc: stamped on the reply when it arrives
+let pendingLoreFlags = []; // places from ws_flag action lore: stamped on the reply when it arrives
 let pendingFlag = null; // from the ws_flag tool: attached to the reply when it arrives
 let patchLib = null;
 const swipeOf = m => m?.swipe_id ?? 0;
@@ -3621,6 +3667,21 @@ export async function onReplyForFlags(id) {
         const u = pendingUserFlag; pendingUserFlag = null;
         const um = c.chat?.[u.start];
         if (u.chat === chatKey() && um?.extra?.[FLAG_KEY]?.status === 'user' && replyAfter(c.chat, u.start) === id) { delete um.extra[FLAG_KEY]; flag ??= { note: u.note, hint: u.hint, start: u.start, source: 'button' }; renderPatchCards(); }
+    }
+    const lf = takeLoreFlags(msg.mes ?? ''), lorePlaces = [...pendingLoreFlags.splice(0), ...lf.places];
+    if (lf.text !== (msg.mes ?? '')) {
+        msg.mes = lf.text.trimEnd();
+        if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+        try { c.updateMessageBlock?.(id, msg); } catch {}
+    }
+    if (lorePlaces.length) {
+        try {
+            const loc = await currentLocation();
+            msg.extra = msg.extra ?? {};
+            msg.extra[LORE_KEY] = (msg.extra[LORE_KEY] ?? []).filter(r => (r?.swipe ?? 0) !== swipeOf(msg));
+            for (const pl of new Set(lorePlaces)) requestLore(msg, loc, pl, 'flag');
+            await c.saveChat?.();
+        } catch (e) { console.warn('[WorldScrawl] lore flag', e.message); }
     }
     const nf = takeNpcFlags(msg.mes ?? ''), npcNames = [...pendingNpcFlags.splice(0), ...nf.names];
     if (nf.text !== (msg.mes ?? '')) {

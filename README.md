@@ -33,15 +33,15 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
 ```json
 {
   "name": "Riverton",
-  "notes": "Flavor that applies to the whole region (optional).",
+  "lore": "What locals know about the whole region (optional).",
   "start": "drowned_rat/common_room",
   "entrance": "streets",
   "subregions": {
     "drowned_rat": {
       "name": "The Drowned Rat",
       "entrance": "common_room",
-      "notes": "Flavor for this building/area (optional).",
-      "inherit_notes": true,
+      "lore": "What locals know about this building/area (optional).",
+      "inherit_lore": true,
       "locations": {
         "common_room": {
           "name": "The Drowned Rat",
@@ -52,7 +52,7 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
             { "direction": "east", "to": "hollowmere:gate/road", "hidden": false }
           ]
         },
-        "upstairs": { "name": "Upstairs Rooms", "description": "...", "inherit_subregion_notes": false, "exits": [] }
+        "upstairs": { "name": "Upstairs Rooms", "description": "...", "inherit_subregion_lore": false, "exits": [] }
       }
     }
   }
@@ -92,9 +92,11 @@ tests/node/         unit tests (node --test); tests/e2e/ is a headless SillyTave
 - Doors: a closed exit can be opened and closed (both sides share the door), by the typed intents "open a door" / "close a door", by peeking through it, or by `/ws-open <dir>` / `/ws-close <dir>`. The change is stamped on the message (swipes keep it, deleting undoes it). An opened door counts as `view: open`. Doors shut themselves: optional `"stays_open": true|false` on a region, a subregion or an exit (per door, the same from both sides: an exit-level `stays_open` on either side wins, false if the two sides disagree; otherwise the door stays open only if both rooms inherit true from their subregion/region; default false); a door that doesn't stay open counts as closed again once the party is in neither of the two rooms it connects. Closing explicitly always works. These fields are optional and Save world never adds them.
 - Optional location `"views": ["streets/square", ...]`: rooms visible from here with no way through (windows). They take priority over the chat's own view links (below).
 - Doors are paired at load time: a flagged exit and its return exit (the exit in its destination room pointing back) share an opaque `door` id, so walking through either side reveals both. A flagged exit with no return exit is allowed (one-way door) and logs a warning at load.
-- Notes sent to the model: region notes, then subregion notes, then the location description (which wins if they disagree).
-  - Subregion `"inherit_notes": false` drops the region notes for all its rooms.
-  - A location's `inherit_region_notes` / `inherit_subregion_notes` override that when present (true/false). Missing = follow the subregion.
+- **Description vs lore.** `description` is what the senses show; it is sent on every move and look. `lore` (region, subregion or room; the old key `notes` still loads) is background knowledge: what locals know. See [docs/lore.md](docs/lore.md).
+  - Lore is not sent by default. The narrator always gets one index line ("Lore on file: The Drowned Rat, Riverton") and asks for one with `[ws_flag: lore | name]` (or the ws_flag tool's `lore` action); the player forces it with `[lore]` or `[lore] The Drowned Rat`. Either way it stays fed for the rest of the scene, until the place changes.
+  - Subregion `"inherit_lore": false` drops the region lore for all its rooms.
+  - A location's `inherit_region_lore` / `inherit_subregion_lore` override that when present (true/false). Missing = follow the subregion.
+  - Write cast NPCs in lore and descriptions as `{{npc:id}}` (e.g. `{{npc:hesk}}`); they show as the NPC's name. Only these tokens, in lore being fed, add "X is not here" presence lines.
 - Optional `"expandable": true/false` (default true) in world.json, a region file, a subregion or a location: whether discovery rooms may be added off a room (see Discovery rooms). Like the other inherited settings, the nearest one wins: the room's own, else its subregion's, else its region's, else world.json's. Anything but true or false is an error.
 - Ids are lowercase slugs (`old_mill`). No duplicate keys anywhere, no duplicate directions in one location. Otherwise the map server answers every request with an error saying what's wrong (in the SillyTavern console too); fix the file and restart SillyTavern.
 

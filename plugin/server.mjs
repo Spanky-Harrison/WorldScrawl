@@ -14,7 +14,7 @@ import { resolvePosition, relocateMap } from './position.mjs';
 import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCastNpc } from './cast.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
 import { opActive, parseLasts } from './ui/patches.mjs';
-import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
+import { World, WorldError, build_world, has, lowerLore, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
 export const VERSION_HEADER = 'X-WorldScrawl-Map-Version';
@@ -700,7 +700,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         try {
             fs.mkdirSync(path.join(tmp, 'regions'));
             writeJson(path.join(tmp, 'world.json'), wj);
-            for (const [rid, data] of Object.entries(raw)) writeJson(path.join(tmp, 'regions', `${rid}.json`), data);
+            for (const [rid, data] of Object.entries(lowerLore(raw))) writeJson(path.join(tmp, 'regions', `${rid}.json`), data);
             if (know !== null) writeJson(path.join(tmp, 'knowledge.json'), know);
             if (over === null) {
                 if (fs.existsSync(target)) throw new HttpError(409, `World ${repr(wid)} already exists.`);

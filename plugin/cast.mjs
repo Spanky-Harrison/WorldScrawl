@@ -2,7 +2,7 @@
 // and skipped. The world still loads.
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_ID, exportRecord, freeId, nameIn, validateRecord } from './npc.mjs';
+import { NPC_ID, NPC_TOKEN, exportRecord, freeId, nameIn, npcTokenIds, validateRecord } from './npc.mjs';
 import { isDir, isFile, isObj, loadJson } from './world.mjs';
 
 export function castFiles(root) {
@@ -25,15 +25,26 @@ export function worldPlaces(world) {
     return { addresses, names: [...new Set(names)], labels };
 }
 
-/** Place notes or descriptions that name a cast person: the narrator may portray them there off-shift. */
+/**
+ * Load warnings for place text (lore and descriptions): a cast name or alias written as plain text ("did you mean
+ * {{npc:hesk}}?"), and a {{npc:id}} token whose id is not in the cast. Aliases come from the cast file's "aliases" list.
+ */
 export function castNameWarnings(world, npcs) {
     const out = [];
-    const groups = [['region', world?.regions], ['subregion', world?.subregions], ['place', world?.locations]];
-    for (const n of npcs ?? []) {
-        if (!n?.ok || !n.name) continue;
-        for (const [, map] of groups) for (const [key, r] of map?.entries?.() ?? []) {
-            const fields = ['notes', 'description'].filter(f => typeof r?.[f] === 'string' && nameIn(r[f], n.name));
-            if (fields.length) out.push(`${r.name ?? key} ${fields.join(' and ')} mention${fields.length > 1 ? "" : "s"} cast NPC ${n.name} by name; the narrator may portray ${n.name} off-shift. Keep their details in the cast file.`);
+    const ok = (npcs ?? []).filter(n => n?.ok && n.id);
+    const ids = new Set(ok.map(n => String(n.id).toLowerCase()));
+    const groups = [world?.regions, world?.subregions, world?.locations];
+    for (const map of groups) for (const [key, r] of map?.entries?.() ?? []) {
+        for (const [f, label] of [['notes', 'lore'], ['description', 'description']]) {
+            const text = typeof r?.[f] === 'string' ? r[f] : '';
+            if (!text) continue;
+            const plain = text.replace(NPC_TOKEN, ' ');
+            for (const n of ok) {
+                const names = [n.name, ...(Array.isArray(n.raw?.aliases) ? n.raw.aliases : [])].filter(a => typeof a === 'string' && a.trim());
+                const hit = names.find(a => nameIn(plain, a));
+                if (hit) out.push(`${r.name ?? key} ${label} names cast NPC ${hit} in plain text; did you mean {{npc:${n.id}}}?`);
+            }
+            for (const id of npcTokenIds(text)) if (!ids.has(id)) out.push(`${r.name ?? key} ${label} has {{npc:${id}}}, but no cast NPC has the id "${id}"; it shows as "${id || 'someone'}".`);
         }
     }
     return out;

@@ -2,7 +2,7 @@
   "name": "Riverton",
   "weather_region": "riverside",
   "exposure": "outdoor",
-  "notes": "Riverton is a small river-trading village on a slow brown river. Folk are plain-spoken and wary of strangers until coin changes hands. Barges and fishing boats bring most of the news, and the smell of river mud is never far away.",
+  "lore": "Riverton is a small river-trading village on a slow brown river. Folk are plain-spoken and wary of strangers until coin changes hands. Barges and fishing boats bring most of the news, and the smell of river mud is never far away.",
   "start": "drowned_rat/common_room",
   "entrance": "streets",
   "subregions": {
@@ -12,7 +12,7 @@
       "indoor_temp": 72,
       "insulation": "cozy",
       "entrance": "common_room",
-      "notes": "Riverton's oldest tavern, run by its sharp-tongued landlady. Cheap ale, dice games and dockhands; it gets loud after dark.",
+      "lore": "Riverton's oldest tavern, run by its sharp-tongued landlady, {{npc:hesk}}. Cheap ale, dice games and dockhands; it gets loud after dark.",
       "locations": {
         "common_room": {
           "name": "Common Room",
@@ -64,7 +64,7 @@
         "upstairs": {
           "name": "Upstairs Rooms",
           "description": "A narrow, quiet hallway with four plain guest rooms. The floorboards groan underfoot, the noise of the bar is only a murmur, and the window at the end looks out over the river.",
-          "inherit_subregion_notes": false,
+          "inherit_subregion_lore": false,
           "exits": [
             { "direction": "down", "to": "common_room", "travel_time": "30s", "description": "The staircase back down to the common room." }
           ]
@@ -77,7 +77,7 @@
       "indoor_temp": 72,
       "insulation": "cozy",
       "entrance": "common_room",
-      "notes": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and its host, Perrin Vale, an elegant, silver-gowned trans woman with a lovely laugh who looks down on the Drowned Rat.",
+      "lore": "A newer, pricier inn that caters to merchants and barge captains. Polished brass, clean linen, and its host, Perrin Vale, an elegant, silver-gowned trans woman with a lovely laugh who looks down on the Drowned Rat.",
       "locations": {
         "common_room": {
           "name": "Common Room",
@@ -100,7 +100,7 @@
       "name": "Marlow's General Store",
       "exposure": "sheltered",
       "indoor_temp": 65,
-      "notes": "A cluttered shop run by Marlow, a curvy, bespectacled beauty who sells a bit of everything and haggles over every copper with a sweet smile.",
+      "lore": "A cluttered shop run by Marlow, a curvy, bespectacled beauty who sells a bit of everything and haggles over every copper with a sweet smile.",
       "locations": {
         "shop": {
           "name": "Marlow's General Store",
@@ -116,7 +116,7 @@
       "exposure": "sheltered",
       "indoor_temp": 80,
       "insulation": "drafty",
-      "notes": "A hot, noisy forge run by Brask, a tall, broad-shouldered trans woman with soot-streaked arms and a confident grin, and her journeyman Tobin, a slender, pretty young man in his twenties who blushes easily. Horseshoes, boat fittings and the occasional blade.",
+      "lore": "A hot, noisy forge run by Brask, a tall, broad-shouldered trans woman with soot-streaked arms and a confident grin, and her journeyman Tobin, a slender, pretty young man in his twenties who blushes easily. Horseshoes, boat fittings and the occasional blade.",
       "locations": {
         "forge": {
           "name": "Brask's Smithy",
@@ -132,7 +132,7 @@
       "exposure": "outdoor",
       "entrance": "square",
       "label_rooms": true,
-      "notes": "Cobbled village streets, busy with carts, chickens and gossip by day and nearly empty after dark.",
+      "lore": "Cobbled village streets, busy with carts, chickens and gossip by day and nearly empty after dark.",
       "locations": {
         "square": {
           "name": "Village Square",
@@ -161,7 +161,7 @@
     "docks": {
       "name": "River Docks",
       "exposure": "outdoor",
-      "notes": "Fishermen, bargemen and the occasional smuggler. Everyone here knows the river's moods.",
+      "lore": "Fishermen, bargemen and the occasional smuggler. Everyone here knows the river's moods.",
       "locations": {
         "piers": {
           "name": "River Docks",
@@ -177,8 +177,8 @@
       "exposure": "sheltered",
       "indoor_temp": 65,
       "insulation": "drafty",
-      "notes": "A hushed, holy place tended by Sister Amara, a serene, dark-eyed beauty in sea-green robes. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
-      "inherit_notes": false,
+      "lore": "A hushed, holy place tended by Sister Amara, a serene, dark-eyed beauty in sea-green robes. Voices drop to a whisper here; the village's bustle and suspicion stay outside.",
+      "inherit_lore": false,
       "locations": {
         "nave": {
           "name": "Temple of the Tides",
@@ -202,8 +202,8 @@
     "secret_tunnel": {
       "name": "Secret Tunnel",
       "exposure": "enclosed",
-      "notes": "A forgotten smugglers' passage under the village. Few living folk know it exists.",
-      "inherit_notes": false,
+      "lore": "A forgotten smugglers' passage under the village. Few living folk know it exists.",
+      "inherit_lore": false,
       "locations": {
         "tunnel": {
           "name": "Secret Tunnel",
@@ -218,12 +218,12 @@
     "east_road": {
       "name": "East Road",
       "exposure": "outdoor",
-      "notes": "Open farmland beyond the village. Travellers, drovers and the odd highwayman use the road.",
+      "lore": "Open farmland beyond the village. Travellers, drovers and the odd highwayman use the road.",
       "locations": {
         "road": {
           "name": "East Road",
           "description": "A rutted dirt road leaving the village between hedgerows and fields. A weathered milestone marks the edge of Riverton; beneath it, carved letters read \"Larkspur, two hours\" with an arrow pointing east.",
-          "inherit_region_notes": true,
+          "inherit_region_lore": true,
           "exits": [
             { "type": "open", "direction": "west", "to": "streets/square", "travel_time": "5m", "description": "Back into the village square." },
             { "type": "open", "direction": "east", "to": "larkspur:west_road/road", "travel_time": "2h", "sight": "none", "sound": "none", "description": "The road runs on east between hedged farmland, over a low rise and out of sight. Larkspur is about two hours' walk." }
