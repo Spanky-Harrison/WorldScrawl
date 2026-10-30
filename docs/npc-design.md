@@ -230,7 +230,7 @@ Waiting until an NPC shows up is the natural partner to sightings and schedules.
 A one-sentence NPC (`worlds/riverton/cast/old-tom.json`):
 
 ```json
-{ "id": "old-tom", "name": "Old Tom", "line": "A stooped farmer who never stops complaining about the river.", "schedule": [{ "place": "riverton/south-field", "activity": "hoeing turnips" }] }
+{ "id": "old-tom", "name": "Old Tom", "personality": { "summary": "A stooped farmer who never stops complaining about the river." }, "schedule": [{ "place": "riverton/south-field", "activity": "hoeing turnips" }] }
 ```
 
 A full NPC:
@@ -239,16 +239,16 @@ A full NPC:
 {
   "id": "marta-ferris",
   "name": "Marta Ferris",
-  "line": "The Drowned Rat's sharp-eyed landlady, forty-odd, sleeves always rolled.",
-  "manner": "Brisk, dry humor, softens around children.",
-  "voice": "Low, clipped; calls everyone 'love'.",
+  "unknownAs": "the landlady",
+  "personality": { "summary": "The Drowned Rat's sharp-eyed landlady", "manner": "Brisk, dry humor, softens around children.", "speech": "Low, clipped; calls everyone 'love'." },
+  "appearance": { "summary": "a forty-odd woman, sleeves always rolled", "body": "Forty-odd, wiry.", "outfit": "Sleeves always rolled." },
+  "history": "Ran with river smugglers in her twenties.",
   "disposition": { "player": { "value": "indifferent", "reason": "Starting attitude: strangers are customers." } },
   "deep": {
-    "history": "Ran with river smugglers in her twenties.",
     "secrets": ["Still fences goods for the Kettle crew."],
     "relationships": { "old-tom": "Owes him money; avoids him." }
   },
-  "body": {
+  "body (later phase, not read yet)": {
     "features": [
       { "id": "tattoo", "area": "chest", "short": "a rose tattoo reading CAPTAIN",
         "long": "Three roses wound around a ship's wheel, CAPTAIN inked in faded navy capitals across the middle." },
@@ -295,18 +295,60 @@ The cast panel's **Activity log** view picks a message (latest by default) and l
 
 **Model-call notes.** Every model call the extension makes (the narrator reply and each side call: intent, discovery/dig, wait amount, Remember, pick-one prompts, map edits) leaves a small debug note in `msg.extra.worldscrawl_calls`, keyed by swipe: the call kind, `ok` / `failed` / `skipped` with the reason, the number of tries, a short answer, and for the narrator reply the `ws_flag`s and tags it emitted, or "narrator made no tool call". Side calls are noted on the message being handled (usually the latest). It is capped at 12 notes per swipe with text truncated, and is not a stamp: undo, rebuilds and snapshots never read it. Failed narrator generations themselves are not noted (no message is made). It is read-only. New flag types plug in with `registerActivity(extraKey, collect)` in `extension/activity.mjs` and, for custom display, `registerRenderer(kind, fn)` in `plugin/ui/activitylog.mjs`; unknown `worldscrawl_*` keys still show with a generic line.
 
-## Appearance (phase-1 bridge)
+## The card: personality, appearance, history, unknownAs
 
-Cast records may carry an optional `appearance` string: 2–4 sentences, physical only (build, face, hair, distinguishing marks, usual clothes). Old cards without it load unchanged. Chat edits use an `npc_fact` stamp with `field: "appearance"`; remembered NPCs get it in `npc_create`.
+A cast file carries:
 
-When it is fed: people in the background get only their `line`. Appearance is added to a present person's entry when
+```json
+{
+  "id": "hesk", "name": "Hesk", "unknownAs": "the landlady",
+  "personality": { "summary": "stern, watchful, sharp-tongued", "manner": "how they behave", "speech": "how they talk" },
+  "appearance": { "summary": "a short first impression", "body": "physical only: build, age, face, hair, marks", "outfit": "what they usually wear and carry" },
+  "history": "their life before the game starts",
+  "disposition": {}, "schedule": [], "facts": [], "memory": [], "deep": { "secrets": [], "relationships": {} }
+}
+```
 
-- the player looks at them ("I look at Hesk", `[look] Hesk`);
-- they are in active interaction: the focus, following the player, or flagged by the narrator (`ws_flag npc`) in the last 3 replies;
-- an `{{npc:id}}` token for them is in the lore being fed.
+- `personality.summary` is required. The rest is optional.
+- `outfit` is kept apart from `body` because it becomes inventory later.
+- `unknownAs` is what the player calls them before learning the name. Leave it empty and the name is used from the start.
+- Active memory stays per chat, as stamps. A chat edit is an `npc_fact` stamp whose field is `personality.summary|manner|speech`, `appearance.summary|body|outfit`, `history` or `unknownAs`. Remembered NPCs carry all of these in `npc_create`.
+- Ideal, bond and flaw are deferred. They are not on the card yet.
+- The loader still reads a top-level `line`, `manner`, `voice` or a string `appearance`. Shipped worlds use only the new shape.
 
-The inspector's "What the narrator was told" table has an Appearance column with the reason it went in (or "not included").
+### Feeding tiers
 
-Remember asks the model to fill every field: record what the story established, then fill gaps plausibly, listing every made-up detail in `invented`. The list is shown on the "Character changed here" bar and in the cast editor's In-this-chat view and diff so it can be corrected before saving; it is never written to the cast file.
+1. **Present** (everyone the narrator is told is here): name (or `unknownAs`), `appearance.summary`, `personality.summary` and the current activity.
+2. **Engaged**: adds body, outfit, manner, speech, disposition and the last few memory highlights. A person is engaged when
+   - the player looks at them ("I look at Hesk", `[look] Hesk`), or
+   - they are the focus, or
+   - they are following the player, or
+   - the narrator flagged them (`ws_flag npc`) in the last 3 replies.
+3. **Topical**: adds `history`. This happens only when a lore request in the current scene names them (`[lore] Hesk`, or the narrator's `[ws_flag: lore | Hesk]`). The `ws_flag` tool's lore action also returns that history.
 
-Phase 2 replaces this free-text field with a structured body object plus a wardrobe.
+The focus slice still adds facts, the full memory and, at deep focus, secrets and relationships.
+
+The inspector's "What the narrator was told" table shows, for each person: the tier and its reason, whether history was added, and the name state.
+
+### Name knowledge
+
+Names are known per actor (the player, or another NPC), never per party. A name counts as known only when one of these happened:
+
+- a remember stamp (`npc_create` marks the rememberer: "known: remembered");
+- the narrator's `[ws_flag: npc | Name]` earlier in the chat ("known: flagged");
+- the narrator's `[ws_flag: name | Name]`, which writes an `npc_name` stamp ("known: name flag").
+
+It is never inferred from chat text. A card with no `unknownAs` counts as known.
+
+While the name is unknown, the narrator sees `the landlady [hesk]` together with the real name. It is told not to let the player's character use the name, and to end its reply with `[ws_flag: name | Hesk]` once someone says the name to them. There is no player bracket for this yet.
+
+### Remember
+
+Remember asks the model to fill every field:
+
+- first, what the story established;
+- then plausible gaps, including history if the story implies one, `unknownAs` when it makes sense, and disposition.
+
+Every made-up detail is listed in `invented`. That list is shown in the "Character changed here" bar, and in the cast editor's In-this-chat view and diff. It is never written to the cast file.
+
+The cast editor has all of these fields in both Base and In-this-chat modes, and they are included in the diff.

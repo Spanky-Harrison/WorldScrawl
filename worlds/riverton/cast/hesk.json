@@ -1,10 +1,18 @@
 {
   "id": "hesk",
   "name": "Hesk",
-  "line": "The Drowned Rat's landlady, a sharp-tongued widow with copper braids who can silence a brawl with one look.",
-  "manner": "Watches the room, wastes no words, and does not soften until she has taken your measure.",
-  "voice": "Low and quick; she does not repeat herself.",
-  "appearance": "A tall, raw-boned woman in her late forties, broad through the shoulders from years of hauling casks. Two thick copper braids, threaded with grey at the temples, hang to her waist. Her face is weathered and freckled, with a hard jaw, pale grey eyes and a thin white scar through her left eyebrow. She wears widow's black wool under a stained leather apron, sleeves rolled to the elbow, with a ring of keys at her belt.",
+  "unknownAs": "the landlady",
+  "personality": {
+    "summary": "The Drowned Rat's landlady: stern, watchful, sharp-tongued; she can silence a brawl with one look.",
+    "manner": "Watches the room, wastes no words, and does not soften until she has taken your measure.",
+    "speech": "Low and quick; she does not repeat herself."
+  },
+  "appearance": {
+    "summary": "a big, raw-boned woman with long copper braids, in widow's black and a leather apron",
+    "body": "A tall, raw-boned woman in her late forties, broad through the shoulders from years of hauling casks. Two thick copper braids, threaded with grey at the temples, hang to her waist. Her face is weathered and freckled, with a hard jaw, pale grey eyes and a thin white scar through her left eyebrow.",
+    "outfit": "Widow's black wool under a stained leather apron, sleeves rolled to the elbow, and a ring of keys at her belt."
+  },
+  "history": "Hesk came to Riverton as a bargeman's daughter and married Corran, who kept the Drowned Rat. When the river took him in a spring flood eleven years ago, she paid off his debts by working the taproom herself and has run the inn alone ever since. The scar through her eyebrow is from the one night she let a fight run too long.",
   "disposition": {
     "player": {
       "value": "indifferent",

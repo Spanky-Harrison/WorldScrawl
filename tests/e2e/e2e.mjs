@@ -2066,7 +2066,7 @@ try {
         return { name: hit?.extra?.worldscrawl_remember?.name ?? '', card: !!document.querySelector('.worldscrawl_remembercard') };
     });
     check('/ws-npc shows a Remember card', remembered.card && remembered.name === 'Maren', JSON.stringify(remembered));
-    await queue([{ content: '{"name":"Maren","line":"A traveling knife-grinder with a squeaky cart.","manner":"","voice":""}' }]);
+    await queue([{ content: '{"name":"Maren","personality":{"summary":"A traveling knife-grinder with a squeaky cart."}}' }]);
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: 'Keep' }).click();
     for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await page.waitForTimeout(250);
     await page.waitForTimeout(800);
@@ -2240,7 +2240,7 @@ try {
     // New person: inline validation, then create and delete with a confirm.
     await cw.locator('.cast-new').click();
     await cw.locator('.cf-row[data-field="name"] input').fill('Pip');
-    await cw.locator('.cf-row[data-field="line"] textarea').fill('A barefoot errand boy.');
+    await cw.locator('.cf-row[data-field="line"] input').fill('A barefoot errand boy.');
     await cw.locator('.cf-row[data-field="id"] input').fill('hesk');
     const dupErr = await cw.locator('.cf-err[data-for="id"]').innerText();
     const dupDisabled = await cw.locator('.cast-save').isDisabled();

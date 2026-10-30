@@ -95,7 +95,8 @@ export function loadCast(root, world = null) {
  * Returns the record that was written (re-validated). Throws when the record itself is not usable.
  */
 export function writeCastNpc(root, npc, { update = false } = {}) {
-    const record = exportRecord(npc) ?? (isObj(npc) ? npc : null);
+    // A file-shaped record (nested personality) is written as it is; a folded chat NPC is exported first.
+    const record = isObj(npc?.personality) ? npc : exportRecord(npc) ?? (isObj(npc) ? npc : null);
     if (!record) throw new Error('nothing to export');
     const taken = new Set();
     const byId = new Map();
@@ -148,10 +149,15 @@ const castFile = (root, name) => {
 export function tidyRecord(raw) {
     const out = {};
     const s = v => (typeof v === 'string' ? v.trim() : '');
-    for (const k of ['id', 'name', 'line', 'manner', 'voice', 'appearance']) if (s(raw[k])) out[k] = s(raw[k]);
+    for (const k of ['id', 'name', 'unknownAs']) if (s(raw[k])) out[k] = s(raw[k]);
+    for (const [k, keys] of [['personality', ['summary', 'manner', 'speech']], ['appearance', ['summary', 'body', 'outfit']]]) {
+        const sub = {};
+        if (isObj(raw[k])) for (const x of keys) if (s(raw[k][x])) sub[x] = s(raw[k][x]);
+        if (Object.keys(sub).length) out[k] = sub;
+    }
+    if (s(raw.history)) out.history = s(raw.history);
     const deep = {};
     if (isObj(raw.deep)) {
-        if (s(raw.deep.history)) deep.history = s(raw.deep.history);
         const secrets = Array.isArray(raw.deep.secrets) ? raw.deep.secrets.map(s).filter(Boolean) : [];
         if (secrets.length) deep.secrets = secrets;
         const rel = {};

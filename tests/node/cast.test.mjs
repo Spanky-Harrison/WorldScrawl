@@ -50,24 +50,24 @@ test('castdata: the form round-trips a record and validates inline', () => {
 test('save and delete routes: create, rename, validate, duplicate id, delete', () => {
     const dir = temp();
     const c = client(dir);
-    const made = c.post('/cast/save', { json: { npc: { id: 'old-tom', name: 'Old Tom', line: 'A stooped farmer.', schedule: [{ place: SQUARE, activity: 'selling turnips', from: '08:00', to: '12:00', importance: 'normal' }] } } });
+    const made = c.post('/cast/save', { json: { npc: { id: 'old-tom', name: 'Old Tom', personality: { summary: 'A stooped farmer.' }, schedule: [{ place: SQUARE, activity: 'selling turnips', from: '08:00', to: '12:00', importance: 'normal' }] } } });
     assert.equal(made.status_code, 200, JSON.stringify(made.json()));
     assert.equal(made.json().id, 'old-tom');
     assert.ok(fs.existsSync(path.join(dir, 'cast', 'old-tom.json')));
     assert.ok(c.get('/cast').json().npcs.some(n => n.id === 'old-tom'));
     // the same id again, without saying it is the same person, is refused
-    assert.equal(c.post('/cast/save', { json: { npc: { id: 'hesk', name: 'Other', line: 'x' } } }).status_code, 422);
+    assert.equal(c.post('/cast/save', { json: { npc: { id: 'hesk', name: 'Other', personality: { summary: 'x' } } } }).status_code, 422);
     // a broken place is refused, and the file is untouched
     const before = fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8');
     assert.equal(c.post('/cast/save', { json: { npc: { ...heskOf(dir), schedule: [{ place: 'riverton:nowhere', activity: 'lost' }] }, original: 'hesk' } }).status_code, 422);
     assert.equal(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8'), before);
-    assert.equal(c.post('/cast/save', { json: { npc: { id: 'Not A Slug', name: 'X', line: 'y' } } }).status_code, 422);
+    assert.equal(c.post('/cast/save', { json: { npc: { id: 'Not A Slug', name: 'X', personality: { summary: 'y' } } } }).status_code, 422);
     // edit in place
     const edited = c.post('/cast/save', { json: { npc: { ...heskOf(dir), facts: ['keeps a cudgel'] }, original: 'hesk', original_file: 'hesk.json' } });
     assert.equal(edited.status_code, 200);
     assert.deepEqual(heskOf(dir).facts, ['keeps a cudgel']);
     // rename moves the file
-    const moved = c.post('/cast/save', { json: { npc: { id: 'tom', name: 'Old Tom', line: 'A stooped farmer.' }, original: 'old-tom', original_file: 'old-tom.json' } });
+    const moved = c.post('/cast/save', { json: { npc: { id: 'tom', name: 'Old Tom', personality: { summary: 'A stooped farmer.' } }, original: 'old-tom', original_file: 'old-tom.json' } });
     assert.equal(moved.status_code, 200);
     assert.ok(fs.existsSync(path.join(dir, 'cast', 'tom.json')));
     assert.ok(!fs.existsSync(path.join(dir, 'cast', 'old-tom.json')));
@@ -81,7 +81,7 @@ test('save and delete routes: create, rename, validate, duplicate id, delete', (
 
 test('saveCastNpc / deleteCastNpc directly, and empty fields are dropped', () => {
     const dir = temp();
-    const r = saveCastNpc(dir, { id: 'pip', name: 'Pip', line: 'A boy.', facts: [], manner: '' }, { places: new Set([SQUARE]) });
+    const r = saveCastNpc(dir, { id: 'pip', name: 'Pip', personality: { summary: 'A boy.' }, facts: [], manner: '' }, { places: new Set([SQUARE]) });
     assert.equal(r.id, 'pip');
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'pip.json'), 'utf8'));
     assert.equal(onDisk.facts, undefined);
@@ -161,14 +161,14 @@ test('sighting rolls: the seeded roll against the chance, and a no-show reason',
 
 test('editor diffs: base record changes and "In this chat" stamps', () => {
     assert.deepEqual(recordChanges({ id: 'a', line: 'x' }, { id: 'a', line: 'y', manner: 'calm' }).map(x => x.field), ['line', 'manner']);
-    const play = { record: { id: 'm', name: 'M', line: 'old', facts: ['f1'], memory: ['m1'] }, disposition: { player: { value: 'indifferent' } } };
+    const play = { record: { id: 'm', name: 'M', personality: { summary: 'old' }, facts: ['f1'], memory: ['m1'] }, disposition: { player: { value: 'indifferent' } } };
     const f = formFromPlay(play);
     f.line = 'new'; f.facts = ['f1', 'f2']; f.memory = []; f.disposition = 'friendly'; f.reason = 'saved her cat';
     const { stamps, cannot } = chatStamps(play, f);
     assert.deepEqual(stamps.map(s => s.type), ['npc_fact', 'npc_fact', 'npc_disposition']);
     assert.equal(stamps[2].dramatic, true);
     assert.ok(cannot.some(x => x.includes('m1')));
-    assert.equal(chatStampLines(stamps)[0], 'line: new');
+    assert.equal(chatStampLines(stamps)[0], 'personality.summary: new');
     assert.deepEqual(chatStamps(play, formFromPlay(play)).stamps, []);
 });
 

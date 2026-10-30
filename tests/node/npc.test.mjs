@@ -268,7 +268,7 @@ test('slices, suggestions, read-back and tags', () => {
     const slice = npcSlices(present, focus);
     assert.match(slice.npcs_present, /Hesk \(hesk\)/);
     assert.match(slice.npcs_present, /indifferent/);
-    assert.match(slice.npc_focus, /Brisk/);
+    assert.match(slice.npcs_present, /Manner: Brisk/);
     assert.match(slice.npc_focus, /kettle crew/);
     assert.equal(focusRules('I sip my ale.', present).id, null);
     assert.equal(focusRules('I talk to her.', present).id, 'hesk');
@@ -294,7 +294,7 @@ test('slices, suggestions, read-back and tags', () => {
     assert.equal(tags.text, 'She smiles.');
     assert.equal(parseNpcTag('disposition | hesk | very friendly | paid the tab').value, 'friendly');
     assert.equal(parseNpcTag('disposition | hesk | devoted'), null);
-    assert.deepEqual(readRememberAnswer({ name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.' }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', appearance: '', facts: [], invented: [] });
+    assert.deepEqual(readRememberAnswer({ name: 'Maren', personality: { summary: 'A knife-grinder.', manner: '', speech: 'Squeak.' } }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] });
     assert.equal(readRememberAnswer({ name: 'Maren' }), null);
 });
 
@@ -308,7 +308,7 @@ test('keeping pulls a record, and export writes a new file instead of overwritin
     copytree(RIVERTON, dir);
     const c = client(dir);
     const first = c.post('/cast/export', { json: { npc: rec } });
-    assert.equal(first.status_code, 200);
+    assert.equal(first.status_code, 200, JSON.stringify(first.json()));
     assert.equal(first.json().id, 'maren');
     assert.equal(first.json().renamed, false);
     const second = c.post('/cast/export', { json: { npc: rec } });
@@ -319,10 +319,10 @@ test('keeping pulls a record, and export writes a new file instead of overwritin
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'maren.json'), 'utf8')).name, 'Maren');
     const bad = c.post('/cast/export', { json: { npc: { id: 'nope' } } });
     assert.equal(bad.status_code, 422);
-    const direct = writeCastNpc(dir, { id: 'old-tom', name: 'Old Tom', line: 'A stooped farmer.' });
+    const direct = writeCastNpc(dir, { id: 'old-tom', name: 'Old Tom', personality: { summary: 'A stooped farmer.' } });
     assert.equal(direct.id, 'old-tom');
     const heskFile = JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8'));
-    const played = exportRecord({ ...heskFile, facts: ['a knife under the bar'] });
+    const played = exportRecord({ ...validateRecord(heskFile, { file: 'hesk.json' }), facts: ['a knife under the bar'] });
     const diff = recordDiff(heskFile, played);
     assert.equal(diff.changed, true);
     assert.match(diff.text, /facts/);
@@ -334,7 +334,7 @@ test('keeping pulls a record, and export writes a new file instead of overwritin
     assert.equal(updated.json().renamed, false);
     assert.equal(fs.existsSync(path.join(dir, 'cast', 'hesk-2.json')), false);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8')).facts, ['a knife under the bar']);
-    const clash = writeCastNpc(dir, { id: 'hesk', name: 'Someone Else', line: 'Not the landlady.' });
+    const clash = writeCastNpc(dir, { id: 'hesk', name: 'Someone Else', personality: { summary: 'Not the landlady.' } });
     assert.equal(clash.id, 'hesk-2');
     assert.equal(clash.updated, false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8')).name, 'Hesk');

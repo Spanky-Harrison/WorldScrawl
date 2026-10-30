@@ -80,8 +80,10 @@ export function castPanel(doc, io) {
         viewBox.replaceChildren($('p', { class: 'muted' }, 'Recomputed from the chat: what {{npcs_present}} and {{npc_focus}} held when this reply was written.'), sel,
             $('button', { type: 'button', class: 'linkish cast-msglink', onclick: () => io.showMessage?.(v.reply) }, ` show #${v.reply}`),
             v.error ? $('p', { class: 'bad' }, v.error) : $('div', {},
-                $('table', { class: 'resolved cast-listed' }, $('tr', {}, $('th', {}, 'Person'), $('th', {}, 'Detail'), $('th', {}, 'Memories included'), $('th', {}, 'Appearance')),
-                    ...(v.listed.length ? v.listed.map(x => $('tr', { 'data-id': x.id }, $('td', {}, x.name), $('td', {}, x.depth), $('td', {}, x.memories.length ? x.memories.join('; ') : '—'), $('td', { class: 'cast-appearance' }, x.appearance ? `included: ${x.appearance}` : x.appearance === '' ? 'not included (in the background)' : 'none on file'))) : [$('tr', {}, $('td', { colspan: 4, class: 'muted' }, 'Nobody was listed.'))])),
+                $('table', { class: 'resolved cast-listed' }, $('tr', {}, $('th', {}, 'Person'), $('th', {}, 'Tier'), $('th', {}, 'Name'), $('th', {}, 'Detail'), $('th', {}, 'Memories included')),
+                    ...(v.listed.length ? v.listed.map(x => $('tr', { 'data-id': x.id }, $('td', {}, x.shownAs && x.shownAs !== x.name ? `${x.shownAs} (${x.name})` : x.name),
+                        $('td', { class: 'cast-tier' }, `${x.tier}: ${x.why}${x.topical ? `; + history (${x.topical})` : ''}`),
+                        $('td', { class: 'cast-name' }, x.nameWhy), $('td', {}, x.depth), $('td', {}, x.memories.length ? x.memories.join('; ') : '—'))) : [$('tr', {}, $('td', { colspan: 5, class: 'muted' }, 'Nobody was listed.'))])),
                 $('p', { class: 'muted' }, v.focus?.id ? `Focus: ${v.focus.id} (${v.focus.depth}${v.focus.stored ? ', from the stored focus' : ', from the focus rules'})` : 'No focus: nobody was named or addressed.'),
                 ...block('{{npcs_present}}', v.npcs_present), ...block('{{npc_focus}}', v.npc_focus)));
     }
@@ -122,7 +124,8 @@ export function castPanel(doc, io) {
         if (tab === 'chatedit') return startEdit(r, null, 'chat');
         if (tab === 'summary') {
             const rec = r.rec?.ok ? r.rec : r.play ?? r.rec ?? {};
-            const pairs = [['Id', r.id || '(none)'], ['Line', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Voice', rec.voice]] : []), ...(rec.appearance ? [['Appearance', rec.appearance]] : []),
+            const pairs = [['Id', r.id || '(none)'], ...(rec.unknownAs ? [['Known as', rec.unknownAs]] : []), ['Personality', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Speech', rec.voice]] : []),
+                ...[['Looks', rec.looks], ['Body', rec.body], ['Outfit', rec.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
                 ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
             pane.append(kv(pairs));
             const places = (r.rec?.schedule ?? []).map(e => $('li', {}, placeLink(e.place, e.broken), ` ${e.activity}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
@@ -217,9 +220,15 @@ export function castPanel(doc, io) {
         const idIn = $('input', { type: 'text', class: 'pf-input', spellcheck: 'false' }); idIn.value = f.id;
         idIn.addEventListener('input', () => { idTouched = true; f.id = idIn.value; check(); });
         form.append(fieldRow('name', 'Name', text('name')), fieldRow('id', 'Id', idIn, 'The cast file name. Lowercase, like old-tam.'),
-            fieldRow('line', 'Line', text('line', { area: true, ph: 'Who they are, in one line' })),
-            fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Voice', text('voice')),
-            fieldRow('appearance', 'Appearance', text('appearance', { area: true, ph: 'Physical only: build, face, hair, marks, usual clothing (2-4 sentences)' }), 'Fed to the narrator only when someone looks at or deals with this person.'));
+            fieldRow('unknownAs', 'Known as (before the name)', text('unknownAs', { ph: 'the landlady' }), 'What the player calls them until they learn the name. Empty: the name is used from the start.'),
+            $('b', {}, 'Personality'),
+            fieldRow('line', 'Summary', text('line', { ph: 'stern, watchful, sharp-tongued' }), 'Always fed while they are here.'),
+            fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Speech', text('voice')),
+            $('b', {}, 'Appearance'),
+            fieldRow('looks', 'Summary', text('looks', { ph: 'big woman with copper braids, in plain work clothes' }), 'Always fed while they are here.'),
+            fieldRow('body', 'Body', text('body', { area: true, ph: 'Physical only: build, age, face, hair, marks' })),
+            fieldRow('outfit', 'Outfit', text('outfit', { area: true, ph: 'What they usually wear and carry' }), 'Body, outfit, manner and speech are fed when the player looks at or deals with them.'),
+            fieldRow('history', 'History', text('history', { area: true, ph: 'Their life before the game starts' }), 'Fed only when a lore request names them ([lore] Hesk).'));
         if (chatMode && r.play?.invented?.length) form.append($('p', { class: 'muted cf-invented' }, `Made up when remembered (not in the story): ${r.play.invented.join('; ')}`));
         const dsel = $('select', { class: 'pf-input' }, $('option', { value: '' }, 'unknown'), ...DISPOSITIONS.map(d => $('option', { value: d }, d)));
         dsel.value = f.disposition; dsel.addEventListener('change', () => { f.disposition = dsel.value; check(); });
@@ -263,8 +272,8 @@ export function castPanel(doc, io) {
             return $('div', { class: 'cf-rel' }, w, t, $('button', { type: 'button', class: 'pf-x', onclick: () => { f.relationships.splice(i, 1); drawRels(); check(); } }, '✕'), err(`relationships.${i}.who`));
         }), $('button', { type: 'button', class: 'crumb', onclick: () => { f.relationships.push({ who: '', text: '' }); drawRels(); } }, 'Add relationship'));
         drawRels();
-        form.append($('details', { class: 'cf-deep' }, $('summary', {}, 'Deep (history, secrets, relationships)'),
-            fieldRow('history', 'History', text('history', { area: true })), fieldRow('secrets', 'Secrets (one per line)', lines('secrets')), $('b', {}, 'Relationships'), relBox),
+        form.append($('details', { class: 'cf-deep' }, $('summary', {}, 'Deep (secrets, relationships)'),
+            fieldRow('secrets', 'Secrets (one per line)', lines('secrets')), $('b', {}, 'Relationships'), relBox),
             fieldRow('facts', 'Facts (one per line)', lines('facts')), fieldRow('memory', 'Memory highlights (one per line)', lines('memory')));
         if (chatMode) { form.querySelector('[data-field="id"]')?.remove(); form.prepend($('p', { class: 'muted cf-modenote' }, `Saves a "Character changed here" stamp on the latest message of this chat. The cast file is not touched. Schedule and sighting are edited in the base record.`)); }
         else form.prepend($('p', { class: 'muted cf-modenote' }, `Saves worldscrawl's cast/${originalFile ?? `${f.id || 'new'}.json`}. Chats keep their own changes on top.`));
