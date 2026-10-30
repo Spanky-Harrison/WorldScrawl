@@ -53,7 +53,7 @@ export function castPanel(doc, io) {
             ...msgs.map(x => $('option', { value: x.msg }, `#${x.msg} ${x.who}${x === msgs[0] ? ' (latest)' : ''}${x.entries.length ? ` · ${x.entries.length}` : ''}`)));
         sel.value = String(m.msg);
         const groups = groupEntries(m.entries);
-        viewBox.replaceChildren($('p', { class: 'muted' }, 'What the engine and the narrator did on this message, read from the chat (calls skipped or failed are kept for this session only).'), sel,
+        viewBox.replaceChildren($('p', { class: 'muted' }, 'What the engine and the narrator did on this message, read from the chat, including the outcome of each model call.'), sel,
             $('button', { type: 'button', class: 'linkish cast-msglink', onclick: () => io.showMessage?.(m.msg) }, ` show #${m.msg}`),
             $('p', { class: 'muted' }, m.snippet),
             groups.length ? $('div', { class: 'cast-activity' }, ...groups.map(g => $('div', { class: 'cast-actgroup', 'data-kind': g.kind }, $('b', {}, g.title), $('ul', {}, ...g.entries.map(e => $('li', {}, renderEntry(e, $)))))))

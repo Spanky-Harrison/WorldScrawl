@@ -1319,6 +1319,15 @@ try {
     check('/ws-wait: stamped user message', /waits for 2h/.test(wq.mes) && wq.w?.seconds === 7200, JSON.stringify(wq));
     const lastBody = async () => JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).pop());
     check('/ws-wait: narrator told how long and the new time', /waited here for 2h/.test(await lastBody()));
+    // Game-time labels: on every narrator message, live from the clock, with the elapsed time after the wait.
+    const tlabels = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; let n = ch.length - 1; while (n >= 0 && (ch[n].is_user || ch[n].is_system)) n--; return { n, last: document.querySelector(`#chat .mes[mesid="${n}"] .worldscrawl_time`)?.textContent ?? '', count: document.querySelectorAll('#chat .worldscrawl_time').length, narr: [...document.querySelectorAll('#chat .mes[mesid]')].filter(el => { const m = ch[Number(el.getAttribute('mesid'))]; return m && !m.is_user && !m.is_system && !m.extra?.worldscrawl_notice; }).length, stored: JSON.stringify(ch).includes('worldscrawl_time') }; });
+    try { await page.waitForFunction(() => /\+2h/.test(document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? ''), null, { timeout: 5000 }); } catch {}
+    const tl = await tlabels();
+    check('game-time labels on every narrator message, +2h after the wait, nothing stored', tl.count > 0 && tl.count === tl.narr && /\d:\d\d [AP]M \(\+2h\)/.test(tl.last) && !tl.stored, JSON.stringify(tl));
+    const relabel = await page.evaluate(async () => { const c = SillyTavern.getContext(); const u = c.chat.filter(m => m.is_user && m.extra?.worldscrawl_wait?.seconds === 7200).pop(); u.extra.worldscrawl_wait.seconds = 3600; await c.eventSource.emit(c.eventTypes.MESSAGE_UPDATED, c.chat.indexOf(u)); await new Promise(r => setTimeout(r, 1500)); const t = document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? ''; u.extra.worldscrawl_wait.seconds = 7200; await c.eventSource.emit(c.eventTypes.MESSAGE_UPDATED, c.chat.indexOf(u)); await new Promise(r => setTimeout(r, 1500)); return { edited: t, back: document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? '' }; });
+    check('game-time labels follow an edited earlier wait', /\(\+1h\)/.test(relabel.edited) && /\(\+2h\)/.test(relabel.back), JSON.stringify(relabel));
+    const cn = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch.filter(x => !x.is_user && !x.is_system).pop(); return m?.extra?.worldscrawl_calls?.[m.swipe_id ?? 0] ?? null; });
+    check('model-call notes: the narrator reply is noted (what it emitted, or no tool call)', Array.isArray(cn) && cn.some(n => n.kind === 'narrator reply' && (n.emitted?.length || n.reason === 'narrator made no tool call')), JSON.stringify(cn));
     const t1 = await clockNow();
     expected += 1; await ui.selectOption('#waitPick', 'sleep|8h'); await waitReqs();
     check('map Wait picker: sleep 8h via the chat tab', (await clockNow()) - t1 === 8 * 3600, `${(await clockNow()) - t1}`);
@@ -2186,6 +2195,8 @@ try {
     let actHit = '';
     for (const v of actV.all) { const t = await cw.evaluate(val => { const s = document.querySelector('.cast-actsel'); s.value = val; s.dispatchEvent(new Event('change')); return document.querySelector('.cast-view')?.innerText ?? ''; }, v); if (/Map stamps|Flags|Rolls|Cards|Positions|People/.test(t)) { actHit = t; break; } }
     check('Activity log lists messages (latest first) and shows recorded engine activity', actV.opts > 0 && /latest/.test(actV.first) && !!actHit, JSON.stringify(actV).slice(0, 300) + ' | ' + actHit.slice(0, 300));
+    const callTxt = await cw.evaluate(async () => { const s = document.querySelector('.cast-actsel'); for (const o of s.options) { s.value = o.value; s.dispatchEvent(new Event('change')); const t = document.querySelector('.cast-view')?.innerText ?? ''; if (/Model calls/.test(t) && /narrator reply/.test(t)) return t; } return ''; });
+    check('Activity log shows the persisted model-call notes', /Model calls/.test(callTxt) && /narrator reply: ok/.test(callTxt), callTxt.slice(0, 400));
     await cw.evaluate(() => wsCast.setView('people'));
     // "In this chat": a memory saved as a stamp on the latest message, after a diff.
     await cw.evaluate(() => wsCast.selectId('hesk', 'chatedit'));
