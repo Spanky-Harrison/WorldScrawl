@@ -259,8 +259,14 @@ try {
     // /ws-go and /ws-exits.
     await queue([{ content: 'The temple.' }]);
     expected += 1;
+    // Regression: the preset's "Replace empty message" must not become an extra player message after a move.
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = '(POV Character stays silent or continues doing previous action)'; });
+    const goN0 = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go North'));
     await waitReqs();
+    const goNew = await page.evaluate(n => SillyTavern.getContext().chat.slice(n).filter(m => !m.is_system).map(m => ({ u: !!m.is_user, mes: m.mes })), goN0);
+    check('move: exactly one player line then one narrator reply (no empty-send filler)', goNew.length === 2 && goNew[0].u && !goNew[1].u && !goNew.some(m => m.mes.includes('stays silent')), JSON.stringify(goNew));
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = ''; });
     check('/ws-go moves party', (await stored()) === 'riverton:temple/nave', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
     check('notes: temple drops region notes (inherit_notes false)', narr.includes('About Temple of the Tides: A hushed') && !narr.includes('About Riverton:'), narr.slice(0, 300));

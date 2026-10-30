@@ -1168,6 +1168,12 @@ export function moveNote(who, move, exit) {
     return move.direction ? `*${who} goes ${move.direction}.*` : `*${who} heads to ${move.to_name}.*`;
 }
 
+/** The narrator's turn after an engine line. Not /trigger: ST treats that as an empty user send and, with
+ *  "Replace empty message" set in the preset, posts that text as an extra player message first. */
+export async function narrate(c = ctx()) {
+    await c.generate('normal', { automatic_trigger: true });
+}
+
 async function goTarget(t) {
     const c = ctx();
     if (!isOn()) { toastr.info(OFF_NOTICE); return OFF_NOTICE; }
@@ -1194,7 +1200,7 @@ async function goTarget(t) {
         msg.extra.worldscrawl_engine = true; // no intent question for this message
         await c.saveChat();
         renderAllExits();
-        await c.executeSlashCommandsWithOptions('/trigger await=true');
+        await narrate(c);
         return '';
     } catch (e) {
         toastr.error(e.message); return e.message;
@@ -3709,7 +3715,7 @@ export async function waitCommand(args, sleep = false) {
         msg.extra.worldscrawl_engine = true;
         await c.saveChat();
         renderAllExits(); broadcastMapState();
-        await c.executeSlashCommandsWithOptions('/trigger await=true');
+        await narrate(c);
         return '';
     } catch (e) { toastr.error(e.message); return e.message; } finally { engineBusy = false; }
 }
