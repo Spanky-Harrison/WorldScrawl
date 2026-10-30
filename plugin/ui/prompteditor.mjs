@@ -5,13 +5,11 @@ import { placeholdersIn } from './prompts.mjs';
 /** Placeholders the default text has that this text dropped (the game fills them; leaving one out loses that part). */
 export const missingPlaceholders = (entry, text) => {
     const have = new Set(placeholdersIn(text));
-    if (have.has('who')) have.add('party'); // old name, still filled
     return (entry.placeholders ?? []).filter(p => !p.optional && !have.has(p.name)).map(p => p.name);
 };
 /** Placeholders in the text that the game never fills (shown as a warning). */
 export const unknownPlaceholders = (entry, text) => {
     const known = new Set((entry.placeholders ?? []).map(p => p.name));
-    if (known.has('party')) known.add('who');
     return placeholdersIn(text).filter(n => !known.has(n));
 };
 /** A line diff (longest common subsequence): [{op: ' '|'-'|'+', line}]. */

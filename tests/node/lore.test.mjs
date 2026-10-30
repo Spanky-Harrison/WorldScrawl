@@ -1,42 +1,27 @@
-// Lore (was "notes"): file keys, the lore chain, requests, the fed block, the index line and {{npc:id}} tokens.
+// Lore: file keys, the lore chain, requests, the fed block, the index line and {{npc:id}} tokens.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { load_world, liftLore, lowerLore } from '../../plugin/world.mjs';
+import { load_world } from '../../plugin/world.mjs';
 import { loreScope, takeLoreFlags, loreIndexLine, loreFor, addLoreRequest, loreRequests, activeLore, loreBlock, renderNpcTokens } from '../../plugin/npc.mjs';
 import { makeWorld, tmpPath } from './helpers.mjs';
 
-const region = (legacy = false) => {
-    const k = legacy ? 'notes' : 'lore';
-    return { name: 'Riverton', [k]: 'A river town.', start: 'inn/common', subregions: {
-        inn: { name: 'The Drowned Rat', [k]: 'Run by {{npc:hesk}}.', locations: {
-            common: { name: 'Common Room', description: 'Smoky.', [k]: 'The hearth never goes out.', exits: [{ direction: 'up', to: 'loft' }] },
-            loft: { name: 'Loft', description: 'Dusty.', [legacy ? 'inherit_subregion_notes' : 'inherit_subregion_lore']: false, exits: [{ direction: 'down', to: 'common' }] },
-        } },
-    } };
-};
-const load = legacy => load_world(makeWorld(tmpPath(), { r: region(legacy) }));
+const region = () => ({ name: 'Riverton', lore: 'A river town.', start: 'inn/common', subregions: {
+    inn: { name: 'The Drowned Rat', lore: 'Run by {{npc:hesk}}.', locations: {
+        common: { name: 'Common Room', description: 'Smoky.', lore: 'The hearth never goes out.', exits: [{ direction: 'up', to: 'loft' }] },
+        loft: { name: 'Loft', description: 'Dusty.', inherit_subregion_lore: false, exits: [{ direction: 'down', to: 'common' }] },
+    } },
+} });
+const load = () => load_world(makeWorld(tmpPath(), { r: region() }));
 
-test('lore and the legacy notes key load the same; the chain is innermost first and follows inherit rules', () => {
-    for (const legacy of [false, true]) {
-        const w = load(legacy);
-        assert.deepEqual(w.lore_chain(w.get('r:inn/common')).map(c => [c.level, c.name]), [['room', 'Common Room'], ['subregion', 'The Drowned Rat'], ['region', 'Riverton']]);
-        assert.deepEqual(w.lore_chain(w.get('r:inn/loft')).map(c => c.level), ['region'], 'inherit_subregion_lore: false drops the area lore');
-        const d = w.to_dict(w.get('r:inn/common'));
-        assert.equal(d.lore, 'The hearth never goes out.');
-        assert.equal(d.lore_chain.length, 3);
-    }
-});
-test('liftLore/lowerLore map the file keys to the internal ones and back', () => {
-    const raw = { r: region(false) };
-    const lifted = liftLore(JSON.parse(JSON.stringify(raw)));
-    assert.equal(lifted.r.notes, 'A river town.');
-    assert.equal(lifted.r.subregions.inn.locations.loft.inherit_subregion_notes, false);
-    assert.ok(!('lore' in lifted.r));
-    const lowered = lowerLore(lifted);
-    assert.deepEqual(lowered, raw);
-    assert.equal(lifted.r.notes, 'A river town.', 'lowerLore works on a copy');
+test('lore loads; the chain is innermost first and follows inherit rules', () => {
+    const w = load();
+    assert.deepEqual(w.lore_chain(w.get('r:inn/common')).map(c => [c.level, c.name]), [['room', 'Common Room'], ['subregion', 'The Drowned Rat'], ['region', 'Riverton']]);
+    assert.deepEqual(w.lore_chain(w.get('r:inn/loft')).map(c => c.level), ['region'], 'inherit_subregion_lore: false drops the area lore');
+    const d = w.to_dict(w.get('r:inn/common'));
+    assert.equal(d.lore, 'The hearth never goes out.');
+    assert.equal(d.lore_chain.length, 3);
 });
 test('the shipped worlds use lore, not notes', () => {
     const dir = new URL('../../worlds/riverton/regions/', import.meta.url);

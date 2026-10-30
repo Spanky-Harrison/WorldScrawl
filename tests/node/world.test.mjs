@@ -6,14 +6,14 @@ import path from 'node:path';
 import { WorldError, load_world } from '../../plugin/world.mjs';
 import { ROOT, SQUARE, TAVERN, TestClient, caplog, client, makeWorld, mkdir, tmpPath, write } from './helpers.mjs';
 
-const region = (start = 's/a', subs = null, notes = 'region notes') => ({ name: 'R', notes, start, subregions: subs ?? {
-    s: { name: 'S', notes: 'sub notes', locations: {
+const region = (start = 's/a', subs = null, notes = 'region lore') => ({ name: 'R', lore: notes, start, subregions: subs ?? {
+    s: { name: 'S', lore: 'sub notes', locations: {
         a: { name: 'A', description: 'da', exits: [{ direction: 'east', to: 'b' }, { direction: 'out', to: 't/x' }] },
         b: { name: 'B', description: 'db', exits: [{ direction: 'west', to: 'a' }] },
     } },
-    t: { name: 'T', notes: 't notes', inherit_notes: false, locations: {
+    t: { name: 'T', lore: 't notes', inherit_lore: false, locations: {
         x: { name: 'X', description: 'dx', exits: [{ direction: 'in', to: 's/a' }] },
-        y: { name: 'Y', description: 'dy', inherit_region_notes: true, inherit_subregion_notes: false, exits: [] },
+        y: { name: 'Y', description: 'dy', inherit_region_lore: true, inherit_subregion_lore: false, exits: [] },
     } },
 } });
 const load = (dir, r, startRegion) => load_world(makeWorld(dir, { r }, startRegion));
@@ -38,23 +38,23 @@ test('minimal and exit resolution', () => {
 
 test('notes inheritance', () => {
     const w = load(tmpPath(), region());
-    assert.deepEqual(w.effective_notes(w.get('r:s/a')), { region: 'region notes', subregion: 'sub notes' });
-    assert.deepEqual(w.effective_notes(w.get('r:t/x')), { region: null, subregion: 't notes' });
-    assert.deepEqual(w.effective_notes(w.get('r:t/y')), { region: 'region notes', subregion: null });
+    assert.deepEqual(w.effective_lore(w.get('r:s/a')), { region: 'region lore', subregion: 'sub notes' });
+    assert.deepEqual(w.effective_lore(w.get('r:t/x')), { region: null, subregion: 't notes' });
+    assert.deepEqual(w.effective_lore(w.get('r:t/y')), { region: 'region lore', subregion: null });
 });
 
 test('location can drop region notes', () => {
     const r = region();
-    r.subregions.s.locations.b.inherit_region_notes = false;
+    r.subregions.s.locations.b.inherit_region_lore = false;
     const w = load(tmpPath(), r);
-    assert.deepEqual(w.effective_notes(w.get('r:s/b')), { region: null, subregion: 'sub notes' });
+    assert.deepEqual(w.effective_lore(w.get('r:s/b')), { region: null, subregion: 'sub notes' });
 });
 
 test('bad flag types', () => {
     const tmp = tmpPath();
     let r = region();
-    r.subregions.s.inherit_notes = 'no';
-    raises(() => load(tmp, r), /inherit_notes" must be true or false/);
+    r.subregions.s.inherit_lore = 'no';
+    raises(() => load(tmp, r), /inherit_lore" must be true or false/);
     r = region();
     r.subregions.s.locations.a.exits[0].hidden = 1;
     raises(() => load(mkdir(path.join(tmp, 'x')), r), /hidden" must be true or false/);
@@ -126,17 +126,17 @@ test('duplicate direction', () => {
 test('start', () => {
     const r = C().get('/start').json();
     assert.ok(r.address === TAVERN && r.name === 'Common Room');
-    assert.ok(r.subregion.id === 'drowned_rat' && r.subregion.name === 'The Drowned Rat' && r.subregion.notes);
-    assert.ok(r.region.name === 'Riverton' && r.region.notes);
+    assert.ok(r.subregion.id === 'drowned_rat' && r.subregion.name === 'The Drowned Rat' && r.subregion.lore);
+    assert.ok(r.region.name === 'Riverton' && r.region.lore);
     const out = ex(r, 'out');
     assert.ok(out.to === SQUARE && out.to_name === 'Village Square' && out.to_subregion.name === 'Riverton Streets');
 });
 
 test('sample notes', () => {
     const c = C();
-    const up = c.get('/location/riverton:drowned_rat/upstairs').json().effective_notes;
+    const up = c.get('/location/riverton:drowned_rat/upstairs').json().effective_lore;
     assert.ok(up.region && up.subregion === null); // quiet room drops the tavern's noise
-    const nave = c.get('/location/riverton:temple/nave').json().effective_notes;
+    const nave = c.get('/location/riverton:temple/nave').json().effective_lore;
     assert.ok(nave.region === null && nave.subregion); // temple drops village notes
 });
 

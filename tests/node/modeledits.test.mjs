@@ -73,9 +73,3 @@ test('story-made places respect "expandable"; editor-made ones keep the id clash
     assert.throws(() => applyPatch(structuredClone(raw), { ops: [{ op: 'create_place', area: `${rid}:${sid}`, name: raw[rid].subregions[sid].locations[lid].name, description: 'x', exits: [{ to: TAVERN, direction: 'a', return_direction: 'b' }] }] }), /suggested/);
 });
 
-test('old chats: a stamped "discover" op still reads, as a create_place', () => {
-    const UP = 'riverton:drowned_rat/upstairs';
-    const old = { type: 'patch', id: 'd', note: 'x', at: 0, ops: [{ op: 'discover', loc: UP, id: 'guest_room', direction: 'guest door', return_direction: 'hallway', name: 'Guest Room', description: 'A bed.' }] };
-    const got = c.post('/rooms', { json: { addresses: ['riverton:drowned_rat/guest_room'], changes: [old] } }).json();
-    assert.equal(got.rooms[0].name, 'Guest Room');
-});

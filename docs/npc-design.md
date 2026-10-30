@@ -20,7 +20,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **Simple JSON for creators.** A quick NPC is one sentence. Everything else is optional with defaults.
 - **Pick-one prompts** use text keys with lenient matching, like the existing intent and direction questions in `plugin/prompts/default.json`.
 - **UI reuses existing patterns:** the Approve / Adjust / Discard card (as in room discovery) and the Edit / Turn off / Undo bar (as in "Map changed here").
-- **Actor placeholders** are our own: `{{party}}` (with `{{who}}` as an alias), rendered from the player's group (see *Actors, not a party*), not SillyTavern's `{{user}}`/`{{char}}`.
+- **Actor placeholders** are our own: `{{party}}`, rendered from the player's group (see *Actors, not a party*), not SillyTavern's `{{user}}`/`{{char}}`.
 
 ## Actors, not a party
 

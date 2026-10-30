@@ -7,7 +7,7 @@ import { OPS, parseLasts, newRoomId } from './patches.mjs';
 export const EXIT_OPS = ['block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit'];
 export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
-    set_notes: 'Rewrite area lore', update_area: 'Rename area / rewrite its lore', append_notes: 'Add to area lore',
+    set_lore: 'Rewrite area lore', update_area: 'Rename area / rewrite its lore', append_lore: 'Add to area lore',
     block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
     remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms',
     set_fields: 'Change settings', set_exit: 'Exit: change settings', add_exit: 'Exit: add (with the way back)', move_location: 'Move place to another subregion', move_area: 'Move subregion to another region',
@@ -18,8 +18,8 @@ const JSON_KEYS = new Set(['fields', 'exits', 'place', 'subregion', 'ids']);
 /** The fields each op type has (besides "op" and "lasts"), and which are required. */
 export const OP_FIELDS = {
     set_description: [['loc', 1], ['text', 1]], append_description: [['loc', 1], ['text', 1]], set_name: [['loc', 1], ['text', 1]],
-    update_area: [['area', 1], ['name', 0], ['notes', 0]],
-    set_notes: [['area', 1], ['text', 1]], append_notes: [['area', 1], ['text', 1]],
+    update_area: [['area', 1], ['name', 0], ['lore', 0]],
+    set_lore: [['area', 1], ['text', 1]], append_lore: [['area', 1], ['text', 1]],
     ...Object.fromEntries(EXIT_OPS.map(o => [o, [['loc', 1], ['direction', 1]]])),
     set_exit_description: [['loc', 1], ['direction', 1], ['text', 1]],
     set_travel_time: [['loc', 1], ['direction', 1], ['time', 1]],
@@ -33,8 +33,8 @@ export const OP_FIELDS = {
     move_location: [['loc', 1], ['area', 1], ['id', 0]],
     move_area: [['area', 1], ['region', 1], ['id', 0]],
     create_place: [['area', 1], ['name', 1], ['description', 1], ['exits', 1], ['id', 0]],
-    create_subregion: [['region', 1], ['name', 1], ['place', 1], ['notes', 0], ['id', 0]],
-    create_region: [['name', 1], ['subregion', 1], ['notes', 0], ['id', 0]],
+    create_subregion: [['region', 1], ['name', 1], ['place', 1], ['lore', 0], ['id', 0]],
+    create_region: [['name', 1], ['subregion', 1], ['lore', 0], ['id', 0]],
     remove_area: [['area', 1], ['contents', 1], ['into', 0], ['ids', 0]],
 };
 const s = v => (typeof v === 'string' ? v.trim() : v === null || v === undefined ? '' : String(v).trim());
@@ -71,7 +71,7 @@ export function checkOps(ops) {
             if (!req) continue;
             if (k === 'locs' ? !(op.locs?.length) : !s(op[k])) errs.push({ i, error: `"${k}" is required.` });
         }
-        if (op.op === 'update_area' && !s(op.name) && !s(op.notes)) errs.push({ i, error: 'Give the area a new name and/or notes.' });
+        if (op.op === 'update_area' && !s(op.name) && !s(op.lore)) errs.push({ i, error: 'Give the area a new name and/or notes.' });
         if (op.op === 'merge') {
             if (op.into && !op.locs?.includes(op.into)) errs.push({ i, error: '"Keep as" must be one of the merged places.' });
             if (!op.into && (!s(op.name) || !s(op.description))) errs.push({ i, error: 'A merge into a new place needs a name and a description (or pick one place to keep).' });
@@ -92,11 +92,11 @@ export function blankOp(type, { loc = '', area = '', direction = '', text = '' }
     return op;
 }
 /** Starting ops for "Edit live" on an inspector target, prefilled from its live values. */
-export function liveOps(target, { description = '', notes = '', name = '' } = {}) {
+export function liveOps(target, { description = '', lore = '', name = '' } = {}) {
     const t = String(target ?? '');
     if (t.startsWith('exit:')) { const ref = t.slice(5), i = ref.lastIndexOf('|'); return [blankOp('block_exit', { loc: ref.slice(0, i), direction: ref.slice(i + 1) })]; }
-    // Regions and subregions: rename and/or rewrite the notes (update_area); set_notes / append_notes can be added in the form.
-    if (t.startsWith('region:') || t.startsWith('sub:')) return [{ ...blankOp('update_area', { area: t.slice(t.startsWith('sub:') ? 4 : 7) }), name: name ?? '', notes: notes ?? '' }];
+    // Regions and subregions: rename and/or rewrite the notes (update_area); set_lore / append_lore can be added in the form.
+    if (t.startsWith('region:') || t.startsWith('sub:')) return [{ ...blankOp('update_area', { area: t.slice(t.startsWith('sub:') ? 4 : 7) }), name: name ?? '', lore: lore ?? '' }];
     if (t.includes('/')) return [blankOp('set_description', { loc: t, text: description ?? '' })];
     return [];
 }
@@ -168,9 +168,9 @@ export function buildPatchForm(doc, opts = {}) {
             box.append(head);
             const set = k => v => { d[k] = v; };
             for (const [k, req] of OP_FIELDS[d.op] ?? []) {
-                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('notes') ? 'Lore' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)', target: 'Room, area (region:subregion) or region', value: 'true, false or inherit' }[k] ?? k}${req ? '' : ' (optional)'}`;
+                const lab = `${{ loc: 'Place', area: 'Area (region or region:subregion)', text: d.op === 'set_name' ? 'New name' : d.op.includes('lore') ? 'Lore' : 'Description', direction: 'Exit', locs: 'Places to merge', into: 'Keep as', id: 'New place id', name: d.op === 'update_area' ? 'New display name (the id stays the same)' : 'New name', description: 'New description', area_m: 'Area', return_direction: 'Exit name back (default: out)', exit_description: 'Door description (this side)', return_description: 'Door description (the new room side)', target: 'Room, area (region:subregion) or region', value: 'true, false or inherit' }[k] ?? k}${req ? '' : ' (optional)'}`;
                 if (k === 'text') box.append(field(lab, d.op === 'set_name' ? input(d.text, set('text')) : area(d.text, set('text'))));
-                else if (k === 'notes') box.append(field('New lore (optional)', area(d.notes, set('notes'))));
+                else if (k === 'lore') box.append(field('New lore (optional)', area(d.lore, set('lore'))));
                 else if (k === 'description') box.append(field(lab, area(d.description, set('description'))));
                 else if (k === 'loc') box.append(field(lab, roomPick(d.loc, v => { d.loc = v; render(); })));
                 else if (k === 'area') box.append(field(d.op === 'merge' ? 'Area for the merged place (optional)' : lab.replace(' (region or region:subregion)', ''), areaPick(d.area, set('area'), d.op === 'merge' ? '— same as the kept place —' : undefined)));

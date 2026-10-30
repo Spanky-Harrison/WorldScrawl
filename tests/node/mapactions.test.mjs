@@ -27,12 +27,12 @@ test('create place: needs an exit to an existing place; exits come with their wa
 });
 
 test('create subregion and region: the wizard chain (region -> first subregion -> starting place)', () => {
-    const [raw] = apply([{ op: 'create_subregion', region: 'riverton', name: 'Mill Yard', notes: 'Flour dust.', place: { name: 'Mill', description: 'A creaking mill.', exits: [{ direction: 'lane', to: LANE, return_direction: 'mill' }] } }]);
+    const [raw] = apply([{ op: 'create_subregion', region: 'riverton', name: 'Mill Yard', lore: 'Flour dust.', place: { name: 'Mill', description: 'A creaking mill.', exits: [{ direction: 'lane', to: LANE, return_direction: 'mill' }] } }]);
     assert.ok(getRoom(raw, 'riverton:mill_yard/mill'));
-    assert.equal(raw.riverton.subregions.mill_yard.notes, 'Flour dust.');
+    assert.equal(raw.riverton.subregions.mill_yard.lore, 'Flour dust.');
     bad([{ op: 'create_subregion', region: 'riverton', name: 'Mill Yard', place: { name: 'Mill', description: 'x', exits: [] } }], /at least one exit/);
     bad([{ op: 'create_subregion', region: 'riverton', name: 'Streets', place: { name: 'M', description: 'x', exits: [{ direction: 'a', to: LANE, return_direction: 'b' }] } }], /suggested: "streets_2"/);
-    const [r2] = apply([{ op: 'create_region', name: 'Fen Marsh', notes: 'Wet.', subregion: { name: 'Reeds', place: { name: 'Reed Hut', description: 'A hut on stilts.', exits: [{ direction: 'road', to: ROAD, return_direction: 'fen' }] } } }]);
+    const [r2] = apply([{ op: 'create_region', name: 'Fen Marsh', lore: 'Wet.', subregion: { name: 'Reeds', place: { name: 'Reed Hut', description: 'A hut on stilts.', exits: [{ direction: 'road', to: ROAD, return_direction: 'fen' }] } } }]);
     assert.equal(r2.fen_marsh.start, 'reeds/reed_hut');
     assert.ok(getRoom(r2, ROAD).exits.some(e => e.to === 'fen_marsh:reeds/reed_hut'));
     const [r3] = apply([{ op: 'create_region', name: 'Isle', subregion: { name: 'Shore', place: { name: 'Beach', description: 'Sand.' } } }]);

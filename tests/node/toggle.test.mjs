@@ -11,7 +11,7 @@ const chain = () => [
     patch('merge', 3, [{ op: 'merge', locs: [TAVERN, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash.' }]),
     patch('soot', 5, [{ op: 'set_description', loc: MERGED, text: 'Soot everywhere.' }]),
     patch('square', 7, [{ op: 'set_description', loc: SQUARE, text: 'Quiet square.' }]),
-    patch('sign', 9, [{ op: 'append_notes', area: 'riverton:drowned_rat', text: 'Burned down.' }]),
+    patch('sign', 9, [{ op: 'append_lore', area: 'riverton:drowned_rat', text: 'Burned down.' }]),
 ];
 const rooms = (changes, a) => c.post('/rooms', { json: { addresses: [a], changes } }).json();
 

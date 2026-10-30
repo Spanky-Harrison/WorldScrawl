@@ -274,9 +274,9 @@ test('stays open precedence and views', () => {
     editJson(regionFile(wd), d => {
         d.stays_open = true;
         d.subregions.drowned_rat.stays_open = false;
-        _exit(d, 'drowned_rat', 'common_room', 'out').view = 'closed';
-        Object.assign(_exit(d, 'streets', 'square', 'east'), { view: 'closed', stays_open: false });
-        _exit(d, 'temple', 'nave', 'south').view = 'closed';
+        _exit(d, 'drowned_rat', 'common_room', 'out').barrier = {};
+        Object.assign(_exit(d, 'streets', 'square', 'east'), { barrier: {}, stays_open: false });
+        _exit(d, 'temple', 'nave', 'south').barrier = {};
         d.subregions.drowned_rat.locations.upstairs.views = ['streets/square'];
     });
     const c = new TestClient({ worldsDir: wd });
@@ -317,7 +317,7 @@ test('stays open per door across a boundary', () => {
             }
             for (const [sid, loc, dr, v] of [['temple', 'catacombs', 'tunnel', ex_cat], ['secret_tunnel', 'tunnel', 'catacombs', ex_tun]]) {
                 const e = _exit(d, sid, loc, dr);
-                e.view = 'closed';
+                e.barrier = {};
                 delete e.stays_open;
                 if (v !== undefined) e.stays_open = v;
             }

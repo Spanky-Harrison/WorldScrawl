@@ -149,15 +149,15 @@ export function openAction(doc, pane, action, ctx, io) {
         case 'create_region': {
             const n = input(), notes = area(), sn = input(), snotes = area(), p = placeFields(() => '', true, 'Starting place');
             build = () => { if (!n.value.trim()) throw new Error('Region name is required.'); if (!sn.value.trim()) throw new Error('First subregion name is required.');
-                return [{ op: 'create_region', name: n.value.trim(), ...(notes.value.trim() ? { notes: notes.value.trim() } : {}), subregion: { name: sn.value.trim(), ...(snotes.value.trim() ? { notes: snotes.value.trim() } : {}), place: p.get() } }]; };
-            header('Create region', $('p', { class: 'muted' }, 'A region needs its first subregion and a starting place.'), row('Region name', n, { 'data-field': 'region_name' }), row('Region lore', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'region', name: n.value, area: '', rooms: [] })),
+                return [{ op: 'create_region', name: n.value.trim(), ...(notes.value.trim() ? { lore: notes.value.trim() } : {}), subregion: { name: sn.value.trim(), ...(snotes.value.trim() ? { lore: snotes.value.trim() } : {}), place: p.get() } }]; };
+            header('Create region', $('p', { class: 'muted' }, 'A region needs its first subregion and a starting place.'), row('Region name', n, { 'data-field': 'region_name' }), row('Region lore', notes), aiBtn(notes, () => ({ field: 'lore', kind: 'region', name: n.value, area: '', rooms: [] })),
                 row('First subregion name', sn, { 'data-field': 'sub_name' }), row('Subregion lore', snotes), ...p.els);
             break;
         }
         case 'create_subregion': {
             const n = input(), notes = area(), p = placeFields(() => t, true, 'First place');
-            build = () => { if (!n.value.trim()) throw new Error('Subregion name is required.'); return [{ op: 'create_subregion', region: t, name: n.value.trim(), ...(notes.value.trim() ? { notes: notes.value.trim() } : {}), place: p.get() }]; };
-            header(`Create subregion in ${findRegion(o, t)?.name ?? t}`, row('Subregion name', n, { 'data-field': 'sub_name' }), row('Lore', notes), aiBtn(notes, () => ({ field: 'notes', kind: 'subregion', name: n.value, area: t, rooms: [] })), ...p.els);
+            build = () => { if (!n.value.trim()) throw new Error('Subregion name is required.'); return [{ op: 'create_subregion', region: t, name: n.value.trim(), ...(notes.value.trim() ? { lore: notes.value.trim() } : {}), place: p.get() }]; };
+            header(`Create subregion in ${findRegion(o, t)?.name ?? t}`, row('Subregion name', n, { 'data-field': 'sub_name' }), row('Lore', notes), aiBtn(notes, () => ({ field: 'lore', kind: 'subregion', name: n.value, area: t, rooms: [] })), ...p.els);
             break;
         }
         case 'create_place': {

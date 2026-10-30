@@ -1,7 +1,7 @@
 // What a moved place starts or stops inheriting from its new parents (notes, climate, exposure...): compared on the
 // effective values before and after the move, so only categories that actually differ are listed. Read-only.
 const CATS = [
-    ['notes', (w, l) => { const n = w.effective_notes(l); return [n.region ?? null, n.subregion ?? null]; }],
+    ['lore', (w, l) => { const n = w.effective_lore(l); return [n.region ?? null, n.subregion ?? null]; }],
     ['climate', (w, l) => { const p = w.place_weather(l); return [p.weather_region ?? null, p.fixed_weather ?? null]; }],
     ['exposure', (w, l) => w.place_weather(l).exposure],
     ['temperature', (w, l) => { const p = w.place_weather(l); return [p.indoor_temp, p.temp_offset]; }],

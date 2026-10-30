@@ -13,7 +13,7 @@ test('patch prompt: descriptions say what a place is now, traces allowed, the ch
     assert.match(sys, /traces of the past are fine/);
     assert.match(sys, /Never narrate the change itself: no "has been replaced by", "was transformed", "was once", "now"/);
     assert.match(sys, /History goes in notes/);
-    assert.match(sys, /"op":"append_notes"/);
+    assert.match(sys, /"op":"append_lore"/);
     assert.match(sys, /temporary change with "lasts".*may mention the event/);
     assert.doesNotMatch(sys.slice(sys.indexOf('Example')), /"text":"[^"]*(has been|was transformed|was once)/, 'the example obeys the rule');
 });
