@@ -1,4 +1,4 @@
-// Fake OpenAI-compatible server. Replies come from a queue: POST /__queue [{content} | {tool_calls:[{name, arguments}]}]
+// Fake OpenAI-compatible server. Replies come from a queue: POST /__queue [{content} | {tool_calls:[{name, arguments}]} | {error} (a 500)]
 // GET /__requests returns the received chat-completion bodies.
 import http from 'node:http';
 const port = Number(process.argv[2] ?? 9098);
@@ -12,6 +12,7 @@ http.createServer(async (req, res) => {
         const body = JSON.parse(await readBody(req));
         requests.push(body);
         const next = queue.shift() ?? { content: 'ok' };
+        if (next.error) return json(500, { error: { message: next.error, type: 'server_error' } });
         const message = next.tool_calls
             ? { role: 'assistant', content: '', tool_calls: next.tool_calls.map((t, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.arguments ?? {}) } })) }
             : { role: 'assistant', content: next.content };

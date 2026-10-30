@@ -1328,6 +1328,18 @@ try {
     check('game-time labels follow an edited earlier wait', /\(\+1h\)/.test(relabel.edited) && /\(\+2h\)/.test(relabel.back), JSON.stringify(relabel));
     const cn = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch.filter(x => !x.is_user && !x.is_system).pop(); return m?.extra?.worldscrawl_calls?.[m.swipe_id ?? 0] ?? null; });
     check('model-call notes: the narrator reply is noted (what it emitted, or no tool call)', Array.isArray(cn) && cn.some(n => n.kind === 'narrator reply' && (n.emitted?.length || n.reason === 'narrator made no tool call')), JSON.stringify(cn));
+    // A narrator generation that fails outright: noted on the player's message that triggered it.
+    await queue([{ content: 'stay' }, { error: 'fake model is down' }, { error: 'fake model is down' }]);
+    await send('I hum a tune quietly.');
+    const nf = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), i = c.chat.length - 1, m = c.chat[i];
+        const { messageActivity } = await import('/scripts/extensions/third-party/WorldScrawl/activity.mjs');
+        return { user: !!m.is_user, notes: m.extra?.worldscrawl_calls?.[m.swipe_id ?? 0] ?? null, act: messageActivity(m, i).filter(e => e.kind === 'call').map(e => `${e.label}: ${e.status} ${e.reason ?? ''}`) };
+    });
+    check('a failed narrator generation is noted on the player message (kind narrator, failed, reason) and shown in the activity log', nf.user && nf.notes?.some(n => n.kind === 'narrator' && n.status === 'failed' && /fake model is down|error|no reply/.test(n.reason ?? '')) && nf.act.some(t => /^narrator: failed/.test(t)), JSON.stringify(nf));
+    await queue([]);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); if (c.chat[c.chat.length - 1]?.is_user) await c.executeSlashCommandsWithOptions('/cut ' + (c.chat.length - 1)); });
+    await page.waitForTimeout(1000);
     const t1 = await clockNow();
     expected += 1; await ui.selectOption('#waitPick', 'sleep|8h'); await waitReqs();
     check('map Wait picker: sleep 8h via the chat tab', (await clockNow()) - t1 === 8 * 3600, `${(await clockNow()) - t1}`);
