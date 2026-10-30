@@ -85,8 +85,8 @@ test('a passed door reveals its destination; dug exits and new rooms appear; rem
 });
 
 test('closed doors, open doors and pairs of exits', () => {
-    assert.equal(isClosed({ view: 'closed', door: 'd1' }), true);
-    assert.equal(isClosed({ view: 'closed', door: 'd1' }, ['d1']), false);
+    assert.equal(isClosed({ barrier: {}, door: 'd1' }), true);
+    assert.equal(isClosed({ barrier: {}, door: 'd1' }, ['d1']), false);
     assert.equal(isClosed({ view: 'open' }), false);
     const c = client(ROOT);
     const raw = rooms(c, [TAVERN, SQUARE]);

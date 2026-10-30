@@ -67,11 +67,6 @@ test('one placeholder dictionary describes every placeholder; fixed values are l
     assert.match(def.placeholders.party, /Who moves/);
     assert.ok(!used.has('who') && !def.prompts.some(e => e.text.includes('{{who}}')));
 });
-test('{{who}} still works as the old name of {{party}} in saved profiles', async () => {
-    const pr = await import('../../plugin/ui/prompts.mjs');
-    pr.setPrompts({ 'x': 'A {{who}} B {{party}}' });
-    assert.equal(pr.render('x', { party: 'Ann and Bob' }), 'A Ann and Bob B Ann and Bob');
-});
 test('Writing style: open by default, holds the prose prompts, each says which process uses it', () => {
     assert.equal(def.groups[0].open, true);
     assert.ok(def.groups.slice(1).every(g => !g.open));

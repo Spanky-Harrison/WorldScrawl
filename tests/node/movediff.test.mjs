@@ -15,13 +15,13 @@ test('move_area: one subregion line with its places as children', () => {
     assert.equal(it.kind, 'subregion'); assert.equal(it.new, 'b:x'); assert.equal(it.children.length, 2); assert.equal(it.renamed, null);
 });
 test('region bulk move: one group, one line per subregion, a shared note once per group', () => {
-    const n = { kind: 'region', from: 'Larkspur', to: 'Riverton', changed: ['notes', 'climate'] };
+    const n = { kind: 'region', from: 'Larkspur', to: 'Riverton', changed: ['lore', 'climate'] };
     const { groups } = moveGroups({ ops: [{ op: 'remove_area', area: 'l', contents: 'move', into: 'r' }],
         relocate: { 'l:s1/a': 'r:s1/a', 'l:s2/b': 'r:s2/b' }, inherit: { 'l:s1/a': n, 'l:s2/b': n } });
     assert.equal(groups.length, 1); assert.equal(groups[0].items.length, 2);
     assert.ok(groups[0].note); assert.ok(groups[0].items.every(i => !i.note));
 });
 test('inheritance line names only the differing categories', () => {
-    const t = inheritLine({ kind: 'region', from: 'Larkspur', to: 'Riverton', changed: ['notes', 'climate'] });
-    assert.match(t ?? '', /Riverton/); assert.match(t ?? '', /notes/); assert.match(t ?? '', /Larkspur/);
+    const t = inheritLine({ kind: 'region', from: 'Larkspur', to: 'Riverton', changed: ['lore', 'climate'] });
+    assert.match(t ?? '', /Riverton/); assert.match(t ?? '', /lore/); assert.match(t ?? '', /Larkspur/);
 });

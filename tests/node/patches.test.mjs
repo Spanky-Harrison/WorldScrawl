@@ -13,9 +13,9 @@ const worldWith = (changes, now = null) => build_world(...apply_changes(...base(
 const exit = (w, a, d) => w.get(a).exits.find(e => e.direction.toLowerCase() === d);
 
 test('description and notes ops', () => {
-    const w = worldWith([patch([{ op: 'set_description', loc: TAVERN, text: 'Charred beams and ash.' }, { op: 'append_notes', area: 'riverton:drowned_rat', text: 'Burned down.' }])]);
+    const w = worldWith([patch([{ op: 'set_description', loc: TAVERN, text: 'Charred beams and ash.' }, { op: 'append_lore', area: 'riverton:drowned_rat', text: 'Burned down.' }])]);
     assert.equal(w.get(TAVERN).description, 'Charred beams and ash.');
-    assert.match(w.subregions.get('riverton:drowned_rat').notes, /Burned down\.$/);
+    assert.match(w.subregions.get('riverton:drowned_rat').lore, /Burned down\.$/);
 });
 
 test('block, open, break and remove exits (both sides)', () => {
@@ -156,7 +156,7 @@ test('ids: full addresses or bare ids are accepted; new room ids come from the n
 test('update_area: the Drowned Rat becomes a golden palace (area renamed, every room re-described, ids and exits unchanged)', () => {
     const rooms = ['common_room', 'courtyard', 'cellar', 'kitchens', 'stable', 'upstairs'].map(x => R + x);
     const before = worldWith([]);
-    const ops = [{ op: 'update_area', area: 'riverton:drowned_rat', name: 'The Golden Palace', notes: 'Gold everywhere.' }, ...rooms.map(a => ({ op: 'set_description', loc: a, text: `Gilded ${a}.` }))];
+    const ops = [{ op: 'update_area', area: 'riverton:drowned_rat', name: 'The Golden Palace', lore: 'Gold everywhere.' }, ...rooms.map(a => ({ op: 'set_description', loc: a, text: `Gilded ${a}.` }))];
     const w = worldWith([patch(ops)]);
     assert.equal(w.subregions.get('riverton:drowned_rat').name, 'The Golden Palace');
     for (const a of rooms) {

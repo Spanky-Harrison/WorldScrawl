@@ -44,11 +44,7 @@ try {
     check('old checkboxes gone', await page.locator('#worldscrawl_use_tools, #worldscrawl_parse_intent').count() === 0);
     const mig = await page.evaluate(async () => {
         const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
-        const es = SillyTavern.getContext().extensionSettings; const keep = es.worldscrawl; const out = [];
-        for (const old of [{ parseIntent: false, useTools: false }, { parseIntent: true, useTools: true }, { parseIntent: true, useTools: false }, {}]) {
-            es.worldscrawl = { serverUrl: keep.serverUrl, ...old }; const s = m.settings(); out.push(s.moveMode + (('useTools' in s || 'parseIntent' in s) ? '!' : ''));
-        }
-        es.worldscrawl = keep;
+        const out = [];
         const p = m.parseIntentAnswer;
         out.push(p('<think>they want to leave</think>\nOut.', ['out', 'up']), p('Answer: Elsewhere', ['out']), p('STAY', ['out']), p('the temple', ['out']), p('<think>unfinished', ['out']));
         out.push(m.parseYesNo('<think>hmm</think>\nYes.'), m.parseYesNo('maybe'));
@@ -64,8 +60,7 @@ try {
         out.push(m.exitsText(hid), m.exitLabel(hid.exits[0]), m.revealsDestination(hid.exits[1]));
         return out;
     });
-    check('old checkbox settings migrate to radio', JSON.stringify(mig.slice(0, 4)) === '["commands","tools","typed","typed"]', JSON.stringify(mig));
-    check('answer parsing (think tags, prefixes, exact match)', JSON.stringify(mig.slice(4)) === '["out","elsewhere","stay",null,null,"yes",null,"[{\\"direction\\":\\"to_b\\",\\"to\\":\\"r:b\\"},{\\"direction\\":\\"to_c\\",\\"to\\":\\"r:c\\"}]","Exits: north, out (Village Square)","north",true]', JSON.stringify(mig.slice(4)));
+    check('answer parsing (think tags, prefixes, exact match)', JSON.stringify(mig) === '["out","elsewhere","stay",null,null,"yes",null,"[{\\"direction\\":\\"to_b\\",\\"to\\":\\"r:b\\"},{\\"direction\\":\\"to_c\\",\\"to\\":\\"r:c\\"}]","Exits: north, out (Village Square)","north",true]', JSON.stringify(mig));
     const rt = await page.evaluate(() => window.__routeTests);
     check('route refused when shortest path needs an unvisited room', rt[0] === 'null', JSON.stringify(rt));
     check('route goes the long way via visited rooms only', rt[1] === '["south","east","north"]', JSON.stringify(rt));
@@ -1077,8 +1072,8 @@ try {
     const rp = E2E_TMP + '/ws-worlds/doorsworld/regions/riverton.json', rj = JSON.parse(fsD.readFileSync(rp, 'utf8'));
     const exD = (sub, loc, d) => rj.subregions[sub].locations[loc].exits.find(e => e.direction === d);
     rj.stays_open = true; rj.subregions.drowned_rat.stays_open = false;
-    Object.assign(exD('drowned_rat', 'common_room', 'out'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'in'), { view: 'closed' });
-    Object.assign(exD('temple', 'nave', 'south'), { view: 'closed' }); Object.assign(exD('streets', 'square', 'east'), { view: 'closed', stays_open: false });
+    Object.assign(exD('drowned_rat', 'common_room', 'out'), { barrier: {} }); Object.assign(exD('streets', 'square', 'in'), { barrier: {} });
+    Object.assign(exD('temple', 'nave', 'south'), { barrier: {} }); Object.assign(exD('streets', 'square', 'east'), { barrier: {}, stays_open: false });
     fsD.writeFileSync(rp, JSON.stringify(rj, null, 2));
     fsD.writeFileSync(E2E_TMP + '/ws-worlds/doorsworld/world.json', JSON.stringify({ name: 'Doors World', start_region: 'riverton', living: false, weather_regions: { riverside: { climate: 'temperate' } } }));
     await (await stFetch('/worlds')).json(); // rescan
@@ -1488,7 +1483,7 @@ try {
     await ui.click('.side .editlive');
     const nameIn = ui.locator('.side .placeform > .pf-row[data-field="name"] input').first();
     await nameIn.waitFor({ timeout: 10000 });
-    const areaForm = await ui.evaluate(() => ({ kind: document.querySelector('.side .placeform')?.dataset.kind, btn: document.querySelector('.side .editlive')?.textContent, notes: !!document.querySelector('.side .placeform .pf-row[data-field="notes"] textarea'), stays: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-from')?.textContent ?? null, staysReset: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-reset')?.hidden === false, regionNote: !!document.querySelector('.side .placeform .pf-parent-note[data-from="region"]') }));
+    const areaForm = await ui.evaluate(() => ({ kind: document.querySelector('.side .placeform')?.dataset.kind, btn: document.querySelector('.side .editlive')?.textContent, notes: !!document.querySelector('.side .placeform .pf-row[data-field="lore"] textarea'), stays: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-from')?.textContent ?? null, staysReset: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-reset')?.hidden === false, regionNote: !!document.querySelector('.side .placeform .pf-parent-note[data-from="region"]') }));
     check('area Edit form: same style, prefilled with the live name, notes textarea, defaults tagged', (await nameIn.inputValue()) === an0.v && /^(sub)?region$/.test(areaForm.kind) && /^Edit (sub)?region$/.test(areaForm.btn) && areaForm.notes && areaForm.stays === null && !areaForm.staysReset, await nameIn.inputValue() + JSON.stringify(areaForm));
     await nameIn.fill('The Gilded Quarter');
     try { await ui.waitForFunction(() => /Gilded Quarter/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
@@ -1496,7 +1491,7 @@ try {
     await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
     const ae = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, op: m.extra?.worldscrawl_patches?.[0]?.ops?.[0] }; }, nArea);
-    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter' && !('notes' in ae.op), JSON.stringify(ae));
+    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter' && !('lore' in ae.op), JSON.stringify(ae));
     await ui.waitForTimeout(1500);
     for (let k = 0; k < 4; k++) { // the map re-renders after the stamp; reopen the area page once it settles
         await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(1000);

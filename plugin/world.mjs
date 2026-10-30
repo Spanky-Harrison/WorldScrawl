@@ -6,9 +6,7 @@
 //                          locations: {loc_id: {name, description, lore?, inherit_region_lore?: bool,
 //                                               inherit_subregion_lore?: bool, exits: [...]}}}}}
 // "description" is what the senses take in (fed on moves and looks); "lore" is background knowledge (history, who
-// runs the place), fed only when asked for (see docs/lore.md). Legacy files say "notes" / "inherit_notes" /
-// "inherit_region_notes" / "inherit_subregion_notes": read the same. In memory (and in map patches) the key stays
-// "notes" so old chats' set_notes / append_notes ops keep working; liftLore / lowerLore convert at the file edge.
+// runs the place), fed only when asked for (see docs/lore.md).
 // Map-only hint (optional): pos?: {x, y} on a location.
 // Full address: "region:sub/loc". Exit "to": "loc" (same subregion), "sub/loc" (same region) or "region:sub/loc".
 import crypto from 'node:crypto';
@@ -20,7 +18,7 @@ import { BAR_SIDES, flipBar } from './ui/doorbar.mjs';
 export { BAR_SIDES, flipBar };
 
 export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
-export const VIEWS = ['open', 'closed', 'none']; // legacy exit "view" (read as sight/sound/barrier; see exitShape)
+export const VIEWS = ['open']; // exit "view": "open" = a hidden/obscured exit with no door of its own (see exitShape)
 export const EXIT_FLAGS = ['hidden', 'obscured', 'one_way'];
 export const LEVELS = ['clear', 'partial', 'none']; // exit "sight" / "sound", and a barrier's closed_sight / closed_sound
 /** Exit type presets (plugin/exit_types.json): type -> default fields. A new type is a new entry there. */
@@ -161,15 +159,14 @@ export class Exit {
         this.travel_time = null; // seconds from "travel_time" in the region file, or null = default (calendar.mjs defaultTravel)
         this.type = DEFAULT_EXIT_TYPE; this.sight = EXIT_TYPES[DEFAULT_EXIT_TYPE]?.sight ?? 'partial'; this.sound = EXIT_TYPES[DEFAULT_EXIT_TYPE]?.sound ?? 'partial';
         this.barrier = null; // {closed_sight, closed_sound, openable, starts_open, locked, stays_open (null = inherit)} or null
-        this.barrier_explicit = false; // set in the file ("barrier" or legacy "view": "closed"): shared with the return exit
+        this.barrier_explicit = false; // set in the file ("barrier"): shared with the return exit
         this.traversal = null; // narrator note for the move that uses this exit
         this.barrier_from = null; // address of the room whose exit defines the shared barrier (the primary side)
-        this.barrier_own = false; // this exit's own entry has "barrier" (or legacy "view": "closed")
-        this.legacy_view = false; // the barrier came from the legacy "view": "closed"
+        this.barrier_own = false; // this exit's own entry has "barrier"
         this.raw = null; // the exit object as written in the region file (for the inspector)
     }
     get flagged() { return Boolean(this.flags.hidden || this.flags.obscured); }
-    /** Legacy one-word view: "closed" if something can block it, "none" if nothing is seen through it, else "open". */
+    /** One-word view (for the client): "closed" if something can block it, "none" if nothing is seen through it, else "open". */
     get effective_view() { return this.barrier ? 'closed' : this.sight === 'none' ? 'none' : 'open'; }
     /** A barrier nobody can get through now (static: can't be opened, or locked shut). */
     get blocked() { return Boolean(this.barrier && !this.barrier.starts_open && (!this.barrier.openable || this.barrier.locked)); }
@@ -188,16 +185,16 @@ export class World {
     /** Seconds a step through exit e (from room src) takes: its travel_time, else the default for where it leads. */
     travel_seconds(e, src) { return e.travel_time ?? defaultTravel(src?.address ?? '', e.to); }
     sub_of(loc) { return this.subregions.get(`${loc.region}:${loc.subregion}`); }
-    effective_notes(loc) {
+    effective_lore(loc) {
         const region = this.regions.get(loc.region), sub = this.sub_of(loc);
-        const useRegion = loc.inherit_region_notes === null ? sub.inherit_notes : loc.inherit_region_notes;
-        const useSub = loc.inherit_subregion_notes === null ? true : loc.inherit_subregion_notes;
-        return { region: useRegion ? region.notes : null, subregion: useSub ? sub.notes : null };
+        const useRegion = loc.inherit_region_lore === null ? sub.inherit_lore : loc.inherit_region_lore;
+        const useSub = loc.inherit_subregion_lore === null ? true : loc.inherit_subregion_lore;
+        return { region: useRegion ? region.lore : null, subregion: useSub ? sub.lore : null };
     }
     /** The lore chain for a room, innermost first: [{level: 'room'|'subregion'|'region', name, text}] (inherit rules applied, empty ones dropped). */
     lore_chain(loc) {
-        const n = this.effective_notes(loc), sub = this.sub_of(loc), region = this.regions.get(loc.region);
-        return [['room', loc.name, loc.notes], ['subregion', sub.name, n.subregion], ['region', region.name, n.region]]
+        const n = this.effective_lore(loc), sub = this.sub_of(loc), region = this.regions.get(loc.region);
+        return [['room', loc.name, loc.lore], ['subregion', sub.name, n.subregion], ['region', region.name, n.region]]
             .filter(([, , t]) => typeof t === 'string' && t.trim()).map(([level, name, text]) => ({ level, name, text }));
     }
     static place_label(name, subName) { return subName && subName !== name ? `${name} (${subName})` : name; }
@@ -230,14 +227,14 @@ export class World {
         return {
             address: loc.address,
             room_token: room_token(loc.address),
-            region: { id: region.id, name: region.name, notes: region.notes, entrance: region.entrance },
-            subregion: { id: sub.id, name: sub.name, notes: sub.notes, entrance: sub.entrance,
+            region: { id: region.id, name: region.name, lore: region.lore, entrance: region.entrance },
+            subregion: { id: sub.id, name: sub.name, lore: sub.lore, entrance: sub.entrance,
                 entrance_name: this.locations.get(sub.entrance).name, label_rooms: sub.label_rooms },
             ...(loc.pos ? { pos: { ...loc.pos } } : {}),
             name: loc.name,
             display_name: World.place_label(loc.name, sub.name),
             description: loc.description,
-            lore: loc.notes ?? null, effective_notes: this.effective_notes(loc), lore_chain: this.lore_chain(loc), expandable: loc.expandable !== false,
+            lore: loc.lore ?? null, effective_lore: this.effective_lore(loc), lore_chain: this.lore_chain(loc), expandable: loc.expandable !== false,
             exits: loc.exits.map(e => this._exit_dict(e, loc)),
             views: loc.views.map(a => this.view_dict(a)),
             weather: this.place_weather(loc),
@@ -294,9 +291,8 @@ export class World {
 }
 
 /**
- * Type, sight, sound, barrier and traversal of an exit. Precedence: the exit's own fields > legacy "view" > its type's
- * preset > nothing. Legacy: "view": "closed" = a door ("barrier": {}), "none" = sight and sound none, "open" = the
- * type's defaults; a hidden/obscured exit with neither "view" nor "barrier" gets a door on its own side only (as before).
+ * Type, sight, sound, barrier and traversal of an exit. Precedence: the exit's own fields > its type's preset > nothing.
+ * A hidden/obscured exit with neither "barrier" nor "view": "open" gets a door on its own side only.
  */
 export function exitShape(e, ex, where) {
     const type = has(ex, 'type') ? ex.type : DEFAULT_EXIT_TYPE;
@@ -308,10 +304,9 @@ export function exitShape(e, ex, where) {
         if (!LEVELS.includes(ex[k])) throw new WorldError(`${where}: "${k}" must be one of ${LEVELS.join(', ')}`);
         return ex[k];
     };
-    const legacyNone = e.view === 'none';
-    e.sight = level('sight', legacyNone ? 'none' : preset.sight ?? 'partial');
+    e.sight = level('sight', preset.sight ?? 'partial');
     e._sight_given = has(ex, 'sight') ? ex.sight : null;
-    e.sound = level('sound', legacyNone ? 'none' : preset.sound ?? 'partial');
+    e.sound = level('sound', preset.sound ?? 'partial');
     if (has(ex, 'barrier')) {
         const b = ex.barrier;
         if (!isObj(b)) throw new WorldError(`${where}: "barrier" must be an object (use {} for an ordinary closed door)`);
@@ -325,8 +320,6 @@ export function exitShape(e, ex, where) {
         if (!out.openable && out.starts_open) throw new WorldError(`${bw}: a barrier that can't be opened ("openable": false) can't start open`);
         e.barrier = out; e.barrier_explicit = true;
         e._barrier_given = Object.fromEntries(Object.keys(b).map(k => [k, b[k]]));
-    } else if (e.view === 'closed') {
-        e.barrier = { ...BARRIER_DEFAULTS, stays_open: e.stays_open }; e.barrier_explicit = true; e._barrier_given = {}; e.legacy_view = true;
     } else if (e.view === null && e.flagged) {
         e.barrier = { ...BARRIER_DEFAULTS, stays_open: e.stays_open }; // side-local, as hidden/obscured exits always were
     }
@@ -380,24 +373,6 @@ export function regionFiles(root) {
     return fs.readdirSync(dir).filter(n => n.endsWith('.json') && isFile(path.join(dir, n))).sort().map(n => path.join(dir, n));
 }
 
-const LORE_KEYS = [['lore', 'notes'], ['inherit_lore', 'inherit_notes'], ['inherit_region_lore', 'inherit_region_notes'], ['inherit_subregion_lore', 'inherit_subregion_notes']];
-const eachPlace = (raw, fn) => {
-    for (const r of Object.values(raw ?? {})) {
-        if (!isObj(r)) continue;
-        fn(r);
-        for (const s of Object.values(isObj(r.subregions) ? r.subregions : {})) {
-            if (!isObj(s)) continue;
-            fn(s);
-            for (const l of Object.values(isObj(s.locations) ? s.locations : {})) if (isObj(l)) fn(l);
-        }
-    }
-    return raw;
-};
-/** File keys -> memory keys, in place: "lore" -> "notes" (lore wins when a file has both), inherit_*_lore likewise. */
-export const liftLore = raw => eachPlace(raw, o => { for (const [file, mem] of LORE_KEYS) if (has(o, file)) { o[mem] = o[file]; delete o[file]; } });
-/** Memory keys -> file keys, on a copy: what a saved world writes. */
-export const lowerLore = raw => eachPlace(JSON.parse(JSON.stringify(raw)), o => { for (const [file, mem] of LORE_KEYS) if (has(o, mem)) { o[file] = o[mem]; delete o[mem]; } });
-
 /** The hand-written files as plain JSON: [world.json, {region_id: region file}]. */
 export function read_world_raw(root) {
     const worldFile = path.join(root, 'world.json');
@@ -408,14 +383,13 @@ export function read_world_raw(root) {
     if (!files.length) throw new WorldError(`no region files found in ${path.join(root, 'regions')}`);
     const raw = {};
     for (const p of files) Object.defineProperty(raw, path.basename(p, '.json'), { value: loadJson(p), enumerable: true, writable: true, configurable: true });
-    return [worldJson, liftLore(raw)];
+    return [worldJson, raw];
 }
 
 export const load_world = root => build_world(...read_world_raw(root));
 
 /** Validate and build a World from plain JSON (as read from a world folder, possibly with changes applied). */
 export function build_world(worldJson, rawRegions) {
-    liftLore(rawRegions);
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
     const worldExpandable = optionalBool(worldJson, 'expandable', 'world.json');
@@ -440,7 +414,7 @@ export function build_world(worldJson, rawRegions) {
         if (!isObj(data)) throw new WorldError(`${fname}: must be a JSON object`);
         checkSlug(rid, `${fname}: region id (file name)`);
         if (has(data, 'id') && data.id !== rid) throw new WorldError(`${fname}: region id ${repr(data.id)} must match the file name (${repr(rid)})`);
-        const region = { id: rid, name: requireStr(data, 'name', fname), notes: requireStr(data, 'notes', fname, true), entrance: '',
+        const region = { id: rid, name: requireStr(data, 'name', fname), lore: requireStr(data, 'lore', fname, true), entrance: '',
             stays_open: optionalBool(data, 'stays_open', fname), expandable: optionalBool(data, 'expandable', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
         if (region.place.exposure) anyExposure = true;
         regions.set(rid, region);
@@ -457,14 +431,14 @@ export function build_world(worldJson, rawRegions) {
             const swhere = `${fname}: subregion ${repr(sid)}`;
             checkSlug(sid, `${fname}: subregion id`);
             if (!isObj(sub)) throw new WorldError(`${swhere}: must be an object`);
-            const inherit = optionalBool(sub, 'inherit_notes', swhere);
+            const inherit = optionalBool(sub, 'inherit_lore', swhere);
             const locs = sub.locations;
             if (!isObj(locs) || !Object.keys(locs).length) throw new WorldError(`${swhere}: "locations" must be a non-empty object keyed by location id`);
             const entrance = requireStr(sub, 'entrance', swhere, true) || Object.keys(locs)[0];
             if (!has(locs, entrance)) throw new WorldError(`${swhere}: entrance ${repr(entrance)} is not a room in this subregion`);
             subregions.set(`${rid}:${sid}`, {
-                id: sid, name: requireStr(sub, 'name', swhere), notes: requireStr(sub, 'notes', swhere, true),
-                inherit_notes: inherit === null ? true : inherit, entrance: `${rid}:${sid}/${entrance}`,
+                id: sid, name: requireStr(sub, 'name', swhere), lore: requireStr(sub, 'lore', swhere, true),
+                inherit_lore: inherit === null ? true : inherit, entrance: `${rid}:${sid}/${entrance}`,
                 label_rooms: Boolean(optionalBool(sub, 'label_rooms', swhere)), stays_open: optionalBool(sub, 'stays_open', swhere),
                 expandable: optionalBool(sub, 'expandable', swhere),
                 place: place(sub, swhere),
@@ -505,8 +479,8 @@ export function build_world(worldJson, rawRegions) {
                 const address = `${rid}:${sid}/${lid}`;
                 rawViews.push([where, rid, sid, address, views]);
                 locations.set(address, {
-                    address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), notes: requireStr(loc, 'notes', where, true), exits,
-                    inherit_region_notes: optionalBool(loc, 'inherit_region_notes', where), inherit_subregion_notes: optionalBool(loc, 'inherit_subregion_notes', where),
+                    address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), lore: requireStr(loc, 'lore', where, true), exits,
+                    inherit_region_lore: optionalBool(loc, 'inherit_region_lore', where), inherit_subregion_lore: optionalBool(loc, 'inherit_subregion_lore', where),
                     expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
                 if (locations.get(address).place.exposure) anyExposure = true;
@@ -591,7 +565,6 @@ export function build_world(worldJson, rawRegions) {
     w.weather = weather.config;
     if (!anyExposure) warn('world: no region, subregion or room sets "exposure", so every room is outdoor (it will rain indoors)', ['world']);
     for (const loc of locations.values()) for (const e of loc.exits) {
-        if (e.legacy_view) warn(`world: ${loc.address} exit ${repr(e.direction)} uses the old "view": "closed"; it is read as a door ("barrier": {})`, [exitRef(loc.address, e), `loc:${loc.address}`], true);
     }
     w.warnings = warnings;
     for (const loc of locations.values()) {

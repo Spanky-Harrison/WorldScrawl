@@ -2,12 +2,12 @@ import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { applyPatch, PatchError } from '../../plugin/ui/patches.mjs';
+import { applyPatch, PatchError, discoverToCreate } from '../../plugin/ui/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
 const c = client(RIVERTON);
 const UP = 'riverton:drowned_rat/upstairs', ROOM = 'riverton:drowned_rat/guest_room';
-const op = (extra = {}) => ({ op: 'discover', loc: UP, direction: 'guest room door', return_direction: 'hallway', name: 'Guest Room',
+const op = (extra = {}) => discoverToCreate({ loc: UP, direction: 'guest room door', return_direction: 'hallway', name: 'Guest Room',
     description: 'A narrow bed and a washstand under a sloping ceiling.', ...extra });
 const patch = (ops, extra = {}) => ({ type: 'patch', id: 'd1', note: 'discovery', at: 0, ops, ...extra });
 const rooms = (a, changes) => c.post('/rooms', { json: { addresses: [a], changes } }).json();

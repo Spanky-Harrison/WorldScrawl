@@ -14,7 +14,7 @@ import { resolvePosition, relocateMap } from './position.mjs';
 import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCastNpc } from './cast.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
 import { opActive, parseLasts } from './ui/patches.mjs';
-import { World, WorldError, build_world, has, lowerLore, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
+import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
 export const VERSION_HEADER = 'X-WorldScrawl-Map-Version';
@@ -388,7 +388,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const names = [...affected.filter(a => wanted.includes(a)).map(a => e.w.get(a)?.name), ...wanted.filter(x => !x.includes('/')).map(areaName)].filter(Boolean);
             const mentions = mentionsOf(e.raw, names, new Set([...affected, ...wanted]));
             return { location: loc.address, area: loc.address.split('/')[0], area_name: sub.name, region_name: e.w.regions.get(loc.address.split(':')[0])?.name ?? '', outline, rooms, neighbors, mentions,
-                areas: Object.fromEntries(wanted.filter(a => !a.includes('/')).map(a => { const [r, s2] = a.split(':'); const o = s2 ? raw[r]?.subregions?.[s2] : raw[r]; return [a, o ? { name: o.name, notes: o.notes ?? '' } : null]; })) };
+                areas: Object.fromEntries(wanted.filter(a => !a.includes('/')).map(a => { const [r, s2] = a.split(':'); const o = s2 ? raw[r]?.subregions?.[s2] : raw[r]; return [a, o ? { name: o.name, lore: o.lore ?? '' } : null]; })) };
         },
         // A discovery (a room behind a door the description only mentions): the room, its neighbors one step out, and
         // the subregion and region notes, for the model call that writes the new room.
@@ -399,8 +399,8 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const reg = e.raw[rid] ?? {}, subRaw = reg.subregions?.[sid] ?? {};
             return { location: loc.address, name: loc.name, description: loc.description ?? '', expandable: loc.expandable !== false,
                 exits: loc.exits.map(x => ({ direction: x.direction, to: x.to, ...(x.description ? { description: x.description } : {}) })),
-                neighbors: neighborsOf(e.w, [loc.address]), area: `${rid}:${sid}`, area_name: sub.name, area_notes: subRaw.notes ?? '',
-                region: rid, region_name: reg.name ?? rid, region_notes: reg.notes ?? '' };
+                neighbors: neighborsOf(e.w, [loc.address]), area: `${rid}:${sid}`, area_name: sub.name, area_notes: subRaw.lore ?? '',
+                region: rid, region_name: reg.name ?? rid, region_notes: reg.lore ?? '' };
         },
         'POST /patch/preview': ({ q, body }) => {
             needBody(body);
@@ -415,7 +415,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             }
             const before = structuredClone(e.raw); normalizeRefs(before);
             const touched = [...new Set(r.touched)];
-            const areaOf = (src, a) => { const [rid, sid] = a.split(':'); const o = sid ? src[rid]?.subregions?.[sid] : src[rid]; return o ? { name: o.name ?? a, notes: o.notes ?? '', area: true } : null; };
+            const areaOf = (src, a) => { const [rid, sid] = a.split(':'); const o = sid ? src[rid]?.subregions?.[sid] : src[rid]; return o ? { name: o.name ?? a, lore: o.lore ?? '', area: true } : null; };
             const pick = src => Object.fromEntries(touched.map(a => [a, a.includes('/') ? getRoom(src, a) : areaOf(src, a)]));
             return { ok: true, ops: r.ops, noops: r.noops, summary: r.summary, relocate: r.relocate, inherit: inheritNotes(e.w, wa, r.relocate), names: moveNames(e.w, wa, r.relocate), touched: [...new Set(r.touched)], before: pick(before), after: pick(raw) };
         },
@@ -700,7 +700,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         try {
             fs.mkdirSync(path.join(tmp, 'regions'));
             writeJson(path.join(tmp, 'world.json'), wj);
-            for (const [rid, data] of Object.entries(lowerLore(raw))) writeJson(path.join(tmp, 'regions', `${rid}.json`), data);
+            for (const [rid, data] of Object.entries(raw)) writeJson(path.join(tmp, 'regions', `${rid}.json`), data);
             if (know !== null) writeJson(path.join(tmp, 'knowledge.json'), know);
             if (over === null) {
                 if (fs.existsSync(target)) throw new HttpError(409, `World ${repr(wid)} already exists.`);

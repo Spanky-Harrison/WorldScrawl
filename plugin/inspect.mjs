@@ -64,7 +64,7 @@ export function findExit(w, ref) {
 
 export function exitRows(w, loc, e) {
     const given = isObj(e.raw) ? e.raw : {}, preset = EXIT_TYPES[e.type] ?? {};
-    const lvl = k => (has(given, k) ? 'own' : has(given, 'view') && (k === 'sight' || k === 'sound') && given.view === 'none' ? 'own (legacy "view": "none")' : has(preset, k) ? `from type "${e.type}"` : 'default');
+    const lvl = k => (has(given, k) ? 'own' : has(preset, k) ? `from type "${e.type}"` : 'default');
     const rows = [row('to', e.to, 'own'), row('type', e.type, has(given, 'type') ? 'own' : 'default'), row('sight', e.sight, e.flags.obscured && given.sight !== 'none' ? 'obscured (always none)' : lvl('sight')),
         row('sound', e.sound, lvl('sound')), row('travel_time', w.travel_seconds(e, loc), has(given, 'travel_time') ? `own ("${given.travel_time}")` : 'default'),
         ...['hidden', 'obscured', 'one_way'].map(f => row(f, !!e.flags[f], has(given, f) ? 'own' : 'default')),
@@ -80,7 +80,6 @@ export function exitRows(w, loc, e) {
             if (k === 'closed_sight' && e.flags.obscured) src = 'obscured (always none)';
             else if (from) src = has(pGiven, k) ? from : `${from}; default value`;
             else if (has(bGiven, k)) src = 'own';
-            else if (e.legacy_view) src = 'legacy "view": "closed"';
             else if (isObj(preset.barrier) && has(preset.barrier, k)) src = `from type "${e.type}"`;
             else src = 'default';
             rows.push(row(`barrier.${k}`, e.barrier[k], src));
@@ -119,7 +118,7 @@ function tagLive(rows, baseInfo, changes, key, patched) {
     // The latest change that touched this place (or its area / region, for notes) is the one that set the value.
     const area = key.includes('/') ? key.slice(0, key.indexOf('/')) : key, region = area.split(':')[0];
     const last = [...changes].reverse()[0] ?? null;
-    const lastFor = k => [...changes].reverse().find(p => (k.includes('notes') ? p.touched.some(a => a === area || a === region || a === key) : true)) ?? last;
+    const lastFor = k => [...changes].reverse().find(p => (k.includes('lore') ? p.touched.some(a => a === area || a === region || a === key) : true)) ?? last;
     return rows.map(x => {
         if (patched && (!baseInfo || (baseRows.has(x.key) ? JSON.stringify(baseRows.get(x.key)) !== JSON.stringify(x.value) : true)) && changes.length && !['display_name', 'address'].includes(x.key)) {
             const p = lastFor(x.key);
@@ -142,7 +141,7 @@ function inspectBase(w, raw, target) {
         const id = t.slice(7), r = w.regions.get(id);
         if (!r) return null;
         const rawR = regionsRaw[id] ?? {}, lv = [['region', rawR]];
-        const rows = [row('name', r.name, 'own'), row('entrance', r.entrance, has(rawR, 'entrance') ? 'own' : 'default (start)'), row('notes', r.notes, r.notes ? 'own' : 'default'),
+        const rows = [row('name', r.name, 'own'), row('entrance', r.entrance, has(rawR, 'entrance') ? 'own' : 'default (start)'), row('lore', r.lore, r.lore ? 'own' : 'default'),
             row('weather_region', r.weather_region, has(rawR, 'weather_region') ? 'own' : 'default'), ...PLACE_FIELDS.map(k => row(k, has(rawR, k) ? rawR[k] : k === 'temp_offset' ? 0 : PLACE_DEFAULTS[k], has(rawR, k) ? 'own' : 'default')), stays(w, lv)];
         return out('region', r.name, collapse(rawR, 'subregions'), rows, [`region:${id}`, ...[...w.locations.keys()].filter(a => a.startsWith(`${id}:`)).map(a => `loc:${a}`)]);
     }
@@ -153,8 +152,8 @@ function inspectBase(w, raw, target) {
         const lv = [['subregion', rawS], ['region', rawR]];
         const top = lv.findIndex(([, o]) => has(o, 'exposure')), own = top < 0 ? lv : lv.slice(0, top + 1);
         const pick = (k, list = lv) => { const h = list.find(([, o]) => has(o, k)); return h ? row(k, h[1][k], h[0] === 'subregion' ? 'own' : `from ${h[0]}`) : row(k, k in PLACE_DEFAULTS ? PLACE_DEFAULTS[k] : 0, 'default'); };
-        const rows = [row('name', s.name, 'own'), row('entrance', s.entrance, has(rawS, 'entrance') ? 'own' : 'default (first room)'), row('notes', s.notes, s.notes ? 'own' : 'default'),
-            row('inherit_notes', s.inherit_notes, has(rawS, 'inherit_notes') ? 'own' : 'default'),
+        const rows = [row('name', s.name, 'own'), row('entrance', s.entrance, has(rawS, 'entrance') ? 'own' : 'default (first room)'), row('lore', s.lore, s.lore ? 'own' : 'default'),
+            row('inherit_lore', s.inherit_lore, has(rawS, 'inherit_lore') ? 'own' : 'default'),
             row('weather_region', w.regions.get(rid).weather_region, has(rawR, 'weather_region') ? 'from region' : 'default'),
             ...PLACE_FIELDS.map(k => pick(k, HEAT.includes(k) ? own : lv)), stays(w, lv)];
         return out('subregion', s.name, collapse(rawS, 'locations'), rows, [`sub:${rid}:${sid}`, ...[...w.locations.keys()].filter(a => a.startsWith(`${rid}:${sid}/`)).map(a => `loc:${a}`)]);
@@ -168,14 +167,14 @@ function inspectBase(w, raw, target) {
     }
     const loc = w.get(t);
     if (!loc) return null;
-    const notes = w.effective_notes(loc), sub = w.sub_of(loc), region = w.regions.get(loc.region);
+    const notes = w.effective_lore(loc), sub = w.sub_of(loc), region = w.regions.get(loc.region);
     const lv = rawLevels(raw, w, loc);
     const own = lv[0][1] ?? {};
     const rows = [row('address', loc.address, 'derived'), row('name', loc.name, 'own'), row('display_name', World.place_label(loc.name, sub.name), 'derived'),
         row('description', loc.description, 'own'),
-        row('inherit_region_notes', loc.inherit_region_notes, has(own, 'inherit_region_notes') ? 'own' : 'default (from subregion inherit_notes)'),
-        row('inherit_subregion_notes', loc.inherit_subregion_notes, has(own, 'inherit_subregion_notes') ? 'own' : 'default'),
-        row('region notes', notes.region, notes.region ? 'from region' : 'not inherited'), row('subregion notes', notes.subregion, notes.subregion ? 'from subregion' : 'not inherited'),
+        row('inherit_region_lore', loc.inherit_region_lore, has(own, 'inherit_region_lore') ? 'own' : 'default (from subregion inherit_lore)'),
+        row('inherit_subregion_lore', loc.inherit_subregion_lore, has(own, 'inherit_subregion_lore') ? 'own' : 'default'),
+        row('region lore', notes.region, notes.region ? 'from region' : 'not inherited'), row('subregion lore', notes.subregion, notes.subregion ? 'from subregion' : 'not inherited'),
         ...placeRows(raw, w, loc), stays(w, lv), row('exits', loc.exits.map(e => World.reveals_destination(e) && w.get(e.to) ? `${e.direction} → ${w.exit_label(loc, w.get(e.to))}` : e.direction), 'own'), row('views', loc.views, loc.views.length ? 'own' : 'default'),
         ...(loc.pos ? [row('pos', loc.pos, 'own')] : [])];
     void region;

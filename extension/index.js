@@ -51,18 +51,13 @@ let pendingLocation = null;
 export function settings() {
     const all = ctx().extensionSettings;
     const saved = all[MODULE] ?? {};
-    if (!MODES.includes(saved.moveMode)) { // migrate the old v0.2 checkboxes
-        saved.moveMode = saved.useTools ? 'tools' : saved.parseIntent === false ? 'commands' : 'typed';
-    }
-    delete saved.useTools; delete saved.parseIntent;
     all[MODULE] = Object.assign({}, DEFAULTS, saved);
     return all[MODULE];
 }
 
 /** The map server: SillyTavern's own WorldScrawl plugin route, unless the settings name another server. */
 export const PLUGIN_URL = '/api/plugins/worldscrawl';
-const LEGACY_URL = /^https?:\/\/(127\.0\.0\.1|localhost):5100\/*$/; // the old Python server's default: now the plugin
-const baseUrl = () => { const u = String(settings().serverUrl || '').trim(); return !u || LEGACY_URL.test(u) ? PLUGIN_URL : u.replace(/\/+$/, ''); };
+const baseUrl = () => { const u = String(settings().serverUrl || '').trim(); return !u ? PLUGIN_URL : u.replace(/\/+$/, ''); };
 /** SillyTavern's CSRF token, for requests to its own plugin routes (same origin only). */
 const csrfHeaders = () => { if (/^https?:/.test(baseUrl())) return {}; const t = ctx().getRequestHeaders?.()?.['X-CSRF-Token']; return t ? { 'X-CSRF-Token': t } : {}; };
 const NOT_RUNNING = () => baseUrl() === PLUGIN_URL
@@ -270,8 +265,8 @@ export function doorOverrides(chat = ctx().chat ?? []) {
 }
 /** door id -> the open_door change, for doors opened (by a change) at the end of `chat`. Pass this or doorOverrides() as `open` below. */
 export const doorStates = (chat = ctx().chat ?? []) => new Map([...doorOverrides(chat)].filter(([, c]) => c.type === 'open_door'));
-/** The exit's barrier (older data: "view": "closed" = an ordinary door), or null. */
-export const barrierOf = e => e?.barrier ?? (e?.view === 'closed' ? { closed_sight: 'none', closed_sound: 'partial', openable: true, starts_open: false, locked: false } : null);
+/** The exit's barrier, or null. */
+export const barrierOf = e => e?.barrier ?? null;
 /** Is nothing blocking this exit right now? */
 export function isOpenNow(e, open = doorOverrides()) {
     const b = barrierOf(e);
@@ -281,8 +276,8 @@ export function isOpenNow(e, open = doorOverrides()) {
     return !!b.starts_open;
 }
 /** How much passes through an exit now: its sight/sound when unblocked, else its barrier's closed_sight/closed_sound. */
-export const sightOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sight ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sight ?? 'none');
-export const soundOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sound ?? (e?.view === 'none' ? 'none' : 'partial') : barrierOf(e).closed_sound ?? 'partial');
+export const sightOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sight ?? 'partial' : barrierOf(e).closed_sight ?? 'none');
+export const soundOf = (e, open = doorOverrides()) => (isOpenNow(e, open) ? e?.sound ?? 'partial' : barrierOf(e).closed_sound ?? 'partial');
 // One-sided bars: door.barred_from ("this_side" / "other_side", already measured from the exit's own side by the
 // server). A door with a bar starts barred; bar_door / unbar_door changes on messages (shared door id) change that,
 // and stay as they were left (a bar doesn't drop by itself). Only the bar side can bar or unbar it.
@@ -1126,7 +1121,7 @@ export function partyMembers() {
     return [{ id: PLAYER, name: whoMoves() }, ...extra.map(f => ({ id: f.id, name: f.name }))];
 }
 /**
- * {{party}} and its alias {{who}}: the names of the party. Today the group is only the player, so this is whoMoves()
+ * {{party}}: the names of the party. Today the group is only the player, so this is whoMoves()
  * and every prompt that says {{party}} reads the same as it did.
  */
 export function partyText() {
@@ -2711,7 +2706,7 @@ async function newRoom(address) {
     const near = ch.from ? await fetchRaw(ch.from) : null;
     const sub = near?.subregion ?? {};
     return { address, name: ch.name, display_name: placeLabel(ch.name, sub.name), description: ch.description, exits: [],
-        region: near?.region ?? {}, subregion: sub, effective_notes: near?.effective_notes ?? {}, new_room: true };
+        region: near?.region ?? {}, subregion: sub, effective_lore: near?.effective_lore ?? {}, new_room: true };
 }
 function fetchRaw(address) {
     const w = activeWorld || defaultWorldId || '';
@@ -3569,7 +3564,7 @@ async function analyzeFlag(id) {
 
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
-// id and one door pair; old chats' "discover" ops read the same way). No notes, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
+// id and one door pair; ). No lore, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
 export const discoverSys = () => P('discover.system', { reply: baseReply('json'), style: P('discover.style') });
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
@@ -4276,7 +4271,6 @@ function addSettingsPanel() {
     enNew.checked = !!settings().enableNewChats;
     enNew.addEventListener('change', () => { settings().enableNewChats = enNew.checked; ctx().saveSettingsDebounced(); applyChatState(); });
     const input = document.getElementById('worldscrawl_url');
-    if (LEGACY_URL.test(settings().serverUrl || '')) settings().serverUrl = ''; // old Python default: the plugin now
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
     const who = document.getElementById('worldscrawl_who');

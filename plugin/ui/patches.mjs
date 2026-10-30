@@ -7,7 +7,7 @@
 // Ops (addresses are "region:sub/loc"; areas are "region:sub"; every op may carry "lasts": "3d" / "12h" / "30m"):
 //   {op: "set_description" | "append_description", loc, text}
 //   {op: "set_name", loc, text}
-//   {op: "set_notes" | "append_notes", area, text}            notes of a subregion ("region:sub") or region ("region")
+//   {op: "set_lore" | "append_lore", area, text}            notes of a subregion ("region:sub") or region ("region")
 //   {op: "block_exit" | "open_exit" | "lock_exit" | "unlock_exit" | "break_exit" | "remove_exit", loc, direction}
 //   {op: "remove_location", loc}
 //   {op: "merge", locs: [...], into?: one of locs, id?, name?, description?, area?}
@@ -46,13 +46,13 @@
 import { parseDuration } from './calendar.mjs';
 import { flipBar } from './doorbar.mjs';
 import { render as P } from './prompts.mjs';
-export const OPS = ['set_description', 'append_description', 'set_name', 'set_notes', 'append_notes', 'update_area',
+export const OPS = ['set_description', 'append_description', 'set_name', 'set_lore', 'append_lore', 'update_area',
     'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
     'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
 /** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
 export const FIELD_KEYS = {
-    room: ['inherit_region_notes', 'inherit_subregion_notes', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
-    subregion: ['inherit_notes', 'label_rooms', 'stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+    room: ['inherit_region_lore', 'inherit_subregion_lore', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+    subregion: ['inherit_lore', 'label_rooms', 'stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
     region: ['stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
 };
 export const EXIT_SIDE_KEYS = ['direction', 'description', 'type', 'sight', 'sound', 'traversal', 'hidden', 'obscured'];
@@ -193,7 +193,6 @@ export function normalizeOp(raw, op) {
         if (m && !str(o.area) && !o.into && isObj(raw[m[1]]?.subregions?.[m[2]])) o.area = `${m[1]}:${m[2]}`;
         o.id = slugId(o.id);
     }
-    if (o.op === 'discover') Object.assign(o, discoverToCreate(o)); // old chats: a discovery is a story-made create_place
     if (o.op === 'create_place' && o.story === true) {
         for (const k of ['loc', 'direction', 'return_direction', 'exit_description', 'return_description', 'travel_time', 'door']) delete o[k];
         // Made by the story (a change call or a discovery): the area defaults to the first exit's room's, and the engine
@@ -206,7 +205,7 @@ export function normalizeOp(raw, op) {
 }
 const getArea = (raw, area) => { const [r, s] = String(area ?? '').split(':'); return s ? raw[r]?.subregions?.[s] : null; };
 /**
- * The old "discover" op as the create_place it always meant: a new room in loc's subregion, joined to loc by one exit
+ * A discovery (from the narrator) as a story-made create_place: a new room in loc's subregion, joined to loc by one exit
  * pair (a door unless door: false). `story: true` makes the engine pick the id and respect "expandable".
  */
 export function discoverToCreate(o) {
@@ -269,12 +268,12 @@ export function noopOf(raw, op) {
         if (op.op === 'set_name' && same(op.text, r.name)) return `${r.name} already has that name`;
         if (op.op === 'set_description' && same(op.text, r.description)) return `${r.name ?? op.loc}: description is already that`;
     }
-    if (op.op === 'set_notes' || op.op === 'update_area') {
+    if (op.op === 'set_lore' || op.op === 'update_area') {
         const [rid, sid] = str(op.area).split(':'), obj = sid ? raw[rid]?.subregions?.[sid] : raw[rid];
         if (!isObj(obj)) return '';
-        const n = op.op === 'set_notes' ? op.text : op.notes;
-        if (op.op === 'set_notes') return same(n, obj.notes) ? `${obj.name ?? op.area}: notes are already that` : '';
-        const nameNo = !str(op.name) || same(op.name, obj.name), notesNo = !str(n) || same(n, obj.notes);
+        const n = op.op === 'set_lore' ? op.text : op.lore;
+        if (op.op === 'set_lore') return same(n, obj.lore) ? `${obj.name ?? op.area}: notes are already that` : '';
+        const nameNo = !str(op.name) || same(op.name, obj.name), notesNo = !str(n) || same(n, obj.lore);
         if (nameNo && notesNo) return `${obj.name ?? op.area} already has that name and notes`;
     }
     return '';
@@ -306,24 +305,24 @@ function applyOp(raw, op, w, out, world = null) {
             r.description = op.op === 'set_description' ? t : `${str(r.description)} ${t}`.trim();
             return `${r.name}: description ${op.op === 'set_description' ? 'rewritten' : 'added to'}`;
         }
-        case 'set_notes': case 'append_notes': {
+        case 'set_lore': case 'append_lore': {
             const area = str(op.area), [rid, sid] = area.split(':');
             const obj = sid ? raw[rid]?.subregions?.[sid] : raw[rid];
             if (!isObj(obj) || !rid) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a region ("region") or subregion ("region:subregion")`);
             const t = needText(op, w);
-            obj.notes = op.op === 'set_notes' ? t : `${str(obj.notes)} ${t}`.trim();
+            obj.lore = op.op === 'set_lore' ? t : `${str(obj.lore)} ${t}`.trim();
             out.touched.push(area);
-            return `${obj.name ?? area}: notes ${op.op === 'set_notes' ? 'rewritten' : 'added to'}`;
+            return `${obj.name ?? area}: notes ${op.op === 'set_lore' ? 'rewritten' : 'added to'}`;
         }
         case 'update_area': {
             // A region or subregion's display name and/or notes; its id (and every room address in it) never changes.
             const area = str(op.area), [rid, sid] = area.split(':');
             const obj = sid ? raw[rid]?.subregions?.[sid] : raw[rid];
             if (!isObj(obj) || !rid) throw new PatchError(`${w}: "area" ${JSON.stringify(op.area)} is not a region ("region") or subregion ("region:subregion")`);
-            if (!str(op.name) && !str(op.notes)) throw new PatchError(`${w}: update_area needs a "name" and/or "notes"`);
+            if (!str(op.name) && !str(op.lore)) throw new PatchError(`${w}: update_area needs a "name" and/or "lore"`);
             const old = obj.name ?? area, bits = [];
             if (str(op.name) && str(op.name) !== str(obj.name)) { obj.name = needText(op, w, 'name', MAX_PATCH_NAME); bits.push(`now called ${obj.name}`); }
-            if (str(op.notes) && str(op.notes) !== str(obj.notes)) { obj.notes = needText(op, w, 'notes'); bits.push('notes rewritten'); }
+            if (str(op.lore) && str(op.lore) !== str(obj.lore)) { obj.lore = needText(op, w, 'lore'); bits.push('notes rewritten'); }
             out.touched.push(area);
             return `${old}: ${bits.join(', ') || 'unchanged'}`;
         }
@@ -386,7 +385,7 @@ function applyOp(raw, op, w, out, world = null) {
         case 'create_region': {
             const name = needText(op, w, 'name', MAX_PATCH_NAME), rid = newId(op.id, name, w);
             if (has(raw, rid)) throw clashError(w, 'region', rid, suggestId(new Set(Object.keys(raw)), rid));
-            raw[rid] = { name, ...(str(op.notes) ? { notes: needText(op, w, 'notes') } : {}), start: '', subregions: {} };
+            raw[rid] = { name, ...(str(op.lore) ? { lore: needText(op, w, 'lore') } : {}), start: '', subregions: {} };
             if (!isObj(op.subregion)) throw new PatchError(`${w}: a new region needs its first "subregion" (with a "place")`);
             try {
                 const sid = createSub(raw, rid, op.subregion, `${w}, subregion`, out, false);
@@ -402,7 +401,7 @@ function applyOp(raw, op, w, out, world = null) {
 
 export const ENUMS = { exposure: ['outdoor', 'sheltered', 'enclosed', 'fixed'], insulation: ['drafty', 'normal', 'cozy'], type: ['portal', 'open'], sight: ['clear', 'partial', 'none'], sound: ['clear', 'partial', 'none'],
     closed_sight: ['clear', 'partial', 'none'], closed_sound: ['clear', 'partial', 'none'] };
-const BOOL_KEYS = new Set(['inherit_region_notes', 'inherit_subregion_notes', 'inherit_notes', 'label_rooms', 'stays_open', 'hidden', 'obscured',
+const BOOL_KEYS = new Set(['inherit_region_lore', 'inherit_subregion_lore', 'inherit_lore', 'label_rooms', 'stays_open', 'hidden', 'obscured',
     'openable', 'locked', 'starts_open']);
 const NUM_KEYS = new Set(['indoor_temp', 'temp_offset']);
 /** One form value checked (enums, booleans, numbers, short text); null passes (it means "drop it"). */
@@ -457,8 +456,7 @@ function setExitOp(raw, op, w, out) {
     for (const [k, v0] of Object.entries(op.fields)) {
         if (k === 'barrier') {
             const b = barrierValue(v0, w);
-            if (back) { delete back.barrier; if (back.view === 'closed') delete back.view; }
-            if (ex.view === 'closed') delete ex.view;
+            if (back) delete back.barrier;
             if (b === null) delete ex.barrier; else ex.barrier = b;
             bits.push(b === null ? 'no door (both sides)' : 'door changed (both sides)');
         } else if (k === 'travel_time') {
@@ -553,8 +551,7 @@ function exitOp(raw, op, w, out) {
         return `${label} removed`;
     }
     const own = isObj(ex.barrier) ? ex.barrier : isObj(back?.barrier) ? flipBar(back.barrier) : {}; // moved to this side: barred_from flips
-    const clearBack = () => { if (back) { delete back.barrier; if (back.view === 'closed') delete back.view; } };
-    if (ex.view === 'closed') delete ex.view;
+    const clearBack = () => { if (back) delete back.barrier; };
     if (op.op === 'break_exit') {
         delete ex.barrier; clearBack();
         if (ex.hidden || ex.obscured) ex.view = 'open';
@@ -780,7 +777,7 @@ function createSub(raw, rid, p, w, out, needExit) {
     if (!isObj(p)) throw new PatchError(`${w}: a new subregion needs a "name"`);
     const name = needText(p, w, 'name', MAX_PATCH_NAME), sid = newId(p.id, name, w);
     if (has(raw[rid].subregions, sid)) throw clashError(w, 'subregion', sid, suggestId(new Set(Object.keys(raw[rid].subregions)), sid));
-    raw[rid].subregions[sid] = { name, ...(str(p.notes) ? { notes: needText(p, w, 'notes') } : {}), locations: {} };
+    raw[rid].subregions[sid] = { name, ...(str(p.lore) ? { lore: needText(p, w, 'lore') } : {}), locations: {} };
     try {
         const a = createPlace(raw, `${rid}:${sid}`, isObj(p.place) && str(p.ref) && !str(p.place.ref) ? { ...p.place, ref: p.ref } : p.place, `${w}, place`, out, needExit);
         raw[rid].subregions[sid].entrance = split(a)[2];
@@ -920,15 +917,15 @@ export function mentionsOf(raw, names, skip = new Set()) {
 /**
  * What the model is told about each op, generated into the change call's prompt from OPS, so anything the editor can do
  * the model can propose. ADDR is a room address, AREA a subregion ("region:sub") or region ("region"). Ops the model
- * never writes itself (discover: old chats only) have no entry. New ops in OPS need a line here (a test checks).
+ * never writes itself have no entry. New ops in OPS need a line here (a test checks).
  */
 export const OP_DOCS = {
     set_description: '{"op":"set_description","loc":ADDR,"text":"..."}',
     append_description: '{"op":"append_description","loc":ADDR,"text":"..."}',
     set_name: '{"op":"set_name","loc":ADDR,"text":"New display name"} (the address stays the same)',
-    set_notes: '{"op":"set_notes","area":AREA,"text":"..."}',
-    append_notes: '{"op":"append_notes","area":AREA,"text":"..."}',
-    update_area: '{"op":"update_area","area":AREA,"name":"New display name","notes":"..."} (rename a whole building/area and/or rewrite its notes; give name, notes or both)',
+    set_lore: '{"op":"set_lore","area":AREA,"text":"..."}',
+    append_lore: '{"op":"append_lore","area":AREA,"text":"..."}',
+    update_area: '{"op":"update_area","area":AREA,"name":"New display name","lore":"..."} (rename a whole building/area and/or rewrite its lore; give name, lore or both)',
     block_exit: '{"op":"block_exit","loc":ADDR,"direction":"exit name"} (door state, both sides)',
     open_exit: '{"op":"open_exit","loc":ADDR,"direction":"exit name"}',
     lock_exit: '{"op":"lock_exit","loc":ADDR,"direction":"exit name"}',
@@ -946,8 +943,8 @@ export const OP_DOCS = {
     move_location: '{"op":"move_location","loc":ADDR,"area":"region:sub"} (a room moves to another subregion, keeping its exits)',
     move_area: '{"op":"move_area","area":"region:sub","region":"region"} (a subregion moves to another region)',
     create_place: '{"op":"create_place","name":"...","description":"...","exits":[{"to":ADDR,"direction":"exit name from the new place","return_direction":"exit name from ADDR to the new place","door":true|false}]} (a NEW room; each of its exits already makes the door pair both ways, so never add a separate add_exit for it; the engine makes its id and puts it in the area of its first exit\'s room unless you give "area"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; give it "ref":"label" and later ops in the same patch point at it with "new:label" wherever an address goes, e.g. {"op":"set_fields","target":"new:portal_room",...} or an add_exit "to":"new:portal_room"; never guess the engine-made address)',
-    create_subregion: '{"op":"create_subregion","region":"region","name":"...","notes":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room; "ref":"label" lets later ops use "new:label" for that room)',
-    create_region: '{"op":"create_region","name":"...","notes":"...","subregion":{"name":"...","place":{...}}} (a whole new region)',
+    create_subregion: '{"op":"create_subregion","region":"region","name":"...","lore":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room; "ref":"label" lets later ops use "new:label" for that room)',
+    create_region: '{"op":"create_region","name":"...","lore":"...","subregion":{"name":"...","place":{...}}} (a whole new region)',
     remove_area: '{"op":"remove_area","area":AREA,"contents":"delete"|"move","into":AREA} (delete a subregion or region, or move its contents into another)',
 };
 /** The op list for the change call's prompt, one line per op in OPS (in that order). */
