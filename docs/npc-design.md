@@ -19,7 +19,7 @@ NPCs follow the same pattern the map uses: scenery becomes real when touched, gr
 - **Stateless server.** Nothing about an NPC changes on the server during play. Every change (creation, a new fact, a "seen" mark, a coverage change, a memory highlight) is a stamp on the message where it happened, per swipe. The server applies the stamped changes on each request, just like map patches (`PATCH_KEY`) and location stamps. Deleting or swiping a message undoes its changes.
 - **Simple JSON for creators.** A quick NPC is one sentence. Everything else is optional with defaults.
 - **Pick-one prompts** use text keys with lenient matching, like the existing intent and direction questions in `plugin/prompts/default.json`.
-- **UI reuses existing patterns:** the Keep / Adjust / Discard card (as in room discovery) and the Edit / Turn off / Undo bar (as in "Map changed here").
+- **UI reuses existing patterns:** the Approve / Adjust / Discard card (as in room discovery) and the Edit / Turn off / Undo bar (as in "Map changed here").
 - **Actor placeholders** are our own: `{{party}}` (with `{{who}}` as an alias), rendered from the player's group (see *Actors, not a party*), not SillyTavern's `{{user}}`/`{{char}}`.
 
 ## Actors, not a party
@@ -36,13 +36,13 @@ There is never a single "party" entity. The player and companions are **individu
 | Level | What it is | How it gets there |
 |---|---|---|
 | **Scenery** | Not real. A word in a room description ("a farmer works the field"), like the upstairs doors of the Drowned Rat. No record. | Written by the creator or narrator. |
-| **Stub** | Name and one line (or more, see below). A real record. | Hesitant creation, see below. Keep stamps an `npc_create` on that message. |
+| **Stub** | Name and one line (or more, see below). A real record. | Hesitant creation, see below. Approve stamps an `npc_create` on that message. |
 | **Full** | Detailed description, features, memory, schedule. | Grows through stamps as play adds detail. Creators can also author full NPCs directly. |
 
 ### Hesitant creation
 
 - **Passersby stay scenery:** no record, no card. Asking the barmaid for a drink does not create an NPC.
-- **Suggestion:** after about **3 replies involving the same person**, the engine suggests a **Keep / Adjust / Discard** card.
+- **Suggestion:** after about **3 replies involving the same person**, the engine suggests a **Approve / Adjust / Discard** card.
 - **Explicit:** the player can ask at any time with `[remember]` in a message (e.g. "I'm going to [remember] Maren") or `/ws-npc`.
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
@@ -212,7 +212,7 @@ Waiting until an NPC shows up is the natural partner to sightings and schedules.
 ## Phases
 
 0. **Per-actor positions** (prerequisite, its own PR, zero behavior change).
-1. **Records and slicing (done):** NPC records (stub/full), placement, hesitant creation (suggested Keep card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, disposition (map keyed by person, player only in v1) and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
+1. **Records and slicing (done):** NPC records (stub/full), placement, hesitant creation (suggested Approve card after ~3 replies, `[remember]` / `/ws-npc`, read-back from first appearance, no stand-ins), `following` tag, invented-detail stamps, disposition (map keyed by person, player only in v1) and memory highlights, context slicing (present/focus/memory), cast files, Export to cast, schedule stub with redirect-aware validation, one-off sightings with deterministic seeded rolls.
 1.5. **Cast browser / editor in the map window (done):** search and filters, two-way place selection with people markers, a form editor with map-picked schedule places and inline validation, create / duplicate / delete, saves through the stateless `/cast/save` and `/cast/delete` routes, an "under the hood" inspector per person (schedule entry, sighting and by-name rolls, stub/full, following/staying, disposition, memory, scene declines, stamps with message links, Update with a diff), Who's here per place with no-show reasons, What the narrator was told and Not saved yet views recomputed from the chat, map highlighting of a person's places, and two edit modes with a diff on submit: Base (cast file) and In this chat (stamps on the latest message, checked against chat, message and swipe).
 2. **Body and features:** body areas, features with short/long text, seen marks, simple coverage and coverage stamps, assembled descriptions.
 3. **Wardrobe:** garment library, tags, outfits by tags, tag-informed reactions.

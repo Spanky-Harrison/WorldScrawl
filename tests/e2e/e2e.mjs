@@ -159,7 +159,7 @@ try {
     check('ws_wait tool: a card, nothing stamped yet', ws.length === 0 && (await waitCards()).length === 1 && await page.evaluate(() => /swipe/.test(document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')), JSON.stringify(await waitCards()));
     check('ws_wait keeps location', (await stored()) === 'riverton:streets/square');
     check('ws_wait tool result tells model the time', JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-1).messages).includes('Time passes'));
-    check('Keep on the card stamps 3h', await cardClick('Keep') && (ws = await waits()).length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep && (await waitCards()).length === 0, JSON.stringify(ws));
+    check('Approve on the card stamps 3h', await cardClick('Approve') && (ws = await waits()).length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep && (await waitCards()).length === 0, JSON.stringify(ws));
     await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning]' }]);
     await send('I sleep.', 1);
     check('[ws_wait] tag: a card with the amount', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 1, JSON.stringify(await waitCards()));
@@ -171,7 +171,7 @@ try {
     check('Discard: no time passes', await cardClick('Discard') && (await waitCards()).length === 0 && (await waits()).length === 2, JSON.stringify(await waits()));
     await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
     await send('I wait an hour.');
-    await cardClick('Keep');
+    await cardClick('Approve');
     ws = await waits();
     check('ws_flag wait alias kept stamps 1h', ws.length === 3 && ws[2].seconds === 3600, JSON.stringify(ws));
     await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 11'); });
@@ -1373,13 +1373,13 @@ try {
     const pick = await card.evaluate(c => { const sel = c.querySelector('.wspf-op select.wspf-pick'); return sel ? sel.selectedOptions[0]?.textContent : null; });
     check('review card: the place is a picker with a friendly name, not a raw address box', /^Common Room \(/.test(pick ?? ''), String(pick));
     await card.locator('.wspf-text').first().fill('');
-    await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(800);
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await page.waitForTimeout(800);
     check('review card: an empty description is refused inline, nothing stamped', /text/i.test(await card.innerText()) && await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId), await card.innerText());
     await card.locator('.wspf-text').first().fill('Charred beams and ash.');
     await page.waitForFunction(id => document.querySelector(`#chat .mes[mesid="${id}"] .worldscrawl_patchcard .wsdiff-ins`)?.textContent.includes('Charred beams'), flagId, { timeout: 10000 }).catch(() => {});
     const dl2 = { ...(await diffLook()), dbgBox: await card.evaluate(c => { const b = c.querySelector('.worldscrawl_diff'); return b ? [b.style.opacity, b.title, c.querySelector('.wspf-text')?.value] : null; }) };
     check('review card: the diff follows the form live, before Keep', dl2.ins.includes('Charred beams and ash.') && !dl2.ins.includes('Smoky.'), JSON.stringify(dl2));
-    await card.locator('.worldscrawl_card_btn', { hasText: 'Keep edited' }).click(); await page.waitForTimeout(1500);
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await page.waitForTimeout(1500);
     const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
     check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
     // Edit on a kept change opens the map editor in its own tab: one tab per touched place, place forms, no op dropdown.
@@ -1770,7 +1770,7 @@ try {
     }, [wsMod, UPST]);
     await page.evaluate(() => SillyTavern.getContext().reloadCurrentChat()); await page.waitForTimeout(2000); // the pushed message gets its block
     dbg.card = await page.evaluate(id => document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '', dbg.id);
-    check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Keep/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
+    check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Approve/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await page.waitForTimeout(1500);
     const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
     const hubR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Crystal Room', 'crystal arch'), mk('Ember Room', 'ember arch'), mk('Tide Room', 'tide arch')] }) }]);
@@ -2067,15 +2067,46 @@ try {
     });
     check('/ws-npc shows a Remember card', remembered.card && remembered.name === 'Maren', JSON.stringify(remembered));
     await queue([{ content: '{"name":"Maren","line":"A traveling knife-grinder with a squeaky cart.","manner":"","voice":""}' }]);
-    await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: 'Keep' }).click();
+    const look = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
+        const row = card?.querySelector(':scope > .worldscrawl_notice_row');
+        const btns = [...(card?.querySelectorAll('.worldscrawl_card_btn') ?? [])];
+        return { pending: card?.classList.contains('worldscrawl_pending') && /Waiting on you/.test(card.querySelector('.worldscrawl_waiting_label')?.textContent ?? ''),
+            rowLast: !!row && card.lastElementChild === row, allInRow: btns.length > 0 && btns.every(b => row?.contains(b)), right: row ? getComputedStyle(row).justifyContent : '',
+            labels: btns.map(b => b.textContent) };
+    });
+    check('notices: the Remember card waits on you, with one right-aligned button row at the end (Approve / Adjust / Discard)', look.pending && look.rowLast && look.allInRow && look.right === 'flex-end' && look.labels.join('|') === 'Approve|Adjust|Discard', JSON.stringify(look));
+    await page.locator('.worldscrawl_remembercard').last().scrollIntoViewIfNeeded();
+    await page.locator('.worldscrawl_remembercard').last().screenshot({ path: process.env.E2E_SHOTS ? `${process.env.E2E_SHOTS}/notice-pending.png` : `${process.env.E2E_TMP ?? '/tmp'}/notice-pending.png` }).catch(() => {});
+    const approveBtn = page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ });
+    await page.evaluate(() => { window.__wsSaw = { saving: false, locked: false }; window.__wsObs = new MutationObserver(() => { const c = [...document.querySelectorAll('.worldscrawl_remembercard')].pop(); if (!c) return; if (/Saving…/.test(c.textContent)) window.__wsSaw.saving = true; const bs = [...c.querySelectorAll('.worldscrawl_card_btn')]; if (bs.length && bs.every(b => b.classList.contains('disabled'))) window.__wsSaw.locked = true; }); window.__wsObs.observe(document.getElementById('chat'), { subtree: true, childList: true, attributes: true }); });
+    await approveBtn.dblclick();
+    const saving = await page.evaluate(() => window.__wsSaw);
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.worldscrawl_remembercard .worldscrawl_card_btn')].find(x => x.textContent === 'Approve'); b?.click(); b?.click(); });
     for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await page.waitForTimeout(250);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1500);
+    const dbl = await page.evaluate(() => {
+        const ch = SillyTavern.getContext().chat;
+        const m = [...ch].reverse().find(x => x.extra?.worldscrawl_remember);
+        const res = [...document.querySelectorAll('.worldscrawl_resolved')].map(e => e.textContent);
+        return { creates: ch.flatMap(x => x.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Maren').length,
+            lines: [...document.querySelectorAll('.worldscrawl_npcchange')].filter(e => /Maren/.test(e.textContent)).length,
+            decided: Object.entries(m?.extra?.worldscrawl_decided ?? {}).filter(([k]) => k.startsWith('remember_')).map(([, d]) => d.action), pendingLeft: !!document.querySelector('.worldscrawl_remembercard.worldscrawl_pending'), res };
+    });
+    await page.evaluate(() => window.__wsObs?.disconnect());
+    const reqsAfterNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    check('notices: first click locks the row and shows Saving…', saving.saving && saving.locked, JSON.stringify(saving));
+    check('notices: double-clicking Approve (plus extra clicks) writes one line, one decision, one model call', dbl.creates === 1 && dbl.lines === 1 && dbl.decided.join() === 'approve' && reqsAfterNpc === reqsBeforeNpc + 1, JSON.stringify({ ...dbl, calls: reqsAfterNpc - reqsBeforeNpc }));
+    check('notices: once answered the highlight goes and the notice shows its resolved state', !dbl.pendingLeft && dbl.res.some(t => /✓ Approved: remembered Maren/.test(t)), JSON.stringify(dbl));
+    const act = await page.evaluate(async () => { const { messageActivity } = await import('/scripts/extensions/third-party/WorldScrawl/activity.mjs'); const ch = SillyTavern.getContext().chat; const i = ch.findLastIndex(x => x.extra?.worldscrawl_decided); return messageActivity(ch[i], i).filter(e => /notice answered/.test(e.label)).map(e => `${e.label}: ${e.status}`); });
+    check('notices: the answer shows in the activity log', act.includes('remember notice answered: approve'), JSON.stringify(act));
+    await page.locator('.worldscrawl_resolved', { hasText: 'Maren' }).last().locator('xpath=..').screenshot({ path: process.env.E2E_SHOTS ? `${process.env.E2E_SHOTS}/notice-resolved.png` : `${process.env.E2E_TMP ?? '/tmp'}/notice-resolved.png` }).catch(() => {});
     const created = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
         const stamps = ch.flatMap(m => m.extra?.worldscrawl_npc ?? []);
         return stamps.find(s => s.type === 'npc_create');
     });
-    check('Keep reads the story back into an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? ''), JSON.stringify(created));
+    check('Approve reads the story back into an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? ''), JSON.stringify(created));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
     await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
     await send('I look at Maren\'s hands.', 2);
