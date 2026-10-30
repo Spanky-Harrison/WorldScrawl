@@ -6,9 +6,10 @@
 // when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
 // is the player (id "player") plus whoever is following them, and nobody follows yet.
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
+import { messageActivity, logActivity } from './activity.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -1351,7 +1352,7 @@ async function makeDig(loc, r) {
  */
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
-    const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
+    const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); logAct(ctx().chat?.indexOf(msg) ?? -1, { label: 'breaking through', status: 'failed', reason: why }); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
     const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
     const named = namedPlace(msg.mes, opts);
     if (named) { opts.splice(opts.indexOf(named), 1); opts.unshift(named); } // the place the player named comes first...
@@ -2064,10 +2065,81 @@ async function exportNpc(id, { update = false } = {}) {
     const record = npc ? exportRecord(npc) : null;
     if (!record) { toastr.warning('WorldScrawl: that person is not in this chat.'); return; }
     const r = await api('/cast/export', { method: 'POST', body: JSON.stringify({ npc: record, ...(update ? { update: true } : {}) }) });
-    if (!r.ok) { toastr.warning(typeof r.body?.detail === 'string' ? r.body.detail : 'Could not export.'); return; }
+    if (!r.ok) { const msg = typeof r.body?.detail === 'string' ? r.body.detail : 'Could not export.'; toastr.warning(msg); return { ok: false, error: msg }; }
     rememberWorlds((await api('/worlds').catch(() => null))?.body);
     const where = `cast/${r.body.file}`;
     toastr.success(r.body.updated ? `WorldScrawl: updated ${where}.` : `WorldScrawl: wrote ${where}${r.body.renamed ? ` (as ${r.body.id}, the old file was kept)` : ''}.`);
+    broadcastMapState();
+    return { ok: true, id: r.body.id, file: r.body.file, updated: !!r.body.updated };
+}
+/** The map's cast browser: every saved person in this chat, where they are, their stamps, and the Update diff against their cast file. */
+function mapNpcs(chat, here) {
+    const pack = castPack();
+    if (!pack) return [];
+    try {
+        return npcPlayState(chat ?? [], pack.npcs ?? [], npcEnv(chat ?? [], here)).map(n => {
+            const castNpc = (pack.npcs ?? []).find(x => x.ok && x.id === n.id) ?? null;
+            const { record, ...rest } = n;
+            return { ...rest, record, inCast: !!castNpc, diff: castNpc ? recordDiff(castNpc, n) : null };
+        });
+    } catch (e) { console.warn('[WorldScrawl] npc state for the map failed', e); return []; }
+}
+const logAct = (i, e) => { try { const c = ctx(); logActivity(c.chatId ?? c.getCurrentChatId?.(), i, e); } catch { /* ignore */ } };
+/** The per-message activity log for the map: the last 30 messages, newest first, with sighting rolls at each. */
+function mapActivity(chat, here) {
+    if (!chat?.length) return [];
+    const c = ctx(), chatId = c.chatId ?? c.getCurrentChatId?.();
+    const pack = castPack();
+    let env = null, frames = null;
+    try { env = npcEnv(chat, here); frames = framesOf(chat, chat.length - 1, pack?.npcs ?? []); } catch { /* no world */ }
+    const out = [];
+    for (let i = chat.length - 1; i >= 0 && out.length < 30; i--) {
+        const m = chat[i]; if (!m) continue;
+        const rolls = [];
+        if (env && frames?.[i] && !m.is_user) for (const n of frames[i].values()) {
+            if (!n.seen_at) continue;
+            try { const w = npcWhy(n, i, env); const g = w.sighting; if (g?.active && g.roll != null) rolls.push({ kind: 'roll', label: `${n.name} sighting${g.sought ? ' (by name)' : ''}`, roll: g.used, chance: g.now, seekRoll: g.seekRoll, present: g.wouldShow }); } catch { /* skip */ }
+        }
+        out.push({ msg: i, who: m.is_user ? 'you' : m.is_system ? 'system' : m.name ?? 'narrator', snippet: String(m.mes ?? '').slice(0, 80), entries: messageActivity(m, i, { chatId, extra: rolls }) });
+    }
+    return out;
+}
+/** The map inspector: who is at each place that matters (with no-show reasons), what the narrator was told per reply, and unsaved people. */
+function mapInspect(chat, here) {
+    const pack = castPack();
+    if (!pack || !chat?.length) return null;
+    try {
+        const env = npcEnv(chat, here);
+        const end = chat.length - 1;
+        const places = new Set([here?.address].filter(Boolean));
+        for (const n of pack.npcs ?? []) { for (const e of n.schedule ?? []) if (e?.place) places.add(resolveSchedulePlace(e.place, env).address ?? e.place); if (n.seen_at?.place) places.add(resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place); }
+        for (const n of mapNpcs(chat, here)) if (n.position?.place) places.add(n.position.place);
+        const who = {};
+        for (const a of places) who[a] = whoAt(chat, end, pack.npcs ?? [], env, a);
+        const narrator = [];
+        for (let i = end; i > 0 && narrator.length < 15; i--) if (chat[i] && !chat[i].is_user && !chat[i].is_system) { const v = narratorView(chat, i, pack.npcs ?? [], env, FOCUS_KEY); if (v) narrator.push(v); }
+        const unsaved = unsavedPeople(chat, { known: knownNpcNames(chat), places: pack.names ?? [], threshold: SUGGEST_AFTER, playerAt: i => env.playerAt(i) || '', rememberKey: REMEMBER_KEY });
+        return { who, narrator, unsaved, threshold: SUGGEST_AFTER };
+    } catch (e) { console.warn('[WorldScrawl] npc inspector failed', e); return null; }
+}
+/** "In this chat" edits from the map: stamps on the latest message, only if the chat, message and swipe are still the ones the map saw. */
+const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition']);
+async function npcChatEdit(d) {
+    const c = ctx(), chat = c.chat ?? [];
+    if (!d.chatId || d.chatId !== (c.chatId ?? c.getCurrentChatId?.())) return { ok: false, error: 'That chat is not open in SillyTavern any more.' };
+    const i = Number(d.msg), msg = chat[i];
+    if (!msg || i !== chat.length - 1) return { ok: false, error: 'The chat has moved on since the map loaded; check the In this chat view again.', stale: true };
+    if ((d.swipe ?? null) !== (swipeOf(msg) ?? null)) return { ok: false, error: 'That message is on a different swipe now.', stale: true };
+    const id = String(d.id ?? '');
+    if (!npcAt(chat, i, castPack()?.npcs ?? [], id)) return { ok: false, error: 'That person is not in this chat.' };
+    const stamps = (Array.isArray(d.stamps) ? d.stamps : []).filter(s => s && CHAT_EDIT_TYPES.has(s.type)).map(s => ({ ...s, id, by: 'map' }));
+    if (!stamps.length) return { ok: false, error: 'Nothing changed.' };
+    for (const s of stamps) addNpcStamp(msg, s);
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
+    renderPatchCards();
+    broadcastMapState();
+    return { ok: true, count: stamps.length, msg: i };
 }
 function npcDetail(id) {
     const chat = ctx().chat ?? [];
@@ -2756,7 +2828,7 @@ export async function mapState() {
         weather: here ? placeWeatherNow(here)?.short ?? '' : '',
         abs_seconds: (() => { try { const t = worldTimes.get(activeWorld || defaultWorldId), d = gameDate(); return weatherLib && t && d ? weatherLib.absSeconds(d, t.calendar) : null; } catch { return null; } })(),
         last_wait: (() => { const ch = c.chat ?? []; for (let i = ch.length - 1; i >= 0; i--) { const w = ch[i]?.extra?.[WAIT_KEY]; if (w?.seconds > 0) return { msg: i, label: w.label, sleep: !!w.sleep, recent: i >= lastUserIndex(ch) }; } return null; })(),
-        location: here?.address ?? null, positions: here?.address ? { [PLAYER]: here.address } : {}, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), ...mapCtx() };
+        location: here?.address ?? null, positions: here?.address ? { [PLAYER]: here.address } : {}, stood, seen, doors_revealed: [...revealedDoors], doors_open: [...doorStates().keys()], doors_closed: [...doorOverrides()].filter(([, c]) => c.type === 'close_door').map(([d]) => d), npcs: mapNpcs(c.chat, here), npc_inspect: mapInspect(c.chat, here), activity: mapActivity(c.chat, here), last_msg: (c.chat?.length ?? 0) - 1, last_swipe: c.chat?.length ? swipeOf(c.chat[c.chat.length - 1]) ?? null : null, ...mapCtx() };
 }
 let broadcastTimer = null;
 export function broadcastMapState() {
@@ -2813,6 +2885,26 @@ function openMapChannel() {
             else (d.type === 'change_open' ? changeEditSession(d.session) : restampChange(Number(d.session.msg), d.session.change, Array.isArray(d.ops) ? d.ops : []))
                 .then(r => reply({ ...r, ...(r.ok && d.type === 'change_save' ? { hash: opsHash((ctx().chat[Number(d.session.msg)].extra?.[PATCH_KEY] ?? []).find(x => x.id === d.session.change)?.ops) } : {}) }))
                 .catch(e => reply({ ok: false, errors: [{ i: null, error: e.message }] }));
+        }
+        // The cast browser: Update <name> / Export from the in-play view, a cast file saved or deleted, and a message link.
+        if (ev.data?.type === 'npc_export') {
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) exportNpc(String(d.id ?? ''), { update: d.update === true })
+                .then(r => ch.postMessage({ type: 'npc_export_result', req: d.req, ...(r ?? { ok: false, error: 'not in this chat' }) }))
+                .catch(e => ch.postMessage({ type: 'npc_export_result', req: d.req, ok: false, error: e.message }));
+        }
+        if (ev.data?.type === 'npc_chat_edit') {
+            const d = ev.data;
+            npcChatEdit(d).then(r => ch.postMessage({ type: 'npc_chat_edit_result', req: d.req, ...r })).catch(e => ch.postMessage({ type: 'npc_chat_edit_result', req: d.req, ok: false, error: e.message }));
+        }
+        if (ev.data?.type === 'cast_changed') api('/worlds').then(r => { rememberWorlds(r?.body); broadcastMapState(); }).catch(() => {});
+        if (ev.data?.type === 'show_message') {
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) {
+                const el = document.querySelector(`#chat .mes[mesid="${Number(d.msg)}"]`);
+                if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--SmartThemeQuoteColor)'; setTimeout(() => { el.style.outline = ''; }, 1500); window.focus?.(); }
+                else toastr.info(`WorldScrawl: message #${Number(d.msg)} is not loaded in the chat.`);
+            }
         }
         if (ev.data?.type === 'wait') { const c = ctx(); if (ev.data.chatId && ev.data.chatId === (c.chatId ?? c.getCurrentChatId?.())) waitCommand(String(ev.data.args ?? ''), !!ev.data.sleep); }
     });
@@ -3531,17 +3623,17 @@ export async function onReplyForFlags(id) {
         msg.mes = msg.mes.replace(WAIT_TAG, '').trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
-        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error); }
+        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); logAct(id, { label: 'wait tag', status: 'failed', reason: w.error }); } }
         await c.saveChat?.();
     }
     if (pendingWait) {
         const w = pendingWait; pendingWait = null;
         const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
-        if (what !== 'card' && what !== 'keep') console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`);
+        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); logAct(id, { label: `narrator wait ${w.label}`, status: 'skipped', reason: what }); }
         else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
         else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
-    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); flag = null; }
+    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); logAct(id, { label: `ws_flag ${flag.kind}`, status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
     const taken = takeNpcTags(msg.mes ?? '');
     const stamped = [...(pendingNpc.splice(0)), ...taken.stamps];

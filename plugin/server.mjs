@@ -11,7 +11,7 @@ import { inspect, inspectIndex } from './inspect.mjs';
 import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
-import { castFiles, loadCast, worldPlaces, writeCastNpc } from './cast.mjs';
+import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCastNpc } from './cast.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
 import { opActive, parseLasts } from './ui/patches.mjs';
 import { World, WorldError, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
@@ -329,6 +329,28 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const fresh = new LoadedWorld(lw.id, lw.root);
             worlds.set(lw.id, fresh);
             return { ok: true, id: wrote.id, file: wrote.file, renamed: wrote.renamed, updated: wrote.updated, record: wrote.record, map_version: fresh.version };
+        },
+        // The cast editor (phase 1.5): stateless saves of one cast file each. Places are checked against the base world.
+        'POST /cast/save': ({ q, body }) => {
+            needBody(body);
+            const lw = get_world(q('world'));
+            if (!isObj(body.npc)) bad('npc', 'Input should be a valid dictionary', body.npc ?? null);
+            const original = typeof body.original === 'string' && body.original ? body.original : null;
+            const originalFile = typeof body.original_file === 'string' && body.original_file ? body.original_file : null;
+            let wrote;
+            try { wrote = saveCastNpc(lw.root, body.npc, { original, originalFile, places: worldPlaces(lw.world).addresses }); } catch (e) { throw new HttpError(422, e.message); }
+            const fresh = new LoadedWorld(lw.id, lw.root);
+            worlds.set(lw.id, fresh);
+            return { ok: true, id: wrote.id, file: wrote.file, record: wrote.record, map_version: fresh.version };
+        },
+        'POST /cast/delete': ({ q, body }) => {
+            needBody(body);
+            const lw = get_world(q('world'));
+            let gone;
+            try { gone = deleteCastNpc(lw.root, { id: typeof body.id === 'string' ? body.id : null, file: typeof body.file === 'string' ? body.file : null }); } catch (e) { throw new HttpError(404, e.message); }
+            const fresh = new LoadedWorld(lw.id, lw.root);
+            worlds.set(lw.id, fresh);
+            return { ok: true, file: gone.file, map_version: fresh.version };
         },
         'GET /start': ({ q }) => { const w = get_world(q('world')).world; return w.to_dict(w.get(w.start)); },
         'GET /rooms': ({ q }) => {

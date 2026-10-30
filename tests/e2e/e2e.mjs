@@ -2074,6 +2074,134 @@ try {
     const cast2 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
     const heskNow = cast2.npcs?.find(n => n.id === 'hesk');
     check('Update writes Hesk in place and does not add hesk-2', heskNow?.facts?.includes('a knife under the bar') && cast2.npcs?.some(n => n.id === 'maren') && !cast2.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast2.npcs?.map(n => n.id)));
+    // ---- Phase 1.5: the map's Cast browser / editor. Saves go through /cast/save and /cast/delete; Update goes through the tab.
+    const cw = await page.context().newPage(); await cw.setViewportSize({ width: 1300, height: 850 });
+    cw.on('pageerror', e => { uiErrors.push(e.message); console.log('[cast pageerror]', e.message); });
+    for (let i = 0; i < 3; i++) {
+        const r = await cw.goto(BASE + 'api/plugins/worldscrawl/ui/').catch(e => { console.log('[cast goto]', e.message); return null; });
+        if (await cw.waitForSelector('#castToggle', { timeout: 10000 }).then(() => true, () => false)) break;
+        console.log('[cast window] no Cast button yet:', r?.status(), (await cw.content().catch(() => '')).slice(0, 300));
+    }
+    try { await cw.waitForSelector('.node.here', { timeout: 15000 }); } catch {}
+    await cw.locator('#castToggle').click();
+    try { await cw.waitForSelector('.castpanel .cast-row[data-id="hesk"]', { timeout: 10000 }); } catch {}
+    const castIds = await cw.evaluate(() => [...document.querySelectorAll('.castpanel .cast-row')].map(r => r.dataset.id));
+    check('Cast panel lists the cast (Hesk, Maren)', castIds.includes('hesk') && castIds.includes('maren'), JSON.stringify(castIds));
+    await cw.locator('.cast-q').fill('landlady');
+    const searched = await cw.evaluate(() => [...document.querySelectorAll('.castpanel .cast-row')].map(r => r.dataset.id));
+    check('Cast search filters by line', searched.join() === 'hesk', JSON.stringify(searched));
+    await cw.locator('.cast-q').fill('');
+    const markCount = await cw.locator('.npcmark').count();
+    await cw.locator('.npctoggle').uncheck();
+    const markOff = await cw.locator('.npcmark').count();
+    await cw.locator('.npctoggle').check();
+    check('NPC markers show on the map and the legend toggle hides them', markCount > 0 && markOff === 0 && await cw.locator('.npcmark').count() === markCount, JSON.stringify([markCount, markOff]));
+    await cw.locator('.node[data-id="riverton:drowned_rat/common_room"] rect').first().click({ force: true });
+    await cw.waitForTimeout(300);
+    const placeFilt = await cw.evaluate(() => ({ ids: [...document.querySelectorAll('.castpanel .cast-row')].map(r => r.dataset.id), pf: document.querySelector('.cast-placefilter')?.dataset.value }));
+    check('clicking a room filters the cast by that place', placeFilt.pf === 'riverton:drowned_rat/common_room' && placeFilt.ids.includes('hesk'), JSON.stringify(placeFilt));
+    await cw.evaluate(() => document.querySelector('.cast-placefilter').setValue(''));
+    // In play: a new fact in the chat, its stamp links back to the message, and Update shows the diff.
+    await queue([{ content: 'stay' }, { content: 'She glares at a rat. [ws_npc: fact | hesk | hates rats]' }]);
+    await send('I point at the rat by the hearth.', 2);
+    await cw.waitForTimeout(1200);
+    await cw.evaluate(() => wsCast.selectId('hesk', 'play'));
+    await cw.waitForTimeout(200);
+    const stampsTxt = await cw.locator('.cast-stamps').innerText().catch(() => '');
+    check('In play lists Hesk\'s changes with message links', /hates rats/.test(stampsTxt) && await cw.locator('.cast-stamps .cast-msglink').count() > 0, stampsTxt + ' / chat has it: ' + await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.text === 'hates rats'))));
+    const whyTxt = await cw.locator('.cast-why').innerText().catch(() => '');
+    check('Under the hood shows game time, why, schedule and disposition', /Game time/.test(whyTxt) && /Why/.test(whyTxt) && /Schedule/.test(whyTxt) && /Toward the player/.test(whyTxt), whyTxt);
+    const hl = await cw.evaluate(() => document.querySelectorAll('.node.cast-hl').length);
+    check('selecting Hesk highlights her places on the map', hl > 0, String(hl));
+    const ratLink = cw.locator('.cast-stamps li', { hasText: 'hates rats' }).locator('.cast-msglink');
+    const ratMsg = Number(await ratLink.getAttribute('data-msg'));
+    await ratLink.click();
+    await page.waitForTimeout(400);
+    check('a message link flashes that message in SillyTavern', await page.evaluate(n => !!document.querySelector(`#chat .mes[mesid="${n}"]`)?.style.outline, ratMsg), String(ratMsg));
+    await cw.locator('.cast-update').click();
+    const mapDiff = await cw.locator('.cast-diff').innerText().catch(() => '');
+    check('Update Hesk on the map shows the diff', /facts/.test(mapDiff) && /hates rats/.test(mapDiff), mapDiff);
+    await cw.locator('.cast-confirm').click();
+    await cw.waitForTimeout(1200);
+    const cast3 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    check('map Update writes Hesk in place', cast3.npcs?.find(n => n.id === 'hesk')?.facts?.includes('hates rats') && !cast3.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast3.npcs?.map(n => [n.id, n.facts])));
+    // Who's here, what the narrator was told, and the unsaved list.
+    await cw.evaluate(() => wsCast.selectPlace('riverton:drowned_rat/common_room'));
+    await cw.waitForTimeout(200);
+    const whoTxt = await cw.locator('.cast-who').innerText().catch(() => '');
+    check('Who\'s here lists Hesk for the common room with a reason', /Who's here/.test(whoTxt) && /Hesk/.test(whoTxt), whoTxt);
+    await cw.evaluate(() => wsCast.selectPlace(''));
+    await cw.evaluate(() => wsCast.setView('narrator'));
+    await cw.waitForTimeout(200);
+    const narrV = await cw.evaluate(() => ({ slices: document.querySelectorAll('.cast-view .cast-slice').length, opts: document.querySelectorAll('.cast-narrsel option').length, txt: document.querySelector('.cast-view')?.innerText ?? '' }));
+    check('What the narrator was told shows both slices for the latest reply', narrV.slices === 2 && narrV.opts > 0 && /npcs_present/.test(narrV.txt), JSON.stringify(narrV).slice(0, 400));
+    await cw.evaluate(() => wsCast.setView('unsaved'));
+    await cw.waitForTimeout(200);
+    const unsTxt = await cw.locator('.cast-view').innerText().catch(() => '');
+    check('Not saved yet shows the Remember threshold', /after 3 replies/.test(unsTxt), unsTxt);
+    await cw.evaluate(() => wsCast.setView('activity'));
+    await cw.waitForTimeout(200);
+    const actV = await cw.evaluate(() => ({ opts: document.querySelectorAll('.cast-actsel option').length, first: document.querySelector('.cast-actsel option')?.textContent ?? '', all: [...document.querySelectorAll('.cast-actsel option')].map(o => o.value) }));
+    let actHit = '';
+    for (const v of actV.all) { const t = await cw.evaluate(val => { const s = document.querySelector('.cast-actsel'); s.value = val; s.dispatchEvent(new Event('change')); return document.querySelector('.cast-view')?.innerText ?? ''; }, v); if (/Map stamps|Flags|Rolls|Cards|Positions|People/.test(t)) { actHit = t; break; } }
+    check('Activity log lists messages (latest first) and shows recorded engine activity', actV.opts > 0 && /latest/.test(actV.first) && !!actHit, JSON.stringify(actV).slice(0, 300) + ' | ' + actHit.slice(0, 300));
+    await cw.evaluate(() => wsCast.setView('people'));
+    // "In this chat": a memory saved as a stamp on the latest message, after a diff.
+    await cw.evaluate(() => wsCast.selectId('hesk', 'chatedit'));
+    await cw.waitForTimeout(200);
+    const memBox = cw.locator('.cf-row[data-field="memory"] textarea');
+    await memBox.fill(((await memBox.inputValue()) + '\npointed at the rat').trim());
+    await cw.locator('.cast-save').click();
+    const chatDiff = await cw.locator('.cast-review').innerText().catch(() => '');
+    check('In this chat shows the stamps before saving', /memory: pointed at the rat/.test(chatDiff), chatDiff);
+    await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1200);
+    const chatMem = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return (ch[ch.length - 1].extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_memory' && s.note === 'pointed at the rat' && s.id === 'hesk'); });
+    check('In this chat saves a Character changed here stamp on the latest message', chatMem);
+    // The editor: Hesk's second schedule entry moves to the courtyard via the map picker field.
+    await cw.evaluate(() => wsCast.selectId('hesk', 'edit'));
+    await cw.waitForTimeout(200);
+    await pickSet(cw.locator('.cf-sched[data-i="1"] .wspick'), 'riverton:drowned_rat/courtyard');
+    await cw.locator('.cf-sched[data-i="1"] .cf-activity').fill('feeding the hens');
+    await cw.locator('.cf-sched[data-i="1"] .cf-from').fill('07:00');
+    await cw.locator('.cf-sched[data-i="1"] .cf-to').fill('09:00');
+    await cw.locator('.cast-save').click();
+    const baseDiff = await cw.locator('.cast-review').innerText().catch(() => '');
+    check('Base (cast file) shows the diff before saving', /schedule/.test(baseDiff) && /feeding the hens/.test(baseDiff), baseDiff);
+    await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1000);
+    const cast4 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    const hs = cast4.npcs?.find(n => n.id === 'hesk')?.schedule ?? [];
+    check('editor saves Hesk\'s schedule through /cast/save', hs[1]?.place === 'riverton:drowned_rat/courtyard' && hs[1]?.activity === 'feeding the hens' && hs[1]?.from === '07:00' && hs[0]?.importance === 'high', JSON.stringify(hs));
+    // New person: inline validation, then create and delete with a confirm.
+    await cw.locator('.cast-new').click();
+    await cw.locator('.cf-row[data-field="name"] input').fill('Pip');
+    await cw.locator('.cf-row[data-field="line"] textarea').fill('A barefoot errand boy.');
+    await cw.locator('.cf-row[data-field="id"] input').fill('hesk');
+    const dupErr = await cw.locator('.cf-err[data-for="id"]').innerText();
+    const dupDisabled = await cw.locator('.cast-save').isDisabled();
+    await cw.locator('.cf-row[data-field="id"] input').fill('Bad Id');
+    const slugErr = await cw.locator('.cf-err[data-for="id"]').innerText();
+    check('editor flags a used id and a bad slug, and Save is disabled', !!dupErr && !!slugErr && dupDisabled && await cw.locator('.cast-save').isDisabled(), JSON.stringify([dupErr, slugErr]));
+    await cw.locator('.cf-row[data-field="id"] input').fill('pip');
+    await cw.locator('.cf-addsched').click();
+    await cw.locator('.cf-sched[data-i="0"] .cf-activity').fill('running errands');
+    const noPlace = await cw.locator('.cast-save').isDisabled() && !!(await cw.locator('.cf-err[data-for="schedule.0.place"]').innerText());
+    check('a schedule entry with no place disables Save', noPlace);
+    await pickSet(cw.locator('.cf-sched[data-i="0"] .wspick'), 'riverton:streets/square');
+    await cw.locator('.cast-save').click();
+    await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1000);
+    const cast5 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    check('Create writes cast/pip.json', cast5.npcs?.some(n => n.id === 'pip' && n.schedule?.[0]?.place === 'riverton:streets/square'), JSON.stringify(cast5.npcs?.map(n => n.id)));
+    await cw.evaluate(() => wsCast.selectId('pip', 'summary'));
+    await cw.locator('.cast-del').click();
+    await cw.locator('.cast-delyes').click();
+    await cw.waitForTimeout(1000);
+    const cast6 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    check('Delete (after the confirm) removes Pip', !cast6.npcs?.some(n => n.id === 'pip') && cast6.npcs?.some(n => n.id === 'hesk'), JSON.stringify(cast6.npcs?.map(n => n.id)));
+    await cw.screenshot({ path: '/tmp/ws-e2e-cast.png' });
+    await cw.close();
     await page.evaluate(() => { SillyTavern.getContext().extensionSettings.worldscrawl.world = ''; });
     await page.screenshot({ path: '/tmp/ws-e2e.png' });
 } finally {
