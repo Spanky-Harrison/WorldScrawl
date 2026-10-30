@@ -19,6 +19,7 @@ registerActivity('worldscrawl_actors', v => ({ kind: 'position', label: 'actor p
 registerActivity('worldscrawl_wait', v => ({ kind: 'clock', label: v?.sleep ? 'slept' : 'waited', text: `${v?.label ?? ''}${v?.seconds ? ` (${v.seconds}s)` : ''}`.trim() }));
 registerActivity('worldscrawl_waitcard', v => ({ kind: 'card', label: 'wait card', text: short(v?.label ?? v), status: v?.status ?? null }));
 registerActivity('worldscrawl_remember', v => ({ kind: 'card', label: `Remember card${v?.suggested ? ' (suggested)' : ''}`, text: v?.name ?? '', status: v?.status ?? null }));
+registerActivity('worldscrawl_decided', v => Object.entries(v ?? {}).map(([nid, d]) => ({ kind: 'card', label: `${nid.split('_')[0]} notice answered`, text: d?.text ?? '', status: d?.action ?? null, swipe: d?.swipe ?? null })));
 registerActivity('worldscrawl_npc_flags', v => list(v).flatMap(f => list(f?.names).map(n => ({ kind: 'npc', label: 'ws_flag npc (person flagged)', text: n, swipe: f?.swipe ?? null }))));
 registerActivity('worldscrawl_lore', v => list(v).map(r => ({ kind: 'lore', label: `lore requested (${r?.source === 'bracket' ? '[lore]' : 'narrator flag'})`, text: [r?.place, r?.level && `(${r.level})`].filter(Boolean).join(' ') || short(r), status: r?.level ? null : 'no match', swipe: r?.swipe ?? null })));
 registerActivity('worldscrawl_focus', v => ({ kind: 'focus', label: 'narrator focus', text: v?.id ? `${v.id} (${v.depth ?? 'present'})` : 'nobody' }));
