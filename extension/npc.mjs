@@ -564,6 +564,162 @@ export function npcAt(chat, index, cast, id) {
     return n ? publicNpc(n) : null;
 }
 
+/**
+ * Where everyone stands at the end of the chat, for the map's cast browser: the folded NPC, where they are and why,
+ * whether they are in the player's scene, and every stamp about them (with its message index). `cast` is the cast list.
+ */
+export function npcPlayState(chat, cast, env) {
+    const end = (chat?.length ?? 0) - 1;
+    if (end < 0) return [];
+    const frames = framesOf(chat, end, cast);
+    const last = frames[end];
+    if (!last) return [];
+    let present = new Set();
+    try { present = new Set(presentAt(chat, end, cast, env).map(n => n.id)); } catch { /* no position without a clock */ }
+    let declined = new Set();
+    try { declined = declinesInScene(chat, end, i => env.playerAt(i)); } catch { /* no position */ }
+    const stamps = new Map();
+    chat.forEach((msg, i) => {
+        const list = msg?.extra?.[NPC_KEY];
+        if (!Array.isArray(list)) return;
+        const swipe = msg.swipe_id ?? null;
+        for (const s of list) {
+            if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
+            if (!stamps.has(s.id)) stamps.set(s.id, []);
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id) });
+        }
+    });
+    const out = [];
+    for (const n of last.values()) {
+        let due = null;
+        try { due = duePlace(n, end, env); } catch { /* no clock */ }
+        out.push({ ...publicNpc(n), held: n.held ? { ...n.held } : null, position: due ? { place: due.address, kind: due.kind, activity: due.activity ?? '' } : null,
+            present: present.has(n.id), stamps: stamps.get(n.id) ?? [], record: exportRecord(n), why: npcWhy(n, end, env, { declined }) });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+}
+
+/**
+ * Under the hood, for the map's inspector: why `n` (a folded NPC) is where they are after message `j`.
+ * Every roll is the same seeded one presentAt uses, so this never disagrees with the narrator.
+ */
+export function npcWhy(n, j, env, { declined = null } = {}) {
+    const clock = (() => { try { return env.clock(j); } catch { return null; } })();
+    const deepKeys = Object.keys(n.deep ?? {}).filter(k => (Array.isArray(n.deep[k]) ? n.deep[k].length : n.deep[k] && (typeof n.deep[k] !== 'object' || Object.keys(n.deep[k]).length)));
+    const tier = n.manner || n.voice || deepKeys.length ? 'full' : 'stub';
+    const out = { clock: clock ? { day: clock.day, hour: clock.hour, minute: clock.minute } : null, tier, from: n.from, following: n.following ? { ...n.following } : null,
+        held: null, schedule: null, sighting: null, kind: null, place: null, reason: '', declined: false };
+    if (declined && declined.has(normName(n.name))) out.declined = true;
+    if (!clock) { out.reason = 'No game clock yet.'; return out; }
+    let due = null; try { due = duePlace(n, j, env); } catch { /* no position */ }
+    out.kind = due?.kind ?? null; out.place = due?.address ?? null;
+    try { if (n.held?.place) out.held = { place: n.held.place, at: n.held.at, active: holdActive(n, j, env) }; } catch { /* ignore */ }
+    const entries = n.schedule ?? [];
+    const sched = (() => { try { return scheduleAt(n, clock, env); } catch { return null; } })();
+    if (entries.length) {
+        const i = sched ? entries.indexOf(sched.entry) : -1;
+        const e = sched?.entry;
+        const timed = e && (e.fromMin != null || e.toMin != null);
+        const inside = timed && inTimeWindow(clock.minutes ?? 0, e.fromMin, e.toMin, env?.dayMinutes ?? DAY_MINUTES);
+        out.schedule = { entry: i, address: sched?.address ?? null, how: sched?.how ?? null, activity: sched?.activity ?? '',
+            why: i < 0 ? 'No entry resolves to a place in this world.' : inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `No timed entry covers now; entry ${i + 1} has no times and fills the rest of the day.` : `No entry covers now; entry ${i + 1} is the first that resolves.`,
+            broken: entries.map((x, k) => (x?.broken ? k : -1)).filter(k => k >= 0) };
+    }
+    if (n.seen_at) {
+        const sp = sightPlaceOf(n, env);
+        const r = { place: n.seen_at.place, hour: n.seen_at.hour, chance: n.seen_at.chance ?? 0.5, resolved: sp, active: !!sp };
+        if (sp) {
+            const dist = hourDistance(clock.hour ?? 0, n.seen_at.hour, env?.hoursPerDay ?? 24);
+            const chance = sightChance(dist, n.seen_at.chance ?? 0.5);
+            const roll = hashRoll(`sight|${n.id}|${sp}|${clock.day}`);
+            const sought = (n.seeks ?? []).some(x => x.day === clock.day);
+            const seekRoll = sought ? hashRoll(`seek|${n.id}|${sp}|${clock.day}`) : null;
+            const used = seekRoll == null ? roll : Math.min(roll, seekRoll);
+            const stamped = (n.appearances ?? []).some(a => a.day === clock.day && a.hour === clock.hour && a.place === sp);
+            Object.assign(r, { day: clock.day, now: Math.round(chance * 100), roll, seekRoll, used, sought, stamped, wouldShow: used < Math.round(chance * 100) });
+        } else r.note = (entries.some(e => e && !e.broken)) ? 'A real schedule replaces the sighting.' : 'The sighting place is not in this world.';
+        out.sighting = r;
+    }
+    const dw = n.disposition?.[PLAYER];
+    out.disposition = dw ? { ...dw } : { value: 'unknown', reason: '' };
+    out.memory = [...(n.memory ?? [])];
+    out.reason = n.following ? `Following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`
+        : out.held?.active ? 'Told to stay; the hold is still on.'
+            : due?.kind === 'schedule' ? out.schedule?.why ?? 'On their schedule.'
+                : due?.kind === 'sight' ? `Sighting: rolled ${out.sighting?.used} under ${out.sighting?.now}.`
+                    : out.sighting?.active ? `Not on a schedule; today's sighting roll is ${out.sighting.used} against ${out.sighting.now}${out.sighting.wouldShow ? ' (would show, waiting for the hour)' : ' (no-show)'}.`
+                        : 'Nowhere this hour.';
+    return out;
+}
+
+/**
+ * Who's at `place` after message `index`: everyone due there, plus everyone whose schedule or sighting points there but who is
+ * not there now, with the reason (another entry, a no-show roll, following someone, told to stay elsewhere).
+ */
+export function whoAt(chat, index, cast, env, place) {
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    if (!chat?.length || !place) return [];
+    const frames = framesOf(chat, end, cast);
+    const last = frames[end];
+    if (!last) return [];
+    let present = new Set();
+    try { present = new Set(presentAt(chat, end, cast, env).map(n => n.id)); } catch { /* no clock */ }
+    const out = [];
+    for (const n of last.values()) {
+        const w = npcWhy(n, end, env);
+        let due = null; try { due = duePlace(n, end, env, { useRoll: true }); } catch { /* no clock */ }
+        const pointsHere = (n.schedule ?? []).some(e => e && !e.broken && (resolveSchedulePlace(e.place, env).address ?? e.place) === place) || (n.seen_at && !n.seen_at.broken && (resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place) === place) || n.held?.place === place;
+        const here = due?.address === place;
+        if (!here && !pointsHere && !present.has(n.id)) continue;
+        let reason = w.reason;
+        if (!here && pointsHere) {
+            if (n.following) reason = `Not here: following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`;
+            else if (w.held?.active && n.held.place !== place) reason = 'Not here: told to stay somewhere else.';
+            else if (w.sighting?.active && w.sighting.resolved === place && !w.sighting.wouldShow) reason = `No-show today: rolled ${w.sighting.used}, needed under ${w.sighting.now}${w.sighting.sought ? ' (with a by-name roll)' : ''}.`;
+            else if (w.schedule && w.schedule.address !== place) reason = `Not here: ${w.schedule.why} (${placeLabel(env, w.schedule.address ?? '') || 'nowhere'}${w.schedule.activity ? `, ${w.schedule.activity}` : ''})`;
+            else reason = `Not here now. ${w.reason}`;
+        }
+        out.push({ id: n.id, name: n.name, here, inScene: present.has(n.id), kind: here ? due?.kind ?? null : null, activity: here ? due?.activity ?? '' : '', reason });
+    }
+    out.sort((a, b) => (b.here - a.here) || a.name.localeCompare(b.name));
+    return out;
+}
+
+/**
+ * What the narrator was told for the reply at message `reply`: the scene as it stood after the message before, the stored
+ * focus (or the focus rules on that user message), and the npcSlices text, with who was listed at which depth and which memories went in.
+ */
+export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_focus') {
+    const before = reply - 1;
+    if (!chat?.length || before < 0) return null;
+    let present = [];
+    try { present = presentAt(chat, before, cast, env); } catch (e) { return { reply, error: e.message }; }
+    let ui = -1;
+    for (let i = before; i >= 0; i--) if (chat[i]?.is_user) { ui = i; break; }
+    const stored = ui >= 0 ? chat[ui]?.extra?.[focusKey] : null;
+    const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
+    const slices = npcSlices(present, focus);
+    const listed = present.map(p => ({ id: p.id, name: p.name, depth: focus?.id === p.id && focus.depth !== 'present' ? focus.depth : 'present',
+        memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [] }));
+    return { reply, user: ui, focus: focus ? { id: focus.id ?? null, depth: focus.depth ?? 'present', stored: !!(stored && stored.depth) } : null, listed, ...slices };
+}
+
+/**
+ * People the engine is counting toward a Remember card: names the narrator flagged ([ws_flag: npc | Name]) in this scene
+ * that no one has saved, with their reply count against the threshold, and whether a "no" was said for them in this scene.
+ */
+export function unsavedPeople(chat, { known = [], threshold = SUGGEST_AFTER, playerAt = () => '', rememberKey = 'worldscrawl_remember' } = {}) {
+    const end = (chat?.length ?? 0) - 1;
+    if (end < 0) return [];
+    const declined = declinesInScene(chat, end, playerAt);
+    const cards = new Map();
+    for (const m of chat) { const r = m?.extra?.[rememberKey]; if (r?.name) cards.set(normName(r.name), r.status ?? ''); }
+    return flaggedPeople(chat, sceneStartOf(chat, end, playerAt), end, { known, threshold })
+        .map(r => ({ name: r.name, count: r.count, threshold, ready: r.ready && !declined.has(r.key), declined: declined.has(r.key), card: cards.get(r.key) ?? null }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
 /** People following someone after message `index` (the player, unless a stamp says otherwise). */
 export function followersAt(chat, index, cast = []) {
     const frames = framesOf(chat, index, cast);
