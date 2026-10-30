@@ -1643,7 +1643,7 @@
       "description": "Step 1 of 1: the system prompt for the remember question. The game reads the JSON.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys.",
-      "text": "You keep a short record of a person the story has already described. {{reply}}: {\"name\": \"...\", \"line\": \"one sentence\", \"manner\": \"...\", \"voice\": \"...\"}. manner and voice may be empty. Use only what the story said. Do not invent a past.",
+      "text": "You write the record card for a person the story has met. The card becomes canon for the rest of the game, so fill every field. First record everything the story established about them. Then fill every remaining gap with plausible details that fit what the story said and the setting; never contradict the story. {{reply}}: {\"name\": \"...\", \"line\": \"one sentence: who they are\", \"manner\": \"how they behave, one or two sentences\", \"voice\": \"how they speak, one sentence\", \"appearance\": \"2-4 sentences, physical only: build, face, hair, distinguishing marks, usual clothing\", \"disposition\": {\"value\": \"hostile|unfriendly|indifferent|friendly|helpful\", \"reason\": \"toward the player, one short sentence\"}, \"facts\": [\"short facts the story established\"], \"invented\": [\"each detail you made up rather than took from the story, a few words each, e.g. 'grey eyes', 'scar on the chin', 'gravelly voice'\"]}. List in invented only what you made up; leave it empty if the story gave you everything.",
       "placeholders": [
         { "name": "reply", "generated": true }
       ]
@@ -1654,7 +1654,7 @@
       "description": "Step 1 of 1: the remember question. It reads the story since the person showed up.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys.",
-      "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nReply with JSON only.",
+      "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nFill every field: what the story said first, then plausible details for the rest, and list the made-up ones in invented. Reply with JSON only.",
       "placeholders": [
         { "name": "name" },
         { "name": "place" },

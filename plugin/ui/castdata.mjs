@@ -73,7 +73,7 @@ export function formFromRecord(rec = null) {
     const raw = r.raw && typeof r.raw === 'object' ? r.raw : r;
     const d = raw.disposition?.player ?? {};
     return {
-        id: s(raw.id) || s(r.id), name: s(raw.name), line: s(raw.line), manner: s(raw.manner), voice: s(raw.voice),
+        id: s(raw.id) || s(r.id), name: s(raw.name), line: s(raw.line), manner: s(raw.manner), voice: s(raw.voice), appearance: s(raw.appearance),
         history: s(raw.deep?.history), secrets: Array.isArray(raw.deep?.secrets) ? raw.deep.secrets.map(String) : [],
         relationships: Object.entries(raw.deep?.relationships ?? {}).map(([who, text]) => ({ who, text: String(text ?? '') })),
         facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], memory: Array.isArray(raw.memory) ? raw.memory.map(x => (typeof x === 'string' ? x : x?.note ?? '')) : [],
@@ -87,6 +87,7 @@ export function recordFromForm(f) {
     const out = { id: s(f.id), name: s(f.name), line: s(f.line) };
     if (s(f.manner)) out.manner = s(f.manner);
     if (s(f.voice)) out.voice = s(f.voice);
+    if (s(f.appearance)) out.appearance = s(f.appearance);
     const disp = { ...(f.others ?? {}) };
     if (s(f.disposition)) disp.player = { value: s(f.disposition), ...(s(f.reason) ? { reason: s(f.reason) } : {}) };
     if (Object.keys(disp).length) out.disposition = disp;
@@ -187,7 +188,7 @@ export function formFromPlay(play) {
 export function chatStamps(play, f) {
     const base = formFromPlay(play);
     const stamps = [], cannot = [];
-    for (const k of ['line', 'manner', 'voice']) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field: k, text: s(f[k]) }); else cannot.push(`clear ${k}`); }
+    for (const k of ['line', 'manner', 'voice', 'appearance']) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field: k, text: s(f[k]) }); else cannot.push(`clear ${k}`); }
     if (s(f.history) !== s(base.history)) { if (s(f.history)) stamps.push({ type: 'npc_fact', field: 'deep.history', text: s(f.history) }); else cannot.push('clear history'); }
     const added = (now, was) => now.map(s).filter(Boolean).filter(x => !was.map(s).includes(x));
     const removed = (now, was) => was.map(s).filter(Boolean).filter(x => !now.map(s).includes(x));

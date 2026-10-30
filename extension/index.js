@@ -11,7 +11,7 @@ import { timeLabel } from './timelabels.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, appearanceWhy, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -2003,8 +2003,9 @@ function npcPromptBits(loc) {
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
-        const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
-        const sl = npcSlices(present, focus);
+        const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
+        const focus = stored && stored.depth ? stored : focusRules(said, present);
+        const sl = npcSlices(present, focus, { appearance: appearanceWhy(present, focus, { chat, index: chat.length - 1, said, lore }) });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
@@ -2096,19 +2097,21 @@ async function keepRemember(id, edited = null) {
     const chat = c.chat ?? [];
     const name = edited?.name?.trim() || card.name;
     const loc = await currentLocation().catch(() => null);
-    let got = edited?.line ? { name, line: edited.line.trim(), manner: '', voice: '', facts: [] } : null;
+    let got = edited?.line ? { name, line: edited.line.trim(), manner: '', voice: '', appearance: '', facts: [], invented: [] } : null;
     if (!got) {
         const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
         const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
         const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
         for (let t = 0; t < 2 && !got; t++) {
-            try { got = readRememberAnswer(parseJsonAnswer(await gen('remember', { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 300 }, { at: id, retry: t > 0 }))); } catch { got = null; }
+            try { got = readRememberAnswer(parseJsonAnswer(await gen('remember', { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, retry: t > 0 }))); } catch { got = null; }
             if (!got) markLast(id, 'remember', 'failed', 'answer was not a usable person');
         }
-        if (!got) got = { name, line: 'Met in this scene.', manner: '', voice: '', facts: [] };
+        if (!got) got = { name, line: 'Met in this scene.', manner: '', voice: '', appearance: '', facts: [], invented: [] };
     }
     const taken = new Set(knownNpcNames(chat));
-    addNpcStamp(msg, { type: 'npc_create', id: freeId(got.name, taken), name: got.name, line: got.line, manner: got.manner, voice: got.voice, facts: got.facts });
+    const newId = freeId(got.name, taken);
+    addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice, ...(got.appearance ? { appearance: got.appearance } : {}), facts: got.facts, ...(got.invented?.length ? { invented: got.invented } : {}) });
+    if (got.disposition) addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: got.disposition.value, reason: got.disposition.reason ?? '', dramatic: true });
     card.status = 'kept'; card.name = got.name;
     syncSwipeExtra(msg);
     await c.saveChat?.();
@@ -2201,7 +2204,7 @@ function mapInspect(chat, here) {
         const who = {};
         for (const a of places) who[a] = whoAt(chat, end, pack.npcs ?? [], env, a);
         const narrator = [];
-        for (let i = end; i > 0 && narrator.length < 15; i--) if (chat[i] && !chat[i].is_user && !chat[i].is_system) { const v = narratorView(chat, i, pack.npcs ?? [], env, FOCUS_KEY); if (v) narrator.push(v); }
+        for (let i = end; i > 0 && narrator.length < 15; i--) if (chat[i] && !chat[i].is_user && !chat[i].is_system) { const v = narratorView(chat, i, pack.npcs ?? [], env, FOCUS_KEY, { loreAt: j => { try { return activeLore(chat, j, here?.lore_chain ?? [], lorePlayerAt(chat, here)).map(c => c.text).join('\n'); } catch { return ''; } } }); if (v) narrator.push(v); }
         const unsaved = unsavedPeople(chat, { known: knownNpcNames(chat), threshold: SUGGEST_AFTER, playerAt: i => env.playerAt(i) || '', rememberKey: REMEMBER_KEY });
         return { who, narrator, unsaved, threshold: SUGGEST_AFTER };
     } catch (e) { console.warn('[WorldScrawl] npc inspector failed', e); return null; }
@@ -2230,6 +2233,7 @@ function npcDetail(id) {
     const npc = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], id);
     if (!npc) return 'No saved person with that id is here.';
     const bits = [npc.line];
+    if (npc.appearance) bits.push(`Appearance: ${npc.appearance}`);
     if (npc.manner) bits.push(`Manner: ${npc.manner}`);
     if (npc.voice) bits.push(`Voice: ${npc.voice}`);
     if (npc.memory?.length) bits.push(`Memory: ${npc.memory.join('; ')}`);
@@ -4084,6 +4088,14 @@ export function renderPatchCards() {
             const who = npcNames.get(s.id) || s.name || s.id;
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';
+            if (s.type === 'npc_create' && !s.off && (s.appearance || s.invented?.length)) {
+                const more = document.createElement('div');
+                more.className = 'worldscrawl_npccreate_more';
+                more.style.cssText = 'font-size:0.9em;opacity:0.85;margin:2px 0 2px 1em;';
+                if (s.appearance) { const a = document.createElement('div'); a.textContent = `Appearance: ${s.appearance}`; more.append(a); }
+                if (s.invented?.length) { const v = document.createElement('div'); v.className = 'worldscrawl_invented'; v.textContent = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it in the map's cast panel (In this chat) before you export.`; more.append(v); }
+                d._more = more;
+            }
             if (s.off) d.style.opacity = '0.6';
             const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
             if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
@@ -4129,6 +4141,7 @@ export function renderPatchCards() {
                 } else d.append(' ', cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
             }
             card.append(d);
+            if (d._more) card.append(d._more);
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
         const carrier = isCarrier(msg), showAll = !!settings().showEditMessages; // Debug > Show map edit messages: full message, list open

@@ -148,7 +148,7 @@ const castFile = (root, name) => {
 export function tidyRecord(raw) {
     const out = {};
     const s = v => (typeof v === 'string' ? v.trim() : '');
-    for (const k of ['id', 'name', 'line', 'manner', 'voice']) if (s(raw[k])) out[k] = s(raw[k]);
+    for (const k of ['id', 'name', 'line', 'manner', 'voice', 'appearance']) if (s(raw[k])) out[k] = s(raw[k]);
     const deep = {};
     if (isObj(raw.deep)) {
         if (s(raw.deep.history)) deep.history = s(raw.deep.history);

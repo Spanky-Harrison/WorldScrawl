@@ -80,8 +80,8 @@ export function castPanel(doc, io) {
         viewBox.replaceChildren($('p', { class: 'muted' }, 'Recomputed from the chat: what {{npcs_present}} and {{npc_focus}} held when this reply was written.'), sel,
             $('button', { type: 'button', class: 'linkish cast-msglink', onclick: () => io.showMessage?.(v.reply) }, ` show #${v.reply}`),
             v.error ? $('p', { class: 'bad' }, v.error) : $('div', {},
-                $('table', { class: 'resolved cast-listed' }, $('tr', {}, $('th', {}, 'Person'), $('th', {}, 'Detail'), $('th', {}, 'Memories included')),
-                    ...(v.listed.length ? v.listed.map(x => $('tr', { 'data-id': x.id }, $('td', {}, x.name), $('td', {}, x.depth), $('td', {}, x.memories.length ? x.memories.join('; ') : '—'))) : [$('tr', {}, $('td', { colspan: 3, class: 'muted' }, 'Nobody was listed.'))])),
+                $('table', { class: 'resolved cast-listed' }, $('tr', {}, $('th', {}, 'Person'), $('th', {}, 'Detail'), $('th', {}, 'Memories included'), $('th', {}, 'Appearance')),
+                    ...(v.listed.length ? v.listed.map(x => $('tr', { 'data-id': x.id }, $('td', {}, x.name), $('td', {}, x.depth), $('td', {}, x.memories.length ? x.memories.join('; ') : '—'), $('td', { class: 'cast-appearance' }, x.appearance ? `included: ${x.appearance}` : x.appearance === '' ? 'not included (in the background)' : 'none on file'))) : [$('tr', {}, $('td', { colspan: 4, class: 'muted' }, 'Nobody was listed.'))])),
                 $('p', { class: 'muted' }, v.focus?.id ? `Focus: ${v.focus.id} (${v.focus.depth}${v.focus.stored ? ', from the stored focus' : ', from the focus rules'})` : 'No focus: nobody was named or addressed.'),
                 ...block('{{npcs_present}}', v.npcs_present), ...block('{{npc_focus}}', v.npc_focus)));
     }
@@ -122,7 +122,7 @@ export function castPanel(doc, io) {
         if (tab === 'chatedit') return startEdit(r, null, 'chat');
         if (tab === 'summary') {
             const rec = r.rec?.ok ? r.rec : r.play ?? r.rec ?? {};
-            const pairs = [['Id', r.id || '(none)'], ['Line', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Voice', rec.voice]] : []),
+            const pairs = [['Id', r.id || '(none)'], ['Line', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Voice', rec.voice]] : []), ...(rec.appearance ? [['Appearance', rec.appearance]] : []),
                 ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
             pane.append(kv(pairs));
             const places = (r.rec?.schedule ?? []).map(e => $('li', {}, placeLink(e.place, e.broken), ` ${e.activity}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
@@ -218,7 +218,9 @@ export function castPanel(doc, io) {
         idIn.addEventListener('input', () => { idTouched = true; f.id = idIn.value; check(); });
         form.append(fieldRow('name', 'Name', text('name')), fieldRow('id', 'Id', idIn, 'The cast file name. Lowercase, like old-tam.'),
             fieldRow('line', 'Line', text('line', { area: true, ph: 'Who they are, in one line' })),
-            fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Voice', text('voice')));
+            fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Voice', text('voice')),
+            fieldRow('appearance', 'Appearance', text('appearance', { area: true, ph: 'Physical only: build, face, hair, marks, usual clothing (2-4 sentences)' }), 'Fed to the narrator only when someone looks at or deals with this person.'));
+        if (chatMode && r.play?.invented?.length) form.append($('p', { class: 'muted cf-invented' }, `Made up when remembered (not in the story): ${r.play.invented.join('; ')}`));
         const dsel = $('select', { class: 'pf-input' }, $('option', { value: '' }, 'unknown'), ...DISPOSITIONS.map(d => $('option', { value: d }, d)));
         dsel.value = f.disposition; dsel.addEventListener('change', () => { f.disposition = dsel.value; check(); });
         form.append(fieldRow('disposition', 'Starts toward the player', dsel), fieldRow('reason', 'Because', text('reason')));

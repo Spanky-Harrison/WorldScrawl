@@ -294,3 +294,19 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 The cast panel's **Activity log** view picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, sighting and by-name rolls, stamps written (map, positions, people, wait/clock), cards and their outcome, and every model call's outcome. All of it is read from the message itself, so it survives a reload.
 
 **Model-call notes.** Every model call the extension makes (the narrator reply and each side call: intent, discovery/dig, wait amount, Remember, pick-one prompts, map edits) leaves a small debug note in `msg.extra.worldscrawl_calls`, keyed by swipe: the call kind, `ok` / `failed` / `skipped` with the reason, the number of tries, a short answer, and for the narrator reply the `ws_flag`s and tags it emitted, or "narrator made no tool call". Side calls are noted on the message being handled (usually the latest). It is capped at 12 notes per swipe with text truncated, and is not a stamp: undo, rebuilds and snapshots never read it. Failed narrator generations themselves are not noted (no message is made). It is read-only. New flag types plug in with `registerActivity(extraKey, collect)` in `extension/activity.mjs` and, for custom display, `registerRenderer(kind, fn)` in `plugin/ui/activitylog.mjs`; unknown `worldscrawl_*` keys still show with a generic line.
+
+## Appearance (phase-1 bridge)
+
+Cast records may carry an optional `appearance` string: 2–4 sentences, physical only (build, face, hair, distinguishing marks, usual clothes). Old cards without it load unchanged. Chat edits use an `npc_fact` stamp with `field: "appearance"`; remembered NPCs get it in `npc_create`.
+
+When it is fed: people in the background get only their `line`. Appearance is added to a present person's entry when
+
+- the player looks at them ("I look at Hesk", `[look] Hesk`);
+- they are in active interaction: the focus, following the player, or flagged by the narrator (`ws_flag npc`) in the last 3 replies;
+- an `{{npc:id}}` token for them is in the lore being fed.
+
+The inspector's "What the narrator was told" table has an Appearance column with the reason it went in (or "not included").
+
+Remember asks the model to fill every field: record what the story established, then fill gaps plausibly, listing every made-up detail in `invented`. The list is shown on the "Character changed here" bar and in the cast editor's In-this-chat view and diff so it can be corrected before saving; it is never written to the cast file.
+
+Phase 2 replaces this free-text field with a structured body object plus a wardrobe.

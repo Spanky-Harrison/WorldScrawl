@@ -294,7 +294,7 @@ test('slices, suggestions, read-back and tags', () => {
     assert.equal(tags.text, 'She smiles.');
     assert.equal(parseNpcTag('disposition | hesk | very friendly | paid the tab').value, 'friendly');
     assert.equal(parseNpcTag('disposition | hesk | devoted'), null);
-    assert.deepEqual(readRememberAnswer({ name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.' }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', facts: [] });
+    assert.deepEqual(readRememberAnswer({ name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.' }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', appearance: '', facts: [], invented: [] });
     assert.equal(readRememberAnswer({ name: 'Maren' }), null);
 });
 
