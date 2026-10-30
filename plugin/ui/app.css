@@ -218,3 +218,51 @@ textarea, .placeform textarea, .mapaction textarea, .patchform textarea { resize
 .change-editor .ce-raw { width: 100%; font-family: monospace; font-size: 12px; }
 .change-editor.saved .ce-status { color: #5c5; }
 .change-editor.stale, .change-editor .pf-errors { color: #e88; }
+/* Cast mode (phase 1.5): the cast browser / editor in the side pane, and the people markers on the map. */
+body.casting .side { width: 380px; }
+@media (orientation: portrait) { body.casting .side { width: auto; max-height: 50%; } }
+.castpanel .cast-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.castpanel .cast-filters { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.castpanel .cast-filters input[type=search] { width: 100%; box-sizing: border-box; }
+.castpanel .cast-msg.bad { color: var(--SmartThemeQuoteColor); font-style: normal; }
+.castpanel ul.cast-list { list-style: none; padding: 0; margin: 4px 0 10px; max-height: 35vh; overflow: auto; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; }
+.castpanel .cast-row { padding: 4px 6px; cursor: pointer; border-bottom: 1px solid var(--SmartThemeBorderColor); }
+.castpanel .cast-row:hover { background: rgba(127,127,127,.12); }
+.castpanel .cast-row.selected { background: rgba(127,127,127,.25); box-shadow: inset 3px 0 0 var(--SmartThemeQuoteColor); }
+.castpanel .cast-badge { font-size: .75em; padding: 0 6px; border-radius: 999px; border: 1px solid var(--SmartThemeBorderColor); margin-left: 4px; }
+.castpanel .cast-badge.broken { border-color: #d05050; color: #e07070; }
+.castpanel .cast-badge.play { border-color: #50a0d0; }
+.castpanel .cast-badge.here { border-color: var(--SmartThemeQuoteColor); color: var(--SmartThemeQuoteColor); }
+.castpanel .cast-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; align-items: center; }
+.castpanel .cast-placelink.broken { color: #e07070; text-decoration: line-through; }
+.castpanel ul.cast-stamps li.off { opacity: .55; }
+.castpanel .cast-diff { margin-top: 6px; padding: 6px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; }
+.castform { display: flex; flex-direction: column; gap: 6px; }
+.castform .cf-row { display: flex; flex-direction: column; gap: 2px; }
+.castform .cf-row .pf-input, .castform .cf-sched .pf-input { width: 100%; box-sizing: border-box; }
+.castform .cf-err { color: #e07070; font-size: .85em; }
+.castform .cf-err:empty { display: none; }
+.castform .bad > .pf-input, .castform .bad .wspick { outline: 1px solid #d05050; }
+.castform .cf-sched { border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; padding: 4px 6px; margin-bottom: 4px; }
+.castform .cf-schedtop { display: flex; align-items: center; gap: 4px; justify-content: space-between; }
+.castform .cf-schedrow { display: flex; gap: 4px; align-items: center; }
+.castform .cf-schedrow .cf-activity { flex: 2; }
+.castform .cf-schedrow input[type=time], .castform .cf-schedrow input[type=number] { width: auto; flex: 1; }
+.castform .cf-rel { display: grid; grid-template-columns: 7em 1fr auto; gap: 4px; margin-bottom: 4px; }
+svg .npcmark circle { fill: #3a7bd5; stroke: #111; }
+svg .npcmark.now circle { fill: var(--SmartThemeQuoteColor); }
+svg .npcmark text { fill: #fff; font-size: 10px; font-weight: bold; pointer-events: none; }
+svg .npcmark { cursor: pointer; }
+.legend .npclegend .npcdot { color: #3a7bd5; }
+.node.cast-hl rect { stroke: #e0a030; stroke-width: 3; stroke-dasharray: 5 3; }
+.node.cast-hlnow rect { stroke-dasharray: none; }
+.cast-who { margin: 6px 0; }
+.cast-wholist li { margin: 3px 0; }
+.cast-wholist li.away { opacity: .8; }
+.cast-badge.away { background: #777; }
+.cast-views { margin: 4px 0 6px; flex-wrap: wrap; }
+.cast-slice { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.cast-review .cast-diff { margin-top: 6px; }
+.cast-activity { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.cast-actgroup ul { margin: 2px 0 0 16px; padding: 0; }
+.cast-actgroup[data-kind="call"] b { color: #b45309; }

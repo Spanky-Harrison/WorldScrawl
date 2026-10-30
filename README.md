@@ -177,6 +177,7 @@ is at most one `/rooms` batch.
 - `GET /health` returns counts, the start address and the map version.
 - Every reply has an `X-WorldScrawl-Map-Version` header (a hash of the map files at load). When it changes, the extension forgets the rooms it remembered.
 - The server log has one line per move and per trip (from, direction/steps, result).
+- `GET /cast` lists the cast files (`worlds/<world>/cast/*.json`) with problems and the world's places. `POST /cast/save {npc, original?, original_file?}` writes one record from the map's Cast editor: the id must be a slug and free (unless it is the record's own), every place must exist, and a rename moves the file. `POST /cast/delete {id | file}` removes one. Both are stateless and return 422 / 404 with a `detail` message.
 
 ## The WorldScrawl window (map)
 
@@ -221,7 +222,37 @@ tells the window what's happening.
 Optional world-file hint, ignored by the game itself: `"pos": {"x": 2, "y": -1}` on a location (numbers; anything
 else is an error).
 
-The window only reads. It never changes the chat or the world files. Room data comes through the normal
+### Cast (NPC browser and editor)
+
+The **Cast** button turns the side panel into the cast browser: search by name, id or line, and filter by place
+(room, subregion or region), status (in the cast files, only in this chat, or broken) and starting disposition.
+Clicking a room on the map filters by it; a place in a record jumps to it on the map. People markers on the rooms
+show where everyone is now (with a chat open) or every scheduled place (without one); the legend's checkbox hides them.
+
+Each person has a summary, an **Under the hood** tab when a chat is open, and two edit modes. Under the hood shows,
+at the current game time, where they are and why (which schedule entry applies, or that they are following someone or
+were told to stay), today's seeded sighting roll against the chance (and the by-name roll if someone asked for them),
+whether the record is a stub or full, their disposition with its reason, their memory, any "no" to remembering them
+said in this scene, and their changes in this chat, each linked to its message, with **Update <name>** (a diff
+against the cast file) or **Export to cast** for someone met only in this chat. Selecting someone outlines their
+current place and schedule stops on the map. With a place selected, **Who's here** lists who is there now and who
+should be but is not, with the reason (another schedule entry, a no-show roll today, following someone).
+
+Two read-only views are recomputed from the chat: **What the narrator was told** (the exact `{{npcs_present}}` and
+`{{npc_focus}}` text for the latest reply, or one you pick, with who was listed, at which detail level, and which
+memories went in) and **Not saved yet** (names the story repeats that nobody has saved, with their reply count
+against the Remember card threshold of 3, and any "no" for the scene).
+
+**Edit: Base (cast file)** is the form (name, id, line, manner, voice, deep tiers, facts, starting disposition and memory, a
+schedule whose places come from the map picker, with times and importance, and a sighting place, hour and chance),
+and the raw JSON as an advanced view. New, Duplicate and Delete (with a confirm) are on the summary. The form checks as
+you type and Save stays off until it is clean. Save shows the changes first; Confirm writes them through
+`POST /cast/save`, and the world reloads at once. **Edit: In this chat** edits the person as this chat has them
+(line, manner, voice, deep tiers, facts, memory, disposition). Its diff is the list of "Character changed here"
+stamps it will add to the latest message; SillyTavern checks the chat, message and swipe are still the ones the map
+saw before adding them. Removing a fact or memory cannot be stamped; turn its stamp off in the chat instead.
+
+Apart from the Cast editor (and its In this chat stamps) and the editor mode below, the window only reads. It never changes the chat. Room data comes through the normal
 `/rooms` and `/doors` endpoints, so it follows the same rules as the extension. Plugin files changed, so
 **restart SillyTavern** after updating to get the window.
 
@@ -544,3 +575,7 @@ Patch ops (for the curious): `set_description`, `append_description`, `set_name`
 ### Discovery rooms
 
 When the story actually opens or enters a door that is not an exit, either one the room description mentions (say, one of the four guest rooms off the Drowned Rat's upstairs hallway) or one nobody described but that plausibly fits the room ("I open a door down the hall"), the narrator flags it (`ws_flag` with `action: "discover"`, or `[ws_flag: discover | which door]` in non-tools mode). One small model call writes the room behind it, given the current room, its neighbours one step out, and the subregion and region notes. If places nearby (up to 3 steps) are not yet connected to the room, they are offered as short keys too, and the model may answer `{"existing": key, ...}`: then only a door pair to that place is added (`add_exit`). If the new room's name closely matches a place up to 3 steps away (same words in any order, ignoring "the" and plurals, or one typo), it is treated as that place: connected to it if it isn't already, and otherwise nothing is added (the bar says it is already connected). The same duplicate guard applies to dug passages and to `/ws-change` edits, which connect to the existing place instead of adding a second copy (the summary says so). Otherwise the engine adds a `create_place` edit: a new room (its id made from the name, e.g. `end_guest_room`) and one door pair to it, as if it had always been there. Nothing else changes: no notes, no rewrite of the hallway. It is stamped at once, with the usual **Map changed here** bar (Edit / Turn off / Undo). **Proactive room discovery** (settings, off by default) decides how eager the narrator is: off, only a door that is actually opened or entered counts, never a room merely mentioned in the scenery ("a hallway lined with four guest rooms"); on, rooms the narration mentions may be added too. A scene can override it (for a future story engine): `worldscrawlScene.set('proactiveDiscovery', true)` (or `false`; `null` goes back to the setting), stored on the chat. Like any change it can be turned off and on again; turning it off while standing in the room moves the party back out. When the player types something like "I open a door down the hall" and no exit matches, the intent check picks **try another door**; the narrator is then told to open it and flag a discovery only if such a door fits the place, and otherwise to say there is none. Rooms where `"expandable"` is false (set on the room or inherited, see the world format) refuse discoveries. In the map editor, **Allow / forbid discovered rooms** (`set_expandable`) sets it on a room, subregion (`region:subregion`) or region to `true`, `false` or `inherit`.
+
+### Activity log
+
+The cast panel's **Activity log** view picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, sighting and by-name rolls, stamps written (map, positions, people, wait/clock), cards and their outcome, and calls skipped or failed with the reason. Everything but the skipped/failed calls is read from the message itself; those come from an in-memory log kept for this session only. It is read-only. New flag types plug in with `registerActivity(extraKey, collect)` in `extension/activity.mjs` and, for custom display, `registerRenderer(kind, fn)` in `plugin/ui/activitylog.mjs`; unknown `worldscrawl_*` keys still show with a generic line.

@@ -10,6 +10,8 @@ import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
 import { pickSearch, pickValid, pathOf } from './picker.mjs';
+import { castPanel } from './castpanel.mjs';
+import { markersByPlace, markersAt } from './castdata.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb, partyHere } from './mapdata.mjs';
 
 const API = '/api/plugins/worldscrawl';
@@ -68,6 +70,7 @@ function buildTopBar() {
         channel.postMessage({ type: 'wait', chatId: state.chatId, sleep: kind === 'sleep', args });
     } }, $('option', { value: '' }, 'Wait…'), $('option', { value: 'wait|1h' }, 'Wait 1 hour'), $('option', { value: 'wait|until morning' }, 'Wait until morning'), $('option', { value: 'sleep|8h' }, 'Sleep 8 hours'));
     nav.append(waitSel);
+    nav.append($('button', { class: 'topbutton cast-toggle', id: 'castToggle', title: 'Cast: browse and edit the people in this world (worlds/<world>/cast/)', onclick: () => setCastMode(!castMode) }, 'Cast'));
     nav.append($('button', { class: 'topbutton editor-toggle', id: 'editorToggle', title: 'Editor mode: see the whole world and inspect its data (read-only)', onclick: () => setEditor(!editor) }, 'Editor'));
 }
 
@@ -81,6 +84,17 @@ function setEditor(on) {
     document.body.classList.toggle('editor', on);
     for (const fn of listeners) fn(state);
 }
+// ---- Cast mode (phase 1.5): the side pane is the cast browser / editor; clicking a place filters it. NPC markers have their own toggle.
+let castMode = false, npcMarkers = true;
+try { castMode = localStorage.getItem('worldscrawl_cast') === '1'; npcMarkers = localStorage.getItem('worldscrawl_npc_markers') !== '0'; } catch {}
+function setCastMode(on) {
+    castMode = on;
+    try { localStorage.setItem('worldscrawl_cast', on ? '1' : '0'); } catch {}
+    document.getElementById('castToggle')?.classList.toggle('active', on);
+    document.body.classList.toggle('casting', on);
+    for (const fn of listeners) fn(state);
+}
+globalThis.wsCastMode = on => setCastMode(on !== false); // for the e2e tests
 const indexCache = new Map(); // world|version -> {addresses, doors}
 /** This chat's map patches (fire, collapse...): when there are any, map requests send the chat's changes. */
 const patchesOf = st => (st?.changes ?? []).filter(c => c?.type === 'patch');
@@ -561,6 +575,60 @@ function createMapWindow(win) {
     });
     globalThis.wsPicking = () => (pick ? { kind: pick.spec.kind, title: pick.spec.title, layer: layerKey(layer) } : null); // for the e2e tests
 
+    // ---- The cast panel: kept across renders while cast mode is on (a pick suspends and restores it like any form).
+    const worldQ = () => { const w = current?.st?.world ?? state?.world ?? ''; return w ? `?world=${encodeURIComponent(w)}` : ''; };
+    const castErr = e => { throw new Error(e.message); };
+    const cast = castPanel(document, {
+        load: () => getJson(`/cast${worldQ()}`),
+        outline: () => postJson(`${API}/edit/outline${worldQ()}`, { changes: (current?.st ?? state)?.changes ?? [], now: (current?.st ?? state)?.now ?? null }),
+        save: async (npc, original, originalFile) => { const r = await postJson(`${API}/cast/save${worldQ()}`, { npc, ...(original ? { original } : {}), ...(originalFile ? { original_file: originalFile } : {}) }).catch(castErr); channel.postMessage({ type: 'cast_changed' }); return r; },
+        del: async which => { const r = await postJson(`${API}/cast/delete${worldQ()}`, which).catch(castErr); channel.postMessage({ type: 'cast_changed' }); return r; },
+        play: () => (state?.on ? state.npcs ?? [] : []), // the newest broadcast, not the one last drawn
+        showPlace: a => { if (current?.full) jumpTo('room', a); },
+        showMessage: i => { if (state?.chatId) channel.postMessage({ type: 'show_message', chatId: state.chatId, msg: i }); },
+        exportNpc: async (id, update) => (state?.chatId ? askST('npc_export', { chatId: state.chatId, id, update }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
+        changed: () => { if (current?.full) redrawMarkers(); },
+        inspect: () => (state?.on ? state.npc_inspect ?? null : null),
+        activity: () => (state?.on ? state.activity ?? [] : []),
+        chatAt: () => (state?.on ? { msg: state.last_msg, swipe: state.last_swipe ?? null } : null),
+        chatEdit: async (id, stamps, at) => (state?.chatId && at ? askST('npc_chat_edit', { chatId: state.chatId, id, stamps, msg: at.msg, swipe: at.swipe }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
+        highlight: (addrs, now) => { castHl = { addrs, now }; paintHl(); },
+    });
+    let castHl = { addrs: [], now: null };
+    const hlHit = (id, a) => !!id && !!a && (a === id || a.startsWith(`${id}/`) || a.startsWith(`${id}:`));
+    function paintHl() {
+        for (const g of world.querySelectorAll('.node')) {
+            const n = current?.graph?.nodes.find(x => x.id === g.dataset.id), id = n ? entityOf(n) : null;
+            const on = castMode && castHl.addrs.some(a => hlHit(id, a));
+            g.classList.toggle('cast-hl', on);
+            g.classList.toggle('cast-hlnow', on && hlHit(id, castHl.now));
+        }
+    }
+    let castWorld = null;
+    function ensureCast(st) {
+        const key = `${st?.world ?? ''}|${st?.map_version ?? ''}`;
+        if (key !== castWorld) { castWorld = key; cast.resetOutline(); cast.refresh(); } else cast.setPlay();
+    }
+    function showCast() { if (!side.contains(cast.el)) side.replaceChildren(cast.el); }
+    globalThis.wsCast = cast; // for the e2e tests
+    function redrawMarkers() {
+        world.querySelectorAll('.npcmark').forEach(x => x.remove());
+        paintHl();
+        if (!npcMarkers || !current?.graph) return;
+        const marks = markersByPlace(cast.rows());
+        for (const n of current.graph.nodes) {
+            if (n.kind === 'stub' || n.kind === 'outside') continue;
+            const ms = markersAt(marks, n); if (!ms.length) continue;
+            const g = world.querySelector(`.node[data-id="${CSS.escape(n.id)}"]`); if (!g) continue;
+            const mk = S('g', { class: `npcmark${ms.some(m => m.now) ? ' now' : ''}`, 'data-npcs': ms.map(m => m.id).join(','), transform: `translate(${-NODE_W / 2 + 9},${NODE_H / 2 - 9})` });
+            mk.append(S('circle', { r: 8 }));
+            const t = S('text', { 'text-anchor': 'middle', y: 4 }); t.textContent = String(ms.length); mk.append(t);
+            const ti = S('title'); ti.textContent = ms.map(m => m.name).join(', ') + (ms.some(m => m.now) ? ' (here now)' : ' (scheduled here)'); mk.append(ti);
+            mk.addEventListener('click', ev => { ev.stopPropagation(); if (!castMode) setCastMode(true); cast.selectPlace(entityOf(n)); if (ms.length === 1) cast.selectId(ms[0].id); });
+            g.append(mk);
+        }
+    }
+
     let inspectSeq = 0;
     globalThis.wsInspect = (t, c) => inspectTarget(t, c); // for the e2e tests and the console
     async function inspectTarget(target, ctx = {}) {
@@ -652,7 +720,12 @@ function createMapWindow(win) {
             }
             const ent = entityOf(n), pk = pick && kindOf(n) === pick.spec.kind ? (pickValid(pick.spec, ent) ? 'pickable' : 'pickdim') : null;
             if (pk) g.classList.add(pk);
-            g.addEventListener('click', () => { if (moved) return; if (pick) { world.querySelectorAll('.node').forEach(x => x.classList.toggle('selected', x === g)); return pickSide(n); } showSide(n.id); });
+            g.addEventListener('click', () => {
+                if (moved) return;
+                if (pick) { world.querySelectorAll('.node').forEach(x => x.classList.toggle('selected', x === g)); return pickSide(n); }
+                if (castMode && n.kind !== 'stub' && n.kind !== 'outside') { selected = n.id; world.querySelectorAll('.node').forEach(x => x.classList.toggle('selected', x === g)); showCast(); return cast.selectPlace(entityOf(n)); }
+                showSide(n.id);
+            });
             g.addEventListener('dblclick', ev => {
                 ev.stopPropagation();
                 // In pick mode, at the field's level: a highlighted target asks "Choose …?"; above it, areas open as usual.
@@ -661,21 +734,26 @@ function createMapWindow(win) {
             });
             world.append(g);
         }
+        const npcToggle = $('input', { type: 'checkbox', class: 'npctoggle', title: 'Show where people are (or are scheduled to be)', onchange: ev => { npcMarkers = ev.target.checked; try { localStorage.setItem('worldscrawl_npc_markers', npcMarkers ? '1' : '0'); } catch {} redrawMarkers(); } });
+        npcToggle.checked = npcMarkers;
         legend.replaceChildren(...[...subs.values()].map(s => $('span', {}, $('i', { style: `background:hsl(${s.hue} 55% 45%)` }), s.name)),
-            $('span', {}, '▭ been · ⋯ seen · ┄ closed door · ✕ blocked'));
+            $('span', {}, '▭ been · ⋯ seen · ┄ closed door · ✕ blocked'), $('label', { class: 'npclegend' }, npcToggle, ' ', $('b', { class: 'npcdot' }, '●'), ' people'));
+        redrawMarkers();
         const hereNode = graph.nodes.find(n => n.here)?.id;
         if (pick) { svg.classList.add('picking'); if (!side.childNodes.length) pickSide(null); return; }
         svg.classList.remove('picking');
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
         // So does an unsaved Edit / Create place form (a "Choose…" pick comes back to it intact).
-        if (side.querySelector('.mapaction, .editlive-pane:not(.saved)')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        if (castMode) { showCast(); world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected)); }
+        else if (side.querySelector('.mapaction, .editlive-pane:not(.saved)')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
         else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
         else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
 
     async function update(st0) {
         let st = st0;
-        if (editor || pick) { try { st = await editorState(st0); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the world: ${e.message}`)); return; } if (st0 !== state) return; }
+        if (st0?.on || castMode) ensureCast(st0);
+        if (editor || pick || (castMode && !st0?.on)) { try { st = await editorState(st0); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the world: ${e.message}`)); return; } if (st0 !== state) return; }
         if (!st || !st.on) { world.replaceChildren(); legend.replaceChildren(); crumbs.replaceChildren(); current = null; layer = null; side.replaceChildren($('p', { class: 'empty' }, NO_CHAT)); lastHere = null; return; }
         let rooms;
         try { rooms = await knownRooms(st); } catch (e) { side.replaceChildren($('p', { class: 'empty' }, `Could not load the map: ${e.message}`)); return; }
@@ -756,6 +834,7 @@ buildMenus();
 buildTopBar();
 guardViewButtons(document.getElementById('windowButtons'));
 setEditor(editor);
+setCastMode(castMode);
 // ?edit=1&...: this tab is the editor for one map change from a SillyTavern message (opened by its Edit button).
 const changeSession = sessionFromUrl(location.search);
 const askST = (type, payload, ms = 20000) => new Promise(res => {

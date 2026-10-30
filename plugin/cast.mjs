@@ -43,6 +43,7 @@ export function loadCast(root, world = null) {
         if (!isObj(raw)) { problems.push(`${base}: not an object`); continue; }
         const rec = validateRecord(raw, { file: base, places: addresses });
         rec.file = base;
+        rec.raw = raw;
         if (rec.id && seen.has(rec.id)) {
             const prev = npcs.find(n => n.id === rec.id && n.ok);
             const prevMatch = prev?.file === `${rec.id}.json`;
@@ -95,4 +96,93 @@ export function writeCastNpc(root, npc, { update = false } = {}) {
     const file = updated ? existing : path.join(dir, `${id}.json`);
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
     return { id, file: path.basename(file), renamed: id !== record.id, updated, record: out };
+}
+
+/** Cast file names and the ids inside them: {byId: Map id -> file, taken: Set of ids and file bases}. */
+function castIndex(root) {
+    const taken = new Set(), byId = new Map();
+    for (const f of castFiles(root)) {
+        taken.add(path.basename(f, '.json'));
+        try {
+            const raw = loadJson(f);
+            if (isObj(raw) && typeof raw.id === 'string') { taken.add(raw.id); if (!byId.has(raw.id)) byId.set(raw.id, f); }
+        } catch { /* a broken file still occupies its name */ }
+    }
+    return { taken, byId };
+}
+
+const castFile = (root, name) => {
+    const base = typeof name === 'string' ? path.basename(name) : '';
+    if (!base || base !== name || !base.endsWith('.json')) return null;
+    const f = path.join(root, 'cast', base);
+    return isFile(f) ? f : null;
+};
+
+/** Drop empty fields so an editor save writes a tidy cast file (the same shape as a hand-written one). */
+export function tidyRecord(raw) {
+    const out = {};
+    const s = v => (typeof v === 'string' ? v.trim() : '');
+    for (const k of ['id', 'name', 'line', 'manner', 'voice']) if (s(raw[k])) out[k] = s(raw[k]);
+    const deep = {};
+    if (isObj(raw.deep)) {
+        if (s(raw.deep.history)) deep.history = s(raw.deep.history);
+        const secrets = Array.isArray(raw.deep.secrets) ? raw.deep.secrets.map(s).filter(Boolean) : [];
+        if (secrets.length) deep.secrets = secrets;
+        const rel = {};
+        if (isObj(raw.deep.relationships)) for (const [k, v] of Object.entries(raw.deep.relationships)) if (s(k) && s(v)) rel[s(k)] = s(v);
+        if (Object.keys(rel).length) deep.relationships = rel;
+    }
+    if (Object.keys(deep).length) out.deep = deep;
+    for (const k of ['facts', 'memory']) { const l = Array.isArray(raw[k]) ? raw[k].map(s).filter(Boolean) : []; if (l.length) out[k] = l; }
+    if (isObj(raw.disposition)) {
+        const d = {};
+        for (const [who, row] of Object.entries(raw.disposition)) if (isObj(row) && s(row.value)) d[who] = { value: s(row.value), ...(s(row.reason) ? { reason: s(row.reason) } : {}) };
+        if (Object.keys(d).length) out.disposition = d;
+    }
+    if (Array.isArray(raw.schedule)) {
+        const sched = raw.schedule.filter(isObj).map(e => {
+            const x = { place: s(e.place), activity: s(e.activity) };
+            if (s(e.from)) x.from = s(e.from);
+            if (s(e.to)) x.to = s(e.to);
+            if (s(e.importance)) x.importance = s(e.importance);
+            return x;
+        });
+        if (sched.length) out.schedule = sched;
+    }
+    if (isObj(raw.seen_at) && s(raw.seen_at.place)) out.seen_at = { place: s(raw.seen_at.place), hour: raw.seen_at.hour, chance: raw.seen_at.chance ?? 0.5 };
+    return out;
+}
+
+/**
+ * Save one NPC from the cast editor. `original` is the id (or file name, for a broken file) being edited; null creates.
+ * The id must be free (other than the NPC's own), the record must validate, and every place must be in this world.
+ * A rename writes <new id>.json and removes the old file. Returns {id, file, record}.
+ */
+export function saveCastNpc(root, raw, { original = null, originalFile = null, places = null } = {}) {
+    if (!isObj(raw)) throw new Error('nothing to save');
+    const record = tidyRecord(raw);
+    if (!NPC_ID.test(record.id ?? '')) throw new Error('id must be a short slug: lowercase letters, digits, - or _');
+    const { taken, byId } = castIndex(root);
+    const oldFile = (originalFile && castFile(root, originalFile)) || (original ? byId.get(original) ?? null : null);
+    if (original && !oldFile) throw new Error(`no cast file for ${original}`);
+    const ownBase = oldFile ? path.basename(oldFile, '.json') : null;
+    if (record.id !== original && taken.has(record.id) && record.id !== ownBase) throw new Error(`id ${record.id} is already taken`);
+    const checked = validateRecord(record, { file: `${record.id}.json`, places });
+    const problems = checked.problems;
+    if (!checked.ok || problems.length) throw new Error(problems.join('; ') || 'the NPC record is not valid');
+    const dir = path.join(root, 'cast');
+    fs.mkdirSync(dir, { recursive: true });
+    const keepName = oldFile && (path.basename(oldFile) === `${record.id}.json` || record.id === original);
+    const file = keepName ? oldFile : path.join(dir, `${record.id}.json`);
+    fs.writeFileSync(file, JSON.stringify(record, null, 2) + '\n');
+    if (oldFile && oldFile !== file) fs.rmSync(oldFile);
+    return { id: record.id, file: path.basename(file), record };
+}
+
+/** Delete one cast file, by the id inside it or (for a broken file) by its file name. */
+export function deleteCastNpc(root, { id = null, file = null } = {}) {
+    const f = (file && castFile(root, file)) || (id ? castIndex(root).byId.get(id) ?? null : null);
+    if (!f) throw new Error(`no cast file for ${id ?? file}`);
+    fs.rmSync(f);
+    return { file: path.basename(f) };
 }
