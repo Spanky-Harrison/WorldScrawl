@@ -172,14 +172,15 @@ test('editor diffs: base record changes and "In this chat" stamps', () => {
     assert.deepEqual(chatStamps(play, formFromPlay(play)).stamps, []);
 });
 
-import { messageActivity, registerActivity, logActivity } from '../../extension/activity.mjs';
+import { messageActivity, registerActivity } from '../../extension/activity.mjs';
+import { addCallNote } from '../../extension/calllog.mjs';
 import { groupEntries, registerRenderer, renderEntry } from '../../plugin/ui/activitylog.mjs';
 
 test('activity log: entries from message data, session calls, and plug-in kinds', () => {
     const msg = { mes: 'x', extra: { worldscrawl_flag: { kind: 'discover', hint: 'cellar', source: 'tool' }, worldscrawl_npc: [{ type: 'npc_fact', id: 'hesk', text: 'hates rats' }],
         worldscrawl_wait: { label: '1h', seconds: 3600 }, worldscrawl_remember: { name: 'Bram', status: 'review' }, worldscrawl_enabled: true, worldscrawl_newthing: { a: 1 } } };
-    logActivity('c1', 4, { label: 'ws_flag discover', status: 'skipped', reason: 'dig failed' });
-    const e = messageActivity(msg, 4, { chatId: 'c1', extra: [{ kind: 'roll', label: 'Tam sighting', roll: 71, chance: 40, present: false }] });
+    addCallNote(msg, { kind: 'ws_flag discover', status: 'skipped', reason: 'dig failed' });
+    const e = messageActivity(msg, 4, { extra: [{ kind: 'roll', label: 'Tam sighting', roll: 71, chance: 40, present: false }] });
     const kinds = e.map(x => x.kind);
     for (const k of ['flag', 'npc', 'clock', 'card', 'roll', 'call', 'worldscrawl_newthing']) assert.ok(kinds.includes(k), k);
     assert.ok(!kinds.includes('worldscrawl_enabled'));
