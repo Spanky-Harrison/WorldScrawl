@@ -10,7 +10,7 @@ test('the extension copy of npc.mjs matches the plugin one', () => {
     const copy = fs.readFileSync(new URL('extension/npc.mjs', root), 'utf8');
     assert.equal(copy.split('\n').slice(1).join('\n'), plugin);
 });
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, suggestNames, takeNpcTags, validateRecord } from '../../plugin/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, validateRecord } from '../../plugin/npc.mjs';
 import { castNameWarnings, loadCast, writeCastNpc } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath } from './helpers.mjs';
 
@@ -272,18 +272,18 @@ test('slices, suggestions, read-back and tags', () => {
     assert.match(slice.npc_focus, /kettle crew/);
     assert.equal(focusRules('I sip my ale.', present).id, null);
     assert.equal(focusRules('I talk to her.', present).id, 'hesk');
-    const messages = [
-        { text: 'The barmaid sets down a mug.' },
-        { text: 'The door creaks. The barmaid laughs.' },
-        { text: 'I thank the barmaid.' },
-        { text: 'Hello there.' }, { text: 'Hello again.' }, { text: 'Hello once more.' },
-        { text: 'Maren nods.' }, { text: 'Then Maren grins.' }, { text: 'I pay Maren.' },
-    ];
-    const sug = suggestNames(messages, { known: ['Hesk'], places: ['Common Room'], threshold: SUGGEST_AFTER });
-    assert.ok(sug.some(s => s.key === 'the barmaid'));
-    assert.ok(!sug.some(s => s.key === 'the door'));
-    assert.ok(sug.some(s => s.key === 'maren'));
-    assert.ok(!sug.some(s => s.key === 'hello'));
+    const fl = takeNpcFlags('Maren grins at you. [ws_flag: npc | Maren] [ws_flag: npc | Old Tom]');
+    assert.deepEqual(fl.names, ['Maren', 'Old Tom']);
+    assert.equal(fl.text, 'Maren grins at you.');
+    const flagged = names => ({ mes: 'x', extra: { [NPC_FLAG_KEY]: [{ swipe: 0, names }] } });
+    const fchat = [flagged(['Maren']), { is_user: true, mes: 'hi', extra: { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Saturday'] }] } }, flagged(['Maren', 'maren', 'Hesk']), { mes: 'Saturday header, no flag' }, flagged(['Maren', 'Tom'])];
+    const fp = flaggedPeople(fchat, 0, 4, { known: ['Hesk'] });
+    assert.equal(fp[0].key, 'maren'); assert.equal(fp[0].count, 3); assert.equal(fp[0].ready, true);
+    assert.ok(fp.some(r => r.key === 'tom' && !r.ready));
+    assert.ok(!fp.some(r => r.key === 'hesk' || r.key === 'saturday'), 'saved people and player lines are never counted');
+    assert.equal(flaggedPeople(fchat, 0, 4, { declined: ['maren'] }).some(r => r.key === 'maren'), false, 'a scene no holds');
+    assert.equal(flaggedPeople(fchat, 3, 4).find(r => r.key === 'maren').ready, false, 'only this scene counts');
+    const messages = [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'Hello.' }, { text: 'Hi.' }, { text: 'Hey.' }, { text: 'Maren nods.' }, { text: 'Then Maren grins.' }, { text: 'I pay Maren.' }];
     const back = readBack(messages.map((m, i) => ({ ...m, index: i })), 'Maren', 2);
     assert.equal(back.start, 6);
     assert.equal(back.truncated, true);
