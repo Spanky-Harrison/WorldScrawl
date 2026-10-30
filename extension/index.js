@@ -4437,7 +4437,7 @@ export function renderPatchCards() {
             if (s.type !== 'npc_found' || s.off) continue;
             const who = npcNames.get(s.id) || s.id;
             const note = foundNotes.find(x => x.ok && x.id === s.id && (x.where ?? '') === (s.where ?? ''));
-            const d = line(`Found ${who}${s.where ? ` (${s.where})` : ''}: now in ${placeLabelOf(s.place)}.${note?.reason ? ` ${note.reason}` : ''}`);
+            const d = line(`${s.where ? `${who}'s "${s.where}" is now ${placeLabelOf(s.place)}, for the rest of this chat.` : `${who} is now placed in ${placeLabelOf(s.place)}, for the rest of this chat.`}${note?.reason ? ` ${note.reason}` : ''}`);
             d.className = 'worldscrawl_found';
             const nrow = rowOf();
             const fields = fieldsOf();
