@@ -517,6 +517,31 @@ export function presentAt(chat, index, cast, env) {
     return out;
 }
 
+/**
+ * Saved people who belong here (a schedule stop at this place, or named in its notes) but are not in the scene now.
+ * One line each, from the schedule entry in force; with none, no place is named (never invented).
+ */
+export function absentAt(chat, index, cast, env, { notes = '', present = [] } = {}) {
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    if (!chat?.length) return [];
+    const frames = framesOf(chat, end, cast);
+    if (!frames.length) return [];
+    const here = env.playerAt(end);
+    const clock = env.clock(end);
+    const ids = new Set((present ?? []).map(p => p.id));
+    const out = [];
+    for (const npc of frames[end].values()) {
+        if (ids.has(npc.id) || npc.following) continue;
+        const stops = (npc.schedule ?? []).filter(e => e && !e.broken).some(e => resolveSchedulePlace(e.place, env).address === here);
+        if (!stops && !nameIn(notes, npc.name)) continue;
+        const sched = scheduleAt(npc, clock, env);
+        const where = sched && sched.address !== here
+            ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
+        out.push(`${npc.name} isn't here right now${where}; do not portray ${npc.name}.`);
+    }
+    return out.sort();
+}
+
 function publicNpc(n) {
     const disposition = {};
     for (const [who, row] of Object.entries(n.disposition ?? {})) disposition[who] = { ...row };
@@ -680,19 +705,17 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
 }
 
 /**
- * People the engine is counting toward a Remember card: names the story repeats that no one has saved, with their
- * reply count against the threshold, and whether a "no" was said for them in this scene.
+ * People the engine is counting toward a Remember card: names the narrator flagged ([ws_flag: npc | Name]) in this scene
+ * that no one has saved, with their reply count against the threshold, and whether a "no" was said for them in this scene.
  */
-export function unsavedPeople(chat, { known = [], places = [], threshold = SUGGEST_AFTER, playerAt = () => '', rememberKey = 'worldscrawl_remember' } = {}) {
+export function unsavedPeople(chat, { known = [], threshold = SUGGEST_AFTER, playerAt = () => '', rememberKey = 'worldscrawl_remember' } = {}) {
     const end = (chat?.length ?? 0) - 1;
     if (end < 0) return [];
     const declined = declinesInScene(chat, end, playerAt);
-    const messages = chat.filter(m => m && !m.is_system && m.mes).map(m => ({ text: m.mes }));
-    const rows = suggestNames(messages, { known, places, threshold: 1 });
     const cards = new Map();
     for (const m of chat) { const r = m?.extra?.[rememberKey]; if (r?.name) cards.set(normName(r.name), r.status ?? ''); }
-    return rows.filter(r => r.key.startsWith('the ') || r.label.includes(' ') || r.mid || r.count >= 1)
-        .map(r => ({ name: r.label, count: r.count, threshold, ready: r.count >= threshold && (r.key.startsWith('the ') || r.label.includes(' ') || r.mid), declined: declined.has(r.key), card: cards.get(r.key) ?? null }))
+    return flaggedPeople(chat, sceneStartOf(chat, end, playerAt), end, { known, threshold })
+        .map(r => ({ name: r.name, count: r.count, threshold, ready: r.ready && !declined.has(r.key), declined: declined.has(r.key), card: cards.get(r.key) ?? null }))
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
@@ -704,6 +727,11 @@ export function followersAt(chat, index, cast = []) {
     return [...frames[end].values()].filter(n => n.following).map(n => ({ id: n.id, name: n.name, who: n.following.who }));
 }
 
+/** Index where the scene holding message `index` starts (player at the same place). */
+export function sceneStartOf(chat, index, playerAt) {
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    return sceneStart(end, i => playerAt(Math.min(i, end)));
+}
 export function declinesInScene(chat, index, playerAt) {
     const end = Math.max(-1, Math.min(index ?? -1, (chat?.length ?? 0) - 1));
     if (end < 0) return new Set();
@@ -823,55 +851,38 @@ export function recordDiff(before, after) {
     return { changed: lines.length > 0, lines, text };
 }
 
-const ROLE_STOP = new Set(['door', 'doors', 'room', 'rooms', 'way', 'ways', 'bar', 'fire', 'ale', 'beer', 'wine', 'night', 'day', 'time', 'man', 'woman', 'men', 'women', 'one', 'other', 'same', 'next', 'back', 'front', 'side', 'floor', 'wall', 'table', 'chair', 'doorway', 'stairs', 'staircase', 'place', 'world', 'story', 'thing', 'things', 'people', 'person', 'player', 'inn', 'tavern', 'street', 'square', 'window', 'windows', 'gate', 'yard', 'cellar', 'kitchen', 'stable', 'upstairs', 'downstairs', 'common', 'village', 'river', 'water', 'light', 'dark', 'coin', 'coins', 'money', 'drink', 'food', 'hand', 'hands', 'head', 'face', 'eyes', 'voice', 'house', 'shop', 'road', 'sign', 'door', 'counter']);
-const PROPER_STOP = new Set(['The', 'Then', 'And', 'But', 'When', 'After', 'Before', 'Hello', 'There', 'This', 'That', 'She', 'Her', 'His', 'They', 'You', 'User', 'What', 'Where', 'Why', 'How', 'Yes', 'Please']);
-
-function sentenceStart(text, index) {
-    const before = text.slice(0, index).trimEnd();
-    return before === '' || /[.!?]$/.test(before);
+export const NPC_FLAG_KEY = 'worldscrawl_npc_flags';
+/** The narrator's [ws_flag: npc | Name] tags: the names come back, the text without the tags. */
+export const NPC_FLAG_TAG = /\s*\[ws_flag:\s*npc\s*\|\s*([^\]|]{1,60})\]/gi;
+export function takeNpcFlags(text) {
+    const names = [];
+    const cleaned = String(text ?? '').replace(NPC_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
+    return { names, text: cleaned };
 }
-
-/** Names and "the role" phrases in one message. `mid` is false when a single proper name is only a sentence start. */
-export function mentionsIn(text) {
-    const src = String(text ?? '');
-    const out = [];
-    for (const m of src.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g)) {
-        let label = m[1];
-        const words = label.split(' ');
-        while (words.length > 1 && PROPER_STOP.has(words[0])) words.shift();
-        if (!words.length || (words.length === 1 && PROPER_STOP.has(words[0]))) continue;
-        label = words.join(' ');
-        if (label.length < 3) continue;
-        out.push({ name: label, mid: label.includes(' ') || !sentenceStart(src, m.index) });
-    }
-    for (const m of src.matchAll(/\bthe ([a-z]{4,20})\b/gi)) {
-        const word = m[1].toLowerCase();
-        if (ROLE_STOP.has(word)) continue;
-        out.push({ name: `the ${word}`, mid: true });
-    }
-    return out;
-}
+/** Names the narrator flagged on message m (the shown swipe). */
+export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
 
 /**
- * People mentioned in at least `threshold` messages, who are not already saved, declined, or a place.
- * A single proper name counts only when it also appears mid-sentence. "the barmaid" counts; "the door" does not.
+ * Unsaved people the narrator flagged in this scene (messages from..to), counted once per reply, most recent first.
+ * Saved names (`known`) and the scene's no (`declined`, normalized) are skipped. `ready` when count >= threshold.
  */
-export function suggestNames(messages, { known = [], declined = [], places = [], threshold = SUGGEST_AFTER } = {}) {
-    const skip = new Set([...known, ...declined, ...places].map(normName).filter(Boolean));
-    const counts = new Map();
-    for (const m of messages ?? []) {
+export function flaggedPeople(chat, from, to, { known = [], declined = [], threshold = SUGGEST_AFTER } = {}) {
+    const skip = new Set([...known.map(normName), ...declined].filter(Boolean));
+    const rows = new Map();
+    for (let i = Math.max(0, from); i <= to && i < (chat?.length ?? 0); i++) {
+        const m = chat[i];
+        if (!m || m.is_user || m.is_system) continue;
         const seen = new Set();
-        for (const hit of mentionsIn(m.text ?? m.mes ?? '')) {
-            const key = normName(hit.name);
-            if (!key || skip.has(key) || seen.has(key)) continue;
+        for (const name of flagsOn(m)) {
+            const key = normName(name);
+            if (!key || seen.has(key) || skip.has(key) || known.some(k => nameIn(name, k) || nameIn(k, name))) continue;
             seen.add(key);
-            const row = counts.get(key) ?? { key, label: hit.name, count: 0, mid: false };
-            row.count++;
-            if (hit.mid) row.mid = true;
-            counts.set(key, row);
+            const row = rows.get(key) ?? { key, name, count: 0, last: i };
+            row.count++; row.last = i; row.name = name;
+            rows.set(key, row);
         }
     }
-    return [...counts.values()].filter(r => r.count >= threshold && (r.key.startsWith('the ') || r.label.includes(' ') || r.mid));
+    return [...rows.values()].map(r => ({ ...r, ready: r.count >= threshold })).sort((a, b) => b.last - a.last);
 }
 
 /** Messages from the first one that names them, capped at the most recent `cap` of that span. */

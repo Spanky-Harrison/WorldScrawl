@@ -18,6 +18,7 @@ registerActivity('worldscrawl_actors', v => ({ kind: 'position', label: 'actor p
 registerActivity('worldscrawl_wait', v => ({ kind: 'clock', label: v?.sleep ? 'slept' : 'waited', text: `${v?.label ?? ''}${v?.seconds ? ` (${v.seconds}s)` : ''}`.trim() }));
 registerActivity('worldscrawl_waitcard', v => ({ kind: 'card', label: 'wait card', text: short(v?.label ?? v), status: v?.status ?? null }));
 registerActivity('worldscrawl_remember', v => ({ kind: 'card', label: `Remember card${v?.suggested ? ' (suggested)' : ''}`, text: v?.name ?? '', status: v?.status ?? null }));
+registerActivity('worldscrawl_npc_flags', v => list(v).flatMap(f => list(f?.names).map(n => ({ kind: 'npc', label: 'ws_flag npc (person flagged)', text: n, swipe: f?.swipe ?? null }))));
 registerActivity('worldscrawl_focus', v => ({ kind: 'focus', label: 'narrator focus', text: v?.id ? `${v.id} (${v.depth ?? 'present'})` : 'nobody' }));
 registerActivity('worldscrawl_npc', v => list(v).map(s => ({ kind: 'npc', label: s?.type ?? 'npc', text: s?.summary ?? [s?.id, s?.text ?? s?.note ?? s?.value ?? s?.place ?? s?.name].filter(Boolean).join(': '), status: s?.off ? 'off' : null, swipe: s?.swipe ?? null })));
 registerActivity('worldscrawl_reveal', v => ({ kind: 'map', label: 'revealed', text: short(v) }));

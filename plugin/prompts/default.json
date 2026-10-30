@@ -974,8 +974,8 @@
       "title": "Narration: how to flag map changes",
       "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
       "group": "narration",
-      "locked": "The exact [ws_flag: …] tag format the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Never write it otherwise.",
+      "locked": "The exact [ws_flag: …] and [ws_flag: npc | …] tag formats the game looks for.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. Never write it otherwise.",
       "placeholders": [
         {
           "name": "discover",
@@ -1042,8 +1042,8 @@
       "title": "Narration: the ws_flag action argument (tools on)",
       "description": "Alongside (map tools on): the description of ws_flag's action argument.",
       "group": "narration",
-      "locked": "Names the action values change, discover, wait and sleep, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night).",
+      "locked": "Names the action values change, discover, wait, sleep and npc, which the game reads.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved.",
       "placeholders": [
         {
           "name": "discover",

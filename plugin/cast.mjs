@@ -2,7 +2,7 @@
 // and skipped. The world still loads.
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_ID, exportRecord, freeId, validateRecord } from './npc.mjs';
+import { NPC_ID, exportRecord, freeId, nameIn, validateRecord } from './npc.mjs';
 import { isDir, isFile, isObj, loadJson } from './world.mjs';
 
 export function castFiles(root) {
@@ -23,6 +23,20 @@ export function worldPlaces(world) {
         if (l?.address && l?.name) labels[l.address] = l.name;
     }
     return { addresses, names: [...new Set(names)], labels };
+}
+
+/** Place notes or descriptions that name a cast person: the narrator may portray them there off-shift. */
+export function castNameWarnings(world, npcs) {
+    const out = [];
+    const groups = [['region', world?.regions], ['subregion', world?.subregions], ['place', world?.locations]];
+    for (const n of npcs ?? []) {
+        if (!n?.ok || !n.name) continue;
+        for (const [, map] of groups) for (const [key, r] of map?.entries?.() ?? []) {
+            const fields = ['notes', 'description'].filter(f => typeof r?.[f] === 'string' && nameIn(r[f], n.name));
+            if (fields.length) out.push(`${r.name ?? key} ${fields.join(' and ')} mention${fields.length > 1 ? "" : "s"} cast NPC ${n.name} by name; the narrator may portray ${n.name} off-shift. Keep their details in the cast file.`);
+        }
+    }
+    return out;
 }
 
 /**
@@ -59,6 +73,7 @@ export function loadCast(root, world = null) {
         for (const p of rec.problems) if (!problems.includes(p)) problems.push(p);
         npcs.push(rec);
     }
+    if (world) for (const w of castNameWarnings(world, npcs)) problems.push(w);
     return { npcs, problems, names };
 }
 

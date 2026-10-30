@@ -259,8 +259,14 @@ try {
     // /ws-go and /ws-exits.
     await queue([{ content: 'The temple.' }]);
     expected += 1;
+    // Regression: the preset's "Replace empty message" must not become an extra player message after a move.
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = '(POV Character stays silent or continues doing previous action)'; });
+    const goN0 = await page.evaluate(() => SillyTavern.getContext().chat.length);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go North'));
     await waitReqs();
+    const goNew = await page.evaluate(n => SillyTavern.getContext().chat.slice(n).filter(m => !m.is_system).map(m => ({ u: !!m.is_user, mes: m.mes })), goN0);
+    check('move: exactly one player line then one narrator reply (no empty-send filler)', goNew.length === 2 && goNew[0].u && !goNew[1].u && !goNew.some(m => m.mes.includes('stays silent')), JSON.stringify(goNew));
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = ''; });
     check('/ws-go moves party', (await stored()) === 'riverton:temple/nave', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
     check('notes: temple drops region notes (inherit_notes false)', narr.includes('About Temple of the Tides: A hushed') && !narr.includes('About Riverton:'), narr.slice(0, 300));
@@ -2050,6 +2056,24 @@ try {
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click();
     await page.waitForTimeout(400);
     check('Undo removes the fact stamp', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'))));
+    // The narrator flags people itself ([ws_flag: npc | Name]); no name scanning, so a date header is never offered.
+    const flagReply = n => `**Saturday, 9 PM**\nBrannoc the ferryman leans in and asks how your crossing was (${n}); Ysolde pours. [ws_flag: npc | Brannoc] [ws_flag: npc | Ysolde]`;
+    await queue([{ content: 'stay' }, { content: flagReply(1) }]); await send('I nod.', 2);
+    await queue([{ content: 'stay' }, { content: flagReply(2) }]); await send('I nod again.', 2);
+    const fl2 = await page.evaluate(async () => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const ch = SillyTavern.getContext().chat;
+        return { rows: m.flaggedInScene(ch, ch.length - 1), shown: ch.slice(-1)[0].mes, card: ch.some(x => /Brannoc|Saturday/.test(x.extra?.worldscrawl_remember?.name ?? '')) };
+    });
+    check('npc flags: tag stripped, counted, no card before 3, never Saturday', !/ws_flag/.test(fl2.shown) && fl2.rows.length === 2 && fl2.rows[0].name === 'Brannoc' && fl2.rows.every(r => r.count === 2) && !fl2.card, JSON.stringify(fl2));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc'));
+    await page.waitForTimeout(500);
+    const bare = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch.slice(-1)[0].extra?.worldscrawl_remember ?? null; });
+    check('bare /ws-npc targets the most recently flagged unsaved person', bare?.name === 'Brannoc' && bare.status === 'review' && !bare.suggested, JSON.stringify(bare));
+    await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: 'Discard' }).last().click();
+    await page.waitForTimeout(400);
+    await queue([{ content: 'stay' }, { content: flagReply(3) }]); await send('I shrug.', 2);
+    const fl3 = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch.slice(-1)[0].extra?.worldscrawl_remember ?? null; });
+    check('third flag shows a Remember card, but not for the scene no', fl3?.name === 'Ysolde' && fl3.suggested === true, JSON.stringify(fl3));
     const beforeWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     expected += 1;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm'));

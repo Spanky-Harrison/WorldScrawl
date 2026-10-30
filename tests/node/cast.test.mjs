@@ -117,8 +117,8 @@ const inspEnv = (hour, at = BAR) => ({
 
 test('inspector: why someone is where they are, who is at a place, the narrator view and unsaved people', () => {
     const cast = client(RIVERTON).get('/cast').json().npcs;
-    const chat = [{ mes: 'You walk into the Drowned Rat.', is_user: true, extra: {} }, { mes: 'Hesk wipes the bar. A man called Bram Tull nods. Bram Tull drinks.', is_user: false, extra: {} },
-        { mes: 'Hello Hesk', is_user: true, extra: {} }, { mes: 'Bram Tull leaves. Hesk shrugs.', is_user: false, extra: {} }];
+    const chat = [{ mes: 'You walk into the Drowned Rat.', is_user: true, extra: {} }, { mes: 'Hesk wipes the bar. A man called Bram Tull nods. Bram Tull drinks.', is_user: false, extra: { worldscrawl_npc_flags: [{ swipe: 0, names: ['Bram Tull'] }] } },
+        { mes: 'Hello Hesk', is_user: true, extra: {} }, { mes: 'Bram Tull leaves. Hesk shrugs.', is_user: false, extra: { worldscrawl_npc_flags: [{ swipe: 0, names: ['Bram Tull', 'Hesk'] }] } }];
     const env = inspEnv(12);
     const hesk = framesOf(chat, 3, cast)[3].get('hesk');
     const w = npcWhy(hesk, 3, env);
@@ -141,7 +141,8 @@ test('inspector: why someone is where they are, who is at a place, the narrator 
     const bram = un.find(x => x.name.includes('Bram'));
     assert.ok(bram, JSON.stringify(un));
     assert.equal(bram.threshold, 3);
-    assert.ok(bram.count >= 1);
+    assert.equal(bram.count, 2);
+    assert.ok(!un.some(x => x.name === 'Hesk'));
 });
 
 test('sighting rolls: the seeded roll against the chance, and a no-show reason', () => {

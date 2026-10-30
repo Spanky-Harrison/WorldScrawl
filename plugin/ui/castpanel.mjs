@@ -87,7 +87,7 @@ export function castPanel(doc, io) {
     }
     function drawUnsaved() {
         const i = insp(), rowsU = i?.unsaved ?? [];
-        viewBox.replaceChildren($('p', { class: 'muted' }, `People the story keeps naming that nobody has saved. A Remember card is offered after ${i?.threshold ?? 3} replies.`),
+        viewBox.replaceChildren($('p', { class: 'muted' }, `People the narrator flagged in this scene that nobody has saved. A Remember card is offered after ${i?.threshold ?? 3} replies.`),
             !rowsU.length ? $('p', { class: 'muted' }, i ? 'Nobody unsaved is being tracked.' : 'Open a chat to see this.')
                 : $('table', { class: 'resolved cast-unsaved' }, $('tr', {}, $('th', {}, 'Name'), $('th', {}, 'Replies'), $('th', {}, 'Status')),
                     ...rowsU.map(x => $('tr', {}, $('td', {}, x.name), $('td', {}, `${x.count} / ${x.threshold}`),
