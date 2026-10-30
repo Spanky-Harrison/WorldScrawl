@@ -12,6 +12,7 @@ http.createServer(async (req, res) => {
         const body = JSON.parse(await readBody(req));
         requests.push(body);
         const next = queue.shift() ?? { content: 'ok' };
+        if (next.delay) await new Promise(r => setTimeout(r, next.delay)); // {content, delay: ms}: a slow answer
         if (next.error) return json(500, { error: { message: next.error, type: 'server_error' } });
         const message = next.tool_calls
             ? { role: 'assistant', content: '', tool_calls: next.tool_calls.map((t, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.arguments ?? {}) } })) }

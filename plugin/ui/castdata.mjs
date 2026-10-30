@@ -73,8 +73,11 @@ export function formFromRecord(rec = null) {
     const raw = r.raw && typeof r.raw === 'object' ? r.raw : r;
     const d = raw.disposition?.player ?? {};
     return {
-        id: s(raw.id) || s(r.id), name: s(raw.name), line: s(raw.line), manner: s(raw.manner), voice: s(raw.voice),
-        history: s(raw.deep?.history), secrets: Array.isArray(raw.deep?.secrets) ? raw.deep.secrets.map(String) : [],
+        id: s(raw.id) || s(r.id), name: s(raw.name), unknownAs: s(raw.unknownAs),
+        // A cast file (nested personality / appearance) or a loaded or folded record (flat line / manner / voice / looks / body / outfit).
+        line: s(raw.personality?.summary ?? raw.line), manner: s(raw.personality?.manner ?? raw.manner), voice: s(raw.personality?.speech ?? raw.voice),
+        looks: s(raw.appearance?.summary ?? raw.looks), body: s(raw.appearance?.body ?? raw.body), outfit: s(raw.appearance?.outfit ?? raw.outfit),
+        history: s(raw.history ?? raw.deep?.history), secrets: Array.isArray(raw.deep?.secrets) ? raw.deep.secrets.map(String) : [],
         relationships: Object.entries(raw.deep?.relationships ?? {}).map(([who, text]) => ({ who, text: String(text ?? '') })),
         facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], memory: Array.isArray(raw.memory) ? raw.memory.map(x => (typeof x === 'string' ? x : x?.note ?? '')) : [],
         disposition: s(d.value) || '', reason: s(d.reason),
@@ -84,9 +87,17 @@ export function formFromRecord(rec = null) {
     };
 }
 export function recordFromForm(f) {
-    const out = { id: s(f.id), name: s(f.name), line: s(f.line) };
-    if (s(f.manner)) out.manner = s(f.manner);
-    if (s(f.voice)) out.voice = s(f.voice);
+    const out = { id: s(f.id), name: s(f.name) };
+    if (s(f.unknownAs)) out.unknownAs = s(f.unknownAs);
+    out.personality = { summary: s(f.line) };
+    if (s(f.manner)) out.personality.manner = s(f.manner);
+    if (s(f.voice)) out.personality.speech = s(f.voice);
+    const look = {};
+    if (s(f.looks)) look.summary = s(f.looks);
+    if (s(f.body)) look.body = s(f.body);
+    if (s(f.outfit)) look.outfit = s(f.outfit);
+    if (Object.keys(look).length) out.appearance = look;
+    if (s(f.history)) out.history = s(f.history);
     const disp = { ...(f.others ?? {}) };
     if (s(f.disposition)) disp.player = { value: s(f.disposition), ...(s(f.reason) ? { reason: s(f.reason) } : {}) };
     if (Object.keys(disp).length) out.disposition = disp;
@@ -94,7 +105,6 @@ export function recordFromForm(f) {
     if (sched.length) out.schedule = sched;
     if (f.seen && s(f.seen.place)) out.seen_at = { place: s(f.seen.place), hour: Number(f.seen.hour), chance: Number(f.seen.chance) };
     const deep = {};
-    if (s(f.history)) deep.history = s(f.history);
     const secrets = (f.secrets ?? []).map(s).filter(Boolean);
     if (secrets.length) deep.secrets = secrets;
     const rel = {};
@@ -173,6 +183,8 @@ export function recordChanges(a = {}, b = {}) {
     for (const k of keys) if (JSON.stringify(a?.[k] ?? null) !== JSON.stringify(b?.[k] ?? null)) out.push({ field: k, from: show(a?.[k]), to: show(b?.[k]) });
     return out;
 }
+/** Form text fields -> the card field a chat stamp sets. */
+export const FORM_FIELDS = { line: 'personality.summary', manner: 'personality.manner', voice: 'personality.speech', looks: 'appearance.summary', body: 'appearance.body', outfit: 'appearance.outfit', history: 'history', unknownAs: 'unknownAs' };
 /** A form for "In this chat": the person as the chat has them now (their folded state, not the cast file). */
 export function formFromPlay(play) {
     const f = formFromRecord(play?.record ?? play ?? {});
@@ -187,8 +199,7 @@ export function formFromPlay(play) {
 export function chatStamps(play, f) {
     const base = formFromPlay(play);
     const stamps = [], cannot = [];
-    for (const k of ['line', 'manner', 'voice']) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field: k, text: s(f[k]) }); else cannot.push(`clear ${k}`); }
-    if (s(f.history) !== s(base.history)) { if (s(f.history)) stamps.push({ type: 'npc_fact', field: 'deep.history', text: s(f.history) }); else cannot.push('clear history'); }
+    for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`); }
     const added = (now, was) => now.map(s).filter(Boolean).filter(x => !was.map(s).includes(x));
     const removed = (now, was) => was.map(s).filter(Boolean).filter(x => !now.map(s).includes(x));
     for (const t of added(f.facts ?? [], base.facts)) stamps.push({ type: 'npc_fact', field: 'fact', text: t });

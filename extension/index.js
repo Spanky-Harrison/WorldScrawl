@@ -12,7 +12,7 @@ import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecide
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, npcForName, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -629,7 +629,7 @@ function registerTools() {
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep', 'npc', 'lore'], description: flagActionText() },
+            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep', 'npc', 'name', 'lore'], description: flagActionText() },
                 location: { type: 'string', description: 'The place that changed (its name); for "lore", the place whose lore you want.' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
             required: ['note'],
         },
@@ -642,10 +642,14 @@ function registerTools() {
             if (action === 'lore') {
                 const loc = await currentLocation(), chain = loc?.lore_chain ?? [];
                 const hits = loreFor(chain, String(location || note || ''));
+                const asked = String(location || note || '').trim();
+                const person = !hits.length && asked ? npcForName([...(framesOf(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? []).at(-1)?.values() ?? [])], asked) : null;
+                if (person?.deep?.history) { pendingLoreFlags.push(asked); return `${person.name}'s history: ${person.deep.history}`; }
                 if (!hits.length) return chain.length ? `No lore on file for that. Lore on file: ${chain.map(c => c.name).join(', ')}.` : 'No lore on file here.';
                 pendingLoreFlags.push(...hits.map(h => h.name));
                 return renderTokens(P('narration.lore_block', { lore: hits.map(c => `- ${c.name}: ${c.text}`).join('\n') }));
             }
+            if (action === 'name') { const n = String(note || location || '').trim().slice(0, 60); if (n) pendingNameFlags.push(n); return 'Noted.'; }
             if (action === 'npc') { const n = String(note || location || '').trim().slice(0, 60); if (n) pendingNpcFlags.push(n); return 'Noted.'; }
             if (action === 'discover') { pendingFlag = { kind: 'discover', hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will add the room behind that door after your reply.'; }
             pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
@@ -1993,14 +1997,16 @@ function npcPromptBits(loc) {
     try {
         const env = npcEnv(chat, loc);
         const present = presentAt(chat, chat.length - 1, pack.npcs, env);
-        const lore = fedLore(loc).map(c => c.text).join('\n'); // presence lines only for {{npc:id}} in lore being fed
+        const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
         const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
         if (!present.length && !absent.length) return {};
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
-        const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
-        const sl = npcSlices(present, focus);
+        const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
+        const focus = stored && stored.depth ? stored : focusRules(said, present);
+        const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
+        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }) });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
@@ -2094,23 +2100,66 @@ async function keepRemember(id, edited = null) {
         try { await keepRememberNow(c, msg, card, id, edited); } catch (e) { unmarkDecided(msg, nid); renderPatchCards(); throw e; }
     });
 }
+const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
+/** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
+async function askRemember(id, name, { prefetch = false } = {}) {
+    const chat = ctx().chat ?? [];
+    const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
+    const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
+    const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
+    const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
+    const kind = prefetch ? 'remember (prefetch)' : 'remember';
+    let got = null;
+    for (let t = 0; t < 2 && !got; t++) {
+        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, retry: t > 0 }))); } catch { got = null; }
+        if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
+    }
+    return got;
+}
+// Prefetch: the remember call starts when the card first shows (once per card id). The answer is cached on the card
+// (msg.extra, per swipe) so a redraw never calls again; Approve uses it, or awaits the call still in flight.
+const rememberFlights = new Map(); // card nid -> promise of the parsed card (or null)
+function prefetchRemember(id) {
+    const msg = ctx().chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
+    if (!card || card.status !== 'review') return null;
+    card.nid = card.nid || newNoticeId('remember');
+    if (card.proposal?.name === card.name && card.proposal.got) return Promise.resolve(card.proposal.got);
+    if (rememberFlights.has(card.nid)) return rememberFlights.get(card.nid);
+    if (card.proposal?.failed && card.proposal.name === card.name) return null; // failed: wait for Retry
+    const name = card.name;
+    const p = askRemember(id, name, { prefetch: true }).catch(() => null).then(got => {
+        card.proposal = got ? { name, got } : { name, failed: true };
+        syncSwipeExtra(msg);
+        ctx().saveChat?.();
+        renderPatchCards();
+        return got;
+    }).finally(() => rememberFlights.delete(card.nid));
+    rememberFlights.set(card.nid, p);
+    return p;
+}
+function retryRemember(id) {
+    const card = ctx().chat?.[id]?.extra?.[REMEMBER_KEY];
+    if (card?.proposal?.failed) delete card.proposal;
+    prefetchRemember(id);
+    renderPatchCards();
+}
 async function keepRememberNow(c, msg, card, id, edited) {
     const chat = c.chat ?? [];
     const name = edited?.name?.trim() || card.name;
-    const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
-    let got = edited?.line ? { name, line: edited.line.trim(), manner: '', voice: '', facts: [] } : null;
-    if (!got) {
-        const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
-        const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
-        const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
-        for (let t = 0; t < 2 && !got; t++) {
-            try { got = readRememberAnswer(parseJsonAnswer(await gen('remember', { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 300 }, { at: id, retry: t > 0 }))); } catch { got = null; }
-            if (!got) markLast(id, 'remember', 'failed', 'answer was not a usable person');
-        }
-        if (!got) got = { name, line: 'Met in this scene.', manner: '', voice: '', facts: [] };
+    const blank = REMEMBER_BLANK;
+    let got = edited?.line ? { ...blank, name, line: edited.line.trim() } : null;
+    if (!got && name === card.name) {
+        if (card.proposal?.name === name && card.proposal.got) got = card.proposal.got; // prefetched: instant
+        else if (rememberFlights.has(card.nid)) got = await rememberFlights.get(card.nid); // in flight: never a second call
     }
+    if (!got) got = await askRemember(id, name);
+    if (!got) got = { ...blank, name, line: 'Met in this scene.' };
+    else if (edited?.name?.trim() && name !== got.name) got = { ...got, name };
     const taken = new Set(knownNpcNames(chat));
-    addNpcStamp(msg, { type: 'npc_create', id: freeId(got.name, taken), name: got.name, line: got.line, manner: got.manner, voice: got.voice, facts: got.facts });
+    const newId = freeId(got.name, taken);
+    addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
+        ...Object.fromEntries(['looks', 'body', 'outfit', 'history', 'unknownAs'].filter(k => got[k]).map(k => [k, got[k]])), facts: got.facts, ...(got.invented?.length ? { invented: got.invented } : {}) });
+    if (got.disposition) addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: got.disposition.value, reason: got.disposition.reason ?? '', dramatic: true });
     card.status = 'kept'; card.name = got.name;
     const d = decisionOf(msg, card.nid); if (d) d.text = `remembered ${got.name}`;
     syncSwipeExtra(msg);
@@ -2146,7 +2195,7 @@ function maybeSuggest(id) {
     const hit = flaggedInScene(chat, id).find(s => s.ready && !chat.some(m => normName(m?.extra?.[REMEMBER_KEY]?.name ?? '') === s.key));
     if (!hit) return;
     msg.extra = msg.extra ?? {};
-    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.name, status: 'review', suggested: true };
+    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.name, status: 'review', suggested: true, nid: newNoticeId('remember') };
 }
 async function exportNpc(id, { update = false } = {}) {
     const chat = ctx().chat ?? [];
@@ -2234,9 +2283,12 @@ function npcDetail(id) {
     const chat = ctx().chat ?? [];
     const npc = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], id);
     if (!npc) return 'No saved person with that id is here.';
-    const bits = [npc.line];
+    const bits = [`Personality: ${npc.line}`];
     if (npc.manner) bits.push(`Manner: ${npc.manner}`);
-    if (npc.voice) bits.push(`Voice: ${npc.voice}`);
+    if (npc.voice) bits.push(`Speech: ${npc.voice}`);
+    if (npc.looks) bits.push(`Looks: ${npc.looks}`);
+    if (npc.body) bits.push(`Body: ${npc.body}`);
+    if (npc.outfit) bits.push(`Wearing: ${npc.outfit}`);
     if (npc.memory?.length) bits.push(`Memory: ${npc.memory.join('; ')}`);
     if (npc.deep?.history) bits.push(`History: ${npc.deep.history}`);
     if (npc.deep?.secrets?.length) bits.push(`Secrets: ${npc.deep.secrets.join('; ')}`);
@@ -3074,6 +3126,7 @@ export const waitHint = () => P('narration.wait_hint');
 const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i;
 let pendingWait = null; // from ws_flag action wait/sleep: stamped on the reply when it arrives
 const RANGE_CAP = 10;
+let pendingNameFlags = []; // names from ws_flag action name: the player learned them; stamped on the reply
 let pendingNpcFlags = []; // names from ws_flag action npc: stamped on the reply when it arrives
 let pendingLoreFlags = []; // places from ws_flag action lore: stamped on the reply when it arrives
 let pendingFlag = null; // from the ws_flag tool: attached to the reply when it arrives
@@ -3739,6 +3792,20 @@ export async function onReplyForFlags(id) {
             await c.saveChat?.();
         } catch (e) { console.warn('[WorldScrawl] lore flag', e.message); }
     }
+    const kf = takeNameFlags(msg.mes ?? ''), learned = [...pendingNameFlags.splice(0), ...kf.names];
+    if (kf.text !== (msg.mes ?? '')) {
+        msg.mes = kf.text.trimEnd();
+        if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+        try { c.updateMessageBlock?.(id, msg); } catch {}
+    }
+    if (learned.length) {
+        const ch = c.chat ?? [];
+        const folded = [...(framesOf(ch, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+        msg.extra = msg.extra ?? {};
+        msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && (s.swipe ?? 0) === swipeOf(msg)));
+        for (const nm of new Set(learned)) { const n = npcForName(folded, nm); if (n) addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source: 'flag' }); }
+        await c.saveChat?.();
+    }
     const nf = takeNpcFlags(msg.mes ?? ''), npcNames = [...pendingNpcFlags.splice(0), ...nf.names];
     if (nf.text !== (msg.mes ?? '')) {
         msg.mes = nf.text.trimEnd();
@@ -4011,6 +4078,32 @@ function cardButton(label, onClick, title = '', decides = false) {
 /** Notice text, then ONE right-aligned button row at the end. */
 const rowOf = (...buttons) => noticeRow(document, buttons.flat());
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
+/** The proposed card on a Remember notice: what Approve will save. Invented details are marked. */
+function rememberProposalEl(got) {
+    const box = document.createElement('div');
+    box.className = 'worldscrawl_remember_proposal';
+    box.style.cssText = 'margin:3px 0 3px 1em;font-size:0.92em;';
+    const head = document.createElement('div');
+    head.className = 'worldscrawl_remember_head';
+    head.textContent = `${got.name}${got.unknownAs ? ` (shown as "${got.unknownAs}" until the name is learned)` : ''}: ${got.line}${got.looks ? ` — ${got.looks}` : ''}`;
+    box.append(head);
+    const rows = [['Manner', got.manner], ['Speech', got.voice], ['Body', got.body], ['Wearing', got.outfit], ['History', got.history],
+        ['Starts', got.disposition ? `${got.disposition.value}${got.disposition.reason ? ` (${got.disposition.reason})` : ''}` : ''], ['Facts', (got.facts ?? []).join('; ')]].filter(([, v]) => v);
+    if (rows.length || got.invented?.length) {
+        const det = document.createElement('details');
+        det.className = 'worldscrawl_remember_details';
+        const sum = document.createElement('summary'); sum.textContent = 'Details'; det.append(sum);
+        det.addEventListener('click', e => e.stopPropagation());
+        for (const [k, v] of rows) { const r = document.createElement('div'); r.textContent = `${k}: ${v}`; det.append(r); }
+        if (got.invented?.length) {
+            const v = document.createElement('div'); v.className = 'worldscrawl_invented';
+            v.textContent = `Made up to fill gaps (not in the story): ${got.invented.map(x => `⚠ ${x}`).join('; ')}`;
+            det.append(v);
+        }
+        box.append(det);
+    }
+    return box;
+}
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
@@ -4108,7 +4201,13 @@ export function renderPatchCards() {
             lineInp.type = 'text'; lineInp.placeholder = 'one sentence (optional)'; lineInp.className = 'text_pole worldscrawl_remember_line';
             lineInp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
             lineInp.addEventListener('click', e => e.stopPropagation());
-            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), `Remember ${remember.name} (the narrator writes one sentence about them)`, true),
+            const decided = isDecided(msg, remember.nid);
+            const prop = remember.proposal?.name === remember.name ? remember.proposal : null;
+            if (!prop && !decided) queueMicrotask(() => prefetchRemember(id));
+            if (prop?.got) d.append(rememberProposalEl(prop.got));
+            else if (prop?.failed) { const f = line('Could not prepare the card. '); f.className = 'worldscrawl_remember_failed'; f.append(cardButton('Retry', () => retryRemember(id), 'Ask the model again')); d.append(f); }
+            else { const w = line(decided ? 'Saving…' : 'Preparing…'); w.className = 'worldscrawl_remember_preparing'; w.style.opacity = '0.75'; d.append(w); }
+            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), prop?.got ? `Save ${prop.got.name} as shown` : `Remember ${remember.name} (saves the card as soon as it is ready)`, true),
                 cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Approve with the name and the sentence in the boxes', true),
                 cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.', true)));
             if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)
@@ -4122,6 +4221,14 @@ export function renderPatchCards() {
             const who = npcNames.get(s.id) || s.name || s.id;
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';
+            if (s.type === 'npc_create' && !s.off && (s.looks || s.body || s.outfit || s.history || s.invented?.length)) {
+                const more = document.createElement('div');
+                more.className = 'worldscrawl_npccreate_more';
+                more.style.cssText = 'font-size:0.9em;opacity:0.85;margin:2px 0 2px 1em;';
+                for (const [k, label] of [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']]) if (s[k]) { const a = document.createElement('div'); a.textContent = `${label}: ${s[k]}`; more.append(a); }
+                if (s.invented?.length) { const v = document.createElement('div'); v.className = 'worldscrawl_invented'; v.textContent = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it in the map's cast panel (In this chat) before you export.`; more.append(v); }
+                d._more = more;
+            }
             if (s.off) d.style.opacity = '0.6';
             const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
             const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
@@ -4167,6 +4274,7 @@ export function renderPatchCards() {
                 } else nrow.append(cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
             }
             card.append(d);
+            if (d._more) card.append(d._more);
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
         const carrier = isCarrier(msg), showAll = !!settings().showEditMessages; // Debug > Show map edit messages: full message, list open

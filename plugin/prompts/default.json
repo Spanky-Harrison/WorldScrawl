@@ -978,7 +978,7 @@
       "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
       "group": "narration",
       "locked": "The exact [ws_flag: …] and [ws_flag: npc | …] tag formats the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. Never write it otherwise.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. Never write these otherwise.",
       "placeholders": [
         {
           "name": "discover",
@@ -1046,7 +1046,7 @@
       "description": "Alongside (map tools on): the description of ws_flag's action argument.",
       "group": "narration",
       "locked": "Names the action values change, discover, wait, sleep, npc and lore, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"lore\": location is the name of a place listed under \"Lore on file\"; the tool answers with what locals know about it, and it stays in your notes while the characters remain here.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here.",
       "placeholders": [
         {
           "name": "discover",
@@ -1643,7 +1643,7 @@
       "description": "Step 1 of 1: the system prompt for the remember question. The game reads the JSON.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys.",
-      "text": "You keep a short record of a person the story has already described. {{reply}}: {\"name\": \"...\", \"line\": \"one sentence\", \"manner\": \"...\", \"voice\": \"...\"}. manner and voice may be empty. Use only what the story said. Do not invent a past.",
+      "text": "You write the record card for a person the story has met. The card becomes canon for the rest of the game, so fill every field. First record everything the story established about them. Then fill every remaining gap with plausible details that fit what the story said and the setting; never contradict the story. {{reply}}: {\"name\": \"...\", \"unknownAs\": \"what a stranger would call them before learning the name, e.g. 'the landlady' (empty if the name is all anyone would use)\", \"personality\": {\"summary\": \"a few words of high-level demeanor, e.g. 'stern, watchful, sharp-tongued'\", \"manner\": \"how they behave, one or two sentences\", \"speech\": \"how they speak, one sentence\"}, \"appearance\": {\"summary\": \"a very short first impression, e.g. 'big woman with copper braids, in plain work clothes'\", \"body\": \"2-3 sentences, physical only: build, age, face, hair, distinguishing marks\", \"outfit\": \"one or two sentences: what they usually wear and carry\"}, \"history\": \"their life before the story began, 2-3 sentences (only what fits what the story said)\", \"disposition\": {\"value\": \"hostile|unfriendly|indifferent|friendly|helpful\", \"reason\": \"toward the player, one short sentence\"}, \"facts\": [\"short facts the story established\"], \"invented\": [\"each detail you made up rather than took from the story, a few words each, e.g. 'grey eyes', 'scar on the chin', 'gravelly voice', 'widowed young'\"]}. List in invented only what you made up; leave it empty if the story gave you everything.",
       "placeholders": [
         { "name": "reply", "generated": true }
       ]
@@ -1654,7 +1654,7 @@
       "description": "Step 1 of 1: the remember question. It reads the story since the person showed up.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys.",
-      "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nReply with JSON only.",
+      "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nFill every field: what the story said first, then plausible details for the rest, and list the made-up ones in invented. Reply with JSON only.",
       "placeholders": [
         { "name": "name" },
         { "name": "place" },

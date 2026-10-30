@@ -14,9 +14,16 @@ export const DISPOSITION_ALL = ['unknown', ...DISPOSITIONS];
 export const IMPORTANCE = ['low', 'normal', 'high'];
 export const NPC_ID = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const LADDER = DISPOSITIONS;
+/** Appearance (docs/npc-design.md): 2-4 sentences, physical only. A phase-1 bridge; phase 2 is a structured body and wardrobe. */
+export const APPEARANCE_MAX = 800;
+export const HISTORY_MAX = 1200;
+/** Card text fields a stamp can set: stamp field -> folded key. Legacy names (manner, voice, appearance) still apply. */
+export const CARD_FIELDS = { line: 'line', 'personality.summary': 'line', 'personality.manner': 'manner', 'personality.speech': 'voice', manner: 'manner', voice: 'voice',
+    'appearance.summary': 'looks', 'appearance.body': 'body', 'appearance.outfit': 'outfit', appearance: 'body', unknownAs: 'unknownAs' };
 const DAY_MINUTES = 1440;
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const cleanList = (v, cap) => (Array.isArray(v) ? v.map(x => (typeof x === 'string' ? x.trim().slice(0, 200) : '')).filter(Boolean).slice(0, cap) : []);
 const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
 
 /** Lowercase, punctuation to spaces. */
@@ -117,12 +124,30 @@ export function validateRecord(raw, { file = 'npc', places = null } = {}) {
     if (id && stem && stem !== id && stem !== 'npc') note(`${file}: file name should match "id" (${id})`);
     const name = str(raw.name, 80);
     if (!name) fail(`${file}: "name" is required`);
-    const line = str(raw.line, 400);
-    if (!line) fail(`${file}: "line" is required (one sentence)`);
-    const manner = str(raw.manner, 400) ?? '';
-    const voice = str(raw.voice, 400) ?? '';
-    if (raw.manner != null && !manner) fail(`${file}: "manner" must be a short string`);
-    if (raw.voice != null && !voice) fail(`${file}: "voice" must be a short string`);
+    const sub = (obj, key, max, label) => {
+        const v = obj?.[key];
+        if (v == null || v === '') return '';
+        const s = str(v, max);
+        if (!s) fail(`${file}: "${label}" must be a short string`);
+        return s ?? '';
+    };
+    if (raw.personality != null && !isObj(raw.personality)) fail(`${file}: "personality" must be {summary, manner, speech}`);
+    const pers = isObj(raw.personality) ? raw.personality : {};
+    // personality.summary is the card's one-line identity (kept as `line` inside; an old top-level "line" still loads).
+    const line = sub(pers, 'summary', 400, 'personality.summary') || str(raw.line, 400);
+    if (!line) fail(`${file}: "personality.summary" is required (a few words: stern, watchful, sharp-tongued)`);
+    // Legacy top-level manner / voice load into personality.manner / personality.speech.
+    const manner = sub(pers, 'manner', 400, 'personality.manner') || sub(raw, 'manner', 400, 'manner');
+    const voice = sub(pers, 'speech', 400, 'personality.speech') || sub(raw, 'voice', 400, 'voice');
+    let looks = '', body = '', outfit = '';
+    if (typeof raw.appearance === 'string') body = sub(raw, 'appearance', APPEARANCE_MAX, 'appearance'); // the phase-1 string loads as the body
+    else if (isObj(raw.appearance)) {
+        looks = sub(raw.appearance, 'summary', 240, 'appearance.summary');
+        body = sub(raw.appearance, 'body', APPEARANCE_MAX, 'appearance.body');
+        outfit = sub(raw.appearance, 'outfit', APPEARANCE_MAX, 'appearance.outfit');
+    } else if (raw.appearance != null) fail(`${file}: "appearance" must be {summary, body, outfit}`);
+    const history = sub(raw, 'history', HISTORY_MAX, 'history');
+    const unknownAs = sub(raw, 'unknownAs', 80, 'unknownAs');
     const disposition = {};
     if (raw.disposition != null) {
         if (!isObj(raw.disposition)) fail(`${file}: "disposition" must be an object keyed by person`);
@@ -155,10 +180,11 @@ export function validateRecord(raw, { file = 'npc', places = null } = {}) {
         }
     }
     const deep = cleanDeep(raw.deep, file, fail);
+    if (history) deep.history = history;
     const facts = Array.isArray(raw.facts) ? raw.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 24) : [];
     const memory = Array.isArray(raw.memory) ? raw.memory.map(f => (typeof f === 'string' ? f.trim() : isObj(f) ? str(f.note, 240) : '')).filter(Boolean).slice(-MEMORY_CAP) : [];
     const ok = errors.length === 0 && !!id && !!name && !!line;
-    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
+    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
 }
 
 function validateEntry(e, where, places, fail) {
@@ -199,7 +225,7 @@ function cleanDeep(raw, file, fail) {
     if (!isObj(raw)) { fail(`${file}: "deep" must be an object`); return {}; }
     const out = {};
     if (raw.history != null) {
-        const h = str(raw.history, 800);
+        const h = str(raw.history, HISTORY_MAX);
         if (!h) fail(`${file}: deep.history must be a string`);
         else out.history = h;
     }
@@ -288,7 +314,8 @@ export function clampDisposition(from, to, dramatic = false) {
 function blankFrom(rec) {
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
-        deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
+        looks: rec.looks ?? '', body: rec.body ?? '', outfit: rec.outfit ?? '', unknownAs: rec.unknownAs ?? '', knownBy: { ...(rec.knownBy ?? {}) },
+        invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
         ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [],
@@ -299,7 +326,7 @@ function snapshot(state) {
     const out = new Map();
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
-        fromCast: new Set(n.fromCast), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(),
+        fromCast: new Set(n.fromCast), knownBy: { ...n.knownBy }, invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(),
         following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
     });
     return out;
@@ -322,17 +349,22 @@ function applyStamp(state, s, index) {
         if (!id || !NPC_ID.test(id) || state.has(id)) return;
         const name = str(s.name, 80), line = str(s.line, 400);
         if (!name || !line) return;
-        state.set(id, blankFrom({ id, name, line, manner: str(s.manner, 400) ?? '', voice: str(s.voice, 400) ?? '', facts: Array.isArray(s.facts) ? s.facts : [], ok: true, from: 'play', schedule: [], disposition: {} }));
+        const t = (k, max = 400) => str(s[k], max) ?? '';
+        const history = t('history', HISTORY_MAX);
+        // Whoever remembered them knows their name (the player, unless the stamp says otherwise).
+        state.set(id, blankFrom({ id, name, line, manner: t('manner'), voice: t('voice'), looks: t('looks', 240), body: t('body', APPEARANCE_MAX) || t('appearance', APPEARANCE_MAX),
+            outfit: t('outfit', APPEARANCE_MAX), unknownAs: t('unknownAs', 80), knownBy: { [str(s.knownBy, 40) || PLAYER]: 'remembered' }, deep: history ? { history } : {}, invented: cleanList(s.invented, 12), facts: Array.isArray(s.facts) ? s.facts : [], ok: true, from: 'play', schedule: [], disposition: {} }));
         return;
     }
     if (s.type === 'npc_decline') return;
     const n = id ? state.get(id) : null;
     if (!n) return;
     if (s.type === 'npc_fact') {
-        const text = str(s.text, 400);
-        if (!text) return;
         const field = String(s.field ?? 'fact');
-        if (field === 'line' || field === 'manner' || field === 'voice') n[field] = text;
+        const text = str(s.text, field === 'history' || field === 'deep.history' ? HISTORY_MAX : /appearance/.test(field) ? APPEARANCE_MAX : 400);
+        if (!text) return;
+        if (CARD_FIELDS[field]) n[CARD_FIELDS[field]] = text;
+        else if (field === 'history') n.deep.history = text;
         else if (field.startsWith('deep.')) setDeep(n.deep, field, text);
         else n.facts.push(text);
         return;
@@ -352,6 +384,7 @@ function applyStamp(state, s, index) {
         n.disposition[who] = { value, reason: str(s.reason, 240) ?? '' };
         return;
     }
+    if (s.type === 'npc_name') { n.knownBy[str(s.who, 40) || PLAYER] = s.source === 'bracket' ? 'name bracket' : 'name flag'; return; }
     if (s.type === 'npc_follow') { n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
     if (s.type === 'npc_stay') {
         n.following = null;
@@ -512,7 +545,7 @@ export function presentAt(chat, index, cast, env) {
             if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
             else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${now.name}'s hour here has passed.`;
         }
-        out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene' });
+        out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: nameKnown(now, chat, end) });
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -549,7 +582,8 @@ function publicNpc(n) {
     for (const [who, row] of Object.entries(n.disposition ?? {})) disposition[who] = { ...row };
     if (!disposition[PLAYER]) disposition[PLAYER] = { value: 'unknown', reason: '' };
     return {
-        id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', deep: clone(n.deep ?? {}),
+        id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
+        unknownAs: n.unknownAs ?? '', knownBy: { ...(n.knownBy ?? {}) }, invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: n.facts.slice(), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
         schedule: n.schedule.map(e => ({ ...e })),
@@ -700,9 +734,14 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
     for (let i = before; i >= 0; i--) if (chat[i]?.is_user) { ui = i; break; }
     const stored = ui >= 0 ? chat[ui]?.extra?.[focusKey] : null;
     const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
-    const slices = npcSlices(present, focus);
+    let asked = [];
+    try { asked = askedLoreNames(chat, before, i => env.playerAt(i)); } catch { asked = []; }
+    const tiers = npcTiers(present, focus, { chat, index: before, said: ui >= 0 ? chat[ui]?.mes ?? '' : '', asked });
+    const slices = npcSlices(present, focus, { tiers });
     const listed = present.map(p => ({ id: p.id, name: p.name, depth: focus?.id === p.id && focus.depth !== 'present' ? focus.depth : 'present',
-        memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [] }));
+        memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [],
+        tier: tiers[p.id].tier, why: tiers[p.id].why, topical: tiers[p.id].topical ? tiers[p.id].topicalWhy : '',
+        known: p.known?.known !== false, nameWhy: p.known?.reason ?? '', shownAs: p.known?.known === false ? p.unknownAs : p.name }));
     return { reply, user: ui, focus: focus ? { id: focus.id ?? null, depth: focus.depth ?? 'present', stored: !!(stored && stored.depth) } : null, listed, ...slices };
 }
 
@@ -770,25 +809,107 @@ function dispositionLine(n) {
     return ` Disposition toward the player: ${d.value}${d.reason ? ` (${d.reason})` : ''}.`;
 }
 
-/** Prompt slices. Present is the short line; focus adds manner, voice, memory and (when deep) the deep fields. */
-export function npcSlices(present, focus = {}) {
+const LOOK_BRACKET_RE = /\[\s*look\b/i;
+
+/**
+ * Whether actor `who` (the player unless given) knows NPC n's name after message `index`, and why. Per actor, never per
+ * party. Known when: a stamp says so (remembered through [remember], or an npc_name stamp from the narrator's
+ * [ws_flag: name | Name]); the narrator flagged them with [ws_flag: npc | Name] (they were engaging with the player);
+ * or the card has no unknownAs (nothing else to call them). Never inferred from chat text.
+ */
+export function nameKnown(n, chat = [], index = -1, who = PLAYER) {
+    const stamped = n?.knownBy?.[who];
+    if (stamped) return { known: true, reason: `known: ${stamped}` };
+    if (who === PLAYER) {
+        for (let i = 0; i <= Math.min(index, (chat?.length ?? 0) - 1); i++) {
+            if (flagsOn(chat[i]).some(f => normName(f) === normName(n.name) || normName(f) === n.id)) return { known: true, reason: 'known: flagged' };
+        }
+    }
+    if (!n?.unknownAs) return { known: true, reason: 'known: no unknownAs on the card' };
+    return { known: false, reason: `not known: shown as "${n.unknownAs}"` };
+}
+
+/** The lore requests in this scene up to `index` that name no place (e.g. [lore] Hesk or [ws_flag: lore | Hesk]): their asked names. */
+export function askedLoreNames(chat, index, playerAt) {
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    if (!chat?.length) return [];
+    const out = [];
+    for (let i = sceneStartOf(chat, end, playerAt); i <= end; i++) for (const r of loreRequestsOn(chat[i])) if (!r.level && r.place) out.push(r.place);
+    return out;
+}
+
+/**
+ * Feeding tiers for the people present: {id: {tier, why, topical, topicalWhy}}.
+ * - 'present' (background): name or unknownAs, appearance.summary, personality.summary, current activity.
+ * - 'engaged': looked at, in focus (talking), following the player, or flagged by the narrator ([ws_flag: npc | Name])
+ *   in one of the last `recent` replies: adds body, outfit, manner, speech, disposition and memory highlights.
+ * - topical: history, only when a lore request in this scene names them (`asked`, from askedLoreNames).
+ */
+export function npcTiers(present, focus, { chat = [], index = -1, said = '', asked = [], recent = 3 } = {}) {
+    const out = {};
+    const flagged = [];
+    for (let i = Math.min(index, (chat?.length ?? 0) - 1), seen = 0; i >= 0 && seen < recent; i--) {
+        const m = chat[i];
+        if (!m || m.is_system || m.is_user) continue;
+        seen++;
+        flagged.push(...flagsOn(m));
+    }
+    const names = p => [p.name, p.id, p.unknownAs].filter(Boolean);
+    const hits = (list, p) => list.some(x => names(p).some(nm => normName(x) === normName(nm) || nameIn(x, nm)));
+    for (const p of present ?? []) {
+        const focused = focus?.id === p.id && focus.depth && focus.depth !== 'present';
+        let why = '';
+        if (focused && (LOOK_AT_RE.test(said) || LOOK_BRACKET_RE.test(said))) why = 'the player looked at them';
+        else if (focused) why = 'in active interaction (in focus)';
+        else if (p.following) why = 'following the player';
+        else if (hits(flagged, p)) why = 'the narrator flagged them in a recent reply';
+        const topical = !!p.deep?.history && hits(asked, p);
+        out[p.id] = { tier: why ? 'engaged' : 'present', why: why || 'in the background', topical, topicalWhy: topical ? 'a lore request named them' : '' };
+    }
+    return out;
+}
+
+/** How the narrator is told to refer to p: the name, or unknownAs with the real name for consistency only. */
+function label(p) {
+    if (p.known?.known === false && p.unknownAs) return `${p.unknownAs} [${p.id}] (the player does not know this person's name yet; it is ${p.name}. Do not have the player's character use it until it is learned; when someone says it to them, end your reply with [ws_flag: name | ${p.name}])`;
+    return `${p.name} (${p.id})`;
+}
+
+/**
+ * Prompt slices by tier (see npcTiers). Everyone present gets one line: label, appearance.summary, personality.summary,
+ * activity. Engaged people add body, outfit, manner, speech, disposition and their last few memories; topical adds history.
+ * The focus slice keeps facts, the full memory and (when deep) secrets and relationships.
+ */
+export function npcSlices(present, focus = {}, { tiers = null } = {}) {
     const list = present ?? [];
     if (!list.length) return { npcs_present: '', npc_focus: '' };
+    const tierOf = p => tiers?.[p.id] ?? { tier: focus?.id === p.id ? 'engaged' : 'present' };
     const lines = list.map(p => {
-        const act = p.activity ? ` Now: ${p.activity}.` : '';
-        const due = p.overdue ? ` ${p.overdue}` : '';
-        return `${p.name} (${p.id}): ${p.line}${act}${dispositionLine(p)}${due}`;
+        const t = tierOf(p);
+        const bits = [`${label(p)}:`];
+        if (p.looks) bits.push(`Looks: ${p.looks}.`);
+        bits.push(`Demeanor: ${p.line}`);
+        if (p.activity) bits.push(`Now: ${p.activity}.`);
+        if (p.overdue) bits.push(p.overdue);
+        if (t.tier === 'engaged') {
+            if (p.body) bits.push(`Body: ${p.body}`);
+            if (p.outfit) bits.push(`Wearing: ${p.outfit}`);
+            if (p.manner) bits.push(`Manner: ${p.manner}`);
+            if (p.voice) bits.push(`Speech: ${p.voice}`);
+            const d = dispositionLine(p).trim();
+            if (d) bits.push(d);
+            if (p.memory?.length && focus?.id !== p.id) bits.push(`Remembers: ${p.memory.slice(-3).join('; ')}.`);
+        }
+        if (t.topical) bits.push(`History: ${p.deep.history}`);
+        return bits.join(' ').replace(/\.\./g, '.');
     });
     const who = focus?.id ? list.find(p => p.id === focus.id) : null;
     let npc_focus = '';
     if (who && focus.depth && focus.depth !== 'present') {
-        const bits = [`${who.name}, in focus.`];
-        if (who.manner) bits.push(`Manner: ${who.manner}`);
-        if (who.voice) bits.push(`Voice: ${who.voice}`);
+        const bits = [`${who.known?.known === false && who.unknownAs ? who.unknownAs : who.name}, in focus.`];
         if (who.facts?.length) bits.push(`Known facts: ${who.facts.join('; ')}`);
         if (who.memory?.length) bits.push(`Memory: ${who.memory.map(m => `- ${m}`).join('\n')}`);
         if (focus.depth === 'deep' && who.deep) {
-            if (who.deep.history) bits.push(`History: ${who.deep.history}`);
             if (who.deep.secrets?.length) bits.push(`Secrets: ${who.deep.secrets.join('; ')}`);
             if (who.deep.relationships && Object.keys(who.deep.relationships).length) bits.push(`Relationships: ${Object.entries(who.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
         }
@@ -800,16 +921,29 @@ export function npcSlices(present, focus = {}) {
 /** A clean cast file from a played NPC (base fields plus facts, memory and disposition). Following stays in the chat. */
 export function exportRecord(npc) {
     if (!npc?.id) return null;
-    const out = { id: npc.id, name: npc.name, line: npc.line };
-    if (npc.manner) out.manner = npc.manner;
-    if (npc.voice) out.voice = npc.voice;
+    // A file-shaped record (nested personality / appearance, top-level history) reads as its folded form.
+    if (isObj(npc.personality)) {
+        const p = npc.personality, a = isObj(npc.appearance) ? npc.appearance : {};
+        npc = { ...npc, line: p.summary, manner: p.manner, voice: p.speech, looks: a.summary, body: a.body, outfit: a.outfit,
+            deep: { ...(npc.deep ?? {}), ...(npc.history ? { history: npc.history } : {}) } };
+    }
+    const out = { id: npc.id, name: npc.name };
+    if (npc.unknownAs) out.unknownAs = npc.unknownAs;
+    out.personality = { summary: npc.line };
+    if (npc.manner) out.personality.manner = npc.manner;
+    if (npc.voice) out.personality.speech = npc.voice;
+    const appearance = {};
+    if (npc.looks) appearance.summary = npc.looks;
+    if (npc.body) appearance.body = npc.body;
+    if (npc.outfit) appearance.outfit = npc.outfit;
+    if (Object.keys(appearance).length) out.appearance = appearance;
+    if (npc.deep?.history) out.history = npc.deep.history;
     const disposition = {};
     for (const [who, row] of Object.entries(npc.disposition ?? {})) if (row?.value && row.value !== 'unknown') disposition[who] = { value: row.value, ...(row.reason ? { reason: row.reason } : {}) };
     if (Object.keys(disposition).length) out.disposition = disposition;
     if (npc.facts?.length) out.facts = npc.facts.slice();
     if (npc.memory?.length) out.memory = npc.memory.slice();
     const deep = {};
-    if (npc.deep?.history) deep.history = npc.deep.history;
     if (npc.deep?.secrets?.length) deep.secrets = npc.deep.secrets.slice();
     if (npc.deep?.relationships && Object.keys(npc.deep.relationships).length) deep.relationships = { ...npc.deep.relationships };
     if (Object.keys(deep).length) out.deep = deep;
@@ -836,21 +970,26 @@ export function recordDiff(before, after) {
     const a = exportRecord(before) ?? (isObj(before) ? before : {});
     const b = exportRecord(after) ?? (isObj(after) ? after : {});
     const lines = [];
-    for (const k of ['name', 'line', 'manner', 'voice']) diffLine(k, a[k] ?? '', b[k] ?? '', lines);
+    diffLine('name', a.name ?? '', b.name ?? '', lines);
+    diffLine('unknownAs', a.unknownAs ?? '', b.unknownAs ?? '', lines);
+    for (const k of ['summary', 'manner', 'speech']) diffLine(`personality.${k}`, a.personality?.[k] ?? '', b.personality?.[k] ?? '', lines);
+    for (const k of ['summary', 'body', 'outfit']) diffLine(`appearance.${k}`, a.appearance?.[k] ?? '', b.appearance?.[k] ?? '', lines);
+    diffLine('history', a.history ?? '', b.history ?? '', lines);
     const whos = new Set([...Object.keys(a.disposition ?? {}), ...Object.keys(b.disposition ?? {})]);
     const disp = d => (d ? `${d.value}${d.reason ? ` (${d.reason})` : ''}` : '');
     for (const who of [...whos].sort()) diffLine(`disposition.${who}`, disp(a.disposition?.[who]), disp(b.disposition?.[who]), lines);
     const list = xs => (xs ?? []).join('; ');
     diffLine('facts', list(a.facts), list(b.facts), lines);
     diffLine('memory', list(a.memory), list(b.memory), lines);
-    diffLine('deep.history', a.deep?.history ?? '', b.deep?.history ?? '', lines);
     diffLine('deep.secrets', list(a.deep?.secrets), list(b.deep?.secrets), lines);
     const rels = new Set([...Object.keys(a.deep?.relationships ?? {}), ...Object.keys(b.deep?.relationships ?? {})]);
     for (const k of [...rels].sort()) diffLine(`deep.relationships.${k}`, a.deep?.relationships?.[k] ?? '', b.deep?.relationships?.[k] ?? '', lines);
     diffLine('schedule', JSON.stringify(a.schedule ?? []), JSON.stringify(b.schedule ?? []), lines);
     diffLine('seen_at', JSON.stringify(a.seen_at ?? null), JSON.stringify(b.seen_at ?? null), lines);
-    const text = lines.map(l => `${l.field}\n- ${l.from || '(empty)'}\n+ ${l.to || '(empty)'}`).join('\n');
-    return { changed: lines.length > 0, lines, text };
+    const invented = Array.isArray(after?.invented) ? after.invented.slice() : [];
+    const text = lines.map(l => `${l.field}\n- ${l.from || '(empty)'}\n+ ${l.to || '(empty)'}`).join('\n')
+        + (lines.length && invented.length ? `\n\nMade up when remembered (not in the story; edit before saving if wrong):\n${invented.map(x => `- ${x}`).join('\n')}` : '');
+    return { changed: lines.length > 0, lines, text, invented };
 }
 
 export const NPC_FLAG_KEY = 'worldscrawl_npc_flags';
@@ -860,6 +999,22 @@ export function takeNpcFlags(text) {
     const names = [];
     const cleaned = String(text ?? '').replace(NPC_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
     return { names, text: cleaned };
+}
+/** The narrator's [ws_flag: name | Name] tags (the player just learned that person's name): the names, the text without them. */
+export const NAME_FLAG_TAG = /\s*\[ws_flag:\s*name\s*\|\s*([^\]|]{1,60})\]/gi;
+export function takeNameFlags(text) {
+    const names = [];
+    const cleaned = String(text ?? '').replace(NAME_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
+    return { names, text: cleaned };
+}
+/** The saved person a name flag means: exact name or id first, then a name contained either way. Null when none or several. */
+export function npcForName(npcs, name) {
+    const key = normName(name);
+    const list = [...(npcs ?? [])];
+    const exact = list.filter(n => normName(n.name) === key || n.id === key);
+    if (exact.length === 1) return exact[0];
+    const loose = list.filter(n => nameIn(name, n.name) || nameIn(n.name, name));
+    return loose.length === 1 ? loose[0] : null;
 }
 /** Names the narrator flagged on message m (the shown swipe). */
 export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
@@ -931,14 +1086,27 @@ export function takeNpcTags(text) {
     return { stamps, text: cleaned };
 }
 
-/** JSON from the remember question. Empty manner and voice are fine. Null when it is not that JSON. */
+/**
+ * JSON from the remember question: {name, unknownAs, personality: {summary, manner, speech}, appearance: {summary, body,
+ * outfit}, history, disposition: {value, reason}, facts: [], invented: []}. Name and personality.summary are required.
+ * `invented` lists details the model made up to fill gaps (not in the story), shown when the card is reviewed.
+ * Returned flat, in the stamp's field names: {name, line, manner, voice, looks, body, outfit, history, unknownAs, ...}.
+ */
 export function readRememberAnswer(ans) {
     if (!isObj(ans)) return null;
     const name = str(ans.name, 80);
-    const line = str(ans.line, 400);
+    const pers = isObj(ans.personality) ? ans.personality : {};
+    const app = isObj(ans.appearance) ? ans.appearance : {};
+    const line = str(pers.summary, 400);
     if (!name || !line) return null;
-    const facts = Array.isArray(ans.facts) ? ans.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 8) : [];
-    return { name, line, manner: str(ans.manner, 400) ?? '', voice: str(ans.voice, 400) ?? '', facts };
+    const out = { name, line, manner: str(pers.manner, 400) ?? '', voice: str(pers.speech, 400) ?? '',
+        looks: str(app.summary, 240) ?? '', body: str(app.body, APPEARANCE_MAX) ?? '', outfit: str(app.outfit, APPEARANCE_MAX) ?? '',
+        history: str(ans.history, HISTORY_MAX) ?? '', unknownAs: str(ans.unknownAs, 80) ?? '',
+        facts: cleanList(ans.facts, 8), invented: cleanList(ans.invented, 12) };
+    const d = isObj(ans.disposition) ? ans.disposition : typeof ans.disposition === 'string' ? { value: ans.disposition } : null;
+    const value = d ? matchEnum(d.value, DISPOSITIONS) : null;
+    if (value) out.disposition = { value, reason: str(d.reason, 240) ?? '' };
+    return out;
 }
 
 /** A one-line description of one stamp, for the "Character changed here" bar. */
@@ -953,6 +1121,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_leave') return `${who} leaves`;
     if (s.type === 'npc_staying') return `${who} is staying`;
     if (s.type === 'npc_create') return `${who} remembered`;
+    if (s.type === 'npc_name') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} learned ${who}'s name`;
     if (s.type === 'npc_appear') return `${who} is here`;
     if (s.type === 'npc_seek') return `Looking for ${who}`;
     return who;
