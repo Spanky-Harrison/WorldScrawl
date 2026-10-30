@@ -52,3 +52,23 @@ test('game-time labels: live from the clock, day on rollover, elapsed over a few
     assert.ok(!JSON.stringify(chat).includes('AM'));
     assert.equal(elapsedText(90061), '+1d1h');
 });
+
+import { narratorStart, narratorFailure } from '../../extension/calllog.mjs';
+test('failed narrator generation: noted on the triggering message, per swipe', () => {
+    const chat = [{ mes: 'hi' }, { is_user: true, mes: 'I hum', extra: {} }];
+    assert.equal(narratorStart(chat, 'quiet'), null);
+    assert.equal(narratorStart(chat, 'normal', {}, true), null);
+    const p = narratorStart(chat, 'normal');
+    assert.equal(p.at, 1);
+    p.error = 'Chat Completion API: fake model is down';
+    const n = narratorFailure(p);
+    assert.deepEqual([n.kind, n.status], ['narrator', 'failed']);
+    assert.match(n.reason, /fake model is down/);
+    addCallNote(chat[1], n);
+    assert.match(messageActivity(chat[1], 1).find(e => e.kind === 'call' && e.label === 'narrator').reason, /fake model is down/);
+    assert.equal(narratorFailure({ ...p, received: true }), null);
+    assert.match(narratorFailure({ ...narratorStart(chat, 'normal'), stopped: true }).reason, /aborted/);
+    assert.match(narratorFailure(narratorStart(chat, 'normal')).reason, /no reply/);
+    const s = narratorStart([...chat, { mes: 'reply', swipe_id: 1 }], 'swipe');
+    assert.equal(s.at, 1); assert.match(narratorFailure(s).reason, /\[swipe\]/);
+});

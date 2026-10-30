@@ -35,3 +35,19 @@ export function markCall(msg, kind, status, reason) {
 }
 /** The narrator reply's note: what it emitted, or explicitly no tool call. */
 export const narratorNote = emitted => (emitted.length ? { kind: 'narrator reply', status: 'ok', emitted } : { kind: 'narrator reply', status: 'ok', reason: 'narrator made no tool call' });
+
+// ---- A narrator generation that fails outright (error, empty or stopped; no message made) is noted on the message
+// that triggered it: the player's message, or the last message when a move or wait started it. A swipe's trigger is
+// the message before the swiped reply.
+export function narratorStart(chat, type, opts = {}, dryRun = false) {
+    if (dryRun || type === 'quiet' || opts?.quiet_prompt || opts?.quietToLoud) return null;
+    const n = chat?.length ?? 0;
+    const at = type === 'swipe' ? n - 2 : n - 1;
+    return at >= 0 ? { at, type: type ?? 'normal', received: false, stopped: false, error: null } : null;
+}
+/** The failure note for a finished generation, or null when a reply arrived. */
+export function narratorFailure(p) {
+    if (!p || p.received) return null;
+    const reason = p.stopped ? 'stopped before a reply (aborted)' : p.error ? `error: ${p.error}` : 'no reply (error or empty answer)';
+    return { kind: 'narrator', status: 'failed', reason: `${reason}${p.type && p.type !== 'normal' ? ` [${p.type}]` : ''}` };
+}

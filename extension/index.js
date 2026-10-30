@@ -8,7 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
-import { addCallNote, markCall, narratorNote } from './calllog.mjs';
+import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
@@ -4282,6 +4282,17 @@ function addSettingsPanel() {
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
+    // Narrator generations that fail outright leave a 'narrator' failed note on the triggering message.
+    let narrGen = null;
+    const endNarr = () => { const p = narrGen; narrGen = null; const n = narratorFailure(p); if (n) { const len = ctx().chat?.length ?? 0; const at2 = p.type === 'swipe' ? len - 2 : len - 1; if (at2 >= 0) p.at = at2; noteCall(p.at, n); console.log(`[WorldScrawl] narrator failed on #${p.at}: ${n.reason}`); } };
+    if (eventTypes.GENERATION_STARTED) eventSource.on(eventTypes.GENERATION_STARTED, (type, opts, dry) => { if (narrGen) endNarr(); if (isOn()) { const p = narratorStart(ctx().chat, type, opts, dry); if (p) narrGen = p; } });
+    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, () => { if (narrGen) narrGen.stopped = true; });
+    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => { const p = narrGen; if (p) setTimeout(() => { if (narrGen === p) endNarr(); }, 800); });
+    if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, () => { if (narrGen) narrGen.received = true; });
+    try {
+        const tz = globalThis.toastr;
+        if (tz?.error && !tz.error.__ws) { const orig = tz.error; tz.error = function (msg, title, ...r) { if (narrGen && !narrGen.error) narrGen.error = String([title, msg].filter(Boolean).join(': ')).replace(/<[^>]+>/g, '').slice(0, 160); return orig.call(this, msg, title, ...r); }; tz.error.__ws = true; }
+    } catch { /* no toastr */ }
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { stampExpiryReply(Number(id)).catch(e => console.error('[WorldScrawl] expiry stamp', e)); });
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { onReplyForFlags(Number(id)).catch(e => console.error('[WorldScrawl] flag', e)); });
     eventSource.on(eventTypes.CHAT_CHANGED, async () => { pendingLocation = null; expiryPending = null; snapCarriers(); await applyChatState(); });
