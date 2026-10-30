@@ -8,6 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
+import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, noticeRow, lockRow, markPending, NOTICE_CSS, resolvedText } from './notices.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
@@ -2091,17 +2092,23 @@ async function offerRemember(msg, name) {
     const known = knownNpcNames(chat);
     if (known.some(n => normName(n) === normName(who) || nameIn(who, n))) { toastr.info(`WorldScrawl: ${who} is already remembered.`); return; }
     msg.extra = msg.extra ?? {};
-    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: who, status: 'review' };
+    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: who, status: 'review', nid: newNoticeId('remember') };
     await ctx().saveChat?.();
     renderPatchCards();
 }
 async function keepRemember(id, edited = null) {
     const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
-    if (!card || card.status === 'kept') return;
-    await ensurePrompts();
+    if (!card || card.status !== 'review') return;
+    const nid = noticeIdOf(card, 'remember');
+    return once(nid, async () => {
+        if (!markDecided(msg, nid, edited ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: `remember ${edited?.name?.trim() || card.name}` })) return; // decided once: a second Approve is a no-op
+        try { await keepRememberNow(c, msg, card, id, edited); } catch (e) { unmarkDecided(msg, nid); renderPatchCards(); throw e; }
+    });
+}
+async function keepRememberNow(c, msg, card, id, edited) {
     const chat = c.chat ?? [];
     const name = edited?.name?.trim() || card.name;
-    const loc = await currentLocation().catch(() => null);
+    const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
     const blank = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
     let got = edited?.line ? { ...blank, name, line: edited.line.trim() } : null;
     if (!got) {
@@ -2120,15 +2127,18 @@ async function keepRemember(id, edited = null) {
         ...Object.fromEntries(['looks', 'body', 'outfit', 'history', 'unknownAs'].filter(k => got[k]).map(k => [k, got[k]])), facts: got.facts, ...(got.invented?.length ? { invented: got.invented } : {}) });
     if (got.disposition) addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: got.disposition.value, reason: got.disposition.reason ?? '', dramatic: true });
     card.status = 'kept'; card.name = got.name;
+    const d = decisionOf(msg, card.nid); if (d) d.text = `remembered ${got.name}`;
     syncSwipeExtra(msg);
-    await c.saveChat?.();
+    renderPatchCards(); // show the result at once; saving and the prompt refresh follow
     toastr.success(`WorldScrawl: ${got.name} remembered. Delete this message to undo it.`);
+    await c.saveChat?.();
     await applyFacts();
     renderPatchCards();
 }
 async function discardRemember(id) {
     const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
-    if (!card) return;
+    if (!card || card.status !== 'review') return;
+    if (!markDecided(msg, noticeIdOf(card, 'remember'), 'discard', { swipe: swipeOf(msg), text: `not remembering ${card.name} this scene` })) return;
     addNpcStamp(msg, { type: 'npc_decline', name: card.name });
     card.status = 'declined';
     syncSwipeExtra(msg);
@@ -2556,7 +2566,7 @@ function registerSlashCommands() {
             toastr.info(`WorldScrawl: ${t}`); return '';
         }),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'what changed, e.g. "the inn burned down" (optional)', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
-        helpString: 'WorldScrawl: the map changed in the latest message (fire, collapse, smashed door...). The engine works out the change and shows a Keep / Discard card.',
+        helpString: 'WorldScrawl: the map changed in the latest message (fire, collapse, smashed door...). The engine works out the change and shows an Approve / Discard card.',
     }));
     for (const sleep of [false, true]) SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: sleep ? 'ws-sleep' : 'ws-wait',
@@ -2578,7 +2588,7 @@ function registerSlashCommands() {
             return '';
         }),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person to remember, e.g. Maren', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
-        helpString: 'WorldScrawl: remember a person (no name: the person the narrator flagged most recently) from the story (a Keep / Adjust / Discard card). A no lasts until the scene changes.',
+        helpString: 'WorldScrawl: remember a person (no name: the person the narrator flagged most recently) from the story (an Approve / Adjust / Discard card). A no lasts until the scene changes.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
@@ -3676,6 +3686,7 @@ async function keepFlag(id, { quiet = false } = {}) {
         f.proposal = { ...f.proposal, ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {} };
         openForms.delete(`${id}|flag`);
     }
+    if (!markDecided(msg, noticeIdOf(f, 'flag'), form ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: clip((f.proposal.summary ?? []).join('; '), 160) })) return; // already decided
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
         ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
@@ -3696,6 +3707,7 @@ function syncSwipeExtra(msg) {
     if (msg.extra[PATCH_KEY]) si.extra[PATCH_KEY] = msg.extra[PATCH_KEY]; else delete si.extra[PATCH_KEY];
     if (msg.extra[NPC_KEY]) si.extra[NPC_KEY] = msg.extra[NPC_KEY]; else delete si.extra[NPC_KEY];
     if (msg.extra[REMEMBER_KEY]) si.extra[REMEMBER_KEY] = msg.extra[REMEMBER_KEY]; else delete si.extra[REMEMBER_KEY];
+    if (msg.extra[DECIDED_KEY]) si.extra[DECIDED_KEY] = msg.extra[DECIDED_KEY]; else delete si.extra[DECIDED_KEY];
 }
 async function undoFlag(id) {
     const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
@@ -3711,6 +3723,8 @@ async function undoFlag(id) {
 }
 async function discardFlag(id) {
     const c = ctx(), msg = c.chat?.[id];
+    const f0 = msg?.extra?.[FLAG_KEY];
+    if (f0?.status === 'review' && f0.proposal && !markDecided(msg, noticeIdOf(f0, 'flag'), 'discard', { swipe: swipeOf(msg), text: clip((f0.proposal.summary ?? []).join('; '), 160) || 'map change' })) return;
     if (msg?.extra) delete msg.extra[FLAG_KEY];
     await c.saveChat?.();
     renderPatchCards();
@@ -3903,18 +3917,26 @@ const waitAsk = () => (settings().autoKeepWaits ? '' : ' (The player will confir
 export const waitAmount = w => (w.until ? `until ${w.until}` : calendarLib?.formatDuration ? calendarLib.formatDuration(w.seconds) : `${Math.round(w.seconds / 60)}m`);
 export function proposeWait(msg, w) {
     msg.extra = msg.extra ?? {};
-    msg.extra[WAITCARD_KEY] = { swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w) };
+    msg.extra[WAITCARD_KEY] = { nid: newNoticeId('wait'), swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w) };
 }
 /** Keep (amount unchanged) or Adjust (a new amount) a proposed wait: the same stamp as a narrator wait kept at once. */
 export async function keepWait(id, amount = null) {
     const c = ctx(), msg = c.chat?.[id], p = msg?.extra?.[WAITCARD_KEY];
     if (!p) return 'no wait to keep';
+    const nid = noticeIdOf(p, 'wait');
+    if (isDecided(msg, nid)) return 'already decided';
+    const r = await once(nid, () => keepWaitNow(c, msg, p, nid, amount));
+    return r ?? 'already saving';
+}
+async function keepWaitNow(c, msg, p, nid, amount) {
     let w = p;
     if (amount != null && String(amount).trim() && String(amount).trim().toLowerCase() !== String(p.amount).toLowerCase()) {
         w = await planWait(String(amount), p.sleep);
         if (w.error) { toastr.warning(`WorldScrawl: ${w.error}`); return w.error; }
     }
+    if (!markDecided(msg, nid, w === p ? 'approve' : 'adjust', { swipe: swipeOf(msg), text: `${w.label} passed` })) return 'already decided';
     stampWait(msg, w); delete msg.extra[WAITCARD_KEY];
+    renderPatchCards();
     await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     return '';
 }
@@ -3941,9 +3963,11 @@ export async function editKeptWait(id, amount) {
     return delta;
 }
 export async function discardWait(id) {
-    const c = ctx(), msg = c.chat?.[id];
-    if (msg?.extra) delete msg.extra[WAITCARD_KEY];
-    await c.saveChat?.(); renderPatchCards();
+    const c = ctx(), msg = c.chat?.[id], p = msg?.extra?.[WAITCARD_KEY];
+    if (!p) return;
+    if (!markDecided(msg, noticeIdOf(p, 'wait'), 'discard', { swipe: swipeOf(msg), text: `no time passes (${p.label})` })) return;
+    delete msg.extra[WAITCARD_KEY];
+    renderPatchCards(); await c.saveChat?.();
 }
 function stampWait(msg, w) {
     msg.extra = msg.extra ?? {};
@@ -4001,13 +4025,25 @@ async function waitFacts(chat, loc) {
     return lines.join('\n');
 }
 
-function cardButton(label, onClick, title = '') {
+/** A notice button. decides: answering the notice (Approve / Adjust / Discard...): the first click locks the whole row
+ * ("Saving…"), later clicks are ignored, and the notice redraws when the work is done (the write itself is decide-once). */
+function cardButton(label, onClick, title = '', decides = false) {
     const b = document.createElement('span');
     b.className = 'menu_button worldscrawl_card_btn'; b.textContent = label; if (title) b.title = title;
-    b.style.cssText = 'display:inline-block;padding:2px 8px;margin:2px 4px 0 0;font-size:0.9em;';
-    b.addEventListener('click', e => { e.stopPropagation(); onClick(); });
+    b.style.cssText = 'display:inline-block;padding:2px 8px;margin:0;font-size:0.9em;white-space:nowrap;width:auto;';
+    if (decides) b.dataset.decides = '1';
+    b.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!decides) return onClick();
+        const row = b.closest('.worldscrawl_notice_row');
+        if (row && !lockRow(row)) return; // already saving
+        Promise.resolve().then(onClick).catch(err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }).finally(() => { if (row?.isConnected) renderPatchCards(); });
+    });
     return b;
 }
+/** Notice text, then ONE right-aligned button row at the end. */
+const rowOf = (...buttons) => noticeRow(document, buttons.flat());
+const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
@@ -4030,7 +4066,8 @@ export function renderPatchCards() {
         const wc = msg.extra?.[WAITCARD_KEY], waitCard = wc && (wc.swipe ?? 0) === swipeOf(msg);
         const remember = msg.extra?.[REMEMBER_KEY], rememberCard = remember && remember.status === 'review' && (remember.swipe ?? 0) === swipeOf(msg);
         const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_seek', 'npc_decline'].includes(s.type));
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length) continue;
+        const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !resolved.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -4053,10 +4090,13 @@ export function renderPatchCards() {
             const view = flagCardView(f, id);
             if (view && view.buttons[0] !== 'review') {
                 const t = line(view.text); t.className = `worldscrawl_flag_${f.status}`; card.append(t);
-                if (view.buttons.includes('Retry')) card.append(startPicker(), cardButton('Retry', () => analyzeFlag(id)));
-                if (view.buttons.includes('Dismiss')) card.append(cardButton('Dismiss', () => discardFlag(id)));
+                if (view.buttons.includes('Retry')) card.append(fieldsOf(startPicker()));
+                const bs = [view.buttons.includes('Retry') && cardButton('Retry', () => analyzeFlag(id)), view.buttons.includes('Dismiss') && cardButton('Dismiss', () => discardFlag(id))].filter(Boolean);
+                if (bs.length) card.append(rowOf(bs));
             } else if (f.status === 'review' && f.proposal) {
-                card.append(line(f.proposal.invalid ? "🗺 The suggested change didn't fit the map. Press Edit to fix it (Keep opens the editor):" : '🗺 Proposed map change:'));
+                const rc = markPending(document.createElement('div')); rc.classList.add('worldscrawl_flagreview'); card.append(rc);
+                { const card = rc; // the review notice: text, diff, fields, then one row
+                card.append(line(f.proposal.invalid ? "🗺 The suggested change didn't fit the map. Press Edit to fix it (Approve opens the editor):" : '🗺 Proposed map change:'));
                 const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
                 for (const s of f.proposal.summary ?? []) { const li = document.createElement('li'); li.textContent = s; ul.append(li); }
                 card.append(ul);
@@ -4070,27 +4110,28 @@ export function renderPatchCards() {
                     card.append(form.el); form.diffBox = diffBox;
                     form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
                 }
-                card.append(startPicker(), cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
+                card.append(fieldsOf(startPicker()), rowOf(cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
                     form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
-                        : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before keeping it'),
-                    cardButton(form ? 'Keep edited' : 'Keep', () => keepFlag(id)), cardButton('Discard', () => { openForms.delete(`${id}|flag`); discardFlag(id); }));
+                        : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before approving it'),
+                    cardButton(form ? 'Approve edited' : 'Approve', () => keepFlag(id), 'Put this change on the map', true), cardButton('Discard', () => { openForms.delete(`${id}|flag`); return discardFlag(id); }, 'Leave the map as it is', true)));
+                }
             }
         }
         if (waitCard) {
-            const d = document.createElement('div'); d.className = 'worldscrawl_waitcard';
+            const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_waitcard');
             d.append(line(`⏳ The narrator passed time: ${wc.label}.`));
             const inp = document.createElement('input');
             inp.type = 'text'; inp.value = wc.amount; inp.className = 'text_pole worldscrawl_wait_amount'; inp.title = 'e.g. 45m, 2h, 1h30m, until dawn';
             inp.style.cssText = 'width:9em;display:inline-block;margin:0 4px;padding:1px 4px;';
             inp.addEventListener('click', e => e.stopPropagation());
-            d.append(cardButton('Keep', () => keepWait(id), `Let ${wc.amount} pass`), inp, cardButton('Adjust', () => keepWait(id, inp.value), 'Let the amount in the box pass instead'),
-                cardButton('Discard', () => discardWait(id), 'No time passes'));
             const note = line('A shortened or discarded wait may disagree with the story text; swipe the reply to fix that.');
-            note.style.opacity = '0.7'; note.style.fontSize = '0.9em'; d.append(note);
+            note.style.opacity = '0.7'; note.style.fontSize = '0.9em';
+            d.append(fieldsOf('Amount:', inp), note, rowOf(cardButton('Approve', () => keepWait(id), `Let ${wc.amount} pass`, true), cardButton('Adjust', () => keepWait(id, inp.value), 'Let the amount in the box pass instead', true),
+                cardButton('Discard', () => discardWait(id), 'No time passes', true)));
             card.append(d);
         }
         if (rememberCard) {
-            const d = document.createElement('div'); d.className = 'worldscrawl_remembercard';
+            const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_remembercard');
             d.append(line(remember.suggested ? `Remember ${remember.name}? They have come up a few times.` : `Remember ${remember.name}?`));
             const nameInp = document.createElement('input');
             nameInp.type = 'text'; nameInp.value = remember.name; nameInp.className = 'text_pole worldscrawl_remember_name';
@@ -4100,11 +4141,13 @@ export function renderPatchCards() {
             lineInp.type = 'text'; lineInp.placeholder = 'one sentence (optional)'; lineInp.className = 'text_pole worldscrawl_remember_line';
             lineInp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
             lineInp.addEventListener('click', e => e.stopPropagation());
-            d.append(cardButton('Keep', () => keepRemember(id)), nameInp, lineInp,
-                cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Keep the name and the sentence in the boxes'),
-                cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.'));
+            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), `Remember ${remember.name} (the narrator writes one sentence about them)`, true),
+                cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Approve with the name and the sentence in the boxes', true),
+                cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.', true)));
+            if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)
             card.append(d);
         }
+        for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
         let exported = new Set();
@@ -4121,9 +4164,10 @@ export function renderPatchCards() {
                 d._more = more;
             }
             if (s.off) d.style.opacity = '0.6';
+            const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
             const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
             if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
-                d.append(' ', cardButton('Edit', () => {
+                nrow.append(cardButton('Edit', () => {
                     const inp = document.createElement('input');
                     inp.type = 'text'; inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? ''); inp.className = 'text_pole';
                     inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
@@ -4133,11 +4177,11 @@ export function renderPatchCards() {
                         else s[textKey] = inp.value.trim();
                         syncSwipeExtra(msg); ctx().saveChat?.(); renderPatchCards();
                     });
-                    d.append(inp, save);
+                    fields.append(inp, save); d.insertBefore(fields, nrow);
                 }, 'Edit this note'));
             }
-            d.append(' ', cardButton(s.off ? 'Turn on' : 'Turn off', () => { s.off = !s.off; syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); }, s.off ? 'Use this note again' : 'Keep the note here but stop using it'));
-            d.append(' ', cardButton('Undo', () => {
+            nrow.append(cardButton(s.off ? 'Turn on' : 'Turn off', () => { s.off = !s.off; syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); }, s.off ? 'Use this note again' : 'Keep the note here but stop using it'));
+            nrow.append(cardButton('Undo', () => {
                 msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
                 if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
                 syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards();
@@ -4147,7 +4191,7 @@ export function renderPatchCards() {
                 const live = npcAt(ch, ch.length - 1, castPack()?.npcs ?? [], s.id);
                 const castNpc = (castPack()?.npcs ?? []).find(n => n.id === s.id && n.ok !== false && n.from !== 'play');
                 if (live?.from === 'cast' && castNpc) {
-                    d.append(' ', cardButton(`Update ${who}`, () => {
+                    nrow.append(cardButton(`Update ${who}`, () => {
                         d.querySelector('.worldscrawl_castdiff')?.remove();
                         const now = npcAt(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? [], s.id);
                         const diff = recordDiff(castNpc, now);
@@ -4158,11 +4202,10 @@ export function renderPatchCards() {
                         pre.style.cssText = 'white-space:pre-wrap;margin:4px 0;font-size:0.9em;';
                         pre.textContent = diff.changed ? diff.text : 'Nothing has changed since the cast file.';
                         box.append(pre);
-                        if (diff.changed) box.append(cardButton('Confirm', () => exportNpc(s.id, { update: true }), 'Write this record over the cast file'));
-                        box.append(cardButton('Cancel', () => { box.remove(); }, 'Leave the cast file as it is'));
+                        box.append(rowOf(diff.changed && cardButton('Confirm', () => exportNpc(s.id, { update: true }), 'Write this record over the cast file'), cardButton('Cancel', () => { box.remove(); }, 'Leave the cast file as it is')));
                         d.append(box);
                     }, 'Show what would change in the cast file, then write it in place'));
-                } else d.append(' ', cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
+                } else nrow.append(cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
             }
             card.append(d);
             if (d._more) card.append(d._more);
@@ -4183,15 +4226,15 @@ export function renderPatchCards() {
             if (p.off === true) {
                 const d = line(`🗺 Map change turned off: ${what}`);
                 d.className = 'worldscrawl_change_off'; d.style.opacity = '0.6';
-                d.append(' ', cardButton('Turn on', () => toggleFromCard(id, p.id), 'Put this change back on the map'));
+                d.append(rowOf(cardButton('Turn on', () => toggleFromCard(id, p.id), 'Put this change back on the map')));
                 box.append(d);
                 continue;
             }
             const d = line(`🗺 Map changed here: ${what}`);
             const key = `${id}|${p.id}`, form = openForms.get(key);
-            d.append(' ', form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => editChangeInTab(id, p, () => openEditor(key, p.ops)), 'Change this kept change in the map editor (a new tab); it stays on this message'),
+            d.append(rowOf(form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => editChangeInTab(id, p, () => openEditor(key, p.ops)), 'Change this kept change in the map editor (a new tab); it stays on this message'),
                 ...(failedFor(id, p.id)?.inactive ? [] : [cardButton('Turn off', () => toggleFromCard(id, p.id), 'Take this change off the map for now (it stays here; turn it on again any time)')]),
-                cardButton('Undo', () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }, 'Remove this change (deleting the message does the same)'));
+                cardButton('Undo', () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }, 'Remove this change (deleting the message does the same)')));
             box.append(d);
             const bad = failedFor(id, p.id);
             if (bad?.inactive) { const w = line(bad.inactive); w.className = 'worldscrawl_inactive'; w.style.opacity = '.6'; box.append(w); }
@@ -4212,7 +4255,8 @@ const openCarriers = new WeakSet();
 (function carrierCss() {
     if (typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
     const st = document.createElement('style'); st.id = 'worldscrawl_carrier_css';
-    st.textContent = `#chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;overflow:hidden;font-size:0.82em;}
+    st.textContent = `${NOTICE_CSS}
+#chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;overflow:hidden;font-size:0.82em;}
 #chat .mes.worldscrawl_carrier_mes .mes_text,#chat .mes.worldscrawl_carrier_mes .avatar,#chat .mes.worldscrawl_carrier_mes .mesIDDisplay,#chat .mes.worldscrawl_carrier_mes .mes_timer,#chat .mes.worldscrawl_carrier_mes .tokenCounterDisplay{display:none;}
 #chat .mes.worldscrawl_carrier_mes .worldscrawl_patchcard{margin-top:0!important;padding:2px 6px!important;font-size:1em!important;}
 .worldscrawl_carrier>summary{cursor:pointer;opacity:0.85;}
@@ -4246,11 +4290,11 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_save_switch" type="checkbox" checked> Switch this chat to the saved world</label>
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Map changes</div>
-      <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Keep map changes without asking (skip the Keep / Discard card)</label>
+      <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Approve map changes without asking (skip the Approve / Discard card)</label>
       <label class="checkbox_label" title="Off: a room is only discovered when a door that isn't on the map is actually opened or entered. On: rooms the narration mentions (a hallway lined with guest rooms) may be added too."><input id="worldscrawl_proactive_discovery" type="checkbox"> Proactive room discovery (add rooms the narration mentions)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
-      <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Keep the narrator's waits without asking (skip the Keep / Adjust / Discard card)</label>
+      <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the Approve / Adjust / Discard card)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="typed"> Clicks, commands and typed moves</label>
