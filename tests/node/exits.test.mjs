@@ -53,20 +53,6 @@ test('barrier set on both sides and disagreeing warns; first read wins', () => {
     assert.doesNotMatch(quiet, /disagree/);
 });
 
-test('legacy view maps onto sight/sound/barrier', () => {
-    let w = W({ view: 'closed' }, { view: 'closed' });
-    assert.ok(E(w, A, 'east').barrier);
-    assert.equal(E(w, A, 'east').door, E(w, B, 'west').door);
-    w = W({ view: 'none' }, { view: 'open' });
-    assert.equal(E(w, A, 'east').sight, 'none');
-    assert.equal(E(w, A, 'east').sound, 'none');
-    assert.equal(E(w, A, 'east').barrier, null);
-    assert.equal(E(w, B, 'west').sight, 'partial');
-    w = W({ view: 'closed', stays_open: true });
-    assert.equal(w.stays_open(E(w, A, 'east'), w.get(A)), true);
-    assert.equal(w.stays_open(E(w, B, 'west'), w.get(B)), true);
-});
-
 test('openable:false and locked block movement; starts_open does not', () => {
     for (const bar of [{ openable: false }, { locked: true }]) {
         const dir = makeWorld(tmpPath(), { r: two({ barrier: bar }, {}) });
@@ -84,10 +70,10 @@ test('openable:false and locked block movement; starts_open does not', () => {
 test('starts_open shows the door open on the map until closed', () => {
     const w = W({ barrier: { starts_open: true } });
     const d = w.get(A).exits[0].door;
-    const e = { barrier: { starts_open: true }, door: d, view: 'closed' };
+    const e = { barrier: { starts_open: true }, door: d };
     assert.equal(isClosed(e, [], []), false);
     assert.equal(isClosed(e, [], [d]), true);
-    assert.equal(isClosed({ view: 'closed', door: 'd1' }, ['d1']), false);
+    assert.equal(isClosed({ barrier: {}, door: 'd1' }, ['d1']), false);
     assert.equal(isBlocked({ barrier: { openable: false } }), true);
     assert.equal(isBlocked({ barrier: {} }), false);
 });

@@ -35,13 +35,6 @@ test('disagreeing barriers: the first wins and a warning names both exits', () =
     assert.ok(w.warnings.some(x => x.refs.includes(`exit:${A}|east`) && x.refs.includes(`exit:${B}|west`)));
 });
 
-test('legacy view:"closed" still becomes a barrier, with a notice', () => {
-    const w = load_world(dir({ view: 'closed' }, {}));
-    assert.ok(E(w, A, 'east').barrier);
-    assert.ok(E(w, B, 'west').barrier);
-    assert.ok(w.warnings.some(x => /view/.test(x.message) && x.refs.includes(`exit:${A}|east`)));
-});
-
 test('inspector labels sources: inherited place fields and the inherited barrier', () => {
     const c = client(dir({ barrier: { locked: true } }, {}));
     let [s, d] = get(c, A);

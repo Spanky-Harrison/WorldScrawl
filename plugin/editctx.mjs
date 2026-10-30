@@ -32,7 +32,7 @@ export function editContext(w, worldJson, raw, target) {
         const rawR = raw[rid], rawS = sub ? rawR?.subregions?.[sid] : null, obj = sub ? rawS : rawR;
         if (!isObj(obj)) return null;
         const kind = sub ? 'subregion' : 'region', ins = inspect(w, [worldJson, raw], t);
-        const own = pick(obj, ['name', 'notes', 'expandable', ...FIELD_KEYS[kind]]);
+        const own = pick(obj, ['name', 'lore', 'expandable', ...FIELD_KEYS[kind]]);
         const inherited = inheritedFrom(ins.resolved, FIELD_KEYS[kind].filter(k => k !== 'entrance'), own);
         if (!has(own, 'expandable')) inherited.expandable = expandInherit(sub ? [['region', rawR], ['world', worldJson]] : [['world', worldJson]]);
         const ent = ins.resolved.find(r => r.key === 'entrance');
@@ -41,7 +41,7 @@ export function editContext(w, worldJson, raw, target) {
         const entrances = sub ? Object.entries(rawS.locations ?? {}).map(([l, o]) => ({ value: l, label: o.name ?? l }))
             : Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ value: s, label: o.name ?? s }));
         // Notes stack (they are additive, not overridden): a subregion's own notes sit under its region's.
-        const parent_notes = sub && rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_notes' }] : [];
+        const parent_notes = sub && rawR?.lore ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.lore), toggle: 'inherit_lore' }] : [];
         return { kind, area: sub ? `${rid}:${sid}` : rid, title: obj.name ?? t, own, inherited, entrances, parent_notes };
     }
     if (t.startsWith('new:')) return createContext(w, worldJson, raw, t.slice(4), rooms);
@@ -53,8 +53,8 @@ export function editContext(w, worldJson, raw, target) {
     const ins = inspect(w, [worldJson, raw], a);
     const own = pick(r, ['name', 'description', 'expandable', ...FIELD_KEYS.room]);
     const inherited = inheritedFrom(ins.resolved, FIELD_KEYS.room, own);
-    if (!has(own, 'inherit_region_notes')) inherited.inherit_region_notes = has(rawS, 'inherit_notes') ? { value: rawS.inherit_notes, from: 'subregion' } : { value: true, from: 'default' };
-    if (!has(own, 'inherit_subregion_notes')) inherited.inherit_subregion_notes = { value: true, from: 'default' };
+    if (!has(own, 'inherit_region_lore')) inherited.inherit_region_lore = has(rawS, 'inherit_lore') ? { value: rawS.inherit_lore, from: 'subregion' } : { value: true, from: 'default' };
+    if (!has(own, 'inherit_subregion_lore')) inherited.inherit_subregion_lore = { value: true, from: 'default' };
     if (!has(own, 'expandable')) inherited.expandable = expandInherit([['subregion', rawS], ['region', rawR], ['world', worldJson]]);
     const exits = (r.exits ?? []).filter(isObj).map(e => {
         const backRoom = getRoom(raw, e.to), back = backRoom ? (backRoom.exits ?? []).find(x => isObj(x) && x.to === a) ?? null : null;
@@ -67,8 +67,8 @@ export function editContext(w, worldJson, raw, target) {
         rooms: rooms.filter(x => x.address !== a),
         // The parent notes stacked on top of this place's own description (each with its inherit toggle).
         parent_notes: [
-            ...(rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_region_notes' }] : []),
-            ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
+            ...(rawR?.lore ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.lore), toggle: 'inherit_region_lore' }] : []),
+            ...(rawS?.lore ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.lore), toggle: 'inherit_subregion_lore' }] : []),
         ] };
 }
 
@@ -81,15 +81,15 @@ function createContext(w, worldJson, raw, area, rooms) {
     if (!isObj(rawS)) return null;
     const ins = inspect(w, [worldJson, raw], `sub:${area}`);
     const inherited = inheritedFrom(ins?.resolved ?? [], FIELD_KEYS.room.filter(k => !/^inherit_/.test(k)), {});
-    inherited.inherit_region_notes = has(rawS, 'inherit_notes') ? { value: rawS.inherit_notes, from: 'subregion' } : { value: true, from: 'default' };
-    inherited.inherit_subregion_notes = { value: true, from: 'default' };
+    inherited.inherit_region_lore = has(rawS, 'inherit_lore') ? { value: rawS.inherit_lore, from: 'subregion' } : { value: true, from: 'default' };
+    inherited.inherit_subregion_lore = { value: true, from: 'default' };
     inherited.expandable = expandInherit([['subregion', rawS], ['region', rawR], ['world', worldJson]]);
     return { kind: 'room', create: true, address: null, area, title: 'New place', own: {}, inherited, exits: [],
         subregions: Object.entries(rawR.subregions ?? {}).map(([s, o]) => ({ area: `${rid}:${s}`, name: o.name ?? s })),
         rooms,
         parent_notes: [
-            ...(rawR?.notes ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.notes), toggle: 'inherit_region_notes' }] : []),
-            ...(rawS?.notes ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.notes), toggle: 'inherit_subregion_notes' }] : []),
+            ...(rawR?.lore ? [{ from: 'region', name: rawR.name ?? rid, text: String(rawR.lore), toggle: 'inherit_region_lore' }] : []),
+            ...(rawS?.lore ? [{ from: 'subregion', name: rawS.name ?? sid, text: String(rawS.lore), toggle: 'inherit_subregion_lore' }] : []),
         ] };
 }
 
@@ -113,5 +113,5 @@ const short = t => { const s = String(t ?? '').trim().replace(/\s+/g, ' '); cons
 export function aiContext(raw, area, rooms = []) {
     const [rid, sid] = String(area ?? '').split(':'), r = raw[rid], s = sid ? r?.subregions?.[sid] : null;
     const neighbors = [...new Set(rooms)].slice(0, 12).map(a => getRoom(raw, a) ? { name: getRoom(raw, a).name ?? a, short: short(getRoom(raw, a).description) } : null).filter(Boolean);
-    return { region: isObj(r) ? { name: r.name ?? rid, notes: r.notes ?? '' } : null, subregion: isObj(s) ? { name: s.name ?? sid, notes: s.notes ?? '' } : null, neighbors };
+    return { region: isObj(r) ? { name: r.name ?? rid, lore: r.lore ?? '' } : null, subregion: isObj(s) ? { name: s.name ?? sid, lore: s.lore ?? '' } : null, neighbors };
 }

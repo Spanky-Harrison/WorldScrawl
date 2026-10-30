@@ -54,7 +54,7 @@ export function knownRoom(loc, { changes = [], reveals = [], rooms = new Map() }
 
 /** Is this exit a closed door right now? */
 export function isClosed(e, open = [], closed = []) {
-    if (!(e?.barrier || e?.view === 'closed')) return false;
+    if (!(e?.barrier)) return false;
     if (e.door && closed.includes(e.door)) return true;
     if (e.door && open.includes(e.door)) return false;
     return !e.barrier?.starts_open;

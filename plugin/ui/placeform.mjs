@@ -27,8 +27,8 @@ export const ROOM_FIELDS = [
     { k: 'name', type: 'text', label: 'Name', required: true },
     { k: 'description', type: 'textarea', label: 'Description', required: true, ai: true },
     { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
-    { k: 'inherit_region_notes', type: 'bool', label: 'Uses the region lore' },
-    { k: 'inherit_subregion_notes', type: 'bool', label: 'Uses the subregion lore' },
+    { k: 'inherit_region_lore', type: 'bool', label: 'Uses the region lore' },
+    { k: 'inherit_subregion_lore', type: 'bool', label: 'Uses the subregion lore' },
     { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
     { k: 'insulation', type: 'choice', label: 'Insulation', options: ENUMS.insulation },
     { k: 'indoor_temp', type: 'number', label: 'Indoor temperature' },
@@ -37,10 +37,10 @@ export const ROOM_FIELDS = [
 export const AREA_FIELDS = {
     subregion: [
         { k: 'name', type: 'text', label: 'Name', required: true },
-        { k: 'notes', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
+        { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
-        { k: 'inherit_notes', type: 'bool', label: 'Rooms use the region lore' },
+        { k: 'inherit_lore', type: 'bool', label: 'Rooms use the region lore' },
         { k: 'label_rooms', type: 'bool', label: 'Room names carry the subregion name', dflt: false },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },
         { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
@@ -50,7 +50,7 @@ export const AREA_FIELDS = {
     ],
     region: [
         { k: 'name', type: 'text', label: 'Name', required: true },
-        { k: 'notes', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
+        { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },
@@ -196,7 +196,7 @@ export function placeOps(ctx, state) {
 /** The patch ops for a subregion or region form. */
 export function areaOps(ctx, state) {
     const area = ctx.area, b = ctx.own ?? {}, o = state.own ?? {}, ops = [];
-    const name = str(o.name) !== str(b.name) && str(o.name), notes = str(o.notes) !== str(b.notes) && str(o.notes);
+    const name = str(o.name) !== str(b.name) && str(o.name), notes = str(o.lore) !== str(b.lore) && str(o.lore);
     if (name || notes) ops.push({ op: 'update_area', area, ...(name ? { name } : {}), ...(notes ? { notes } : {}) });
     if (!same(b.expandable, o.expandable)) ops.push({ op: 'set_expandable', target: area, value: o.expandable ?? null });
     const f = fieldDiff(b, o, FIELD_KEYS[ctx.kind]);
@@ -302,7 +302,7 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
     const root = el('div', { class: 'placeform', 'data-kind': ctx.kind });
     const specs = ctx.kind === 'room' ? ROOM_FIELDS : AREA_FIELDS[ctx.kind];
     const aiFor = fieldObj => (ai ? (k, text) => ai({ kind: ctx.kind, field: k, text, exit: fieldObj }) : null);
-    const textKey = ctx.kind === 'room' ? 'description' : 'notes';
+    const textKey = ctx.kind === 'room' ? 'description' : 'lore';
     // With an outline (the map passes /edit/outline) the area-picking fields are map picks, else plain dropdowns.
     const ol = ctx.outline ?? null;
     const entrancePick = !ol || ctx.kind === 'room' ? null : ctx.kind === 'subregion'
@@ -421,9 +421,9 @@ export function buildEditForm(doc, ctx, { onChange = () => {}, ai = null, expand
  */
 export function expandPrompt(ctx, { field = 'description', text = '', name = '', kind = 'room' } = {}) {
     const what = kind === 'room' ? 'place' : kind, L = [];
-    if (ctx?.region) L.push(`Region: ${ctx.region.name}${ctx.region.notes ? ` - ${ctx.region.notes}` : ''}`);
-    if (ctx?.subregion && kind === 'room') L.push(`Area: ${ctx.subregion.name}${ctx.subregion.notes ? ` - ${ctx.subregion.notes}` : ''}`);
+    if (ctx?.region) L.push(`Region: ${ctx.region.name}${ctx.region.lore ? ` - ${ctx.region.lore}` : ''}`);
+    if (ctx?.subregion && kind === 'room') L.push(`Area: ${ctx.subregion.name}${ctx.subregion.lore ? ` - ${ctx.subregion.lore}` : ''}`);
     if (ctx?.neighbors?.length) L.push('Connected places:', ...ctx.neighbors.map(n => `- ${n.name}${n.short ? `: ${n.short}` : ''}`));
     const draft = String(text).trim() ? '\n' + P('expand.draft', { text: String(text).trim() }) : '';
-    return P('expand.question', { context: L.length ? L.join('\n') + '\n' : '', field: P(field === 'notes' ? 'expand.field_notes' : 'expand.field_description'), kind: what, name: name || 'new ' + what, draft });
+    return P('expand.question', { context: L.length ? L.join('\n') + '\n' : '', field: P(field === 'lore' ? 'expand.field_notes' : 'expand.field_description'), kind: what, name: name || 'new ' + what, draft });
 }

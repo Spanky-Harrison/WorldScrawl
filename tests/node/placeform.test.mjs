@@ -19,7 +19,7 @@ test('edit context: own values, inherited ones with their source, exits with the
     assert.ok(!('exposure' in x.own) && !('expandable' in x.own));
     assert.deepEqual(x.inherited.exposure, { value: 'sheltered', from: 'subregion' });
     assert.deepEqual(x.inherited.expandable, { value: true, from: 'default' });
-    assert.deepEqual(x.inherited.inherit_region_notes, { value: true, from: 'default' });
+    assert.deepEqual(x.inherited.inherit_region_lore, { value: true, from: 'default' });
     const out = x.exits.find(e => e.direction === 'out');
     assert.equal(out.to, SQUARE); assert.equal(out.to_name, 'Village Square'); assert.deepEqual(out.barrier, {}); assert.equal(out.back_direction, 'in');
     assert.ok(x.subregions.some(s => s.area === 'riverton:streets'));
@@ -34,7 +34,7 @@ test('edit context: own values, inherited ones with their source, exits with the
     assert.equal(c.post('/edit/context', { json: { target: 'riverton:nope/x' } }).status_code, 404);
     // Notes stack: parent notes are listed (read-only) with the toggle that drops them, never as an inherited value.
     assert.ok(!('description' in x.inherited));
-    for (const n of x.parent_notes) assert.ok(['inherit_region_notes', 'inherit_subregion_notes'].includes(n.toggle) && n.text);
+    for (const n of x.parent_notes) assert.ok(['inherit_region_lore', 'inherit_subregion_lore'].includes(n.toggle) && n.text);
 });
 
 test('edit form diff: an untouched form makes no ops; inherited values are never copied in', () => {
@@ -87,13 +87,13 @@ test('area form diff: update_area for name/notes, set_fields for settings, set_e
 test('set_fields / set_exit / add_exit / move_location apply, sync shared fields and validate', () => {
     const raw = loadRaw();
     const r = applyPatch(raw, { ops: [
-        { op: 'set_fields', target: TAVERN, fields: { exposure: 'outdoor', inherit_region_notes: false } },
+        { op: 'set_fields', target: TAVERN, fields: { exposure: 'outdoor', inherit_region_lore: false } },
         { op: 'set_exit', loc: TAVERN, direction: 'out', fields: { sight: 'none', barrier: { locked: true }, travel_time: '2m', direction: 'front' } },
         { op: 'add_exit', loc: TAVERN, direction: 'side door', to: LANE, return_direction: 'tavern', door: true },
         { op: 'move_location', loc: YARD, area: 'riverton:streets' },
     ] });
     const t = getRoom(raw, TAVERN), sq = getRoom(raw, SQUARE);
-    assert.equal(t.exposure, 'outdoor'); assert.equal(t.inherit_region_notes, false);
+    assert.equal(t.exposure, 'outdoor'); assert.equal(t.inherit_region_lore, false);
     const front = t.exits.find(e => e.direction === 'front'), back = sq.exits.find(e => e.to === TAVERN);
     assert.equal(front.sight, 'none'); assert.equal(back.sight, undefined, 'sight is per side');
     assert.deepEqual(front.barrier, { locked: true }); assert.equal(back.barrier, undefined, 'one door per pair');

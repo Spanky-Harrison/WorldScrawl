@@ -3,7 +3,7 @@
 Every place can have two kinds of text:
 
 - **description**: what the senses show. It goes to the narrator on every move and look.
-- **lore**: background knowledge, what locals know (history, who runs it, reputation). It is set at region, subregion or room level, in the `lore` key. The old `notes` key still loads, and `inherit_notes`, `inherit_region_notes` and `inherit_subregion_notes` work as `inherit_lore`, `inherit_region_lore` and `inherit_subregion_lore`, with the same stacking rules.
+- **lore**: background knowledge, what locals know (history, who runs it, reputation). It is set at region, subregion or room level, in the `lore` key.
 
 ## How lore reaches the narrator
 
