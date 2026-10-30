@@ -1017,19 +1017,36 @@ export function loreRequests(chat) {
     (chat ?? []).forEach((m, index) => { for (const r of loreRequestsOn(m)) out.push({ index, place: r.place, level: r.level, address: r.address, source: r.source }); });
     return out;
 }
+/** The part of an address a lore level covers: "riverton:drowned_rat/common_room" -> region "riverton", subregion "riverton:drowned_rat", room the whole. */
+export function loreScope(address, level) {
+    const a = String(address ?? '');
+    if (level === 'region') return a.includes(':') ? a.slice(0, a.indexOf(':')) : a;
+    if (level === 'subregion') return a.includes('/') ? a.slice(0, a.lastIndexOf('/')) : a;
+    return a;
+}
 /**
- * The lore to feed at message `index`: chain entries (innermost first) asked for by a request in this scene at this
- * place. A request sticks until the player's place changes. `extra` are requests not stamped yet (this turn's [lore]).
+ * The lore to feed at message `index`: chain entries (innermost first) that were asked for while the player has been
+ * inside them. A request for a level stays active as long as the player stays inside that level (room: the same room;
+ * subregion: anywhere in it; region: anywhere in it), looking back until the player was last outside it. Requests with
+ * level '' (nothing matched) keep the exact-room, this-scene rule. `extra` are requests not stamped yet (this turn's [lore]).
  */
 export function activeLore(chat, index, chain, playerAt, extra = []) {
     if (!chain?.length) return [];
-    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    const n = chat?.length ?? 0;
+    const end = Math.max(0, Math.min(index ?? 0, n - 1));
     const here = playerAt(end);
-    const from = chat?.length ? sceneStartOf(chat, end, playerAt) : 0;
-    const asked = [...extra];
-    for (let i = from; i <= end && i < (chat?.length ?? 0); i++) for (const r of loreRequestsOn(chat[i])) if (!r.address || r.address === here) asked.push(r);
     const levels = new Set();
-    for (const r of asked) for (const c of (r.level ? chain.filter(c => c.level === r.level) : loreFor(chain, r.place))) levels.add(c.level);
+    const add = r => { for (const c of (r.level ? chain.filter(c => c.level === r.level) : loreFor(chain, r.place))) levels.add(c.level); };
+    for (const r of extra) add(r);
+    for (const c of chain) {
+        const scope = loreScope(here, c.level);
+        for (let i = end; i >= 0 && i < n; i--) {
+            if (loreScope(playerAt(i), c.level) !== scope) break;
+            if (loreRequestsOn(chat[i]).some(r => r.level === c.level && (!r.address || loreScope(r.address, c.level) === scope))) { levels.add(c.level); break; }
+        }
+    }
+    const from = n ? sceneStartOf(chat, end, playerAt) : 0;
+    for (let i = from; i <= end && i < n; i++) for (const r of loreRequestsOn(chat[i])) if (!r.level && (!r.address || r.address === here)) add(r);
     return chain.filter(c => levels.has(c.level));
 }
 /** The fed-lore block for the narrator ('' when nothing is fed), tokens left in (render afterwards). */

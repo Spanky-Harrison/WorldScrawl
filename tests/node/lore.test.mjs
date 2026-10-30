@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { load_world, liftLore, lowerLore } from '../../plugin/world.mjs';
-import { takeLoreFlags, loreIndexLine, loreFor, addLoreRequest, loreRequests, activeLore, loreBlock, renderNpcTokens } from '../../plugin/npc.mjs';
+import { loreScope, takeLoreFlags, loreIndexLine, loreFor, addLoreRequest, loreRequests, activeLore, loreBlock, renderNpcTokens } from '../../plugin/npc.mjs';
 import { makeWorld, tmpPath } from './helpers.mjs';
 
 const region = (legacy = false) => {
@@ -72,4 +72,33 @@ test('{{npc:id}} renders as the cast name; unknown ids show bare and warn', () =
     const seen = [];
     assert.equal(renderNpcTokens('Run by {{npc:hesk}} and {{npc:nobody}}.', [{ id: 'hesk', name: 'Hesk' }], id => seen.push(id)), 'Run by Hesk and nobody.');
     assert.deepEqual(seen, ['nobody']);
+});
+
+const RAT = 'riverton:drowned_rat/common_room', STABLE = 'riverton:drowned_rat/stable', SQUARE = 'riverton:streets/square';
+const ratChain = [{ level: 'subregion', name: 'The Drowned Rat', text: 'An inn.' }, { level: 'region', name: 'Riverton', text: 'A town.' }];
+const walk = at => ({ chat: at.map((_, i) => ({ is_user: i % 2 === 0, mes: 'x', extra: {} })), playerAt: i => at[Math.min(i, at.length - 1)] });
+test('loreScope covers room, subregion and region', () => {
+    assert.equal(loreScope(RAT, 'room'), RAT);
+    assert.equal(loreScope(RAT, 'subregion'), 'riverton:drowned_rat');
+    assert.equal(loreScope(RAT, 'region'), 'riverton');
+});
+test('subregion lore asked in the common room stays fed in the stable, and drops once out of the building', () => {
+    const { chat, playerAt } = walk([RAT, RAT, STABLE, STABLE, SQUARE, SQUARE, RAT]);
+    addLoreRequest(chat[1], { place: 'The Drowned Rat', level: 'subregion', address: RAT, source: 'bracket' });
+    assert.deepEqual(activeLore(chat, 3, ratChain, playerAt).map(c => c.level), ['subregion'], 'stable: still fed');
+    assert.deepEqual(activeLore(chat, 5, ratChain, playerAt), [], 'square: dropped');
+    assert.deepEqual(activeLore(chat, 6, ratChain, playerAt), [], 'back inside later: not revived');
+});
+test('region lore survives moving between buildings in the region', () => {
+    const { chat, playerAt } = walk([RAT, RAT, SQUARE, STABLE, 'larkspur:farm/yard']);
+    addLoreRequest(chat[1], { place: 'Riverton', level: 'region', address: RAT, source: 'flag' });
+    assert.deepEqual(activeLore(chat, 2, ratChain, playerAt).map(c => c.level), ['region']);
+    assert.deepEqual(activeLore(chat, 3, ratChain, playerAt).map(c => c.level), ['region']);
+    assert.deepEqual(activeLore(chat, 4, ratChain, playerAt), [], 'another region: dropped');
+});
+test("level '' requests keep the exact-room rule", () => {
+    const { chat, playerAt } = walk([RAT, RAT, STABLE]);
+    addLoreRequest(chat[1], { place: 'Drowned Rat', level: '', address: RAT, source: 'bracket' });
+    assert.deepEqual(activeLore(chat, 1, ratChain, playerAt).map(c => c.level), ['subregion']);
+    assert.deepEqual(activeLore(chat, 2, ratChain, playerAt), []);
 });
