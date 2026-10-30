@@ -412,14 +412,14 @@ try {
     check('lore: [lore] feeds the tavern lore as background knowledge, {{npc:hesk}} as a name', narr.includes('Background knowledge (lore)') && narr.includes("Riverton's oldest tavern") && narr.includes('Hesk') && !narr.includes('{{npc:') && !narr.includes('Riverton is a small'), narr.slice(0, 400));
     const lr = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
     check('lore: the [lore] request is stamped {swipe, place, level, address, source}', lr.length === 1 && lr[0].source === 'bracket' && lr[0].place === 'The Drowned Rat' && lr[0].level === 'subregion' && lr[0].address === 'riverton:drowned_rat/common_room', JSON.stringify(lr));
-    await queue([{ content: 'She pours an ale. [ws_flag: lore | Riverton]' }]);
-    await send('I order an ale.', 1);
+    await queue([{ content: 'stay' }, { content: 'She pours an ale. [ws_flag: lore | Riverton]' }]);
+    await send('I order an ale.');
     narr = JSON.stringify((await lastReq()).messages);
     check('lore: still fed later in the scene', narr.includes("Riverton's oldest tavern"));
     const loreMes = await page.evaluate(() => SillyTavern.getContext().chat.at(-1).mes);
     check('lore: the narrator flag tag is stripped from the reply', loreMes === 'She pours an ale.', loreMes);
-    await queue([{ content: 'You sip.' }]);
-    await send('I sip it.', 1);
+    await queue([{ content: 'stay' }, { content: 'You sip.' }]);
+    await send('I sip it.');
     narr = JSON.stringify((await lastReq()).messages);
     const lr2 = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
     check('lore: the narrator flag feeds region lore the next turn', lr2.some(r => r.source === 'flag' && r.level === 'region') && narr.includes('Background knowledge (lore)') && /- Riverton: /.test(narr), JSON.stringify(lr2));
