@@ -2105,22 +2105,61 @@ async function keepRemember(id, edited = null) {
         try { await keepRememberNow(c, msg, card, id, edited); } catch (e) { unmarkDecided(msg, nid); renderPatchCards(); throw e; }
     });
 }
+const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
+/** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
+async function askRemember(id, name, { prefetch = false } = {}) {
+    const chat = ctx().chat ?? [];
+    const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
+    const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
+    const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
+    const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
+    const kind = prefetch ? 'remember (prefetch)' : 'remember';
+    let got = null;
+    for (let t = 0; t < 2 && !got; t++) {
+        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, retry: t > 0 }))); } catch { got = null; }
+        if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
+    }
+    return got;
+}
+// Prefetch: the remember call starts when the card first shows (once per card id). The answer is cached on the card
+// (msg.extra, per swipe) so a redraw never calls again; Approve uses it, or awaits the call still in flight.
+const rememberFlights = new Map(); // card nid -> promise of the parsed card (or null)
+function prefetchRemember(id) {
+    const msg = ctx().chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
+    if (!card || card.status !== 'review') return null;
+    card.nid = card.nid || newNoticeId('remember');
+    if (card.proposal?.name === card.name && card.proposal.got) return Promise.resolve(card.proposal.got);
+    if (rememberFlights.has(card.nid)) return rememberFlights.get(card.nid);
+    if (card.proposal?.failed && card.proposal.name === card.name) return null; // failed: wait for Retry
+    const name = card.name;
+    const p = askRemember(id, name, { prefetch: true }).catch(() => null).then(got => {
+        card.proposal = got ? { name, got } : { name, failed: true };
+        syncSwipeExtra(msg);
+        ctx().saveChat?.();
+        renderPatchCards();
+        return got;
+    }).finally(() => rememberFlights.delete(card.nid));
+    rememberFlights.set(card.nid, p);
+    return p;
+}
+function retryRemember(id) {
+    const card = ctx().chat?.[id]?.extra?.[REMEMBER_KEY];
+    if (card?.proposal?.failed) delete card.proposal;
+    prefetchRemember(id);
+    renderPatchCards();
+}
 async function keepRememberNow(c, msg, card, id, edited) {
     const chat = c.chat ?? [];
     const name = edited?.name?.trim() || card.name;
-    const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
-    const blank = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
+    const blank = REMEMBER_BLANK;
     let got = edited?.line ? { ...blank, name, line: edited.line.trim() } : null;
-    if (!got) {
-        const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
-        const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
-        const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
-        for (let t = 0; t < 2 && !got; t++) {
-            try { got = readRememberAnswer(parseJsonAnswer(await gen('remember', { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, retry: t > 0 }))); } catch { got = null; }
-            if (!got) markLast(id, 'remember', 'failed', 'answer was not a usable person');
-        }
-        if (!got) got = { ...blank, name, line: 'Met in this scene.' };
+    if (!got && name === card.name) {
+        if (card.proposal?.name === name && card.proposal.got) got = card.proposal.got; // prefetched: instant
+        else if (rememberFlights.has(card.nid)) got = await rememberFlights.get(card.nid); // in flight: never a second call
     }
+    if (!got) got = await askRemember(id, name);
+    if (!got) got = { ...blank, name, line: 'Met in this scene.' };
+    else if (edited?.name?.trim() && name !== got.name) got = { ...got, name };
     const taken = new Set(knownNpcNames(chat));
     const newId = freeId(got.name, taken);
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
@@ -2161,7 +2200,7 @@ function maybeSuggest(id) {
     const hit = flaggedInScene(chat, id).find(s => s.ready && !chat.some(m => normName(m?.extra?.[REMEMBER_KEY]?.name ?? '') === s.key));
     if (!hit) return;
     msg.extra = msg.extra ?? {};
-    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.name, status: 'review', suggested: true };
+    msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: hit.name, status: 'review', suggested: true, nid: newNoticeId('remember') };
 }
 async function exportNpc(id, { update = false } = {}) {
     const chat = ctx().chat ?? [];
@@ -4044,6 +4083,32 @@ function cardButton(label, onClick, title = '', decides = false) {
 /** Notice text, then ONE right-aligned button row at the end. */
 const rowOf = (...buttons) => noticeRow(document, buttons.flat());
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
+/** The proposed card on a Remember notice: what Approve will save. Invented details are marked. */
+function rememberProposalEl(got) {
+    const box = document.createElement('div');
+    box.className = 'worldscrawl_remember_proposal';
+    box.style.cssText = 'margin:3px 0 3px 1em;font-size:0.92em;';
+    const head = document.createElement('div');
+    head.className = 'worldscrawl_remember_head';
+    head.textContent = `${got.name}${got.unknownAs ? ` (shown as "${got.unknownAs}" until the name is learned)` : ''}: ${got.line}${got.looks ? ` — ${got.looks}` : ''}`;
+    box.append(head);
+    const rows = [['Manner', got.manner], ['Speech', got.voice], ['Body', got.body], ['Wearing', got.outfit], ['History', got.history],
+        ['Starts', got.disposition ? `${got.disposition.value}${got.disposition.reason ? ` (${got.disposition.reason})` : ''}` : ''], ['Facts', (got.facts ?? []).join('; ')]].filter(([, v]) => v);
+    if (rows.length || got.invented?.length) {
+        const det = document.createElement('details');
+        det.className = 'worldscrawl_remember_details';
+        const sum = document.createElement('summary'); sum.textContent = 'Details'; det.append(sum);
+        det.addEventListener('click', e => e.stopPropagation());
+        for (const [k, v] of rows) { const r = document.createElement('div'); r.textContent = `${k}: ${v}`; det.append(r); }
+        if (got.invented?.length) {
+            const v = document.createElement('div'); v.className = 'worldscrawl_invented';
+            v.textContent = `Made up to fill gaps (not in the story): ${got.invented.map(x => `⚠ ${x}`).join('; ')}`;
+            det.append(v);
+        }
+        box.append(det);
+    }
+    return box;
+}
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
@@ -4141,7 +4206,13 @@ export function renderPatchCards() {
             lineInp.type = 'text'; lineInp.placeholder = 'one sentence (optional)'; lineInp.className = 'text_pole worldscrawl_remember_line';
             lineInp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
             lineInp.addEventListener('click', e => e.stopPropagation());
-            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), `Remember ${remember.name} (the narrator writes one sentence about them)`, true),
+            const decided = isDecided(msg, remember.nid);
+            const prop = remember.proposal?.name === remember.name ? remember.proposal : null;
+            if (!prop && !decided) queueMicrotask(() => prefetchRemember(id));
+            if (prop?.got) d.append(rememberProposalEl(prop.got));
+            else if (prop?.failed) { const f = line('Could not prepare the card. '); f.className = 'worldscrawl_remember_failed'; f.append(cardButton('Retry', () => retryRemember(id), 'Ask the model again')); d.append(f); }
+            else { const w = line(decided ? 'Saving…' : 'Preparing…'); w.className = 'worldscrawl_remember_preparing'; w.style.opacity = '0.75'; d.append(w); }
+            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), prop?.got ? `Save ${prop.got.name} as shown` : `Remember ${remember.name} (saves the card as soon as it is ready)`, true),
                 cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Approve with the name and the sentence in the boxes', true),
                 cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.', true)));
             if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)

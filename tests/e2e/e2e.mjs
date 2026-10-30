@@ -2058,15 +2058,27 @@ try {
     const cast0 = await (await stFetch('/cast')).json();
     check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 2) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
     const reqsBeforeNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    // The remember call is prefetched as soon as the card shows, so its answer is queued first.
+    await queue([{ content: '{"name":"Maren","unknownAs":"the knife-grinder","personality":{"summary":"A traveling knife-grinder with a squeaky cart."},"appearance":{"summary":"wiry woman with a cart","outfit":"a patched smock"},"invented":["grey eyes"]}' }]);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Maren'));
     await page.waitForTimeout(500);
+    await page.waitForFunction(() => !!document.querySelector('.worldscrawl_remembercard .worldscrawl_remember_proposal'), null, { timeout: 10000 }).catch(() => {});
+    const prop = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
+        const m = [...SillyTavern.getContext().chat].reverse().find(x => x.extra?.worldscrawl_remember);
+        return { head: card?.querySelector('.worldscrawl_remember_head')?.textContent ?? '', invented: card?.querySelector('.worldscrawl_invented')?.textContent ?? '', cached: !!m?.extra?.worldscrawl_remember?.proposal?.got };
+    });
+    const reqsPrefetched = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /Maren \(shown as "the knife-grinder"/.test(prop.head) && /squeaky cart.*wiry woman/.test(prop.head) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 1, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
+    await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); m.renderPatchCards(); m.renderPatchCards(); });
+    await page.waitForTimeout(500);
+    check('remember prefetch: redraws do not call again', (await (await fetch(`${FAKE}/__requests`)).json()).length === reqsPrefetched);
     const remembered = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
         const hit = [...ch].reverse().find(m => m.extra?.worldscrawl_remember?.status === 'review');
         return { name: hit?.extra?.worldscrawl_remember?.name ?? '', card: !!document.querySelector('.worldscrawl_remembercard') };
     });
     check('/ws-npc shows a Remember card', remembered.card && remembered.name === 'Maren', JSON.stringify(remembered));
-    await queue([{ content: '{"name":"Maren","personality":{"summary":"A traveling knife-grinder with a squeaky cart."}}' }]);
     const look = await page.evaluate(() => {
         const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
         const row = card?.querySelector(':scope > .worldscrawl_notice_row');
@@ -2095,8 +2107,8 @@ try {
     });
     await page.evaluate(() => window.__wsObs?.disconnect());
     const reqsAfterNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    check('notices: first click locks the row and shows Saving…', saving.saving && saving.locked, JSON.stringify(saving));
-    check('notices: double-clicking Approve (plus extra clicks) writes one line, one decision, one model call', dbl.creates === 1 && dbl.lines === 1 && dbl.decided.join() === 'approve' && reqsAfterNpc === reqsBeforeNpc + 1, JSON.stringify({ ...dbl, calls: reqsAfterNpc - reqsBeforeNpc }));
+    check('notices: first click locks the row', saving.locked, JSON.stringify(saving));
+    check('notices: double-clicking Approve (plus extra clicks) writes one line, one decision, and no model call beyond the prefetch', dbl.creates === 1 && dbl.lines === 1 && dbl.decided.join() === 'approve' && reqsAfterNpc === reqsBeforeNpc + 1, JSON.stringify({ ...dbl, calls: reqsAfterNpc - reqsBeforeNpc }));
     check('notices: once answered the highlight goes and the notice shows its resolved state', !dbl.pendingLeft && dbl.res.some(t => /✓ Approved: remembered Maren/.test(t)), JSON.stringify(dbl));
     const act = await page.evaluate(async () => { const { messageActivity } = await import('/scripts/extensions/third-party/WorldScrawl/activity.mjs'); const ch = SillyTavern.getContext().chat; const i = ch.findLastIndex(x => x.extra?.worldscrawl_decided); return messageActivity(ch[i], i).filter(e => /notice answered/.test(e.label)).map(e => `${e.label}: ${e.status}`); });
     check('notices: the answer shows in the activity log', act.includes('remember notice answered: approve'), JSON.stringify(act));
@@ -2106,7 +2118,24 @@ try {
         const stamps = ch.flatMap(m => m.extra?.worldscrawl_npc ?? []);
         return stamps.find(s => s.type === 'npc_create');
     });
-    check('Approve reads the story back into an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? ''), JSON.stringify(created));
+    check('Approve saves the prefetched card as an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? '') && created.unknownAs === 'the knife-grinder' && created.outfit === 'a patched smock', JSON.stringify(created));
+    // Approve while the prefetch is still running: Preparing…, then Saving…, then exactly one model call.
+    const reqsBeforeSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }]);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Corwin'));
+    const lastCardText = () => page.evaluate(() => [...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '');
+    await page.waitForFunction(() => /Corwin/.test(([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.querySelector('input')?.value ?? '')) && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
+    const preparing = /Preparing…/.test(await lastCardText());
+    await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ }).last().click();
+    await page.waitForTimeout(300);
+    const savingSlow = /Saving…/.test(await lastCardText());
+    await page.waitForFunction(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_create' && s.name === 'Corwin')), null, { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    const slow = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Corwin').map(s => s.line));
+    const reqsAfterSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    check('remember prefetch: Approve during the prefetch shows Preparing… then Saving…, waits, and makes exactly one call', preparing && savingSlow && slow.length === 1 && slow[0] === 'A ferry hand.' && reqsAfterSlow === reqsBeforeSlow + 1, JSON.stringify({ preparing, savingSlow, slow, calls: reqsAfterSlow - reqsBeforeSlow }));
+    const actPre = await page.evaluate(async () => { const { callNotes } = await import('/scripts/extensions/third-party/WorldScrawl/calllog.mjs'); return SillyTavern.getContext().chat.flatMap(m => callNotes(m)).map(n => n.kind).filter(k => /prefetch/.test(k)); });
+    check('remember prefetch: logged in the model-calls activity log', actPre.length >= 2, JSON.stringify(actPre));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
     await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
     await send('I look at Maren\'s hands.', 2);
@@ -2150,7 +2179,7 @@ try {
     const five = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = [...ch].reverse().find(m => m.extra?.worldscrawl_wait); return u?.extra?.worldscrawl_wait ?? null; });
     const afterWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('/ws-wait until 5pm parses with no extra model call', five?.until === '17:00' && five.seconds > 0 && afterWait === beforeWait + 1, JSON.stringify({ five, calls: afterWait - beforeWait }));
-    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).click();
+    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).filter({ hasText: 'Maren' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).click();
     await page.waitForTimeout(600);
     const exportWorld = await M(m => m.effectiveWorld());
     const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
