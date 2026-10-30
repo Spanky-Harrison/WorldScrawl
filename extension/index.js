@@ -8,7 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcSlices, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, suggestNames, takeNpcTags } from './npc.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
@@ -1926,12 +1926,17 @@ function npcPromptBits(loc) {
     const chat = ctx().chat ?? [];
     if (!pack?.npcs?.length || !chat.length || !calendarLib) return {};
     try {
-        const present = presentAt(chat, chat.length - 1, pack.npcs, npcEnv(chat, loc));
-        if (!present.length) return {};
+        const env = npcEnv(chat, loc);
+        const present = presentAt(chat, chat.length - 1, pack.npcs, env);
+        const notes = [loc?.effective_notes?.region, loc?.effective_notes?.subregion, loc?.notes, loc?.description].filter(Boolean).join('\n');
+        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { notes, present });
+        if (!present.length && !absent.length) return {};
+        if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
         const focus = stored && stored.depth ? stored : focusRules(ui >= 0 ? chat[ui]?.mes ?? '' : '', present);
-        return npcSlices(present, focus);
+        const sl = npcSlices(present, focus);
+        return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
 const DRAMATIC_RE = /\b(attacks?|stab(?:s|bed)?|rescues?|sav(?:e|es|ed)|kills?)\b/i;

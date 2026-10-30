@@ -12,7 +12,7 @@
       "indoor_temp": 72,
       "insulation": "cozy",
       "entrance": "common_room",
-      "notes": "Riverton's oldest tavern, run by Hesk, a striking, sharp-tongued widow with copper braids who can silence a brawl with one look. Cheap ale, dice games and dockhands; it gets loud after dark.",
+      "notes": "Riverton's oldest tavern, run by its sharp-tongued landlady. Cheap ale, dice games and dockhands; it gets loud after dark.",
       "locations": {
         "common_room": {
           "name": "Common Room",

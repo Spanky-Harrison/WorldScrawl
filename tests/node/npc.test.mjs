@@ -10,8 +10,8 @@ test('the extension copy of npc.mjs matches the plugin one', () => {
     const copy = fs.readFileSync(new URL('extension/npc.mjs', root), 'utf8');
     assert.equal(copy.split('\n').slice(1).join('\n'), plugin);
 });
-import { NPC_KEY, SUGGEST_AFTER, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, suggestNames, takeNpcTags, validateRecord } from '../../plugin/npc.mjs';
-import { loadCast, writeCastNpc } from '../../plugin/cast.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, exportRecord, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, scheduleAt, sightChance, sightCheck, suggestNames, takeNpcTags, validateRecord } from '../../plugin/npc.mjs';
+import { castNameWarnings, loadCast, writeCastNpc } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath } from './helpers.mjs';
 
 const BAR = 'riverton:drowned_rat/common_room';
@@ -339,3 +339,31 @@ test('keeping pulls a record, and export writes a new file instead of overwritin
     assert.equal(clash.updated, false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'cast', 'hesk.json'), 'utf8')).name, 'Hesk');
 });
+
+test('absent note: Hesk off-shift in the common room is named as not here, from her schedule in force', () => {
+    const cast = [hesk()];
+    const chat = [msg('I sit at the bar.')];
+    const morning = absentAt(chat, 0, cast, envOf(BAR, clock(8)), { present: [] });
+    assert.deepEqual(morning, ["Hesk isn't here right now (asleep, Upstairs Rooms); do not portray Hesk."]);
+    const evening = absentAt(chat, 0, cast, envOf(BAR, clock(18)), { present: presentAt(chat, 0, cast, envOf(BAR, clock(18))) });
+    assert.deepEqual(evening, []);
+    assert.deepEqual(absentAt(chat, 0, cast, envOf(FORGE, clock(8)), { present: [] }), [], 'not her place, not in the notes');
+    const named = absentAt(chat, 0, [validateRecord({ id: 'tom', name: 'Tom', line: 'A smith.' }, { file: 'tom.json', places })], envOf(FORGE, clock(8)), { notes: 'Tom works here.', present: [] });
+    assert.deepEqual(named, ["Tom isn't here right now; do not portray Tom."], 'no schedule: no place invented');
+});
+
+test('world load warns when place notes name a cast NPC', () => {
+    const world = { regions: new Map(), locations: new Map(), subregions: new Map([['riverton:drowned_rat', { name: 'The Drowned Rat', notes: 'Run by Hesk, a widow.' }]]) };
+    const w = castNameWarnings(world, [hesk()]);
+    assert.equal(w.length, 1);
+    assert.match(w[0], /^The Drowned Rat notes mentions? cast NPC Hesk by name; the narrator may portray Hesk off-shift/);
+    assert.deepEqual(castNameWarnings({ ...world, subregions: new Map([['x', { name: 'X', notes: 'run by its landlady' }]]) }, [hesk()]), []);
+});
+
+test('shipped worlds: no place notes name a cast NPC', async () => {
+    const { read_world_raw, build_world } = await import('../../plugin/world.mjs');
+    const root = new URL('../../worlds/riverton/', import.meta.url).pathname;
+    const world = build_world(...read_world_raw(root));
+    assert.deepEqual(loadCast(root, world).problems.filter(p => /cast NPC/.test(p)), []);
+});
+

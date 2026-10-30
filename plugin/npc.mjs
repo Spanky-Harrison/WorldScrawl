@@ -517,6 +517,31 @@ export function presentAt(chat, index, cast, env) {
     return out;
 }
 
+/**
+ * Saved people who belong here (a schedule stop at this place, or named in its notes) but are not in the scene now.
+ * One line each, from the schedule entry in force; with none, no place is named (never invented).
+ */
+export function absentAt(chat, index, cast, env, { notes = '', present = [] } = {}) {
+    const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
+    if (!chat?.length) return [];
+    const frames = framesOf(chat, end, cast);
+    if (!frames.length) return [];
+    const here = env.playerAt(end);
+    const clock = env.clock(end);
+    const ids = new Set((present ?? []).map(p => p.id));
+    const out = [];
+    for (const npc of frames[end].values()) {
+        if (ids.has(npc.id) || npc.following) continue;
+        const stops = (npc.schedule ?? []).filter(e => e && !e.broken).some(e => resolveSchedulePlace(e.place, env).address === here);
+        if (!stops && !nameIn(notes, npc.name)) continue;
+        const sched = scheduleAt(npc, clock, env);
+        const where = sched && sched.address !== here
+            ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
+        out.push(`${npc.name} isn't here right now${where}; do not portray ${npc.name}.`);
+    }
+    return out.sort();
+}
+
 function publicNpc(n) {
     const disposition = {};
     for (const [who, row] of Object.entries(n.disposition ?? {})) disposition[who] = { ...row };
