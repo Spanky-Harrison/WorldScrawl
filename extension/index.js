@@ -6,7 +6,9 @@
 // when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
 // is the player (id "player") plus whoever is following them, and nobody follows yet.
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
-import { messageActivity, logActivity } from './activity.mjs';
+import { messageActivity } from './activity.mjs';
+import { timeLabel } from './timelabels.mjs';
+import { addCallNote, markCall, narratorNote } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { NPC_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, LORE_KEY } from './npc.mjs';
@@ -1238,11 +1240,31 @@ export const digSys = () => P('dig.system', { reply: baseReply('json') });
 export const DIG_TRIES = 2;
 export const pickSys = () => P('pick.system', { reply: baseReply('one') });
 export const COMPASS = ['north', 'south', 'east', 'west', 'up', 'down'];
+// ---- Model-call notes: every model call the extension makes leaves an outcome on the message it belongs to
+// (by default the latest message, the one being handled). Saved soon after, so they survive a reload.
+let noteSave = null;
+function noteCall(at, note) {
+    try {
+        const c = ctx(), chat = c.chat ?? [], i = Number.isInteger(at) && at >= 0 ? at : chat.length - 1;
+        if (!chat[i] || !addCallNote(chat[i], note)) return;
+        clearTimeout(noteSave); noteSave = setTimeout(() => { try { ctx().saveChat?.(); } catch { /* ignore */ } }, 1500);
+    } catch { /* never break a turn over a debug note */ }
+}
+const markLast = (at, kind, status, reason) => { try { const chat = ctx().chat ?? []; markCall(chat[Number.isInteger(at) && at >= 0 ? at : chat.length - 1], kind, status, reason); } catch { /* ignore */ } };
+/** One model side call, noted: ok with a short answer, or failed (error or empty answer). retry merges with the last note of that kind. */
+async function gen(kind, args, { at, retry = false } = {}) {
+    try {
+        const raw = await ctx().generateRaw(args);
+        noteCall(at, String(raw ?? '').trim() ? { kind, status: 'ok', answer: raw, retry } : { kind, status: 'failed', reason: 'empty answer', retry });
+        return raw;
+    } catch (e) { noteCall(at, { kind, status: 'failed', reason: e?.message ?? String(e), retry }); throw e; }
+}
 /** Ask one pick-one question; one retry if the answer matches nothing. */
 async function askValid(label, prompt, validate, systemPrompt = pickSys()) {
     for (let i = 0; i < DIG_TRIES; i++) {
-        const a = await ctx().generateRaw({ prompt, systemPrompt, responseLength: 60 });
+        const a = await gen(`pick: ${label}`, { prompt, systemPrompt, responseLength: 60 }, { retry: i > 0 });
         const v = validate(trimAnswer(cleanAnswer(a)));
+        if (v == null) markLast(undefined, `pick: ${label}`, 'failed', 'answer matched no option');
         console.log(`[WorldScrawl] dig ${label} (try ${i + 1}): ${JSON.stringify(String(a).slice(0, 80))} -> ${v == null ? 'invalid' : JSON.stringify(v)}`);
         if (v != null) return v;
     }
@@ -1366,7 +1388,7 @@ async function makeDig(loc, r) {
  */
 async function narrativeDig(msg, loc) {
     const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
-    const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); logAct(ctx().chat?.indexOf(msg) ?? -1, { label: 'breaking through', status: 'failed', reason: why }); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
+    const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); noteCall(ctx().chat?.indexOf(msg) ?? -1, { kind: 'breaking through', status: 'failed', reason: why }); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
     const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
     const named = namedPlace(msg.mes, opts);
     if (named) { opts.splice(opts.indexOf(named), 1); opts.unshift(named); } // the place the player named comes first...
@@ -1376,7 +1398,7 @@ async function narrativeDig(msg, loc) {
     const used = loc.exits.filter(e => !e.hidden || e.revealed).map(e => e.direction); // never name a hidden exit in a prompt
     let err = '', made = null, r = null;
     for (let i = 0; i < DIG_TRIES && !made; i++) {
-        const raw = await ctx().generateRaw({ prompt: digPrompt(loc, saidAll, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 });
+        const raw = await gen('discovery / dig', { prompt: digPrompt(loc, saidAll, opts, used, canNew, err), systemPrompt: digSys(), responseLength: 300 }, { retry: i > 0 });
         const a = parseJsonAnswer(raw);
         let pre = readDigAnswer(a, { loc, opts, canNew });
         const dupe = pre.ok && pre.dest.name ? opts.find(o => o.room && duplicatePlace(pre.dest.name, [o.room])) : null;
@@ -1385,7 +1407,7 @@ async function narrativeDig(msg, loc) {
         r = pre.ok && pre.dest.room ? (target ? readDigAnswer(a, { loc, opts, canNew, target }) : { ok: false, error: 'that place is unknown' }) : pre;
         if (r.ok) { const m = await makeDig(loc, r); if (m.ok) made = m; else r = { ok: false, error: m.error }; }
         console.log(`[WorldScrawl] dig (try ${i + 1}): ${JSON.stringify(String(raw).slice(0, 120))} -> ${r.ok ? JSON.stringify({ to: made.to, direction: r.direction, back: r.back, stay: r.stay }) : r.error}`);
-        if (!made) err = r.error;
+        if (!made) { err = r.error; markLast(undefined, 'discovery / dig', 'failed', r.error); }
     }
     if (!made && named && !hasExit(loc, digWordFrom(msg.mes))) { // the model's answers didn't fit, but the player said where: link it directly
         const target = await fetchLocationCached(named.room.address);
@@ -1544,7 +1566,7 @@ async function parseIntent(msg) {
         return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
     });
     const prompt = intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options });
-    const answer = await c.generateRaw({ prompt, systemPrompt: intentSys(), responseLength: 48 });
+    const answer = await gen('intent', { prompt, systemPrompt: intentSys(), responseLength: 48 });
     const cands = await travelCandidates(loc);
     // Without the word check passing, "new opening" is not an option: such an answer falls through to the normal handling.
     let choice = parseIntentAnswer(answer, [...dirs, ...places.map(p => p.label), ...extras]);
@@ -1562,7 +1584,7 @@ async function parseIntent(msg) {
         if (m.length === 1) choice = m[0].direction ?? m[0].label;
     }
     if (!choice) {
-        const yn = await c.generateRaw({ prompt: travelYesNoPrompt(loc, said), systemPrompt: travelSys(), responseLength: 48 });
+        const yn = await gen('intent: travel yes/no', { prompt: travelYesNoPrompt(loc, said), systemPrompt: travelSys(), responseLength: 48 });
         choice = parseYesNo(yn) === 'yes' ? ELSEWHERE : STAY;
         console.log(`[WorldScrawl] intent fallback: ${JSON.stringify(String(yn).slice(0, 80))} -> ${choice}`);
     }
@@ -2080,7 +2102,8 @@ async function keepRemember(id, edited = null) {
         const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
         const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
         for (let t = 0; t < 2 && !got; t++) {
-            try { got = readRememberAnswer(parseJsonAnswer(await c.generateRaw({ prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 300 }))); } catch { got = null; }
+            try { got = readRememberAnswer(parseJsonAnswer(await gen('remember', { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 300 }, { at: id, retry: t > 0 }))); } catch { got = null; }
+            if (!got) markLast(id, 'remember', 'failed', 'answer was not a usable person');
         }
         if (!got) got = { name, line: 'Met in this scene.', manner: '', voice: '', facts: [] };
     }
@@ -2146,7 +2169,6 @@ function mapNpcs(chat, here) {
         });
     } catch (e) { console.warn('[WorldScrawl] npc state for the map failed', e); return []; }
 }
-const logAct = (i, e) => { try { const c = ctx(); logActivity(c.chatId ?? c.getCurrentChatId?.(), i, e); } catch { /* ignore */ } };
 /** The per-message activity log for the map: the last 30 messages, newest first, with sighting rolls at each. */
 function mapActivity(chat, here) {
     if (!chat?.length) return [];
@@ -2840,8 +2862,32 @@ function startAdventure() {
     document.getElementById('send_but')?.click();
 }
 
+/** Game-time labels on every narrator message: live from clockAt, never stored. */
+async function renderTimeLabels() {
+    document.querySelectorAll('#chat .worldscrawl_time').forEach(e => e.remove());
+    if (!isOn() || settings().showTimes === false) return;
+    await loadCalendar();
+    const chat = ctx().chat ?? [], t = worldTimes.get(activeWorld || defaultWorldId);
+    if (!calendarLib || !t || !chat.length) return;
+    let startDay;
+    try { startDay = calendarLib.dateAt(0, t.start_date, t.calendar).day_number; } catch { return; }
+    const hpd = t.calendar?.hours_per_day ?? 24;
+    const date = s => calendarLib.dateAt(s, t.start_date, t.calendar);
+    for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
+        const i = Number(el.getAttribute('mesid'));
+        let l = null; try { l = timeLabel(chat, i, { clock: j => clockAt(j, chat), date, startDay, hoursPerDay: hpd }); } catch { l = null; }
+        if (!l) continue;
+        const span = document.createElement('small');
+        span.className = 'worldscrawl_time'; span.title = 'Game time at this message (from the waits and moves before it)';
+        span.style.cssText = 'opacity:0.7;margin-left:6px;font-style:italic;';
+        span.textContent = l.text;
+        const host = el.querySelector('.ch_name .flex-container') ?? el.querySelector('.ch_name') ?? el.querySelector('.mes_block') ?? el;
+        host.appendChild(span);
+    }
+}
 async function renderAllExits() {
     broadcastMapState();
+    renderTimeLabels().catch(e => console.warn('[WorldScrawl] time labels', e));
     renderStartButton();
     if (!isOn()) { // off: strip footers and notice buttons, no server calls
         document.querySelectorAll('#chat .worldscrawl_exits').forEach(e => e.remove());
@@ -2936,7 +2982,7 @@ function openMapChannel() {
         }
         if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
             const c = ctx(), d = ev.data;
-            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => c.generateRaw({ prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }))
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => gen('map expand', { prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }))
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }
@@ -3407,7 +3453,7 @@ export function logEditCall(label, prompt, answer) {
     console.info(`[WorldScrawl] map edit call: ${label}`, { prompt, answer });
 }
 async function askModel(c, label, args) {
-    const raw = await c.generateRaw(args);
+    const raw = await gen(`map edit: ${label}`, args);
     logEditCall(label, args.prompt, raw);
     return raw;
 }
@@ -3662,7 +3708,8 @@ export async function onReplyForFlags(id) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg || msg.is_user || msg.is_system) return;
     let flag = null;
-    if (pendingFlag) { flag = pendingFlag; pendingFlag = null; }
+    const emitted = [];
+    if (pendingFlag) { flag = pendingFlag; pendingFlag = null; emitted.push(`ws_flag ${flag.kind ?? flag.hint ?? ''} (tool)`.trim()); }
     if (pendingUserFlag) {
         const u = pendingUserFlag; pendingUserFlag = null;
         const um = c.chat?.[u.start];
@@ -3701,32 +3748,38 @@ export async function onReplyForFlags(id) {
         try { c.updateMessageBlock?.(id, msg); } catch {}
         const [hint, ...rest] = m[1].split('|');
         const kind = hint.trim().toLowerCase();
+        emitted.push(`ws_flag ${kind}`);
         if ((kind === 'wait' || kind === 'sleep') && !pendingWait) {
             const w = await planWait(rest.join('|'), kind === 'sleep');
-            if (!w.error) pendingWait = w; else console.warn('[WorldScrawl] wait tag:', w.error);
+            if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: `ws_flag ${kind}`, status: 'failed', reason: w.error }); }
         } else if (kind === 'discover') flag ??= { kind: 'discover', hint: '', note: rest.join('|').trim(), source: 'tag' };
         else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
         await c.saveChat?.();
     }
     const wt = WAIT_TAG.exec(msg.mes ?? '');
     if (wt) {
+        emitted.push('wait tag');
         msg.mes = msg.mes.replace(WAIT_TAG, '').trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
-        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); logAct(id, { label: 'wait tag', status: 'failed', reason: w.error }); } }
+        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
         await c.saveChat?.();
     }
     if (pendingWait) {
         const w = pendingWait; pendingWait = null;
         const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
-        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); logAct(id, { label: `narrator wait ${w.label}`, status: 'skipped', reason: what }); }
+        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: what }); }
         else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
         else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
-    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); logAct(id, { label: `ws_flag ${flag.kind}`, status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
+    if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); noteCall(id, { kind: `ws_flag ${flag.kind ?? ''}`.trim(), status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
     const taken = takeNpcTags(msg.mes ?? '');
-    const stamped = [...(pendingNpc.splice(0)), ...taken.stamps];
+    const fromTool = pendingNpc.splice(0);
+    const stamped = [...fromTool, ...taken.stamps];
+    for (const s of fromTool) emitted.push(`${s.type} (tool)`);
+    for (const s of taken.stamps) emitted.push(`${s.type} tag`);
+    noteCall(id, narratorNote(emitted));
     if (taken.text !== (msg.mes ?? '') || stamped.length) {
         if (taken.text !== (msg.mes ?? '')) {
             msg.mes = taken.text;
@@ -3770,7 +3823,7 @@ export async function modelWait(amount, cal = null, lib = calendarLib) {
     try {
         if (!lib) return null;
         await ensurePrompts();
-        const a = parseJsonAnswer(await ctx().generateRaw({ prompt: P('intent.wait_amount', { amount: clip(String(amount), 120) }), systemPrompt: P('intent.wait_amount_system', { reply: baseReply('json') }), responseLength: 40 }));
+        const a = parseJsonAnswer(await gen('wait amount', { prompt: P('intent.wait_amount', { amount: clip(String(amount), 120) }), systemPrompt: P('intent.wait_amount_system', { reply: baseReply('json') }), responseLength: 40 }));
         const c = cal ? lib.checkCalendar(cal) : undefined;
         if (Number.isFinite(Number(a?.seconds)) && Number(a.seconds) > 0) return { seconds: Math.min(Math.round(Number(a.seconds)), 30 * 86400) };
         if (typeof a?.until === 'string' && a.until.trim()) return lib.parseWait(`until ${a.until.trim()}`, c);
