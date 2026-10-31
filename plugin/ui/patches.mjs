@@ -51,7 +51,7 @@ export const OPS = ['set_description', 'append_description', 'set_name', 'set_lo
     'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
 /** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
 export const FIELD_KEYS = {
-    room: ['inherit_region_lore', 'inherit_subregion_lore', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
+    room: ['lore', 'inherit_region_lore', 'inherit_subregion_lore', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
     subregion: ['inherit_lore', 'label_rooms', 'stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
     region: ['stays_open', 'entrance', 'exposure', 'indoor_temp', 'insulation', 'temp_offset'],
 };
@@ -118,7 +118,7 @@ function* eachRoom(raw) {
             for (const [lid, loc] of Object.entries(sub.locations)) yield [`${rid}:${sid}/${lid}`, loc, rid, sid, lid];
 }
 /** A new room id from whatever the model wrote: the last segment of an address, lowercased, other characters -> "_". */
-export const slugId = v => String(v ?? '').trim().split(/[:/]/).pop().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+export const slugId = v => String(v ?? '').trim().split(/[:/]/).pop().toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 /** A room reference as a full address: an existing address as is, else a unique room matching "sub/id" or "id" (any case). */
 export function resolveRoom(raw, ref) {
     const a = String(ref ?? '').trim();
@@ -411,6 +411,7 @@ function fieldValue(k, v, w) {
     if (NUM_KEYS.has(k)) { const n = typeof v === 'number' ? v : Number(str(String(v))); if (!Number.isFinite(n) || str(String(v)) === '') throw new PatchError(`${w}: "${k}" must be a number`); return n; }
     if (ENUMS[k] && !ENUMS[k].includes(v)) throw new PatchError(`${w}: "${k}" must be one of ${ENUMS[k].join(', ')}`);
     if (typeof v !== 'string' || !v.trim()) throw new PatchError(`${w}: "${k}" must be a non-empty string`);
+    if (k === 'lore') { if (v.length > MAX_TEXT) throw new PatchError(`${w}: "lore" is too long (at most ${MAX_TEXT} characters)`); return v.trim(); }
     if (v.length > 400) throw new PatchError(`${w}: "${k}" is too long (at most 400 characters)`);
     return v.trim();
 }

@@ -263,6 +263,10 @@ svg .npcmark { cursor: pointer; }
 .cast-views { margin: 4px 0 6px; flex-wrap: wrap; }
 .cast-slice { white-space: pre-wrap; max-height: 220px; overflow: auto; }
 .cast-review .cast-diff { margin-top: 6px; }
-.cast-activity { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.cast-actgroup ul { margin: 2px 0 0 16px; padding: 0; }
-.cast-actgroup[data-kind="call"] b { color: #b45309; }
+.act-view { padding: 8px 14px; max-width: 900px; }
+.act-groups { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.act-group ul { margin: 2px 0 0 16px; padding: 0; }
+.act-group[data-kind="call"] b { color: #b45309; }
+.cast-sched li.src-chat { color: var(--accent, #6cf); }
+.cast-sched li.current { font-weight: 600; }
+.cast-sched .cast-schednote { font-style: italic; }

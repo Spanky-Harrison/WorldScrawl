@@ -5,7 +5,7 @@
 // a message rolls them back. A string stamp is the player's position (old chats, and still what we write
 // when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
 // is the player (id "player") plus whoever is following them, and nobody follows yet.
-import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag } from './words.mjs';
+import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, noticeRow, lockRow, markPending, NOTICE_CSS, resolvedText } from './notices.mjs';
@@ -635,9 +635,10 @@ function registerTools() {
         },
         action: async ({ action = 'change', location = '', note = '' } = {}) => {
             if (action === 'wait' || action === 'sleep') {
-                const w = await planWait(String(note ?? ''), action === 'sleep');
+                const tg = parseWaitTag(String(note ?? ''));
+                const w = await planWait(tg.args, action === 'sleep' || tg.sleep, tg.reason);
                 if (w.error) return `Could not pass time: ${w.error}`;
-                if (!(w.seconds >= MIN_NARRATOR_WAIT)) return 'Under 15 minutes: no time is added to the clock.'; pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.${waitAsk()}`;
+                if (!(w.seconds >= MIN_NARRATOR_WAIT)) { noteShortWait(w); return 'Under 15 minutes: no time is added to the clock.'; } pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.${waitAsk()}`;
             }
             if (action === 'lore') {
                 const loc = await currentLocation(), chain = loreChain(loc);
@@ -672,13 +673,14 @@ function registerTools() {
             type: 'object',
             properties: { duration: { type: 'string', description: 'How long, e.g. "2h", "1h30m", "2d".' },
                 until: { type: 'string', description: 'Instead of a duration: wait until dawn, morning, noon, dusk, evening, night, midnight, or a time like "14:00".' },
-                sleep: { type: 'boolean', description: 'true if they sleep (default 8h when no duration or until is given).' } },
+                sleep: { type: 'boolean', description: 'true if they sleep (default 8h when no duration or until is given).' },
+                reason: { type: 'string', description: 'Optional: a few words on what takes the time, e.g. "searching the cellar".' } },
             required: [],
         },
-        action: async ({ duration = '', until = '', sleep = false } = {}) => {
-            const w = await planWait(waitArgs({ duration, until }), sleep === true || sleep === 'true');
+        action: async ({ duration = '', until = '', sleep = false, reason = '' } = {}) => {
+            const w = await planWait(waitArgs({ duration, until }), sleep === true || sleep === 'true', reason);
             if (w.error) return `Could not pass time: ${w.error}`;
-            if (!(w.seconds >= MIN_NARRATOR_WAIT)) return 'Under 15 minutes: no time is added to the clock.'; pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.${waitAsk()}`;
+            if (!(w.seconds >= MIN_NARRATOR_WAIT)) { noteShortWait(w); return 'Under 15 minutes: no time is added to the clock.'; } pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.${waitAsk()}`;
         },
         formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
     });
@@ -691,9 +693,9 @@ function registerTools() {
             properties: {
                 action: { type: 'string', description: 'fact, memory, disposition, leave, staying, follow, stay, seek, or detail.' },
                 id: { type: 'string', description: 'The person\'s id from the people-here list.' },
-                text: { type: 'string', description: 'The fact, memory note, or what detail is needed.' },
-                value: { type: 'string', description: 'For disposition: hostile, unfriendly, indifferent, friendly, or helpful.' },
-                reason: { type: 'string', description: 'For disposition: why it changed.' },
+                text: { type: 'string', description: 'The fact; the memory note (short, from their point of view: something they would still remember tomorrow); or what detail is needed.' },
+                value: { type: 'string', enum: ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'], description: 'For disposition: their attitude toward the player now: hostile, unfriendly, indifferent, friendly, or helpful.' },
+                reason: { type: 'string', description: 'For disposition: a few words on why their attitude toward the player changed.' },
             },
             required: ['action', 'id'],
         },
@@ -1968,9 +1970,28 @@ function requestLore(msg, loc, place, source) {
 const REMEMBER_KEY = 'worldscrawl_remember';
 const FOCUS_KEY = 'worldscrawl_focus';
 let pendingNpc = []; // ws_npc tool calls, stamped on the reply
-function castPack() {
+function baseCastPack() {
     const id = activeWorld || defaultWorldId;
     return (id && worldCasts.get(id)) || (defaultWorldId && worldCasts.get(defaultWorldId)) || null;
+}
+// The one live-map lookup for every NPC-side check (found, follow/stay, near, sightings, people here): the world's
+// places plus the rooms this chat's map changes made, minus removed/moved ones. Refreshed from the server whenever
+// the chat's active patches change (refreshLivePlaces); until then, and with no patches, the world's own places.
+let livePlaces = null; // { key, pack }
+const liveKey = () => `${activeWorld || defaultWorldId}\u0000${patchSig()}`;
+export async function refreshLivePlaces() {
+    try {
+        const base = baseCastPack(); if (!base) { livePlaces = null; return; }
+        const key = liveKey();
+        if (!patchSig()) { livePlaces = null; return; }
+        if (livePlaces?.key === key) return;
+        const w = await api(`/cast/places?world=${encodeURIComponent(activeWorld || defaultWorldId)}`, { method: 'POST', body: JSON.stringify(mapCtx()) });
+        livePlaces = { key, pack: { ...base, places: new Set(w.places ?? []), subs: new Set(w.subs ?? []), regions: new Set(w.regions ?? []), elsewhere: w.elsewhere ?? base.elsewhere, names: w.place_names ?? base.names, labels: { ...base.labels, ...(w.place_labels ?? {}) } } };
+    } catch (e) { console.warn('[WorldScrawl] live places', e.message); }
+}
+function castPack() {
+    const base = baseCastPack();
+    return base && livePlaces && livePlaces.key === liveKey() ? livePlaces.pack : base;
 }
 function chatRelocate(chat) {
     const out = {};
@@ -2111,6 +2132,7 @@ function npcPromptBits(loc) {
         const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
         const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
         if (!present.length && !absent.length) return {};
+        if (absent.some(l => /, somewhere off the map/.test(l))) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
@@ -2424,6 +2446,7 @@ function toolNpcStamp(args = {}) {
 
 async function applyFacts() {
     await ensurePrompts();
+    await refreshLivePlaces();
     const c = ctx();
     if (!isOn()) { c.setExtensionPrompt(FACTS_KEY, '', 1, 1, false, 0); c.setExtensionPrompt(REMINDER_KEY, '', 1, 0, false, 0); return; }
     let text = '', reminder = '';
@@ -2572,7 +2595,7 @@ export async function removeExitAction(arg) {
     await addChangeMessage(`[Engine: the ${e.direction} exit from ${roomLabel(here)} was removed.]`, { type: 'remove_exit', from: here.address, direction: e.direction });
     return '';
 }
-const slug = x => String(x ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const slug = x => String(x ?? '').toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 /** The chat's default save name: "<base world> - <character or chat> - <Mon D, h:mm AM>" (also the Save box placeholder). */
 export function defaultWorldName(now = new Date()) {
     const c = ctx();
@@ -2960,7 +2983,20 @@ async function renderExits(id) {
     if (!isLast || !loc.exits?.length) div.textContent = exitsText(loc);
     else appendExitButtons(div, loc);
     if (isLast) { await loadCalendar(); const d = gameDate(ch.slice(0, id + 1)); if (d) { const t = document.createElement('div'); t.className = 'worldscrawl_clock'; const wx = placeWeatherNow(loc, ch.slice(0, id + 1)); t.textContent = calendarLib.shortDate(d) + (wx?.short ? ` · ${wx.short}` : ''); div.appendChild(t); } }
+    const who = namedNpcsAt(ch, id, loc);
+    if (who.length) { const n = document.createElement('div'); n.className = 'worldscrawl_npcs_here'; n.textContent = `Named NPCs present: ${who.join(', ')}`; div.append(n); }
     (fresh.querySelector('.mes_block') ?? fresh).appendChild(div);
+}
+/**
+ * Display only (the exits footer, never the prompt): the carded people the engine places with the player at message
+ * `id` (same presentAt as the people-here block, followers included), by the name the player knows or unknownAs.
+ */
+export function namedNpcsAt(chat, id, loc) {
+    const pack = castPack();
+    if (!pack?.npcs?.length || !calendarLib || !chat?.[id]) return [];
+    try {
+        return presentAt(chat, id, pack.npcs, npcEnv(chat, loc)).map(p => (p.known?.known === false && p.unknownAs ? p.unknownAs : p.name)).filter(Boolean);
+    } catch (e) { console.warn('[WorldScrawl] npcs footer', e.message); return []; }
 }
 
 /** "Exits: " followed by one clickable entry per exit (shared by the footer and the can't-get-there message). */
@@ -3724,7 +3760,7 @@ async function analyzeFlag(id) {
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
         const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
-        let ops = null, err = '', preview = null, merged = [];
+        let ops = null, err = '', preview = null, merged = [], unmerged = null;
         const nearHere = f.loc ? await nearbyRooms({ address: f.loc }).catch(() => []) : [];
         for (let tries = 0; tries < 2; tries++) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
@@ -3736,7 +3772,7 @@ async function analyzeFlag(id) {
             const md = mergeDuplicates(ops, nearHere); // a "new" room that is a place a few steps away: connect to that place instead
             if (md.merged.length) {
                 const rm = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: md.ops }, ...mapCtx() }) });
-                if (rm.ok) { preview = rm.body; ops = rm.body.ops ?? md.ops; merged = md.merged; break; }
+                if (rm.ok) { preview = rm.body; unmerged = ops; ops = rm.body.ops ?? md.ops; merged = md.merged; break; }
             }
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
@@ -3749,7 +3785,7 @@ async function analyzeFlag(id) {
             return;
         }
         const mergedLines = merged.map(m => `Connected to ${m.to_name} (already on the map, ${m.steps} step${m.steps === 1 ? '' : 's'} away) instead of adding a new "${m.name}".`);
-        f.proposal = { ops, summary: [...preview.summary, ...mergedLines], relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
+        f.proposal = { ops, summary: [...preview.summary, ...mergedLines], relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after, ...(merged.length ? { merged, unmerged } : {}) };
         f.status = 'review';
         if (settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
@@ -3821,6 +3857,23 @@ async function analyzeDiscovery(id) {
         renderPatchCards();
         broadcastMapState();
     }
+}
+
+/**
+ * The duplicate-room guard's "Make it a new room instead": drop the merge and put back the change's own create_place
+ * ops (checked by the same preview), so a separate new room is made. Returns '' or the reason it could not.
+ */
+export async function unmergeFlag(id) {
+    const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY], pr = f?.proposal;
+    if (!pr?.unmerged?.length) return 'nothing was merged';
+    const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: pr.unmerged }, ...mapCtx() }) });
+    if (!r.ok) { const e = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status); toastr.warning(`WorldScrawl: the new room didn't fit the map: ${e}`); return e; }
+    const b = r.body;
+    f.proposal = { ops: b.ops ?? pr.unmerged, summary: [...b.summary, ...pr.merged.map(m => `Added as a new room "${m.name}" (not ${m.to_name}, which is ${m.steps} step${m.steps === 1 ? '' : 's'} away).`)], relocate: b.relocate, inherit: b.inherit ?? {}, names: b.names ?? {}, before: b.before, after: b.after, newRoom: pr.merged.map(m => m.name) };
+    openForms.delete(`${id}|flag`);
+    noteCall(id, { kind: 'duplicate-room guard', status: 'ok', reason: `player chose a new room instead of ${pr.merged.map(m => m.to_name).join(', ')}` });
+    await c.saveChat?.(); renderPatchCards();
+    return '';
 }
 
 /**
@@ -3916,8 +3969,11 @@ export async function onReplyForFlags(id) {
     if (!isOn()) return;
     const c = ctx(), msg = c.chat?.[id];
     if (!msg || msg.is_user || msg.is_system) return;
+    await refreshLivePlaces();
     let flag = null;
     const emitted = [];
+    const norm = normalizeWsTags(msg.mes ?? '');
+    if (norm !== (msg.mes ?? '')) { msg.mes = norm; if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes; }
     if (pendingFlag) { flag = pendingFlag; pendingFlag = null; emitted.push(`ws_flag ${flag.kind ?? flag.hint ?? ''} (tool)`.trim()); }
     if (pendingUserFlag) {
         const u = pendingUserFlag; pendingUserFlag = null;
@@ -3980,7 +4036,7 @@ export async function onReplyForFlags(id) {
         const kind = hint.trim().toLowerCase();
         emitted.push(`ws_flag ${kind}`);
         if ((kind === 'wait' || kind === 'sleep') && !pendingWait) {
-            const w = await planWait(rest.join('|'), kind === 'sleep');
+            const tg = parseWaitTag(rest.join('|')); const w = await planWait(tg.args, kind === 'sleep' || tg.sleep, tg.reason);
             if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: `ws_flag ${kind}`, status: 'failed', reason: w.error }); }
         } else if (kind === 'discover') flag ??= { kind: 'discover', hint: '', note: rest.join('|').trim(), source: 'tag' };
         else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
@@ -3992,15 +4048,15 @@ export async function onReplyForFlags(id) {
         msg.mes = msg.mes.replace(WAIT_TAG, '').trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
-        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
+        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep, tg.reason); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
         await c.saveChat?.();
     }
     if (pendingWait) {
         const w = pendingWait; pendingWait = null;
         const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
-        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: what }); }
-        else if (what === 'keep') { stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
-        else { proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
+        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `${what}${w.reason ? `; why: ${w.reason}` : ''}` }); }
+        else if (what === 'keep') { noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` }); stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
+        else { noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `proposed; why: ${w.reason || '(no reason given)'}` }); proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
     }
     if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); noteCall(id, { kind: `ws_flag ${flag.kind ?? ''}`.trim(), status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
@@ -4029,8 +4085,40 @@ export async function onReplyForFlags(id) {
         syncSwipeExtra(msg);
         await c.saveChat?.();
     }
+    const bad = unreadTags(msg.mes ?? '');
+    msg.extra = msg.extra ?? {};
+    const keepBad = (msg.extra[BADTAG_KEY] ?? []).filter(b => (b?.swipe ?? 0) !== swipeOf(msg));
+    if (bad.length || keepBad.length !== (msg.extra[BADTAG_KEY] ?? []).length) {
+        msg.extra[BADTAG_KEY] = bad.length ? [...keepBad, { swipe: swipeOf(msg), tags: bad }] : keepBad;
+        for (const t of bad) { console.warn('[WorldScrawl] unreadable tag:', t); noteCall(id, { kind: 'warning', status: 'failed', reason: `unreadable tag: ${t}` }); }
+        await c.saveChat?.();
+    }
+    markUnreadTags();
     maybeSuggest(id);
         if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length || (msg.extra?.[FOUND_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }
+}
+const BADTAG_KEY = 'worldscrawl_badtags';
+export const BADTAG_TITLE = "WorldScrawl couldn't read this tag";
+/** Unread [ws_...] tags stay in the message, wrapped in a visible warning marker. */
+export function markUnreadTags(root = globalThis.document) {
+    if (!root?.querySelectorAll) return;
+    for (const el of root.querySelectorAll('.mes_text')) {
+        const walker = el.ownerDocument.createTreeWalker(el, 4);
+        const hits = [];
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) if (/\[\s*ws[_ ]/i.test(n.nodeValue) && !n.parentElement?.closest('.worldscrawl_badtag')) hits.push(n);
+        for (const n of hits) {
+            const frag = el.ownerDocument.createDocumentFragment();
+            let last = 0; const txt = n.nodeValue;
+            for (const m of txt.matchAll(/\[\s*ws[_ ][^\]]{0,300}\]/gi)) {
+                frag.append(txt.slice(last, m.index));
+                const sp = el.ownerDocument.createElement('span');
+                sp.className = 'worldscrawl_badtag'; sp.title = BADTAG_TITLE; sp.style.cssText = 'color:#b8860b;background:rgba(255,200,0,.15);border:1px dashed #b8860b;border-radius:3px;padding:0 2px;cursor:help'; sp.textContent = `⚠ ${m[0]}`;
+                frag.append(sp); last = m.index + m[0].length;
+            }
+            if (!last) continue;
+            frag.append(txt.slice(last)); n.replaceWith(frag);
+        }
+    }
 }
 /** Did the player's turn just before reply `id` fail to break through? Then the reply must not add a room or passage. */
 export function digFailedBefore(chat, id) {
@@ -4061,7 +4149,7 @@ export async function modelWait(amount, cal = null, lib = calendarLib) {
     return null;
 }
 /** Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped. */
-export async function planWait(args, sleep = false) {
+export async function planWait(args, sleep = false, reason = '') {
     if (!(await loadCalendar())) return { error: 'the game clock is unavailable' };
     const t = worldTimes.get(activeWorld || defaultWorldId), cal = t?.calendar ?? null;
     args = String(args ?? '').trim();
@@ -4081,8 +4169,10 @@ export async function planWait(args, sleep = false) {
     const label = `${sleep ? 'slept' : 'waited'} ${dur}${p.until ? ` (until ${p.until})` : ''}`;
     let afterText = '';
     try { afterText = calendarLib.describeDate(calendarLib.dateAt(now + seconds, t?.start_date ?? null, cal)); } catch {}
-    return { seconds, sleep, label, until: p.until ?? null, afterText };
+    return { seconds, sleep, label, until: p.until ?? null, afterText, reason: waitReason(reason) };
 }
+/** A narrator wait under MIN_NARRATOR_WAIT: noted in the inspector's call log with its reason, then dropped. */
+function noteShortWait(w) { noteCall(undefined, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `short${w.reason ? `; why: ${w.reason}` : ''}` }); }
 /** Narrator waits under this are ignored: no card, no clock change. */
 export const MIN_NARRATOR_WAIT = 15 * 60;
 /**
@@ -4105,7 +4195,7 @@ const waitAsk = () => (settings().autoKeepWaits ? '' : ' (The player will confir
 export const waitAmount = w => (w.until ? `until ${w.until}` : calendarLib?.formatDuration ? calendarLib.formatDuration(w.seconds) : `${Math.round(w.seconds / 60)}m`);
 export function proposeWait(msg, w) {
     msg.extra = msg.extra ?? {};
-    msg.extra[WAITCARD_KEY] = { nid: newNoticeId('wait'), swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w) };
+    msg.extra[WAITCARD_KEY] = { nid: newNoticeId('wait'), swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w), reason: w.reason || '' };
 }
 /** Keep (amount unchanged) or Adjust (a new amount) a proposed wait: the same stamp as a narrator wait kept at once. */
 export async function keepWait(id, amount = null) {
@@ -4122,7 +4212,9 @@ async function keepWaitNow(c, msg, p, nid, amount) {
         w = await planWait(String(amount), p.sleep);
         if (w.error) { toastr.warning(`WorldScrawl: ${w.error}`); return w.error; }
     }
-    if (!markDecided(msg, nid, w === p ? 'approve' : 'adjust', { swipe: swipeOf(msg), text: `${w.label} passed` })) return 'already decided';
+    if (w !== p) w = { ...w, reason: p.reason || '' };
+    if (!markDecided(msg, nid, w === p ? 'approve' : 'adjust', { swipe: swipeOf(msg), text: `${w.label} passed${p.reason ? ` (${p.reason})` : ''}` })) return 'already decided';
+    noteCall(c.chat.indexOf(msg), { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept by the player; why: ${p.reason || '(no reason given)'}` });
     stampWait(msg, w); delete msg.extra[WAITCARD_KEY];
     renderPatchCards();
     await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
@@ -4153,13 +4245,14 @@ export async function editKeptWait(id, amount) {
 export async function discardWait(id) {
     const c = ctx(), msg = c.chat?.[id], p = msg?.extra?.[WAITCARD_KEY];
     if (!p) return;
-    if (!markDecided(msg, noticeIdOf(p, 'wait'), 'discard', { swipe: swipeOf(msg), text: `no time passes (${p.label})` })) return;
+    if (!markDecided(msg, noticeIdOf(p, 'wait'), 'discard', { swipe: swipeOf(msg), text: `no time passes (${p.label}${p.reason ? `: ${p.reason}` : ''})` })) return;
+    noteCall(id, { kind: `narrator wait ${p.label}`, status: 'skipped', reason: `discarded by the player; why: ${p.reason || '(no reason given)'}` });
     delete msg.extra[WAITCARD_KEY];
     renderPatchCards(); await c.saveChat?.();
 }
 function stampWait(msg, w) {
     msg.extra = msg.extra ?? {};
-    msg.extra[WAIT_KEY] = { seconds: w.seconds, sleep: !!w.sleep, label: w.label, ...(w.until ? { until: w.until } : {}) };
+    msg.extra[WAIT_KEY] = { seconds: w.seconds, sleep: !!w.sleep, label: w.label, ...(w.until ? { until: w.until } : {}), ...(w.reason ? { reason: w.reason } : {}) };
 }
 /** The auto-sent wait message: "*Knarfy waits for 2h.*", "*Knarfy sleeps for 8h, until morning.*" */
 export function waitNote(who, w) {
@@ -4230,7 +4323,7 @@ function cardButton(label, onClick, title = '', decides = false) {
     return b;
 }
 /** Notice text, then ONE right-aligned button row at the end. */
-const rowOf = (...buttons) => noticeRow(document, buttons.flat());
+const rowOf = (...buttons) => noticeRow(document, buttons.flat().filter(Boolean));
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
 /** The proposed card on a Remember notice: what Approve will save. Invented details are marked. */
 function rememberProposalEl(got) {
@@ -4261,7 +4354,7 @@ function rememberProposalEl(got) {
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
-    if (isOn()) refreshChangeStatus();
+    if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
         el.querySelector('.worldscrawl_patchcard')?.remove();
@@ -4328,6 +4421,7 @@ export function renderPatchCards() {
                 card.append(fieldsOf(startPicker()), rowOf(cardButton('Check again', () => { openForms.delete(`${id}|flag`); analyzeFlag(id); }, 'Ask again with this story range'),
                     form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
                         : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before approving it'),
+                    !form && f.proposal.unmerged?.length ? cardButton('Make it a new room instead', () => unmergeFlag(id), `Add a separate new room instead of connecting to ${f.proposal.merged.map(m => m.to_name).join(', ')}`) : null,
                     cardButton(form ? 'Approve edited' : 'Approve', () => keepFlag(id), 'Put this change on the map', true), cardButton('Discard', () => { openForms.delete(`${id}|flag`); return discardFlag(id); }, 'Leave the map as it is', true)));
                 }
             }
@@ -4335,6 +4429,7 @@ export function renderPatchCards() {
         if (waitCard) {
             const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_waitcard');
             d.append(line(`⏳ The narrator passed time: ${wc.label}.`));
+            if (wc.reason) { const r = line(`Why: ${wc.reason}`); r.className = 'worldscrawl_wait_reason'; d.append(r); }
             const inp = document.createElement('input');
             inp.type = 'text'; inp.value = wc.amount; inp.className = 'text_pole worldscrawl_wait_amount'; inp.title = 'e.g. 45m, 2h, 1h30m, until dawn';
             inp.style.cssText = 'width:9em;display:inline-block;margin:0 4px;padding:1px 4px;';
@@ -4447,10 +4542,15 @@ export function renderPatchCards() {
                 inp.style.cssText = 'width:18em;display:inline-block;margin:0 4px;padding:1px 4px;';
                 inp.addEventListener('click', e => e.stopPropagation());
                 const save = cardButton('Save', async () => {
+                    await refreshLivePlaces();
                     const loc = await currentLocation();
                     const env = npcEnv(ctx().chat ?? [], loc);
                     const n = npcAt(ctx().chat ?? [], id, castPack()?.npcs ?? [], s.id);
-                    const j = foundEditOk(n, s.where ?? '', inp.value.trim(), env);
+                    const typed = inp.value.trim(), pk = castPack();
+                    // By address, or by a room's name on the live map (the first one within the where-label's near).
+                    const cands = pk?.places?.has(typed) ? [typed] : [...(pk?.places ?? [])].filter(a => normName(pk.labels?.[a] ?? '') === normName(typed));
+                    const tries = (cands.length ? cands : [typed]).map(a => foundEditOk(n, s.where ?? '', a, env));
+                    const j = tries.find(t => t.ok) ?? tries[0];
                     if (!j.ok) { toastr.warning(`WorldScrawl: ${j.reason}`); return; }
                     s.place = j.place;
                     syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
@@ -4532,17 +4632,17 @@ function addSettingsPanel() {
     <div class="inline-drawer-content">
       <label class="checkbox_label"><input id="worldscrawl_enabled" type="checkbox"> <b>Enabled in this chat</b></label>
       <label class="checkbox_label"><input id="worldscrawl_enable_new" type="checkbox"> Enable in new chats</label>
-      <div class="flex-container"><div id="worldscrawl_open_map" class="menu_button" title="Opens the WorldScrawl window in a new tab; it follows this chat live">Open map window</div></div>
+      <div class="flex-container"><div id="worldscrawl_open_map" class="menu_button" title="Opens the WorldScrawl window in a new tab; it follows this chat live" style="white-space:nowrap;width:auto;padding:4px 12px;">Open WorldScrawl GUI</div></div>
       <label for="worldscrawl_url">Map server URL (leave empty to use the WorldScrawl plugin built into SillyTavern)</label>
       <input id="worldscrawl_url" class="text_pole" type="text" placeholder="(SillyTavern plugin)">
-      <div class="flex-container"><div id="worldscrawl_test" class="menu_button">Test connection</div></div>
+      <div class="flex-container"><div id="worldscrawl_test" class="menu_button" style="white-space:nowrap;width:auto;padding:4px 12px;">Test connection</div></div>
       <small id="worldscrawl_status"></small>
       <label for="worldscrawl_who">Who moves (used in move messages and notes to the model; macros like {{user}} work)</label>
       <input id="worldscrawl_who" class="text_pole" type="text" placeholder="{{user}}">
       <label for="worldscrawl_world">World for new chats</label>
       <div class="flex-container"><select id="worldscrawl_world" class="text_pole flex1"><option value="">(server default)</option></select>
         <div id="worldscrawl_open_world" class="menu_button" title="Open this world's folder">Open</div></div>
-      <div class="flex-container"><div id="worldscrawl_open_folder" class="menu_button">Open worlds folder</div></div>
+      <div class="flex-container"><div id="worldscrawl_open_folder" class="menu_button" style="white-space:nowrap;width:auto;padding:4px 12px;">Open worlds folder</div></div>
       <label for="worldscrawl_save_name">Save this chat's world as</label>
       <input id="worldscrawl_save_name" class="text_pole" type="text" placeholder="">
       <label class="checkbox_label"><input id="worldscrawl_save_knowledge" type="checkbox"> Include this chat's discoveries</label>

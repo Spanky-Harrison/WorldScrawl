@@ -78,6 +78,7 @@ export function guardViewButtons(nav) {
         const b = ev.target.closest('button');
         if (!b || b._wsPass || !document.querySelector('.toolview')) return;
         ev.preventDefault(); ev.stopImmediatePropagation();
-        closeToolView().then(ok => { if (ok) { b._wsPass = true; try { b.click(); } finally { b._wsPass = false; } } });
+        // a side-pane toggle that is already on (Cast, Editor) just comes back into view: closing the tool is the whole click
+        closeToolView().then(ok => { if (ok && !b.classList.contains('active')) { b._wsPass = true; try { b.click(); } finally { b._wsPass = false; } } });
     }, true);
 }

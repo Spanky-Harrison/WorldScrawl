@@ -199,3 +199,11 @@ test('[name] records the same per-actor name stamp as the narrator flag, and the
     assert.equal(flag.status, 'rejected');
     assert.match(flag.text, /not within/);
 });
+
+test('found: a dynamically discovered room inside the near subregion counts as within it', () => {
+    const near = { kind: 'map', scope: 'subregion', address: 'riverton:drowned_rat', name: 'The Drowned Rat' };
+    assert.equal(withinNear('riverton:drowned_rat/hesks_room', near), true); // discovered, not in the world file
+    assert.equal(withinNear('riverton:drowned_rat/cellar/deep_hole', near), true);
+    assert.equal(withinNear('riverton:drowned_rats_den/x', near), false);
+    assert.equal(withinNear(SQUARE, near), false);
+});

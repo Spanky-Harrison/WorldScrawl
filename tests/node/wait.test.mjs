@@ -99,11 +99,17 @@ test('ws_wait tool args -> wait text', () => {
 test('[ws_wait: ...] tag parsing', () => {
     assert.equal(WAIT_TAG.exec('They rest. [ws_wait: sleep until morning]')[1], 'sleep until morning');
     assert.equal(WAIT_TAG.exec('no tag [ws_flag: wait | 2h]'), null);
-    assert.deepEqual(parseWaitTag('2h'), { sleep: false, args: '2h' });
-    assert.deepEqual(parseWaitTag('sleep until morning'), { sleep: true, args: 'until morning' });
-    assert.deepEqual(parseWaitTag('sleep'), { sleep: true, args: '' });
-    assert.deepEqual(parseWaitTag('Sleep 6h'), { sleep: true, args: '6h' });
-    assert.deepEqual(parseWaitTag('wait for 3 hours'), { sleep: false, args: '3 hours' });
-    assert.deepEqual(parseWaitTag('until dusk'), { sleep: false, args: 'until dusk' });
+    assert.deepEqual(parseWaitTag('2h'), { sleep: false, args: '2h', reason: '' });
+    assert.deepEqual(parseWaitTag('sleep until morning'), { sleep: true, args: 'until morning', reason: '' });
+    assert.deepEqual(parseWaitTag('sleep'), { sleep: true, args: '', reason: '' });
+    assert.deepEqual(parseWaitTag('Sleep 6h'), { sleep: true, args: '6h', reason: '' });
+    assert.deepEqual(parseWaitTag('wait for 3 hours'), { sleep: false, args: '3 hours', reason: '' });
+    assert.deepEqual(parseWaitTag('until dusk'), { sleep: false, args: 'until dusk', reason: '' });
+    assert.deepEqual(parseWaitTag('45m | searching the cellar'), { sleep: false, args: '45m', reason: 'searching the cellar' });
+    assert.deepEqual(parseWaitTag('sleep until morning|sleeping the night.'), { sleep: true, args: 'until morning', reason: 'sleeping the night' });
+    assert.deepEqual(parseWaitTag('2h; a long meal'), { sleep: false, args: '2h', reason: 'a long meal' });
+    assert.deepEqual(parseWaitTag('until 14:00 - "crafting"'), { sleep: false, args: 'until 14:00', reason: 'crafting' });
+    assert.deepEqual(parseWaitTag('1h |  '), { sleep: false, args: '1h', reason: '' });
+    assert.equal(parseWaitTag(`2h | ${'x'.repeat(200)}`).reason.length, 80);
     assert.deepEqual(parseWait(parseWaitTag('wait for 3 hours').args), { seconds: 3 * H });
 });

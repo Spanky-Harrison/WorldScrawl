@@ -25,7 +25,8 @@ registerActivity('worldscrawl_found', v => list(v).map(f => ({ kind: 'flag', lab
 registerActivity('worldscrawl_bracket', v => ({ kind: 'bracket', label: `[${v?.verb ?? ''}]`, text: [v?.target, v?.reason].filter(Boolean).join(' — '), status: v?.status ?? null }));
 registerActivity('worldscrawl_lore', v => list(v).map(r => ({ kind: 'lore', label: `lore requested (${r?.source === 'bracket' ? '[lore]' : 'narrator flag'})`, text: [r?.place, r?.level && `(${r.level})`].filter(Boolean).join(' ') || short(r), status: r?.level ? null : 'no match', swipe: r?.swipe ?? null })));
 registerActivity('worldscrawl_focus', v => ({ kind: 'focus', label: 'narrator focus', text: v?.id ? `${v.id} (${v.depth ?? 'present'})` : 'nobody' }));
-registerActivity('worldscrawl_npc', v => list(v).map(s => ({ kind: 'npc', label: s?.type ?? 'npc', text: s?.summary ?? [s?.id, s?.text ?? s?.note ?? s?.value ?? s?.place ?? s?.name].filter(Boolean).join(': '), status: s?.off ? 'off' : null, swipe: s?.swipe ?? null })));
+registerActivity('worldscrawl_npc', v => list(v).map(s => ({ kind: 'npc', label: s?.type ?? 'npc', text: s?.summary ?? (s?.type === 'npc_disposition' ? `${s?.id ?? ''}: ${s?.value ?? ''} toward ${s?.who ?? 'player'}${s?.reason ? ` — ${s.reason}` : ''}` : [s?.id, s?.text ?? s?.note ?? s?.value ?? s?.place ?? s?.name].filter(Boolean).join(': ')), status: s?.off ? 'off' : null, swipe: s?.swipe ?? null })));
+registerActivity('worldscrawl_badtags', v => list(v).flatMap(b => list(b?.tags).map(t => ({ kind: 'warning', label: 'warning', text: `unreadable tag: ${t}`, status: 'warning', swipe: b?.swipe ?? null }))));
 registerActivity('worldscrawl_reveal', v => ({ kind: 'map', label: 'revealed', text: short(v) }));
 registerActivity('worldscrawl_scene', v => ({ kind: 'scene', label: 'scene', text: short(v) }));
 const QUIET = new Set(['worldscrawl_enabled', 'worldscrawl_notice', 'worldscrawl_notice_kind']);

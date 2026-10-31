@@ -138,7 +138,7 @@ export function buildPatchForm(doc, opts = {}) {
     const areaLabel = a => opts.areaNames?.[a] ?? (a.includes(':') ? `${pretty(a.split(':')[1])} (in ${pretty(a.split(':')[0])})` : `${pretty(a)} (region)`);
     const picker = (val, list, label, on, blank) => {
         const vals = [...new Set([...(list ?? [])])].sort((x, y) => label(x).localeCompare(label(y)));
-        const tail = String(val ?? '').trim().toLowerCase().split(/[:/]/).pop().replace(/[^a-z0-9]+/g, '_');
+        const tail = String(val ?? '').trim().toLowerCase().split(/[:/]/).pop().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '_');
         const amb = val && !vals.includes(val) ? vals.filter(v => v.includes('/') && v.toLowerCase().endsWith(`/${tail}`)) : [];
         if (amb.length > 1) { // ambiguous reference: ask which one instead of guessing
             const el = select('', [['', `"${val}" could be several places — which one?`], ...amb.map(v => [v, label(v)]), ...vals.filter(v => !amb.includes(v)).map(v => [v, label(v)])], on);

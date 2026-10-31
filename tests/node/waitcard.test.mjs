@@ -19,13 +19,15 @@ test('Auto-keep waits defaults to off', () => {
     const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
     assert.match(src, /autoKeepWaits: false/);
 });
-test('wait wording is in the prompt file: loose use, ~15 minutes, best guess, not travel, lean to propose', () => {
+test('wait wording is in the prompt file: clearly 15 minutes or more, best guess, not dialogue or travel, if unclear don\'t', () => {
     for (const id of ['narration.wait_hint', 'narration.wait_tool']) {
         const t = byId[id].text;
         assert.ok(byId[id].locked, id);
-        for (const w of ['15 minutes', 'meal or conversation', 'searching a room', 'crafting', 'time skip', 'best guess', 'travel', 'propose']) assert.ok(t.includes(w), `${id}: ${w}`);
+        for (const w of ['clearly take 15 minutes or more', 'a long meal', 'searching a room', 'crafting', 'explicit time skip', 'best guess', 'travel', 'exchange of dialogue', 'single action', "If it isn't clear, don't", 'reason']) assert.ok(t.includes(w), `${id}: ${w}`);
+        for (const w of ['meal or conversation', 'when in doubt']) assert.ok(!t.includes(w), `${id}: no ${w}`);
     }
-    assert.match(byId['narration.wait_hint'].text, /\[ws_wait: 2h\]/);
+    assert.match(byId['narration.wait_hint'].text, /\[ws_wait: 45m \| searching the cellar\]/);
+    assert.match(byId['narration.flag_action'].text, /isn't clear, don't/);
     assert.equal(ext.render('narration.wait_tool'), byId['narration.wait_tool'].text);
 });
 test('guardrail: narrator waits under 15 minutes are ignored (no card, no clock change)', () => {

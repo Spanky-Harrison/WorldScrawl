@@ -14,3 +14,28 @@ export function groupEntries(entries) {
     const order = [...Object.keys(KIND_LABEL), ...[...g.keys()].filter(k => !KIND_LABEL[k])];
     return order.filter(k => g.has(k)).map(k => ({ kind: k, title: KIND_LABEL[k] ?? k, entries: g.get(k) }));
 }
+
+/**
+ * The Activity log view (Debug > Activity log, a full view): pick a message (latest by default) and list what happened on it.
+ * io: {activity() -> [{msg, who, snippet, entries}] newest first, showMessage(i)}. Returns {refresh()}.
+ */
+export function activityView(box, io, $) {
+    let sel = null;
+    const root = $('div', { class: 'act-view' }); box.append(root);
+    function refresh() {
+        const msgs = io.activity?.() ?? [];
+        if (!msgs.length) { root.replaceChildren($('p', { class: 'muted' }, 'Open a chat to see what happened on each message.')); return; }
+        const m = msgs.find(x => x.msg === sel) ?? msgs[0];
+        const pick = $('select', { class: 'pf-input act-sel', onchange: () => { sel = Number(pick.value); refresh(); } },
+            ...msgs.map(x => $('option', { value: x.msg }, `#${x.msg} ${x.who}${x === msgs[0] ? ' (latest)' : ''}${x.entries.length ? ` · ${x.entries.length}` : ''}`)));
+        pick.value = String(m.msg);
+        const groups = groupEntries(m.entries);
+        root.replaceChildren($('p', { class: 'muted' }, 'What the engine and the narrator did on this message, read from the chat, including the outcome of each model call.'), pick,
+            $('button', { type: 'button', class: 'linkish act-msglink', onclick: () => io.showMessage?.(m.msg) }, ` show #${m.msg}`),
+            $('p', { class: 'muted' }, m.snippet),
+            groups.length ? $('div', { class: 'act-groups' }, ...groups.map(g => $('div', { class: 'act-group', 'data-kind': g.kind }, $('b', {}, g.title), $('ul', {}, ...g.entries.map(e => $('li', {}, renderEntry(e, $)))))))
+                : $('p', { class: 'muted' }, 'Nothing recorded on this message.'));
+    }
+    refresh();
+    return { refresh };
+}

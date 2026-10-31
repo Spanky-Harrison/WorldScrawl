@@ -16,9 +16,40 @@ export function waitArgs({ duration = '', until = '' } = {}) {
     const u = String(until ?? '').trim();
     return u ? `until ${u.replace(/^until\s+/i, '')}` : String(duration ?? '').trim();
 }
-/** A [ws_wait: ...] tag body -> {args, sleep}: "2h", "sleep", "sleep 6h", "sleep until morning", "until dusk". */
+/** A short narrator reason for a wait: trimmed, quotes and trailing dots dropped, at most 80 characters ('' when absent). */
+export const waitReason = r => String(r ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '').replace(/[.\s]+$/, '').slice(0, 80);
+/**
+ * A [ws_wait: ...] tag body -> {args, sleep, reason}: "2h", "sleep", "sleep 6h", "sleep until morning", "until dusk",
+ * each optionally followed by "| reason" (also "; reason" or " - reason"). The reason is optional and only shown.
+ */
 export function parseWaitTag(body) {
-    const t = String(body ?? '').trim();
+    let t = String(body ?? '').trim(), reason = '';
+    const cut = /\s*(?:\||;|\s[-–—]\s)\s*/.exec(t);
+    if (cut) { reason = waitReason(t.slice(cut.index + cut[0].length)); t = t.slice(0, cut.index).trim(); }
     const m = /^(sleep|wait|rest)\b\s*(?:for\s+)?(.*)$/i.exec(t);
-    return m ? { sleep: m[1].toLowerCase() === 'sleep', args: m[2].trim() } : { sleep: false, args: t };
+    return m ? { sleep: m[1].toLowerCase() === 'sleep', args: m[2].trim(), reason } : { sleep: false, args: t, reason };
 }
+
+// ---- Lenient tag reading: the model's obvious short forms become the documented tags before any tag is read.
+export const FLAG_ACTIONS = ['change', 'discover', 'wait', 'sleep', 'npc', 'name', 'lore', 'found'];
+export const NPC_ACTIONS = ['fact', 'memory', 'disposition', 'leave', 'staying', 'follow', 'stay', 'seek'];
+const ANY_WS_TAG = /\[\s*ws[_ ]([a-z]+)\s*(?:[:|]\s*([^\]]*?))?\s*\]/gi;
+const headAct = (rest, acts) => String(rest ?? '').replace(/^\s*([a-z]+)\s*(?:[:|]\s*|$)/i, (m, k) => (acts.includes(k.toLowerCase()) ? `${k.toLowerCase()}${m.trim().length > k.length || /\S/.test(rest.slice(m.length)) ? ' | ' : ''}` : m));
+/**
+ * [ws_found | Hesk], [ws_found: Hesk], [WS_Flag : Found|Hesk], [ws_memory | hesk | ...], [ws_sleep: until morning] ...
+ * -> [ws_flag: found | Hesk], [ws_npc: memory | hesk | ...], [ws_wait: sleep until morning]. Unknown [ws_...] tags are left as they are.
+ */
+export function normalizeWsTags(text) {
+    return String(text ?? '').replace(ANY_WS_TAG, (all, w, rest = '') => {
+        const k = w.toLowerCase(), r = String(rest ?? '').trim();
+        if (k === 'flag') return r ? `[ws_flag: ${headAct(r, [...FLAG_ACTIONS, 'place'])}]` : all;
+        if (k === 'npc') return !r ? all : NPC_ACTIONS.includes(r.split(/[\s:|]/)[0].toLowerCase()) ? `[ws_npc: ${headAct(r, NPC_ACTIONS)}]` : `[ws_flag: npc | ${r}]`; // [ws_npc | Name] is the npc flag
+        if (k === 'wait') return `[ws_wait: ${r}]`;
+        if (k === 'sleep') return `[ws_wait: sleep${r ? ` ${r}` : ''}]`;
+        if (FLAG_ACTIONS.includes(k)) return `[ws_flag: ${k}${r ? ` | ${r}` : ''}]`;
+        if (NPC_ACTIONS.includes(k)) return `[ws_npc: ${k}${r ? ` | ${r}` : ''}]`;
+        return all;
+    });
+}
+/** [ws_...] tags still in a reply after every reader ran: the engine couldn't read them. */
+export const unreadTags = text => [...String(text ?? '').matchAll(/\[\s*ws[_ ][^\]]{0,300}\]/gi)].map(m => m[0]);

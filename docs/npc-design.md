@@ -207,6 +207,8 @@ The narrator gets `about` when it is relevant (an absent line, a rejected find).
 
 **Finding someone.** The narrator's `[ws_flag: found | Name]` and the player's `[found] Name` (or `/ws-found Name`) put that person in the current room for their current placeless entry. It is accepted only when `near` is a map address and the current room is within it. A stub or plain-text `near` is rejected, with the reason shown on the message. The stamp is keyed to the entry's `where` label, not to one entry: every entry of that person with the same `where` then resolves to that room in this chat. The message shows a notice with Edit and Undo, the same shape as a discovered room. In the Cast editor, **Make this permanent** writes that room into the base schedule as a normal placed entry. Deleting the message undoes the find.
 
+The narrator is told (in `flag_hint`/`flag_tool`/`flag_action` and in `narration.offmap_found`, added under the people list whenever it names someone off the map) that if it narrates such a person as actually present with the characters it must flag found for them in that same reply, and otherwise must not narrate them present. This is the model's judgment only; the engine never scans the text for names. A room discovered during play inside the near place counts as within it (addresses under the near subregion).
+
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
 ### Map changes and schedules (phase 4)
@@ -311,7 +313,7 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 
 ### Activity log
 
-The cast panel's **Activity log** view picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, sighting and by-name rolls, stamps written (map, positions, people, wait/clock), cards and their outcome, and every model call's outcome. All of it is read from the message itself, so it survives a reload.
+**Debug > Activity log** (top bar of the map window) opens its own full view, like the tools, so it never shares the side pane with Cast or the Editor (clicking Cast, Editor or Close leaves it). It picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, sighting and by-name rolls, stamps written (map, positions, people, wait/clock), cards and their outcome, and every model call's outcome. All of it is read from the message itself, so it survives a reload.
 
 **Model-call notes.** Every model call the extension makes (the narrator reply and each side call: intent, discovery/dig, wait amount, Remember, pick-one prompts, map edits) leaves a small debug note in `msg.extra.worldscrawl_calls`, keyed by swipe: the call kind, `ok` / `failed` / `skipped` with the reason, the number of tries, a short answer, and for the narrator reply the `ws_flag`s and tags it emitted, or "narrator made no tool call". Side calls are noted on the message being handled (usually the latest). It is capped at 12 notes per swipe with text truncated, and is not a stamp: undo, rebuilds and snapshots never read it. Failed narrator generations themselves are not noted (no message is made). It is read-only. New flag types plug in with `registerActivity(extraKey, collect)` in `extension/activity.mjs` and, for custom display, `registerRenderer(kind, fn)` in `plugin/ui/activitylog.mjs`; unknown `worldscrawl_*` keys still show with a generic line.
 

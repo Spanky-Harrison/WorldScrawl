@@ -978,7 +978,7 @@
       "description": "Alongside (map tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
       "group": "narration",
       "locked": "The exact [ws_flag: …] and [ws_flag: npc | …] tag formats the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. When someone listed as somewhere off the map is found by the characters at the mapped place named as near them, end your reply with [ws_flag: found | their name]. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.",
       "placeholders": [
         {
           "name": "discover",
@@ -1012,7 +1012,7 @@
       "description": "Alongside (map tools on): the description of the ws_flag tool, telling the narrator when to flag a map change or a discovery.",
       "group": "narration",
       "locked": "Names the ws_flag tool's 'discover' action, which the game reads.",
-      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} With action \"found\", note is the name of someone listed as somewhere off the map whom the characters have just found at the mapped place named as near them. The engine handles it after your reply. Do not call it for ordinary events.",
+      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} With action \"found\", note is the name of someone listed as somewhere off the map whom the characters have just found at the mapped place named as near them (or any room inside it). If you narrate such a person as actually present with the characters, you must call this with \"found\" for them in that same reply; otherwise do not narrate them as present. The engine handles it after your reply. Do not call it for ordinary events.",
       "placeholders": [
         {
           "name": "discover",
@@ -1046,13 +1046,22 @@
       "description": "Alongside (map tools on): the description of ws_flag's action argument.",
       "group": "narration",
       "locked": "Names the action values change, discover, wait, sleep, npc, name, lore and found, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": the characters spend time here without travelling (resting, waiting, sleeping the night). \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here. \"found\": note is the name of someone listed as somewhere off the map; the characters have reached the mapped place named as near them. The engine puts them in the current room when that room is within it, and says why when it cannot.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": only when the narrated events clearly take 15 minutes or more here without travelling (resting, sleeping the night, a lengthy task); never for an ordinary exchange of dialogue or a single action. If it isn't clear, don't. \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here. \"found\": note is the name of someone listed as somewhere off the map; the characters have reached the mapped place named as near them (or any room inside it). Required in the same reply whenever you narrate such a person as actually present with the characters; if you don't flag them, don't narrate them present. The engine puts them in the current room when that room is within it, and says why when it cannot.",
       "placeholders": [
         {
           "name": "discover",
           "generated": true
         }
       ]
+    },
+    {
+      "id": "narration.offmap_found",
+      "title": "Narration: the off-the-map people rule",
+      "description": "Alongside: added under the people-here list whenever it names someone as somewhere off the map.",
+      "group": "narration",
+      "locked": "Names the found flag the game reads.",
+      "text": "(Anyone above listed as somewhere off the map is not with the characters. If your reply has the characters actually meet one of them at the place named as near them, or any room inside it, flag found for that person in that same reply; otherwise do not narrate them as present.)",
+      "placeholders": []
     },
     {
       "id": "narration.lore_index",
@@ -1129,8 +1138,8 @@
       "title": "Narration: how to pass time",
       "description": "Alongside (map tools off, flag tags on): tells the narrator when and how to tag time passing in the scene.",
       "group": "narration",
-      "locked": "The exact [ws_wait: …] tag format the game looks for.",
-      "text": "End your reply with [ws_wait: 2h] (or [ws_wait: 45m], [ws_wait: until dusk], [ws_wait: sleep until morning]) whenever a meaningful amount of time (about 15 minutes or more) passes in the scene without travelling, not just long waits or sleep: a long meal or conversation, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or a time skip. Give your best guess at how long. Do not use it for moment-to-moment action or for travel (moves already count their own time). The player can adjust or discard it, so when in doubt, propose it. Never write it otherwise.",
+      "locked": "The exact [ws_wait: … | reason] tag format the game looks for (the reason after | is optional).",
+      "text": "End your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise.",
       "placeholders": []
     },
     {
@@ -1138,9 +1147,9 @@
       "title": "Narration: the ws_wait tool description (tools on)",
       "description": "Alongside (map tools on): the description of the ws_wait tool, telling the narrator when to pass time.",
       "group": "narration",
-      "locked": "Names the ws_wait tool's duration and until arguments, which the game reads.",
+      "locked": "Names the ws_wait tool's duration, until and reason arguments, which the game reads.",
       "placeholders": [],
-      "text": "Call this whenever a meaningful amount of time (about 15 minutes or more) passes in the scene without travelling, not just long waits or sleep: a long meal or conversation, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or a time skip. Give your best guess at how long. Do not use it for moment-to-moment action or for travel (moves already count their own time). The player can adjust or discard it, so when in doubt, propose it. Give a duration (\"45m\", \"2h\", \"1h30m\", \"2d\") or a time to wait until (\"morning\", \"dusk\", \"14:00\"). The game clock moves on once the player keeps it; the result says the new time."
+      "text": "Call this only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). If it isn't clear, don't. Give your best guess at how long: a duration (\"45m\", \"2h\", \"1h30m\", \"2d\") or a time to wait until (\"morning\", \"dusk\", \"14:00\"), and a short reason (a few words on what takes the time, e.g. \"searching the cellar\"). The game clock moves on once the player keeps it; the result says the new time."
     },
     {
       "id": "narration.expiry_pick",
@@ -1587,7 +1596,7 @@
       "piece": true,
       "locked": "The game reads these [ws_npc: …] tags.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. A memory highlight is [ws_npc: memory | their-id | the note]. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tools",
@@ -1597,7 +1606,7 @@
       "piece": true,
       "locked": "The game reads the ws_npc tool.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text. Use action \"memory\", \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event (e.g. \"The stranger lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tool",
@@ -1606,7 +1615,7 @@
       "group": "narration",
       "locked": "Names the ws_npc actions the game reads.",
       "placeholders": [],
-      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact, memory and detail, put the text in text. For disposition, value is hostile, unfriendly, indifferent, friendly or helpful, and reason is why. Use detail only when you would otherwise invent something important."
+      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact and detail, put the text in text. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important."
     },
     {
       "id": "npc.who",
