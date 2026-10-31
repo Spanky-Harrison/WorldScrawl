@@ -3,13 +3,13 @@
 // io: { load() -> GET /cast, outline() -> POST /edit/outline, save(npc, original, originalFile), del({id, file}),
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses) }
+import { permanentProblem, liveSchedule } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
-import { groupEntries, renderEntry } from './activitylog.mjs';
 
 export function castPanel(doc, io) {
     const $ = (tag, attrs = {}, ...kids) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v); } e.append(...kids.flat().filter(x => x !== null && x !== undefined && x !== false)); return e; };
-    let data = null, outline = null, rows = [], selKey = null, tab = 'summary', editing = null, view = 'people', narrSel = null, actSel = null;
+    let data = null, outline = null, rows = [], selKey = null, tab = 'summary', editing = null, view = 'people', narrSel = null;
     const filt = { q: '', place: '', status: '', disposition: '' };
     const root = $('div', { class: 'castpanel' });
     const msg = $('div', { class: 'cast-msg muted' });
@@ -24,7 +24,7 @@ export function castPanel(doc, io) {
     const who = $('div', { class: 'cast-who' });
     const peopleBox = $('div', { class: 'cast-people' });
     const viewBox = $('div', { class: 'cast-view' });
-    const VIEWS = [['people', 'People'], ['offmap', 'Off the map'], ['narrator', 'What the narrator was told'], ['unsaved', 'Not saved yet'], ['activity', 'Activity log']];
+    const VIEWS = [['people', 'People'], ['offmap', 'Off the map'], ['narrator', 'What the narrator was told'], ['unsaved', 'Not saved yet']];
     const viewBar = $('div', { class: 'tabs cast-views' });
     const drawViews = () => viewBar.replaceChildren(...VIEWS.map(([k, l]) => $('button', { type: 'button', class: `tab${k === view ? ' active' : ''}`, 'data-view': k, onclick: () => { view = k; drawViews(); drawView(); } }, l)));
     peopleBox.append($('div', { class: 'cast-filters' }, q, $('div', {}, status, ' ', disp), placeBox), who, list, detail);
@@ -44,7 +44,6 @@ export function castPanel(doc, io) {
         if (view === 'offmap') drawOffmap();
         if (view === 'narrator') drawNarrator();
         if (view === 'unsaved') drawUnsaved();
-        if (view === 'activity') drawActivity();
     }
     function drawOffmap() {
         const report = insp()?.offmap;
@@ -61,20 +60,6 @@ export function castPanel(doc, io) {
         if (others.length) kids.push($('div', {}, $('b', {}, 'Off the map, not in a stub'), $('ul', {}, ...others.map(p => $('li', { 'data-id': p.id }, jump(p.id, p.name), ' — ' + whoLine(p), $('div', { class: 'muted' }, p.how || ''))))));
         if (report?.found?.length) kids.push($('div', {}, $('b', {}, 'Found flags'), $('ul', { class: 'cast-foundflags' }, ...report.found.map(f => $('li', { class: f.ok ? 'ok' : 'bad', 'data-id': f.id }, (f.name || '') + ': ' + (f.ok ? 'accepted' : 'rejected') + (f.source ? ' (' + f.source + ')' : '') + ' — ' + (f.reason || ''))))));
         viewBox.replaceChildren(...kids);
-    }
-    function drawActivity() {
-        const msgs = io.activity?.() ?? [];
-        if (!msgs.length) { viewBox.replaceChildren($('p', { class: 'muted' }, 'Open a chat to see what happened on each message.')); return; }
-        const m = msgs.find(x => x.msg === actSel) ?? msgs[0];
-        const sel = $('select', { class: 'pf-input cast-actsel', onchange: () => { actSel = Number(sel.value); drawActivity(); } },
-            ...msgs.map(x => $('option', { value: x.msg }, `#${x.msg} ${x.who}${x === msgs[0] ? ' (latest)' : ''}${x.entries.length ? ` · ${x.entries.length}` : ''}`)));
-        sel.value = String(m.msg);
-        const groups = groupEntries(m.entries);
-        viewBox.replaceChildren($('p', { class: 'muted' }, 'What the engine and the narrator did on this message, read from the chat, including the outcome of each model call.'), sel,
-            $('button', { type: 'button', class: 'linkish cast-msglink', onclick: () => io.showMessage?.(m.msg) }, ` show #${m.msg}`),
-            $('p', { class: 'muted' }, m.snippet),
-            groups.length ? $('div', { class: 'cast-activity' }, ...groups.map(g => $('div', { class: 'cast-actgroup', 'data-kind': g.kind }, $('b', {}, g.title), $('ul', {}, ...g.entries.map(e => $('li', {}, renderEntry(e, $)))))))
-                : $('p', { class: 'muted' }, 'Nothing recorded on this message.'));
     }
     const insp = () => io.inspect?.() ?? null;
     function drawWho() {
@@ -145,7 +130,10 @@ export function castPanel(doc, io) {
                 ...[['Looks', rec.looks], ['Body', rec.body], ['Outfit', rec.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
                 ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
             pane.append(kv(pairs));
-            const places = (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
+            // Live: the card's schedule with this chat's changes folded in; the entry in force is marked.
+            const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
+                ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
+                ...e.notes.map(n => $('span', { class: 'cast-schednote' }, ` · ${n}`)), e.current ? $('b', { class: 'cast-schednow' }, ' ← now') : '', $('span', { class: 'muted' }, e.src === 'card' ? ' (card)' : ''))) : (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
                 ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near ? ` near ${e.near}` : ''}${e.nearNote ? ` · ${e.nearNote}` : ''}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
             if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
             if (places.length) pane.append($('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places));
@@ -202,6 +190,9 @@ export function castPanel(doc, io) {
         const raw = r.rec?.raw ?? r.rec;
         if (!raw) return;
         const next = permanentSchedule(raw.schedule ?? r.rec.schedule ?? [], found.where, found.place);
+        let basePlaces = null; try { basePlaces = (await io.load())?.places ?? null; } catch { /* checked below */ }
+        const why = basePlaces ? permanentProblem(found.place, basePlaces) : 'Could not check the world files; try again.';
+        if (why) { say(why, true); return; }
         if (!next.changed) { say('Nothing to write: no off-map entry uses that where.', true); return; }
         box.querySelectorAll('button').forEach(b => { b.disabled = true; });
         try {

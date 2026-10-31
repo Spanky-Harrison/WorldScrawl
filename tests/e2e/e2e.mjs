@@ -122,6 +122,7 @@ try {
     const footer = () => page.evaluate(() => { const els = [...document.querySelectorAll('#chat .mes')]; return els[els.length - 1]?.querySelector('.worldscrawl_exits')?.textContent ?? null; });
     const f1 = await footer();
     check('exits footer shown under reply', /^Exits: .*\(/.test(f1 ?? '') && f1.includes('north'), String(f1));
+    check('no carded NPC in the square: no Named NPCs line', await page.evaluate(() => [...document.querySelectorAll('#chat .mes')].at(-1)?.querySelector('.worldscrawl_npcs_here') == null) && !/Named NPCs present/.test(f1 ?? ''), String(f1));
     check('footer not in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /Exits:/.test(m.mes ?? ''))));
     await page.evaluate(() => { const c = document.getElementById('worldscrawl_show_exits'); c.checked = false; c.dispatchEvent(new Event('change')); });
     check('footer toggles off', await page.locator('#chat .worldscrawl_exits').count() === 0);
@@ -145,21 +146,24 @@ try {
         if (amount != null) card.querySelector('.worldscrawl_wait_amount').value = amount;
         const b = [...card.querySelectorAll('.menu_button, button, div')].find(x => x.textContent.trim() === label); if (!b) return false;
         b.click(); await new Promise(r => setTimeout(r, 800)); return true; }, { label, amount });
+    check('ws_npc tool lists disposition with its values and a reason', (() => { const t = (reqs[0].tools ?? []).find(x => (x.function?.name ?? x.name) === 'ws_npc'); const ps = (t?.function ?? t)?.parameters?.properties ?? {}; return /disposition/.test(ps.action?.description ?? '') && JSON.stringify(ps.value?.enum) === JSON.stringify(['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful']) && !!ps.reason; })(), JSON.stringify((reqs[0].tools ?? []).map(x => x.function?.name ?? x.name)));
     check('ws_wait tool sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_wait'));
     check('Auto-keep waits is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.autoKeepWaits === false && !document.getElementById('worldscrawl_auto_keep_waits').checked));
-    check('ws_wait tool description comes from the prompt file (about 15 minutes, lean to propose)', JSON.stringify(reqs[0].tools ?? []).includes('about 15 minutes or more'));
-    await queue([{ tool_calls: [{ name: 'ws_wait', arguments: { duration: '3h' } }] }, { content: 'You wait by the well.' }]);
+    check('ws_wait tool description comes from the prompt file (clearly 15 minutes or more, if unclear don\'t, reason)', JSON.stringify(reqs[0].tools ?? []).includes('clearly take 15 minutes or more') && JSON.stringify(reqs[0].tools ?? []).includes("isn't clear, don't") && JSON.stringify(reqs[0].tools ?? []).includes('"reason"'));
+    await queue([{ tool_calls: [{ name: 'ws_wait', arguments: { duration: '3h', reason: 'waiting for the ferry' } }] }, { content: 'You wait by the well.' }]);
     await send('I wait three hours.');
     let ws = await waits();
     check('ws_wait tool: a card, nothing stamped yet', ws.length === 0 && (await waitCards()).length === 1 && await page.evaluate(() => /swipe/.test(document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')), JSON.stringify(await waitCards()));
+    check('ws_wait reason: on the card and in the inspector call log', (await waitCards())[0]?.reason === 'waiting for the ferry' && await page.evaluate(() => /Why: waiting for the ferry/.test(document.querySelector('.worldscrawl_waitcard .worldscrawl_wait_reason')?.textContent ?? '')), JSON.stringify(await waitCards()));
     check('ws_wait keeps location', (await stored()) === 'riverton:streets/square');
     check('ws_wait tool result tells model the time', JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-1).messages).includes('Time passes'));
     check('Approve on the card stamps 3h', await cardClick('Approve') && (ws = await waits()).length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep && (await waitCards()).length === 0, JSON.stringify(ws));
-    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning]' }]);
+    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning | sleeping on the bench]' }]);
     await send('I sleep.', 1);
     check('[ws_wait] tag: a card with the amount', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 1, JSON.stringify(await waitCards()));
+    check('[ws_wait] tag reason shows on the card', /Why: sleeping on the bench/.test(await page.evaluate(() => document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')));
     check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
-    check('Adjust stamps the edited amount (6h sleep)', await cardClick('Adjust', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600, JSON.stringify(ws));
+    check('Adjust stamps the edited amount (6h sleep) with its reason', await cardClick('Adjust', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600 && ws[1].reason === 'sleeping on the bench', JSON.stringify(ws));
     await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
     await send('I wait an hour.');
     check('ws_flag wait alias: a card', (await waitCards()).length === 1 && (await waits()).length === 2);
@@ -401,9 +405,12 @@ try {
     check('tour back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
     check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Lore on file: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm')); await waitReqs(); // Hesk pours drinks from 16:00
     await queue([{ content: 'Hesk eyes you.' }]);
     await send('[lore] The Drowned Rat', 1);
     narr = JSON.stringify((await lastReq()).messages);
+    const npcLine = await page.evaluate(async mod => { const m = await import(mod), c = SillyTavern.getContext(), id = c.chat.length - 1; return { line: [...document.querySelectorAll('#chat .mes')].at(-1)?.querySelector('.worldscrawl_npcs_here')?.textContent ?? null, names: m.namedNpcsAt(c.chat, id, c.chat[id].extra?.worldscrawl_location) }; }, '/scripts/extensions/third-party/WorldScrawl/index.js');
+    check('footer: Named NPCs present lists the carded NPCs here (Hesk in the tavern), display only', npcLine.names.length > 0 && npcLine.line === 'Named NPCs present: ' + npcLine.names.join(', ') && !narr.includes('Named NPCs present'), JSON.stringify(npcLine));
     check('lore: [lore] feeds the tavern lore as background knowledge, {{npc:hesk}} as a name', narr.includes('Background knowledge (lore)') && narr.includes("Riverton's oldest tavern") && narr.includes('Hesk') && !narr.includes('{{npc:') && !narr.includes('Riverton is a small'), narr.slice(0, 400));
     const lr = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
     check('lore: the [lore] request is stamped {swipe, place, level, address, source}', lr.length === 1 && lr[0].source === 'bracket' && lr[0].place === 'The Drowned Rat' && lr[0].level === 'subregion' && lr[0].address === 'riverton:drowned_rat/common_room', JSON.stringify(lr));
@@ -1347,7 +1354,7 @@ try {
     check('/ws-wait until midnight lands on 00:00', (await clockNow()) > t2 && dm?.time === '00:00', JSON.stringify(dm));
     await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
     check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
-    check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning]')));
+    check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning')));
     // ---- Editing a proposed map change before Keep, re-editing a kept one, and "Edit live" from the map window.
     const CR = 'riverton:drowned_rat/common_room';
     const wsMod = '/scripts/extensions/third-party/WorldScrawl/index.js';
@@ -1422,6 +1429,13 @@ try {
     await descIn.fill('Burned to the rafters.');
     try { await ui.waitForFunction(() => /Burned to the rafters/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
     check('Edit place: the red/green diff shows the change before Submit', /Burned to the rafters/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    // Cast and Editor share the side pane: opening one closes the other, and the unsaved place form comes back intact.
+    await ui.click('#castToggle'); await ui.waitForTimeout(1200);
+    const cxSw1 = await ui.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), cast: !!document.querySelector('.side .castpanel'), form: !!document.querySelector('.side .placeform'), w: Math.round(document.querySelector('.side').getBoundingClientRect().width), draft: globalThis.wsSideDraft?.() }));
+    check('opening Cast while editing: Editor turns off, Cast fills the side pane (no form underneath), draft kept', cxSw1.casting && !cxSw1.editor && cxSw1.cast && !cxSw1.form && cxSw1.w >= 370 && cxSw1.draft, JSON.stringify(cxSw1));
+    await ui.click('#editorToggle'); await ui.waitForTimeout(1200);
+    const cxSw2 = await ui.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), cast: !!document.querySelector('.side .castpanel'), desc: document.querySelector('.side .placeform > .pf-row[data-field="description"] textarea')?.value, w: Math.round(document.querySelector('.side').getBoundingClientRect().width) }));
+    check('opening Editor from Cast: Cast turns off and the unsaved Edit place form is restored', !cxSw2.casting && cxSw2.editor && !cxSw2.cast && cxSw2.desc === 'Burned to the rafters.' && cxSw2.w >= 370, JSON.stringify(cxSw2));
     await ui.click('.side button.pf-submit');
     try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
     const le = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, p: m.extra?.worldscrawl_patches }; }, nLiveEdit);
@@ -1772,6 +1786,16 @@ try {
     check('change call: three new rooms off a hub in one change, engine-made ids', hubR.status === 'review' && hubR.ops?.length === 3 && hubR.ops.every(o => o.op === 'create_place' && o.id !== 'bogus' && o.story === true)
         && JSON.stringify(hubR.ops.map(o => o.id)) === JSON.stringify(['crystal_room', 'ember_room', 'tide_room']), JSON.stringify(hubR).slice(0, 600));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, hubR.id); await page.waitForTimeout(1500);
+    // Duplicate-room guard: a "new" Courtyard two steps away is connected to the existing one; the card offers to make it a new room instead.
+    const dupR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Courtyard', 'side stair')] }) }]);
+    check('duplicate guard: the new Courtyard becomes a door to the existing one, with a Make it a new room instead button', dupR.status === 'review' && dupR.ops?.every(o => o.op === 'add_exit') && /Connected to/.test(dupR.card) && /Make it a new room instead/.test(dupR.card), JSON.stringify(dupR).slice(0, 600));
+    const unm = await page.evaluate(async ([mod, id]) => {
+        const b = [...document.querySelectorAll(`.mes[mesid="${id}"] .worldscrawl_patchcard .worldscrawl_card_btn`)].find(x => /Make it a new room instead/.test(x.textContent)); if (!b) return null;
+        b.click(); await new Promise(r => setTimeout(r, 1500));
+        const p = SillyTavern.getContext().chat[id].extra.worldscrawl_flag?.proposal; return { ops: p?.ops, summary: p?.summary, unmerged: !!p?.unmerged };
+    }, [wsMod, dupR.id]);
+    check('Make it a new room instead: the proposal becomes a create_place for a new room', unm?.ops?.length === 1 && unm.ops[0].op === 'create_place' && unm.ops[0].name === 'Courtyard' && !unm.unmerged && unm.summary?.some(x => /Added as a new room/.test(x)), JSON.stringify(unm));
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dupR.id); await page.waitForTimeout(1500);
     // A door no description mentions: "I open a door down the hall" in the upstairs hallway. The intent check offers
     // "try another door", the narrator is told to open it only if it fits, and its flag adds the room.
     const mode0 = await page.evaluate(async ([mod, UPST]) => {
@@ -2048,7 +2072,7 @@ try {
     const cacheRes = await (await stFetch('/cache/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
     const cacheStats = await (await stFetch('/cache')).json();
     check('map cache: Debug clear empties it', cacheRes.cleared === true && cacheRes.checkpoints > 0 && cacheStats.checkpoints === 0 && cacheStats.built === 0, JSON.stringify([cacheRes, cacheStats]));
-    check('settings panel has an Open map window button', await page.locator('#worldscrawl_open_map').count() === 1);
+    check('settings panel has an Open WorldScrawl GUI button on one line', await page.evaluate(() => { const b = document.getElementById('worldscrawl_open_map'); return !!b && b.textContent.trim() === 'Open WorldScrawl GUI' && getComputedStyle(b).whiteSpace === 'nowrap'; }));
     // NPCs: cast file, remember card, a fact stamp's bar, and 12-hour waits parsed with no extra model call.
     const cast0 = await (await stFetch('/cast')).json();
     check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 2) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
@@ -2146,6 +2170,26 @@ try {
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
     await page.waitForTimeout(400);
     check('Turn off keeps the fact but stops using it', await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.off === true))));
+    await queue([{ content: 'stay' }, { content: 'Maren narrows her eyes. [ws_npc: memory | maren | The stranger lied to me about the knife.] [ws_npc: disposition | maren | unfriendly | caught in a lie]' }]);
+    await send('I lie to Maren about the knife.', 2);
+    const mdBar = await page.evaluate(() => {
+        const m = [...SillyTavern.getContext().chat].reverse().find(x => (x.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_disposition'));
+        const rows = [...document.querySelectorAll('.worldscrawl_npcchange')].filter(el => /lied to me about the knife|caught in a lie/.test(el.textContent ?? ''));
+        return { types: (m?.extra?.worldscrawl_npc ?? []).map(s => s.type), stripped: !!m && !/ws_npc/.test(m.mes ?? ''), rows: rows.map(r => ({ t: r.textContent, b: [...r.querySelectorAll('.worldscrawl_card_btn')].map(b => b.textContent) })) };
+    });
+    check('memory and disposition tags: stamped, stripped, each a notice with Edit and Turn off', mdBar.types.includes('npc_memory') && mdBar.types.includes('npc_disposition') && mdBar.stripped
+        && ['lied to me about the knife', 'caught in a lie'].every(w => mdBar.rows.some(r => r.t.includes(w) && r.b.includes('Edit') && r.b.includes('Turn off'))), JSON.stringify(mdBar));
+    await queue([{ content: 'stay' }, { content: 'Maren shrugs. [WS_Memory|maren|The stranger shrugged at me.] [ws_bogus | huh]' }]);
+    await send('I shrug at Maren.', 2);
+    await page.waitForTimeout(400);
+    const lt = await page.evaluate(() => {
+        const ch = SillyTavern.getContext().chat; const m = ch.slice(-1)[0];
+        const el = document.querySelector(`#chat .mes[mesid="${ch.length - 1}"] .worldscrawl_badtag`);
+        return { mes: m.mes, mem: (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_memory' && /shrugged/.test(s.note ?? s.text ?? '')), bad: m.extra?.worldscrawl_badtags ?? null, mark: el ? { t: el.textContent, title: el.title } : null,
+            call: JSON.stringify(m.extra?.worldscrawl_calls ?? m.extra ?? {}).includes('unreadable tag: [ws_bogus | huh]') };
+    });
+    check('lenient tag: [WS_Memory|...] read and hidden; unreadable [ws_bogus] stays visible, marked, and logged as a warning',
+        lt.mem && !/WS_Memory/i.test(lt.mes) && /\[ws_bogus \| huh\]/.test(lt.mes) && lt.bad?.[0]?.tags?.[0] === '[ws_bogus | huh]' && lt.mark?.title === "WorldScrawl couldn't read this tag" && lt.call, JSON.stringify(lt));
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click();
     await page.waitForTimeout(400);
     check('Undo removes the fact stamp', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'))));
@@ -2174,7 +2218,7 @@ try {
     const five = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = [...ch].reverse().find(m => m.extra?.worldscrawl_wait); return u?.extra?.worldscrawl_wait ?? null; });
     const afterWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('/ws-wait until 5pm parses with no extra model call', five?.until === '17:00' && five.seconds > 0 && afterWait === beforeWait + 1, JSON.stringify({ five, calls: afterWait - beforeWait }));
-    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).filter({ hasText: 'Maren' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).click();
+    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).filter({ hasText: 'Maren' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).first().click();
     await page.waitForTimeout(600);
     const exportWorld = await M(m => m.effectiveWorld());
     const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
@@ -2207,6 +2251,15 @@ try {
     await cw.locator('.cast-q').fill('landlady');
     const searched = await cw.evaluate(() => [...document.querySelectorAll('.castpanel .cast-row')].map(r => r.dataset.id));
     check('Cast search filters by line', searched.join() === 'hesk', JSON.stringify(searched));
+    // An unsaved cast edit survives a trip to the Editor and back.
+    await cw.evaluate(() => wsCast.selectId('hesk', 'edit')); await cw.waitForTimeout(400);
+    await cw.locator('.castform .cf-row[data-field="unknownAs"] input').fill('the scarred landlady');
+    await cw.locator('#editorToggle').click(); await cw.waitForTimeout(1200);
+    const cs1 = await cw.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), cast: !!document.querySelector('.side .castpanel') }));
+    await cw.locator('#castToggle').click(); await cw.waitForTimeout(1200);
+    const cs2 = await cw.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), v: document.querySelector('.side .castform .cf-row[data-field="unknownAs"] input')?.value, editing: wsCast.isEditing() }));
+    check('opening Editor from a cast edit hides Cast; reopening Cast restores the unsaved edit', !cs1.casting && cs1.editor && !cs1.cast && cs2.casting && !cs2.editor && cs2.v === 'the scarred landlady' && cs2.editing, JSON.stringify([cs1, cs2]));
+    await cw.locator('.castform .cast-cancel').click(); await cw.waitForTimeout(300);
     await cw.locator('.cast-q').fill('');
     const markCount = await cw.locator('.npcmark').count();
     await cw.locator('.npctoggle').uncheck();
@@ -2256,14 +2309,18 @@ try {
     await cw.waitForTimeout(200);
     const unsTxt = await cw.locator('.cast-view').innerText().catch(() => '');
     check('Not saved yet shows the Remember threshold', /after 3 replies/.test(unsTxt), unsTxt);
-    await cw.evaluate(() => wsCast.setView('activity'));
-    await cw.waitForTimeout(200);
-    const actV = await cw.evaluate(() => ({ opts: document.querySelectorAll('.cast-actsel option').length, first: document.querySelector('.cast-actsel option')?.textContent ?? '', all: [...document.querySelectorAll('.cast-actsel option')].map(o => o.value) }));
+    check('Activity log is no longer a Cast view', await cw.locator('.castpanel [data-view="activity"]').count() === 0);
+    await cw.locator('#menu-debug .menu-title').click(); await cw.locator('#menu-debug [data-item="activity-log"]').click();
+    await cw.locator('#tool-activity .act-sel').waitFor({ timeout: 10000 }).catch(() => {});
+    check('Debug > Activity log opens its own view; the map, Cast and Editor panes are hidden under it', await cw.evaluate(() => !!document.querySelector('#tool-activity') && document.getElementById('windows').hidden), '');
+    const actV = await cw.evaluate(() => ({ opts: document.querySelectorAll('.act-sel option').length, first: document.querySelector('.act-sel option')?.textContent ?? '', all: [...document.querySelectorAll('.act-sel option')].map(o => o.value) }));
     let actHit = '';
-    for (const v of actV.all) { const t = await cw.evaluate(val => { const s = document.querySelector('.cast-actsel'); s.value = val; s.dispatchEvent(new Event('change')); return document.querySelector('.cast-view')?.innerText ?? ''; }, v); if (/Map stamps|Flags|Rolls|Cards|Positions|People/.test(t)) { actHit = t; break; } }
+    for (const v of actV.all) { const t = await cw.evaluate(val => { const s = document.querySelector('.act-sel'); s.value = val; s.dispatchEvent(new Event('change')); return document.querySelector('#tool-activity')?.innerText ?? ''; }, v); if (/Map stamps|Flags|Rolls|Cards|Positions|People/.test(t)) { actHit = t; break; } }
     check('Activity log lists messages (latest first) and shows recorded engine activity', actV.opts > 0 && /latest/.test(actV.first) && !!actHit, JSON.stringify(actV).slice(0, 300) + ' | ' + actHit.slice(0, 300));
-    const callTxt = await cw.evaluate(async () => { const s = document.querySelector('.cast-actsel'); for (const o of s.options) { s.value = o.value; s.dispatchEvent(new Event('change')); const t = document.querySelector('.cast-view')?.innerText ?? ''; if (/Model calls/.test(t) && /narrator reply/.test(t)) return t; } return ''; });
+    const callTxt = await cw.evaluate(async () => { const s = document.querySelector('.act-sel'); for (const o of s.options) { s.value = o.value; s.dispatchEvent(new Event('change')); const t = document.querySelector('#tool-activity')?.innerText ?? ''; if (/Model calls/.test(t) && /narrator reply/.test(t)) return t; } return ''; });
     check('Activity log shows the persisted model-call notes', /Model calls/.test(callTxt) && /narrator reply: ok/.test(callTxt), callTxt.slice(0, 400));
+    await cw.locator('#castToggle').click(); await cw.waitForTimeout(800);
+    check('clicking Cast closes the Activity log view and shows Cast again', await cw.evaluate(() => !document.querySelector('#tool-activity') && !document.getElementById('windows').hidden && !!document.querySelector('.side .castpanel') && document.body.classList.contains('casting')));
     await cw.evaluate(() => wsCast.setView('people'));
     // "In this chat": a memory saved as a stamp on the latest message, after a diff.
     await cw.evaluate(() => wsCast.selectId('hesk', 'chatedit'));

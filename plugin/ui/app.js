@@ -6,6 +6,7 @@ import { buildEditForm, expandPrompt } from './placeform.mjs';
 import { loadPrompts } from './prompts.mjs';
 import { sessionFromUrl, openChangeEditor } from './changeedit.mjs';
 import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
+import { activityView } from './activitylog.mjs';
 import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
 import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
@@ -77,22 +78,25 @@ function buildTopBar() {
 // ---- Editor mode (read-only inspector): the whole world is shown, and clicking anything shows its data.
 let editor = false;
 try { editor = localStorage.getItem('worldscrawl_editor') === '1'; } catch {}
-function setEditor(on) {
+// Cast and Editor share the side pane: only one is on at a time (turning one on turns the other off; unsaved drafts are kept, see showCast).
+function setEditor(on, quiet = false) {
+    if (on && castMode) setCastMode(false, true);
     editor = on;
     try { localStorage.setItem('worldscrawl_editor', on ? '1' : '0'); } catch {}
     document.getElementById('editorToggle')?.classList.toggle('active', on);
     document.body.classList.toggle('editor', on);
-    for (const fn of listeners) fn(state);
+    if (!quiet) for (const fn of listeners) fn(state);
 }
 // ---- Cast mode (phase 1.5): the side pane is the cast browser / editor; clicking a place filters it. NPC markers have their own toggle.
 let castMode = false, npcMarkers = true;
 try { castMode = localStorage.getItem('worldscrawl_cast') === '1'; npcMarkers = localStorage.getItem('worldscrawl_npc_markers') !== '0'; } catch {}
-function setCastMode(on) {
+function setCastMode(on, quiet = false) {
+    if (on && editor) setEditor(false, true);
     castMode = on;
     try { localStorage.setItem('worldscrawl_cast', on ? '1' : '0'); } catch {}
     document.getElementById('castToggle')?.classList.toggle('active', on);
     document.body.classList.toggle('casting', on);
-    for (const fn of listeners) fn(state);
+    if (!quiet) for (const fn of listeners) fn(state);
 }
 globalThis.wsCastMode = on => setCastMode(on !== false); // for the e2e tests
 const indexCache = new Map(); // world|version -> {addresses, doors}
@@ -602,7 +606,6 @@ function createMapWindow(win) {
         exportNpc: async (id, update) => (state?.chatId ? askST('npc_export', { chatId: state.chatId, id, update }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
         changed: () => { if (current?.full) redrawMarkers(); },
         inspect: () => (state?.on ? state.npc_inspect ?? null : null),
-        activity: () => (state?.on ? state.activity ?? [] : []),
         chatAt: () => (state?.on ? { msg: state.last_msg, swipe: state.last_swipe ?? null } : null),
         chatEdit: async (id, stamps, at) => (state?.chatId && at ? askST('npc_chat_edit', { chatId: state.chatId, id, stamps, msg: at.msg, swipe: at.swipe }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
         highlight: (addrs, now) => { castHl = { addrs, now }; paintHl(); },
@@ -622,7 +625,15 @@ function createMapWindow(win) {
         const key = `${st?.world ?? ''}|${st?.map_version ?? ''}`;
         if (key !== castWorld) { castWorld = key; cast.resetOutline(); cast.refresh(); } else cast.setPlay();
     }
-    function showCast() { if (!side.contains(cast.el)) side.replaceChildren(cast.el); }
+    // An unsaved place form / map wizard set aside when Cast takes the side pane; put back when Cast closes.
+    let sideDraft = null;
+    const unsavedSide = () => !!side.querySelector('.mapaction, .editlive-pane:not(.saved)');
+    function showCast() {
+        if (side.contains(cast.el)) return;
+        if (unsavedSide()) sideDraft = [...side.childNodes];
+        side.replaceChildren(cast.el);
+    }
+    globalThis.wsSideDraft = () => !!sideDraft; // for the e2e tests
     globalThis.wsCast = cast; // for the e2e tests
     function redrawMarkers() {
         world.querySelectorAll('.npcmark').forEach(x => x.remove());
@@ -758,7 +769,8 @@ function createMapWindow(win) {
         // A map wizard in progress keeps the side pane (its own stamps re-render the map; the wizard re-reads the outline).
         // So does an unsaved Edit / Create place form (a "Choose…" pick comes back to it intact).
         if (castMode) { showCast(); world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected)); }
-        else if (side.querySelector('.mapaction, .editlive-pane:not(.saved)')) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
+        else if (sideDraft) { side.replaceChildren(...sideDraft); sideDraft = null; world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected)); }
+        else if (unsavedSide()) world.querySelectorAll('.node').forEach(n => n.classList.toggle('selected', n.dataset.id === selected));
         else if (crumbPick) { const p = crumbPick; crumbPick = null; showCrumbEntity(p); }
         else showSide(graph.nodes.some(n => n.id === selected) ? selected : hereNode);
     }
@@ -817,7 +829,15 @@ export const TOOLS = [
     }, { unlocked: () => unlockPrompts, choose }))) },
 ];
 const pendingReveals = new Map();
+// Debug > Activity log: a full view (like the tools), so it never shares the side pane with Cast or the Editor.
+let actView = null;
+listeners.add(() => { if (actView && document.getElementById('tool-activity')) actView.refresh(); });
 export const DEBUG = [
+    { id: 'activity-log', label: 'Activity log', open: () => openToolView('activity', 'Activity log', body => {
+        actView = activityView(body, { activity: () => (state?.on ? state.activity ?? [] : []),
+            showMessage: i => { if (state?.chatId) channel.postMessage({ type: 'show_message', chatId: state.chatId, msg: i }); } }, $);
+        return { onClose: () => { actView = null; return true; } };
+    }) },
     { id: 'show-edit-messages', label: 'Show map edit messages', toggle: true, checked: () => !!state?.showEditMessages,
         set: on => { if (!state) return setStatus('SillyTavern not connected'); channel.postMessage({ type: 'set_debug', key: 'showEditMessages', value: on }); } },
     { id: 'unlock-prompts', label: 'Unlock locked prompts', toggle: true, checked: () => unlockPrompts,

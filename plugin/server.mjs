@@ -39,7 +39,7 @@ export function map_version(root) {
 /** Readable folder id from a name: "Riverton - Desirae - Oct 19" -> "riverton-desirae-oct-19". */
 export function slugify(text) {
     const trim = s => s.replace(/^-+|-+$/g, '');
-    return trim(trim(String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 48)) || 'world';
+    return trim(trim(String(text).toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-')).slice(0, 48)) || 'world';
 }
 
 export const valid_world_id = wid => typeof wid === 'string' && wid.length <= 64 && WORLD_ID.test(wid);
@@ -321,6 +321,11 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             const lw = get_world(q('world'));
             const places = worldPlaces(lw.world);
             return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
+        },
+        'POST /cast/places': ({ q, body }) => { // the live map's places: the world with this chat's changes applied
+            needBody(body);
+            const places = worldPlaces(world_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)));
+            return { places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
         },
         'POST /cast/export': ({ q, body }) => {
             needBody(body);

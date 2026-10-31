@@ -26,6 +26,7 @@ export const sideLabels = (here, there) => ({ there: `From ${here || 'here'}, go
 export const ROOM_FIELDS = [
     { k: 'name', type: 'text', label: 'Name', required: true },
     { k: 'description', type: 'textarea', label: 'Description', required: true, ai: true },
+    { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
     { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
     { k: 'inherit_region_lore', type: 'bool', label: 'Uses the region lore' },
     { k: 'inherit_subregion_lore', type: 'bool', label: 'Uses the subregion lore' },

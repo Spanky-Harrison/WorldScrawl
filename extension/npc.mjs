@@ -90,7 +90,7 @@ export function inTimeWindow(minutes, from, to, dayMinutes = DAY_MINUTES) {
     return minutes >= start || minutes < end;
 }
 
-const slug = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+const slug = s => String(s ?? '').toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
 /** An id for a person met in play. A clash gets -2, -3, ... */
 export function freeId(name, taken = new Set()) {
     let id = slug(name) || 'npc';

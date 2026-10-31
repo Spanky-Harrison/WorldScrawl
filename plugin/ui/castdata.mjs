@@ -134,7 +134,7 @@ export function recordFromForm(f) {
 }
 /** A slug from a name ("Old Tam" -> "old-tam"), made free against `taken`. */
 export function slugFor(name, taken = new Set()) {
-    const base = String(name ?? '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'npc';
+    const base = String(name ?? '').toLowerCase().normalize('NFKD').replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'npc';
     let id = base, n = 2;
     while (taken.has(id)) id = `${base}-${n++}`;
     return id;
@@ -291,5 +291,40 @@ export function whyRows(play, placeName = a => a) {
     rows.push(['Toward the player', `${w.disposition?.value ?? 'unknown'}${w.disposition?.reason ? ` (${w.disposition.reason})` : ''}`]);
     rows.push(['Memory', w.memory?.length ? w.memory.join('; ') : '(none)']);
     if (w.declined) rows.push(['Scene', 'a "no" to remembering them was said in this scene']);
+    return rows;
+}
+
+export const CHAT_ONLY_ROOM = 'This room only exists in this chat; save the room to the world first (Save world in the WorldScrawl settings, or /ws-save-world).';
+/** Why a found place can't go into the base schedule: it isn't in the world files (only this chat's map has it). '' when fine. */
+export function permanentProblem(place, basePlaces) {
+    const set = basePlaces instanceof Set ? basePlaces : new Set(basePlaces ?? []);
+    return place && !set.has(place) ? CHAT_ONLY_ROOM : '';
+}
+
+/**
+ * The person's schedule as this chat has it: the card's entries with chat edits folded in (play.record), found
+ * placements putting a where-label in a room, and a follow/stay override on top. Each row: {place, activity, where,
+ * near, from, to, src: 'card'|'chat', notes: [], current}. `rec` is the card record; null play = the card as is.
+ */
+export function liveSchedule(rec, play) {
+    const key = e => [e?.place ?? '', e?.activity ?? '', e?.where ?? '', e?.near ?? '', e?.from ?? '', e?.to ?? ''].join('|');
+    const card = (rec?.schedule ?? []).filter(e => e && !e.broken);
+    const cardKeys = new Set(card.map(key));
+    const eff = play?.record?.schedule ?? card;
+    const founds = new Map(activeFounds(play).map(f => [f.where, f]));
+    const cur = play?.why?.schedule;
+    const overriding = !!(play?.following || (play?.held && play?.why?.held?.active !== false));
+    const rows = eff.map(e => {
+        const notes = [];
+        const src = cardKeys.has(key(e)) ? 'card' : 'chat';
+        if (src === 'chat') notes.push('changed in this chat');
+        let place = e.place ?? '';
+        const f = !place ? founds.get(e.where ?? '') : null;
+        if (f) { place = f.place; notes.push('found here this chat'); }
+        const current = !overriding && !!cur && (cur.activity ?? '') === (e.activity ?? '') && (cur.where ?? '') === (e.where ?? '') && (!e.place || cur.address === e.place);
+        return { place, activity: e.activity ?? '', where: e.where ?? '', near: e.near ?? '', from: e.from ?? '', to: e.to ?? '', importance: e.importance ?? '', src: f ? 'chat' : src, notes, current };
+    });
+    if (play?.following) rows.unshift({ place: '', activity: `following ${play.following.who === 'player' ? 'you' : play.following.who}`, where: '', near: '', from: '', to: '', importance: '', src: 'chat', notes: ['this chat (overrides the schedule)'], current: true });
+    else if (play?.held?.place && play?.why?.held?.active !== false) rows.unshift({ place: play.held.place, activity: 'staying here', where: '', near: '', from: '', to: '', importance: '', src: 'chat', notes: ['this chat (overrides the schedule)'], current: true });
     return rows;
 }

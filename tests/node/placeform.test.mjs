@@ -169,3 +169,17 @@ test('create place: the Edit place form, empty; Submit makes create_place plus w
     assert.ok(ops.some(o => o.op === 'set_exit' && o.loc === TAVERN && o.direction === 'south' && o.fields.sight === 'none'));
     const r = preview(c, ops); assert.equal(r.status_code, 200, JSON.stringify(r.json()));
 });
+
+test('room lore: the form has a Lore field, saves it with set_fields (long text ok), and clearing drops it', () => {
+    assert.ok(ROOM_FIELDS.some(f => f.k === 'lore' && f.type === 'textarea'));
+    const c = client(RIVERTON), ctx = ctxOf(c, UP);
+    assert.ok('lore' in ctx.own || ctx.own.lore === undefined);
+    const st = initialState(ctx); const text = 'Built over an old smugglers\' den. '.repeat(20).trim();
+    st.own.lore = text;
+    const ops = placeOps(ctx, st);
+    assert.deepEqual(ops.find(o => o.op === 'set_fields')?.fields, { lore: text });
+    const raw = loadRaw(); applyPatch(raw, { ops }); assert.equal(getRoom(raw, UP).lore, text);
+    const ctx2 = { ...ctx, own: { ...ctx.own, lore: text } }, st2 = initialState(ctx2); st2.own.lore = '';
+    const ops2 = placeOps(ctx2, st2); assert.deepEqual(ops2.find(o => o.op === 'set_fields')?.fields, { lore: null });
+    applyPatch(raw, { ops: ops2 }); assert.equal(getRoom(raw, UP).lore, undefined);
+});
