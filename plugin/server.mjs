@@ -15,6 +15,7 @@ import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCast
 import { nearIndexFrom } from './npc.mjs';
 import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './shared/calendar.mjs';
 import { opActive, parseLasts } from './shared/patches.mjs';
+import { slug } from './shared/ids.mjs';
 import { World, WorldError, attachElsewhere, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';
@@ -37,10 +38,7 @@ export function map_version(root) {
 }
 
 /** Readable folder id from a name: "Riverton - Desirae - Oct 19" -> "riverton-desirae-oct-19". */
-export function slugify(text) {
-    const trim = s => s.replace(/^-+|-+$/g, '');
-    return trim(trim(String(text).toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-')).slice(0, 48)) || 'world';
-}
+export const slugify = text => slug(text, { max: 48, fallback: 'world' });
 
 export const valid_world_id = wid => typeof wid === 'string' && wid.length <= 64 && WORLD_ID.test(wid);
 

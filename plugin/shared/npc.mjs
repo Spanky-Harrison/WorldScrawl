@@ -2,6 +2,7 @@
 // NPC records, stamps and context slices. The server stores nothing during play: a cast file is the
 // template, and every change is a stamp on the message (extra.worldscrawl_npc), per swipe.
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
+import { slug } from './ids.mjs';
 
 export const MEMORY_CAP = 8;
 
@@ -36,11 +37,9 @@ export function matchEnum(text, keys) {
     return hits.length === 1 ? hits[0] : null;
 }
 
-export const slug = s => String(s ?? '').toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
-
 /** An id for a person met in play. A clash gets -2, -3, ... */
 export function freeId(name, taken = new Set()) {
-    let id = slug(name) || 'npc';
+    let id = slug(name, { max: 48, fallback: 'npc' });
     if (!NPC_ID.test(id)) id = 'npc';
     if (!taken.has(id)) return id;
     let n = 2;
