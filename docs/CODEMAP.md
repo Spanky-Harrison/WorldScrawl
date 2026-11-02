@@ -55,3 +55,32 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | e2e/parts/NN-topic.part | The e2e checks by topic, as chapters of one browser session that share variables (not standalone modules): 00-setup, 01-tools, 02-movement, 03-names-routing, 04-requests-reveals, 05-dig-look, 06-doors-exits, 07-map-window-edits, 08-wizards-toggles, 09-discovery, 10-menus-prompts, 11-cast, 99-teardown |
 | e2e/snapshot.mjs, e2e/prompts.golden.json | Prompt snapshot: every model request in a scripted chat vs. the golden file |
 | bench/snapcache.bench.mjs | Snapshot cache benchmark |
+
+## API (plugin routes at `/api/plugins/worldscrawl/`, or the Map server URL setting)
+
+Every call takes `?world=<id>`. The server keeps no chat state: the browser sends the chat's `changes` (patches) and `now` (time stamp) with each call that needs them.
+| Endpoint | Caller | Sends | Gets back |
+|---|---|---|---|
+| GET /health | ext | – | ok, world, map_version, counts, start |
+| GET /worlds | ext | – | default, worlds[] (info, has_knowledge) |
+| GET /worlds/:id/knowledge | ext expiry | – | knowledge {location, stood, seen…} |
+| POST /worlds/render | ext | id, id_hint, name, base, auto, overwrite | the new world |
+| GET /start, GET/POST /rooms | ext | addresses, (changes) | start, rooms[], unknown[] |
+| GET /location/:addr | ext doors | – | one room |
+| POST /resolve | ext | changes | the resolved place |
+| POST /move | ext | from, direction, changes | room + travel_seconds (+ traversal) |
+| POST /travel | ext | from, steps, changes | path / rooms |
+| POST /nearby | ext | from, depth, limit, changes | nearby rooms |
+| POST /doors | ext | doors, changes | exits revealed |
+| POST /discover/context | ext | location, changes | name, description, expandable, area facts |
+| POST /aftermath | ext | address | what happens after a temporary change ends |
+| POST /patch/preview | ext + map | patch, changes | preview / diff |
+| POST /patch/context | ext + map | location, rooms, changes | area context for writing patches |
+| POST /changes/status, /changes/dependents | ext | changes | failed[] / dependents |
+| GET /cast, POST /cast/places | ext + map | changes | npcs, problems, places, labels |
+| POST /cast/export, /cast/save, /cast/delete | ext / castpanel | an NPC record | the saved file |
+| POST /edit/context, /edit/outline, /edit/ai-context | map | target, changes | data for the editor form |
+| GET/POST /inspect, GET /inspect/index | ext + map | target | inspector rows |
+| GET /prompts/active (+ prompt editor routes) | ext + map | – | prompts |
+| POST /open-folder, POST /cache/clear, GET /cache | ext / map / none | – | ok |
+

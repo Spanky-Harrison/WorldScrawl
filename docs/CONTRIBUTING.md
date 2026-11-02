@@ -11,3 +11,4 @@
 9. Every feature ships with inspector visibility.
 10. The player is omnipotent; guards apply to the model.
 11. No backwards compatibility: assume a clean pull and a fresh chat each build.
+12. Checks that only prove a one-time change was safe (before/after comparisons, migration diffs) run once and are reported in the PR body, not kept in the suite. Tests that guard a rule going forward stay.
