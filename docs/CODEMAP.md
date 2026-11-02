@@ -25,7 +25,8 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | waits.mjs | Waits: model and player waits, Keep/Discard, patch cards | `planWait`, `proposeWait`, `renderPatchCards` |
 | settings.mjs | The settings panel | `addSettingsPanel` |
 | npc.mjs | Copy of plugin/npc.mjs (a test checks they match). NPC records, flags, `judgeFound` / `foundEditOk` | see plugin/npc.mjs |
-| actors.mjs, prompts.mjs | Copies of plugin/actors.mjs and plugin/ui/prompts.mjs | — |
+| actors.mjs | Per-actor positions and the party (browser only; the server never needs them) | `positionOf`, `playerAddress`, `positionsAt` |
+| prompts.mjs | Copy of plugin/ui/prompts.mjs | — |
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
 | notices.mjs | Shared in-chat notice layout and decisions | `addNotice` (via brackets), `markDecided` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
@@ -38,7 +39,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | index.mjs | Plugin entry; mounts the API at `/api/plugins/worldscrawl/` |
 | server.mjs | Framework-free API handler, routes incl. `POST /cast/places` |
 | world.mjs, position.mjs, changes.mjs, snapcache.mjs | World loading/validation, position resolver, per-chat changes, map snapshot cache |
-| npc.mjs, cast.mjs, actors.mjs | NPC records and stamps (`judgeFound`, `foundEditOk`), cast files, actor positions |
+| npc.mjs, cast.mjs | NPC records and stamps (`judgeFound`, `foundEditOk`), cast files |
 | prompts.mjs, prompts/default.json | Prompt profiles per user; the default prompt text for every model call |
 | inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static UI serving |
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |

@@ -1,4 +1,3 @@
-// Copy of plugin/actors.mjs (the extension cannot import plugin files statically). Keep them the same; a test checks.
 // Per-actor positions. There is no stored party: a party is the player plus whoever is following them.
 // The player is the default actor ("player"). Nobody follows yet.
 //

@@ -183,7 +183,7 @@ export const messageSeconds = m => { let s = 0; for (const k of ['worldscrawl_mo
  * The shared clock lookup: game seconds elapsed at message `index` (inclusive), counting only messages after `after`.
  * Reads only the time stamps on the messages (never the map, never a position), with a per-chat prefix-sum memo
  * checked against each message's own seconds, so expiries, NPC schedules and the like share one answer instead of
- * replaying the chat. Where each actor is at a message is positionsAt (plugin/actors.mjs): the same kind of memo
+ * replaying the chat. Where each actor is at a message is positionsAt (extension/actors.mjs): the same kind of memo
  * over location stamps, and it has to match a full replay of those stamps. The clock does not store a place.
  */
 const clockCache = new WeakMap();
