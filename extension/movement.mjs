@@ -1,6 +1,7 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { PLAYER, LOC_KEY, playerAddress, placeStamp } from './actors.mjs';
 import { followersAt } from './npc.mjs';
+import { revealsDestination } from './shared.mjs';
 import { PLAIN_DIRECTIONS, addNotice, withArticle } from './brackets.mjs';
 import { worldSeed } from './clock.mjs';
 import { api, currentLocation, isStuck, stuckWhy } from './doors.mjs';
@@ -81,11 +82,6 @@ export const optionLines = opts => opts.map(o => `- ${o.key}: ${o.label}`).join(
 export const pickKey = opts => a => { const k = matchKey(a, opts.map(o => o.key)); return k == null ? null : opts.find(o => o.key === k); };
 
 // ---- Discovered places and route-finding (read-only map; visited set derived from this chat's messages).
-/**
- * The one place that decides whether an exit reveals where it leads. Later a hidden/obscured exit
- * (e.g. exit.hidden or exit.obscured in the region file) can return false here.
- */
-export const revealsDestination = exit => !(exit?.hidden || exit?.obscured) || !!exit?.revealed;
 
 // ---- Obscured/hidden doors. The server gives each flagged exit and its return exit the same opaque `door` id.
 // Walking through either side reveals both. Which doors were walked through is derived from this chat's move

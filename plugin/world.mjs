@@ -15,9 +15,9 @@ import path from 'node:path';
 import { checkCalendar, checkStart, defaultTravel, parseDuration } from './shared/calendar.mjs';
 import { buildWeather, checkPlace } from './weather-config.mjs';
 import { BAR_SIDES, flipBar } from './shared/doorbar.mjs';
+import { SLUG } from './shared/patches.mjs';
 export { BAR_SIDES, flipBar };
 
-export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 export const VIEWS = ['open']; // exit "view": "open" = a hidden/obscured exit with no door of its own (see exitShape)
 export const EXIT_FLAGS = ['hidden', 'obscured', 'one_way'];
 export const LEVELS = ['clear', 'partial', 'none']; // exit "sight" / "sound", and a barrier's closed_sight / closed_sound

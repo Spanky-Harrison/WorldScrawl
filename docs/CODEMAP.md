@@ -46,7 +46,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |
 | config.example.json, package.json | Config template, package metadata |
 | ui/ | The map window (browser only): `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, castdata, castpanel, changeedit, diffview, mapactions, mapdata, menus, patchform, picker, placeform, prompteditor. The extension also imports patchform and diffview from `/ui/` |
-| shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer), npc (record basics both sides use: `exportRecord`, `freeId`, `nameIn`, `normName`, `NPC_ID`, `NPC_TOKEN`, schedules' place lookup) |
+| shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer), npc (record basics both sides use: `exportRecord`, `freeId`, `nameIn`, `normName`, `NPC_ID`, `NPC_TOKEN`, schedules' place lookup), exits (`revealsDestination`). Ids: `SLUG` (place ids) is in patches, `NPC_ID` in npc |
 
 ## tests/
 

@@ -6,7 +6,8 @@ import { askValid, baseReply, gen, narrativeDig, nearbyRooms } from './dig.mjs';
 import { barrierOf, barrierWord, changesOf, currentLocation, doorCandidates, doorChange, doorOverrides, ensurePrompts, isStuck, openChanges, sightOf, soundOf, stuckWhy, viewOf } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
 import { CHANGE_KEY, ctx } from './index.js';
-import { BREAK_RE, ELSEWHERE, OPEN, STAY, UNCLEAR, cleanAnswer, destLabel, discoveredTargets, displayName, engineMove, engineTravel, exitLabel, exitLabels, hereAreas, keyFor, keyWords, matchCandidates, matchKey, namedInText, nearestWaysOut, normKey, optionLines, parseIntentAnswer, parseYesNo, partyText, pickKey, previousAddress, revealsDestination, sameName, stamp, travelCandidates, trimAnswer, words } from './movement.mjs';
+import { BREAK_RE, ELSEWHERE, OPEN, STAY, UNCLEAR, cleanAnswer, destLabel, discoveredTargets, displayName, engineMove, engineTravel, exitLabel, exitLabels, hereAreas, keyFor, keyWords, matchCandidates, matchKey, namedInText, nearestWaysOut, normKey, optionLines, parseIntentAnswer, parseYesNo, partyText, pickKey, previousAddress, sameName, stamp, travelCandidates, trimAnswer, words } from './movement.mjs';
+import { revealsDestination } from './shared.mjs';
 
 // ---- Looking and doors (the party never moves).
 export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door', NEW_DOOR = 'try another door';
