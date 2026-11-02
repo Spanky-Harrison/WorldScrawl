@@ -1,5 +1,6 @@
 // Narrated expiries: pick where the party ends up first (own pick-one call), then one automatic narrator reply
 // told what ran out (name, description, the change that made it, an excerpt of its message) and where they are now.
+import { extSource } from './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.jso
 const ext = await import('../../extension/index.js');
 ext.setPrompts(def);
 const byId = Object.fromEntries(def.prompts.map(e => [e.id, e]));
-const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+const src = extSource();
 const room = { name: 'Guest Room 1', description: 'A narrow room with a broken window.', change: { msg: 5, note: 'innkeeper shows them a room', summary: ['added place Guest Room 1', 'added exit door from Upstairs Rooms'], ended: 'Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)' } };
 const options = [{ address: 'inn/upstairs', direction: 'door', name: 'Upstairs Rooms' }, { address: 'inn/yard', direction: 'window', name: 'Inn Yard' }];
 

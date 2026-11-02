@@ -1,5 +1,6 @@
 // Flagging the player's own message checks the narrator's reply with it; Proactive room discovery (off by default,
 // overridable per scene) decides whether rooms the narration only mentions may be discovered.
+import { extSource } from './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import './ststub.mjs';
 const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
 const ext = await import('../../extension/index.js');
 ext.setPrompts(def);
-const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+const src = extSource();
 
 test('replyAfter: the narrator reply right after a player message, skipping engine notices', () => {
     const chat = [{ is_user: true }, { is_system: true }, { is_user: false }, { is_user: true }];

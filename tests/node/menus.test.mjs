@@ -1,3 +1,4 @@
+import { extSource } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ test('app.js registers Tools > Prompt Editor and the two Debug items', () => {
     assert.match(src, /querySelector\('\.brand'\)\.after\(buildMenu\('tools'/);
 });
 test('extension handles the Debug messages and the new setting', () => {
-    const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+    const src = extSource();
     assert.match(src, /showEditMessages: false/);
     assert.match(src, /type === 'reveal'[\s\S]{0,300}revealPlaces/);
     assert.match(src, /type === 'set_debug'/);

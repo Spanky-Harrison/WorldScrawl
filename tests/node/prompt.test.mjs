@@ -1,10 +1,11 @@
 // The patch prompt's rules, read from plugin/prompts/default.json.
+import { extSource } from './helpers.mjs';
 import { DEFAULT_PROMPTS } from './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+const src = extSource();
 import { opDocs as opDocs0 } from '../../plugin/ui/patches.mjs';
 const sys = DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.system').text.replace('{{edit_types}}', opDocs0()).replace('{{style}}', DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.style').text);
 

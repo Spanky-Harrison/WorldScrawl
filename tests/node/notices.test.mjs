@@ -1,3 +1,4 @@
+import { extSource } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -49,7 +50,7 @@ test('resolved text and the activity log show the decision', () => {
     assert.ok(e && e.status === 'approve' && /Maren/.test(e.text), JSON.stringify(messageActivity(msg, 0)));
 });
 test('notices use the shared row and Approve labels (no Keep button labels left)', () => {
-    const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+    const src = extSource();
     assert.doesNotMatch(src, /cardButton\('Keep/);
     assert.doesNotMatch(src, /cardButton\(form \? 'Keep/);
     assert.match(src, /cardButton\('Approve', \(\) => keepRemember\(id\)/);

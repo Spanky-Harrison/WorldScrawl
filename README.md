@@ -349,6 +349,7 @@ Every folder in `worlds/` with a `world.json` is a world; its id is the folder n
 ```bash
 node --test tests/node/
 ST_SRC=/path/to/SillyTavern tests/e2e/run.sh   # headless: real ST 1.19 + fake model + Chrome (needs playwright-core)
+ST_SRC=/path/to/SillyTavern E2E_SCRIPT=snapshot.mjs tests/e2e/run.sh   # prompt snapshot: every model call of a scripted chat vs tests/e2e/prompts.golden.json (UPDATE_SNAPSHOT=1 rewrites it)
 ```
 
 ## Movement (v0.2): the engine moves, the model narrates

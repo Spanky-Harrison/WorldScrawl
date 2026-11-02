@@ -4,3 +4,4 @@ worlds/*
 .backups/
 plugin/config.json
 /data/
+tests/e2e/*.actual
