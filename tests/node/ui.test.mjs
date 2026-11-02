@@ -277,7 +277,7 @@ test('ui files have no external dependencies', () => {
     for (const f of fs.readdirSync(UI_DIR)) {
         const s = fs.readFileSync(path.join(UI_DIR, f), 'utf8');
         assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(s), `${f} loads nothing from the internet`);
-        for (const m of s.matchAll(/from '([^']+)'/g)) assert.ok(m[1].startsWith('./'), `${f} imports only local files`);
+        for (const m of s.matchAll(/from '([^']+)'/g)) assert.ok(/^\.\/|^\.\.\/shared\//.test(m[1]), `${f} imports only local files (plugin/ui/ or plugin/shared/)`);
     }
 });
 
