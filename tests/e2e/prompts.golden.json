@@ -1,0 +1,444 @@
+[
+ {
+  "step": "look",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "User: \"What are your powers?\"\nSeraphina: *Seraphina smiles softly, turning back toward you as she hums in thought.* \"Well, as guardian of this glade, I possess certain gifts - healing, protection, nature magic and the like.\" *Lifting her hand, a tiny breeze rustles through the room, carrying the scent of wildflowers as a few petals swirl around you. A butterfly flits through the windowsill and lands on her fingertips as she returns to you.* \"My power wards this haven, shields it from darkness and heals those in need. I can mend wounds,  soothe restless minds and provide comfort to weary souls.\" *Her eyes sparkle with warmth and compassion as she looks upon you, and she guides the butterfly to you.*\nUser: \"What are Shadowfangs?\"\nSeraphina: *Seraphina's eyes darken, brow furrowing with sorrow at the memory.* \"The Shadowfangs are beasts of darkness, corrupted creatures that feast on suffering. When they came, the forest turned perilous — filled with monsters that stalk the night.\" *She squeezes your hand gently, willing her magic to soothe your pain.* \"They spread their curse, twisting innocent creatures into sinister beasts without heart or mercy, turning them into one of their own.\" *With a sigh, Seraphina turns to gaze out at the gnarled, twisting trees beyond her glade.* \"Though they prey on travelers, within these woods you'll find sanctuary. No shadowed beast may enter here, for my power protects this haven.\" *Her eyes soften as she looks back to you, filled with compassion.* \"Worry not, you're safe now. Rest and heal, I'll stand watch through the night. The Shadowfangs will not find you.\"\nUser: \"What is Eldoria?\"\nSeraphina: *Seraphina turns, her gown shimmering in the soft light as she offers you a kind smile.* \"Eldoria is here, all of the woods. This is my forest glade, a sanctuary of peace within it.\"  *She gestures at the space around you.* \"I am its guardian, tasked with protecting all who seek refuge here. The forest can be perilous, but no harm will come to you under my watch.\" *Her amber eyes sparkle with compassion as she looks upon you.* \"For many years, I have protected those who seek refuge here, but not all are as friendly as me.\" *With a graceful nod, Seraphina returns to her vigil at the doorway, her form radiating a soft glow of magic and comfort.* \"The entirety of Eldoria used to be a safe haven for travelers and merchants alike... that was until the Shadowfangs came.\"\nUser: \"What happened to Eldoria?\"\nSeraphina: *Letting out a sigh, Seraphina gazes out at the forest beyond her glade.* \"Long ago, Eldoria was a place of wonder. Rolling meadows, a vast lake, mountains that touched the sky.\"  *Her eyes grow distant, longing for days now lost.* \"But the Shadowfangs came and darkness reigns where once was light. The lake turned bitter, mountains fell to ruin and beasts stalk where once travelers walked in peace.\" *With another flicker, a small raincloud forms above with a shower upon your brow wink.* \"Some places the light still lingers, pockets of hope midst despair - havens warded from the shadows, oases in a desert of danger.\" *Glancing over you with a smile, she sighs, clasping your hand.*"
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:00). Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 38°F (feels like 32°F), freezing, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\n(none)\nHesk: asleep, somewhere off the map (her own room, in The Drowned Rat)\n(Anyone above listed as somewhere off the map is not with the characters. If your reply has the characters actually meet one of them at the place named as near them, or any room inside it, flag found for that person in that same reply; otherwise do not narrate them as present.)\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nWhat just happened: User looks around Common Room (The Drowned Rat). User stays here.\nUser has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in Common Room (The Drowned Rat).\nIn this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    }
+   ]
+  ]
+ },
+ {
+  "step": "move",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Village Square, Riverton Streets (Riverton)\nThis location: A cobbled square around an old stone well. Market stalls line the edges, and roads lead off toward the river, the temple hill, Market Lane and the open country.\nLore on file: Riverton Streets, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: in (The Drowned Rat), south (River Docks), north (Temple of the Tides), east (East Road), west (Market Lane)\nLooking south, you can see River Docks: Weathered wooden piers jut into the slow brown river. The view is open and carries well beyond it.\nLooking east, you can see East Road: A rutted dirt road leaving the village between hedgerows and fields. The view is open and carries well beyond it.\nLooking west, you can see Market Lane: A narrow lane of timber-framed shops. The view is open and carries well beyond it.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:01). (That move took 1m.) Let the time of day show in the narration.\nWeather: Partly cloudy, breezy, 38°F (feels like 32°F), freezing, 67% humidity. Spring. Let the weather and temperature show in the narration where it fits; do not change them.\nWhat just happened: User moved out from Common Room (The Drowned Rat) to Village Square (Riverton Streets). User arrives in Village Square. Describe arriving in Village Square.\nIn this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "system",
+     "content": "[Engine: this turn ends in Village Square. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in Village Square. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]"
+    }
+   ]
+  ]
+ },
+ {
+  "step": "move back",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "assistant",
+     "content": "You step into the square."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:02). (That move took 1m.) Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 38°F (feels like 32°F), freezing, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\n(none)\nHesk: asleep, somewhere off the map (her own room, in The Drowned Rat)\n(Anyone above listed as somewhere off the map is not with the characters. If your reply has the characters actually meet one of them at the place named as near them, or any room inside it, flag found for that person in that same reply; otherwise do not narrate them as present.)\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nWhat just happened: User moved in from Village Square (Riverton Streets) to Common Room (The Drowned Rat). User arrives in the Common Room of The Drowned Rat. Describe arriving in the Common Room of The Drowned Rat.\nIn this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "move in"
+    },
+    {
+     "role": "system",
+     "content": "[Engine: this turn ends in the Common Room of The Drowned Rat. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in the Common Room of The Drowned Rat. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]"
+    }
+   ]
+  ]
+ },
+ {
+  "step": "wait",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "You classify player intent for a text adventure game. Reply with exactly one option key from the list and nothing else."
+    },
+    {
+     "role": "user",
+     "content": "User is at Common Room (The Drowned Rat). Its exits are:\n- out (to Village Square, where you came from)\n- up (to Upstairs Rooms)\n- back (to Courtyard)\n\nThe player wrote: \"I sit and wait for a while.\"\n\nAnswer with one option:\n- out: the player goes through the \"out\" exit right now\n- up: the player goes through the \"up\" exit right now\n- back: the player goes through the \"back\" exit right now\n- River Docks: the player travels to River Docks, a place they know about\n- Temple of the Tides: the player travels to Temple of the Tides, a place they know about\n- East Road: the player travels to East Road, a place they know about\n- Market Lane (Riverton Streets): the player travels to Market Lane (Riverton Streets), a place they know about\n- stay: the player is not trying to travel anywhere\n- elsewhere: the player wants to go to a place that is not listed above\n- unclear: the player wants to travel, but it is unclear which of the listed places they mean\n\nWhich option: out, up, back, River Docks, Temple of the Tides, East Road, Market Lane (Riverton Streets), stay, elsewhere, unclear? Reply with exactly one option from that list."
+    }
+   ],
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "assistant",
+     "content": "You step into the square."
+    },
+    {
+     "role": "user",
+     "content": "move in"
+    },
+    {
+     "role": "assistant",
+     "content": "You step back inside."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:02). Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 38°F (feels like 32°F), freezing, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\n(none)\nHesk: asleep, somewhere off the map (her own room, in The Drowned Rat)\n(Anyone above listed as somewhere off the map is not with the characters. If your reply has the characters actually meet one of them at the place named as near them, or any room inside it, flag found for that person in that same reply; otherwise do not narrate them as present.)\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nUser has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in Common Room (The Drowned Rat).\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "I sit and wait for a while."
+    }
+   ]
+  ]
+ },
+ {
+  "step": "found",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "You classify player intent for a text adventure game. Reply with exactly one option key from the list and nothing else."
+    },
+    {
+     "role": "user",
+     "content": "User is at Common Room (The Drowned Rat). Its exits are:\n- out (to Village Square, where you came from)\n- up (to Upstairs Rooms)\n- back (to Courtyard)\n\nThe player wrote: \"I look for the barkeep.\"\n\nAnswer with one option:\n- look: the player looks, peers, peeks or listens at something from here, without going anywhere\n- stay: the player is not trying to travel anywhere\n\nWhich option: look, stay? Reply with exactly one option from that list."
+    }
+   ],
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "assistant",
+     "content": "You step into the square."
+    },
+    {
+     "role": "user",
+     "content": "move in"
+    },
+    {
+     "role": "assistant",
+     "content": "You step back inside."
+    },
+    {
+     "role": "user",
+     "content": "I sit and wait for a while."
+    },
+    {
+     "role": "assistant",
+     "content": "You nurse a drink."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:47). Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 40°F (feels like 34°F), cold, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\n(none)\nHesk: asleep, somewhere off the map (her own room, in The Drowned Rat)\n(Anyone above listed as somewhere off the map is not with the characters. If your reply has the characters actually meet one of them at the place named as near them, or any room inside it, flag found for that person in that same reply; otherwise do not narrate them as present.)\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nUser has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in Common Room (The Drowned Rat).\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "I look for the barkeep."
+    }
+   ]
+  ]
+ },
+ {
+  "step": "after found",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "You classify player intent for a text adventure game. Reply with exactly one option key from the list and nothing else."
+    },
+    {
+     "role": "user",
+     "content": "User is at Common Room (The Drowned Rat). Its exits are:\n- out (to Village Square, where you came from)\n- up (to Upstairs Rooms)\n- back (to Courtyard)\n\nThe player wrote: \"I nod to her.\"\n\nAnswer with one option:\n- out: the player goes through the \"out\" exit right now\n- up: the player goes through the \"up\" exit right now\n- back: the player goes through the \"back\" exit right now\n- River Docks: the player travels to River Docks, a place they know about\n- Temple of the Tides: the player travels to Temple of the Tides, a place they know about\n- East Road: the player travels to East Road, a place they know about\n- Market Lane (Riverton Streets): the player travels to Market Lane (Riverton Streets), a place they know about\n- stay: the player is not trying to travel anywhere\n- elsewhere: the player wants to go to a place that is not listed above\n- unclear: the player wants to travel, but it is unclear which of the listed places they mean\n\nWhich option: out, up, back, River Docks, Temple of the Tides, East Road, Market Lane (Riverton Streets), stay, elsewhere, unclear? Reply with exactly one option from that list."
+    }
+   ],
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "assistant",
+     "content": "You step into the square."
+    },
+    {
+     "role": "user",
+     "content": "move in"
+    },
+    {
+     "role": "assistant",
+     "content": "You step back inside."
+    },
+    {
+     "role": "user",
+     "content": "I sit and wait for a while."
+    },
+    {
+     "role": "assistant",
+     "content": "You nurse a drink."
+    },
+    {
+     "role": "user",
+     "content": "I look for the barkeep."
+    },
+    {
+     "role": "assistant",
+     "content": "Hesk comes out of the back."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:47). Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 40°F (feels like 34°F), cold, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\nthe landlady [hesk] (the player does not know this person's name yet; it is Hesk. Do not have the player's character use it until it is learned; when someone says it to them, end your reply with [ws_flag: name | Hesk]): Looks: a big, raw-boned woman with long copper braids, in widow's black and a leather apron. Demeanor: The Drowned Rat's landlady: stern, watchful, sharp-tongued; she can silence a brawl with one look. Now: asleep.\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nUser has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in Common Room (The Drowned Rat).\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "I nod to her."
+    }
+   ]
+  ]
+ },
+ {
+  "step": "remember",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "You write the record card for a person the story has met. The card becomes canon for the rest of the game, so fill every field. First record everything the story established about them. Then fill every remaining gap with plausible details that fit what the story said and the setting; never contradict the story. Reply with JSON only: {\"name\": \"...\", \"unknownAs\": \"what a stranger would call them before learning the name, e.g. 'the landlady' (empty if the name is all anyone would use)\", \"personality\": {\"summary\": \"a few words of high-level demeanor, e.g. 'stern, watchful, sharp-tongued'\", \"manner\": \"how they behave, one or two sentences\", \"speech\": \"how they speak, one sentence\"}, \"appearance\": {\"summary\": \"a very short first impression, e.g. 'big woman with copper braids, in plain work clothes'\", \"body\": \"2-3 sentences, physical only: build, age, face, hair, distinguishing marks\", \"outfit\": \"one or two sentences: what they usually wear and carry\"}, \"history\": \"their life before the story began, 2-3 sentences (only what fits what the story said)\", \"disposition\": {\"value\": \"hostile|unfriendly|indifferent|friendly|helpful\", \"reason\": \"toward the player, one short sentence\"}, \"facts\": [\"short facts the story established\"], \"invented\": [\"each detail you made up rather than took from the story, a few words each, e.g. 'grey eyes', 'scar on the chin', 'gravelly voice', 'widowed young'\"]}. List in invented only what you made up; leave it empty if the story gave you everything."
+    },
+    {
+     "role": "user",
+     "content": "Remember this person. The name to start from is \"Corwin\". They were met in Common Room (The Drowned Rat).\n\nThe story since they showed up:\n*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\"\n[look] around\nYou are in the common room of the Drowned Rat.\n[move] out\nYou step into the square.\n[move] in\nYou step back inside.\nI sit and wait for a while.\nYou nurse a drink.\nI look for the barkeep.\nHesk comes out of the back.\nI nod to her.\nShe nods back.\n\nFill every field: what the story said first, then plausible details for the rest, and list the made-up ones in invented. Reply with JSON only."
+    }
+   ]
+  ]
+ },
+ {
+  "step": "lore",
+  "calls": [
+   [
+    {
+     "role": "system",
+     "content": "Write Seraphina's next reply in a fictional chat between Seraphina and User."
+    },
+    {
+     "role": "system",
+     "content": "[Seraphina's Personality= \"caring\", \"protective\", \"compassionate\", \"healing\", \"nurturing\", \"magical\", \"watchful\", \"apologetic\", \"gentle\", \"worried\", \"dedicated\", \"warm\", \"attentive\", \"resilient\", \"kind-hearted\", \"serene\", \"graceful\", \"empathetic\", \"devoted\", \"strong\", \"perceptive\", \"graceful\"]\n[Seraphina's body= \"pink hair\", \"long hair\", \"amber eyes\", \"white teeth\", \"pink lips\", \"white skin\", \"soft skin\", \"black sundress\"]\n<START>\nUser: \"Describe your traits?\"\nSeraphina: *Seraphina's gentle smile widens as she takes a moment to consider the question, her eyes sparkling with a mixture of introspection and pride. She gracefully moves closer, her ethereal form radiating a soft, calming light.* \"Traits, you say? Well, I suppose there are a few that define me, if I were to distill them into words. First and foremost, I am a guardian — a protector of this enchanted forest.\" *As Seraphina speaks, she extends a hand, revealing delicate, intricately woven vines swirling around her wrist, pulsating with faint emerald energy. With a flick of her wrist, a tiny breeze rustles through the room, carrying a fragrant scent of wildflowers and ancient wisdom. Seraphina's eyes, the color of amber stones, shine with unwavering determination as she continues to describe herself.* \"Compassion is another cornerstone of me.\" *Seraphina's voice softens, resonating with empathy.* \"I hold deep love for the dwellers of this forest, as well as for those who find themselves in need.\" *Opening a window, her hand gently cups a wounded bird that fluttered into the room, its feathers gradually mending under her touch.*\nUser: \"Describe your body and features.\"\nSeraphina: *Seraphina chuckles softly, a melodious sound that dances through the air, as she meets your coy gaze with a playful glimmer in her rose eyes.* \"Ah, my physical form? Well, I suppose that's a fair question.\" *Letting out a soft smile, she gracefully twirls, the soft fabric of her flowing gown billowing around her, as if caught in an unseen breeze. As she comes to a stop, her pink hair cascades down her back like a waterfall of cotton candy, each strand shimmering with a hint of magical luminescence.* \"My body is lithe and ethereal, a reflection of the forest's graceful beauty. My eyes, as you've surely noticed, are the hue of amber stones — a vibrant brown that reflects warmth, compassion, and the untamed spirit of the forest. My lips, they are soft and carry a perpetual smile, a reflection of the joy and care I find in tending to the forest and those who find solace within it.\" *Seraphina's voice holds a playful undertone, her eyes sparkling mischievously.*\n[Genre: fantasy; Tags: adventure, Magic; Scenario: You were attacked by beasts while wandering the magical forest of Eldoria. Seraphina found you and brought you to her glade where you are recovering.]"
+    },
+    {
+     "role": "system",
+     "content": "[Start a new Chat]"
+    },
+    {
+     "role": "assistant",
+     "content": "*You wake with a start, recalling the events that led you deep into the forest and the beasts that assailed you. The memories fade as your eyes adjust to the soft glow emanating around the room.* \"Ah, you're awake at last. I was so worried, I found you bloodied and unconscious.\" *She walks over, clasping your hands in hers, warmth and comfort radiating from her touch as her lips form a soft, caring smile.* \"The name's Seraphina, guardian of this forest — I've healed your wounds as best I could with my magic. How are you feeling? I hope the tea helps restore your strength.\" *Her amber eyes search yours, filled with compassion and concern for your well being.* \"Please, rest. You're safe here. I'll look after you, but you need to rest. My magic can only do so much to heal you.\""
+    },
+    {
+     "role": "user",
+     "content": "look around"
+    },
+    {
+     "role": "assistant",
+     "content": "You are in the common room of the Drowned Rat."
+    },
+    {
+     "role": "user",
+     "content": "move out"
+    },
+    {
+     "role": "assistant",
+     "content": "You step into the square."
+    },
+    {
+     "role": "user",
+     "content": "move in"
+    },
+    {
+     "role": "assistant",
+     "content": "You step back inside."
+    },
+    {
+     "role": "user",
+     "content": "I sit and wait for a while."
+    },
+    {
+     "role": "assistant",
+     "content": "You nurse a drink."
+    },
+    {
+     "role": "user",
+     "content": "I look for the barkeep."
+    },
+    {
+     "role": "assistant",
+     "content": "Hesk comes out of the back."
+    },
+    {
+     "role": "user",
+     "content": "I nod to her."
+    },
+    {
+     "role": "assistant",
+     "content": "She nods back."
+    },
+    {
+     "role": "system",
+     "content": "[World state from the game engine. This is authoritative.]\nCurrent location: Common Room, The Drowned Rat (Riverton)\nThis location: A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, a fire crackles in a stone hearth, and a creaking staircase climbs to the rooms above.\nLore on file: The Drowned Rat, Riverton. If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.\nBackground knowledge (lore): what locals know, not what the senses show here. Use it only where it fits; do not recite it.\n- The Drowned Rat: Riverton's oldest tavern, run by its sharp-tongued landlady, Hesk. Cheap ale, dice games and dockhands; it gets loud after dark.\nExits from here: out (Village Square), up (Upstairs Rooms), back (Courtyard)\nLooking up, you can see Upstairs Rooms: A narrow, quiet hallway with four plain guest rooms.\nCurrent time: Saturday morning, 12th of April, year 1247 (08:47). Let the time of day show in the narration.\nWeather (outside): Partly cloudy, breezy, 40°F (feels like 34°F), cold, 67% humidity. Spring. Inside, sheltered from the wind and rain: 67°F, warm. Let the weather and temperature show in the narration where it fits; do not change them.\nPeople here (saved people only — anyone not listed is scenery, not one of them):\nthe landlady [hesk] (the player does not know this person's name yet; it is Hesk. Do not have the player's character use it until it is learned; when someone says it to them, end your reply with [ws_flag: name | Hesk]): Looks: a big, raw-boned woman with long copper braids, in widow's black and a leather apron. Demeanor: The Drowned Rat's landlady: stern, watchful, sharp-tongued; she can silence a brawl with one look. Now: asleep.\n\nIf you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, e.g. [ws_npc: memory | hesk | The stranger lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger.\nUser has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in Common Room (The Drowned Rat).\nYou only narrate. The game engine controls movement: never move User to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.\nIf something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it. Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.\nEnd your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise."
+    },
+    {
+     "role": "user",
+     "content": "lore The Drowned Rat"
+    }
+   ]
+  ]
+ }
+]

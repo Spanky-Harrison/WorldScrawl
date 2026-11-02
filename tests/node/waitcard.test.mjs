@@ -1,4 +1,5 @@
 // Narrator waits (ws_wait tool, [ws_wait] tag, ws_flag wait) wait for the player on a Keep / Adjust / Discard card.
+import { extSource } from './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ test('the card stores the amount as the player would type it', () => {
     assert.equal(ext.waitAmount({ until: 'dawn', seconds: 1 }), 'until dawn');
 });
 test('Auto-keep waits defaults to off', () => {
-    const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+    const src = extSource();
     assert.match(src, /autoKeepWaits: false/);
 });
 test('wait wording is in the prompt file: clearly 15 minutes or more, best guess, not dialogue or travel, if unclear don\'t', () => {

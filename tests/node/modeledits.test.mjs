@@ -1,5 +1,6 @@
 // The change call (the model's map edits): its op list comes from the engine's OPS, story-made places get engine ids,
 // several new places work in one change, and "can't express this" is a plain answer.
+import { extSource } from './helpers.mjs';
 import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import { client, RIVERTON, TAVERN } from './helpers.mjs';
 import { OPS, OP_DOCS, opDocs, readChangeAnswer, applyPatch } from '../../plugin/ui/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
-const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+const src = extSource();
 const c = client(RIVERTON);
 
 test('change prompt: every editor op is documented, generated from OPS (create_place included)', () => {

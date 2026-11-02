@@ -1,3 +1,4 @@
+import { extSource } from './helpers.mjs';
 import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -116,7 +117,7 @@ test('expandable: an area-level false refuses discoveries; set_expandable edits 
 
 test('undescribed doors: prompts allow a door that plausibly fits, the intent offers it, the narration asks for the flag only if it fits', async () => {
     const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+    const src = extSource();
     const { DEFAULT_PROMPTS } = await import('./useprompts.mjs');
     const pt = id => DEFAULT_PROMPTS.prompts.find(e => e.id === id).text;
     const hint = pt('narration.discover_strict');

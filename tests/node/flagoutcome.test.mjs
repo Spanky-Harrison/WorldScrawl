@@ -1,4 +1,5 @@
 // A manual map flag always ends visibly: a proposal card, a "can't show this" note, "no map change found", or an error.
+import { extSource } from './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,7 +42,7 @@ test('Debug > Show map edit messages logs the map-edit call', () => {
     } finally { console.info = orig; ext.settings().showEditMessages = false; }
 });
 test('the flag button and the analysis cannot fail silently', () => {
-    const src = fs.readFileSync(new URL('../../extension/index.js', import.meta.url), 'utf8');
+    const src = extSource();
     assert.match(src, /flagMessage\(Number\(el\.getAttribute\('mesid'\)\)\)\.then\([^\n]*toastr\.error/);
     assert.match(src, /analyzeFlag\(id\)\.catch\(/);
     assert.match(src, /try \{\n\s+await ensurePrompts\(\);/);

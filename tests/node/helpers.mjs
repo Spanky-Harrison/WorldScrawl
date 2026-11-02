@@ -55,3 +55,7 @@ export function caplog(fn) {
     log.warning = (...a) => lines.push(a.join(' '));
     try { return [fn(), lines.join('\n')]; } finally { Object.assign(log, { info, warning }); }
 }
+
+/** All extension source text (index.js and its modules), for tests that check the source for a pattern. */
+export const extSource = () => fs.readdirSync(path.join(REPO, 'extension')).filter(f => /\.(m?js)$/.test(f)).sort()
+    .map(f => fs.readFileSync(path.join(REPO, 'extension', f), 'utf8')).join('\n');
