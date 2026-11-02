@@ -10,7 +10,7 @@ import path from 'node:path';
 import { groupPrompts, isLocked } from '../../plugin/ui/prompteditor.mjs';
 import { handlePrompts, hashText, storeFile } from '../../plugin/prompts.mjs';
 import { userRoot } from '../../plugin/index.mjs';
-import { parseNpcTag, takeNpcTags } from '../../plugin/npc.mjs';
+import { parseNpcTag, takeNpcTags } from '../../extension/npc.mjs';
 import { messageActivity } from '../../extension/activity.mjs';
 
 // ---- from prompt.test.mjs

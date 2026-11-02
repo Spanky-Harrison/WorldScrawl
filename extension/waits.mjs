@@ -2,7 +2,8 @@
 import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, noticeRow, lockRow, markPending, resolvedText } from './notices.mjs';
 import { render as P } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, normName, npcAt, recordDiff, foundEditOk, stampSummary } from './npc.mjs';
+import { normName } from './shared.mjs';
+import { NPC_KEY, FOUND_KEY, npcAt, recordDiff, foundEditOk, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';

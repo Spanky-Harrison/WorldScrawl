@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_KEY, npcPlayState } from '../../plugin/npc.mjs';
+import { NPC_KEY, npcPlayState } from '../../extension/npc.mjs';
 import { deleteCastNpc, loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { castRows, filterRows, formFromRecord, formProblems, markersAt, markersByPlace, recordFromForm, slugFor, stampRows, playSummary, within } from '../../plugin/ui/castdata.mjs';
 import { client, copytree, RIVERTON, tmpPath } from './helpers.mjs';
@@ -107,7 +107,7 @@ test('npcPlayState: stamps with message numbers, and an exportable record', () =
     assert.deepEqual(npcPlayState([], [], {}), []);
 });
 
-import { npcWhy, whoAt, narratorView, unsavedPeople, framesOf } from '../../plugin/npc.mjs';
+import { npcWhy, whoAt, narratorView, unsavedPeople, framesOf } from '../../extension/npc.mjs';
 import { recordChanges, chatStamps, formFromPlay, whyRows, chatStampLines } from '../../plugin/ui/castdata.mjs';
 
 const inspEnv = (hour, at = BAR) => ({

@@ -24,7 +24,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration | `onReplyForFlags`, `flagMessage`, `registerTools` |
 | waits.mjs | Waits: model and player waits, Keep/Discard, patch cards | `planWait`, `proposeWait`, `renderPatchCards` |
 | settings.mjs | The settings panel | `addSettingsPanel` |
-| npc.mjs | Copy of plugin/npc.mjs (a test checks they match). NPC records, flags, `judgeFound` / `foundEditOk` | see plugin/npc.mjs |
+| npc.mjs | NPC play: stamps, presence, schedules, flags and tags, lore, context slices, `judgeFound` / `foundEditOk` (browser only; the parts the server uses too are in plugin/shared/npc.mjs) | `framesOf`, `npcSlices`, `presentAt`, `takeNpcTags`, `recordDiff` |
 | actors.mjs | Per-actor positions and the party (browser only; the server never needs them) | `positionOf`, `playerAddress`, `positionsAt` |
 | shared.mjs | Loads plugin/shared/ once at startup from `<server>/shared/` (follows the Map server URL setting; a change reloads the page). If it fails, `sharedError` names the URL and startup shows it. Re-exports the prompt helpers (`render`, `setPrompts`, `hasPrompts`) | `calendar`, `patches`, `doorbar`, `weather`, `prompts`, `sharedError`, `sharedUrl` |
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
@@ -39,13 +39,14 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | index.mjs | Plugin entry; mounts the API at `/api/plugins/worldscrawl/` |
 | server.mjs | Framework-free API handler, routes incl. `POST /cast/places` |
 | world.mjs, position.mjs, changes.mjs, snapcache.mjs | World loading/validation, position resolver, per-chat changes, map snapshot cache |
-| npc.mjs, cast.mjs | NPC records and stamps (`judgeFound`, `foundEditOk`), cast files |
+| npc.mjs | Server-only NPC code: `validateRecord` (cast file checks) and `nearIndexFrom` |
+| cast.mjs | Cast files: load, save, export |
 | prompts.mjs, prompts/default.json | Prompt profiles per user; the default prompt text for every model call |
 | inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static serving of plugin/ui/ (`/ui/*`) and plugin/shared/ (`/shared/*`) |
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |
 | config.example.json, package.json | Config template, package metadata |
 | ui/ | The map window (browser only): `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, castdata, castpanel, changeedit, diffview, mapactions, mapdata, menus, patchform, picker, placeform, prompteditor. The extension also imports patchform and diffview from `/ui/` |
-| shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer) |
+| shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer), npc (record basics both sides use: `exportRecord`, `freeId`, `nameIn`, `normName`, `NPC_ID`, `NPC_TOKEN`, schedules' place lookup) |
 
 ## tests/
 
