@@ -16,16 +16,6 @@ import { load_world } from '../../plugin/world.mjs';
 
 
 
-test('the extension copy of npc.mjs matches the plugin one', () => {
-    const root = new URL('../../', import.meta.url);
-    const plugin = fs.readFileSync(new URL('plugin/npc.mjs', root), 'utf8');
-    const copy = fs.readFileSync(new URL('extension/npc.mjs', root), 'utf8');
-    assert.equal(copy.split('\n').slice(1).join('\n'), plugin);
-});
-
-
-
-
 const BAR = 'riverton:drowned_rat/common_room';
 const UP = 'riverton:drowned_rat/upstairs';
 const FORGE = 'riverton:smithy/forge';

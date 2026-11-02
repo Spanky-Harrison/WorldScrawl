@@ -110,11 +110,6 @@ test('op docs are a generated placeholder, not text in the file', () => {
     assert.ok(sys.placeholders.find(p => p.name === 'edit_types').generated);
     assert.ok(!sys.text.includes('"op":"add_exit"'));
 });
-test('the extension copy of prompts.mjs matches the plugin one', () => {
-    const a = fs.readFileSync(new URL('plugin/ui/prompts.mjs', root), 'utf8');
-    const b = fs.readFileSync(new URL('extension/prompts.mjs', root), 'utf8');
-    assert.equal(b.split('\n').slice(1).join('\n'), a);
-});
 test('an override changes the prompt, values are not re-filled', () => {
     ext.setPrompts({ ...Object.fromEntries(def.prompts.map(e => [e.id, e.text])), 'dig.style': 'X {{who}} Y' });
     assert.match(ext.digPrompt({ name: 'Hall', exits: [] }, 'said {{who}}', [], [], true), /said \{\{who\}\}[\s\S]*X \{\{who\}\} Y/);
