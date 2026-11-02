@@ -2,8 +2,7 @@
 // can stand somewhere else. Nothing in the UI places that second actor yet.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import { PLAYER, readPositions, playerAddress, partyAddresses, partyIds, followers, positionStamp, placeStamp, replayPositions, positionsAt, positionOf, actorHistory } from '../../plugin/actors.mjs';
+import { PLAYER, readPositions, playerAddress, partyAddresses, partyIds, followers, positionStamp, placeStamp, replayPositions, positionsAt, positionOf, actorHistory } from '../../extension/actors.mjs';
 import { resolveActors, relocateMap } from '../../plugin/position.mjs';
 import { SnapshotCache } from '../../plugin/snapcache.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
@@ -15,13 +14,6 @@ import './ststub.mjs';
 
 const ext = await import('../../extension/index.js');
 const c = client(RIVERTON);
-const root = new URL('../../', import.meta.url);
-
-test('the extension copy of actors.mjs matches the plugin one', () => {
-    const plugin = fs.readFileSync(new URL('plugin/actors.mjs', root), 'utf8');
-    const copy = fs.readFileSync(new URL('extension/actors.mjs', root), 'utf8');
-    assert.equal(copy.split('\n').slice(1).join('\n'), plugin);
-});
 
 test('old-format stamps load as the player\'s position', () => {
     const chat = [
