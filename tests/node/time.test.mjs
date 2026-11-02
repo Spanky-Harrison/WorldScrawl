@@ -113,3 +113,20 @@ test('bad start_date or calendar in world.json is a load error', () => {
 });
 import fs from 'node:fs';
 function require_write(p, j) { fs.writeFileSync(p, JSON.stringify(j)); }
+
+test('checkCalendar: each bad field gets its own error', () => {
+    const ok = { hours_per_day: 24, days_of_week: ['A'], months: [{ name: 'M', days: 3 }] };
+    const bad = [
+        ['x', /must be an object/],
+        [{ ...ok, hours_per_day: 0 }, /hours_per_day/],
+        [{ ...ok, months: [] }, /"months" must be a non-empty list/],
+        [{ ...ok, months: [{ days: 3 }] }, /needs a "name"/],
+        [{ ...ok, months: [{ name: 'M', days: 3 }, { name: 'm', days: 3 }] }, /used twice/],
+        [{ ...ok, months: [{ name: 'M', days: 0 }] }, /"days" must be/],
+        [{ ...ok, months: [{ name: 'M', days: 3, leap_every: 0 }] }, /"leap_every"/],
+        [{ ...ok, months: [{ name: 'M', days: 3, leap_days: -1 }] }, /"leap_days"/],
+        [{ ...ok, first_weekday: -1 }, /"first_weekday"/],
+    ];
+    for (const [cal, re] of bad) assert.throws(() => checkCalendar(cal), re);
+    assert.equal(checkCalendar(null), GREGORIAN);
+});

@@ -5,3 +5,4 @@ worlds/*
 plugin/config.json
 /data/
 tests/e2e/*.actual
+tests/e2e/.assembled.mjs

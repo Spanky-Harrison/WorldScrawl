@@ -1,0 +1,68 @@
+import { chromium } from 'playwright-core';
+const E2E_TMP = process.env.E2E_TMP || '/tmp';
+const BASE = `http://localhost:${process.env.E2E_PORT || 8767}/`;
+const FAKE = `http://127.0.0.1:${process.env.E2E_FAKE_PORT || 9098}`;
+let failures = 0;
+const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} ${extra}`); if (!ok) failures++; };
+const pickSet = (loc, v) => loc.evaluate((el, x) => el.setValue(x), v); // a map pick field's value, as a pick sets it
+const queue = q => fetch(`${FAKE}/__queue`, { method: 'POST', body: JSON.stringify(q) });
+
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'], headless: true });
+try {
+    const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
+    page.on('console', m => { if (m.type() === 'error' || /WorldScrawl/.test(m.text())) console.log('[console]', m.type(), m.text().slice(0, 300)); });
+    const apiCalls = [];
+    const apiUrls = [];
+    const typedGets = []; // GETs to the map server that carry a Content-Type (would force a CORS preflight)
+    const API = '/api/plugins/worldscrawl';
+    // The test's own direct calls to the map server (stFetch) are not the extension's and are not recorded.
+    page.on('request', r => { const u = r.url(); if (!u.includes(API + '/') || r.headers()['x-e2e-direct']) return; apiCalls.push(decodeURIComponent(new URL(u).pathname.slice(API.length))); apiUrls.push(u); if (r.method() === 'GET' && r.headers()['content-type']) typedGets.push(u); });
+    /** Call the map server plugin the way the extension does: same origin, with SillyTavern's CSRF token. */
+    const stFetch = async (path, opts = {}) => {
+        const r = await page.evaluate(async ([url, o]) => {
+            const h = { ...SillyTavern.getContext().getRequestHeaders(), ...(o.headers ?? {}), 'X-E2E-Direct': '1' };
+            if (!o.body) delete h['Content-Type'];
+            const res = await fetch(url, { ...o, headers: h });
+            return { status: res.status, ok: res.ok, text: await res.text() };
+        }, [API + path, opts]);
+        return { ...r, json: async () => JSON.parse(r.text) };
+    };
+    page.on('pageerror', e => console.log('[pageerror]', e.message));
+    await page.goto(BASE);
+    await page.waitForSelector('#send_textarea', { timeout: 90000 });
+    const ok = page.locator('dialog[open] .popup-button-ok').first();
+    try { await ok.waitFor({ timeout: 8000 }); await ok.click(); } catch {}
+    await page.waitForTimeout(1500);
+
+    await page.waitForSelector('input[name="worldscrawl_mode"]', { state: 'attached', timeout: 60000 });
+    check('Enable in new chats is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.enableNewChats === false && !document.getElementById('worldscrawl_enable_new').checked));
+    await page.evaluate(() => { const b = document.getElementById('worldscrawl_enable_new'); b.checked = true; b.dispatchEvent(new Event('change')); }); // the rest of the run uses WorldScrawl chats
+    const toolNames = () => page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
+    check('tools off by default', !(await toolNames()).includes('ws_move'));
+    check('no tool nudge by default', await page.evaluate(() => !SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value));
+    check('default mode is typed moves', await page.evaluate(() => document.querySelector('input[name="worldscrawl_mode"]:checked')?.value === 'typed'));
+    check('old checkboxes gone', await page.locator('#worldscrawl_use_tools, #worldscrawl_parse_intent').count() === 0);
+    const mig = await page.evaluate(async () => {
+        const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const out = [];
+        const p = m.parseIntentAnswer;
+        out.push(p('<think>they want to leave</think>\nOut.', ['out', 'up']), p('Answer: Elsewhere', ['out']), p('STAY', ['out']), p('the temple', ['out']), p('<think>unfinished', ['out']));
+        out.push(m.parseYesNo('<think>hmm</think>\nYes.'), m.parseYesNo('maybe'));
+        const g = { a: ['b'], b: ['a', 'c'], c: ['b'] };
+        const getLoc = async x => ({ exits: g[x.split(':')[1]].map(t => ({ direction: 'to_' + t, to: 'r:' + t })) });
+        out.push(JSON.stringify(await m.findPath('r:a', 'r:c', getLoc)));
+        // Routing limits: intermediates must be stood in; hidden exits never used.
+        const G = { a: [['east', 'b'], ['south', 'd'], ['secret', 'c', true]], b: [['east', 'c']], d: [['east', 'e']], e: [['north', 'c']], c: [] };
+        const gl = async x => ({ exits: G[x.split(':')[1]].map(([direction, t, hidden]) => ({ direction, to: 'r:' + t, hidden: !!hidden })) });
+        const path = async (vis) => JSON.stringify((await m.findPath('r:a', 'r:c', gl, new Set(vis.map(v => 'r:' + v))))?.map(x => x.direction) ?? null);
+        window.__routeTests = [await path(['a']), await path(['a', 'd', 'e']), await path(['a', 'b']), await path(['a', 'b', 'd', 'e'])];
+        const hid = { exits: [{ direction: 'north', to_name: 'Secret Vault', hidden: true }, { direction: 'out', to_name: 'Village Square' }] };
+        out.push(m.exitsText(hid), m.exitLabel(hid.exits[0]), m.revealsDestination(hid.exits[1]));
+        return out;
+    });
+    check('answer parsing (think tags, prefixes, exact match)', JSON.stringify(mig) === '["out","elsewhere","stay",null,null,"yes",null,"[{\\"direction\\":\\"to_b\\",\\"to\\":\\"r:b\\"},{\\"direction\\":\\"to_c\\",\\"to\\":\\"r:c\\"}]","Exits: north, out (Village Square)","north",true]', JSON.stringify(mig));
+    const rt = await page.evaluate(() => window.__routeTests);
+    check('route refused when shortest path needs an unvisited room', rt[0] === 'null', JSON.stringify(rt));
+    check('route goes the long way via visited rooms only', rt[1] === '["south","east","north"]', JSON.stringify(rt));
+    check('hidden exit never used for routing', rt[2] === '["east","east"]' && rt[3] === '["east","east"]', JSON.stringify(rt));
+    check('slash commands registered', await page.evaluate(() => { const p = SillyTavern.getContext().SlashCommandParser.commands; return !!p['ws-go'] && !!p['ws-exits']; }));

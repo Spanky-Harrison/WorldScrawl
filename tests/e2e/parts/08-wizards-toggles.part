@@ -1,0 +1,179 @@
+    // ---- Map wizards (PR B): cascade on the last place (Confirm / Cancel / Add a place first), Move with an id clash
+    // (rename prefilled), Delete subregion moving its places (= merge), Create region with Expand with AI, start region.
+    const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; const ps = m.extra?.worldscrawl_patches ?? []; return { grew: c.chat.length > n || ps.length > 1, sys: m.is_system, ops: ps.at(-1)?.ops ?? [], n: c.chat.length }; }, n); // a run of edits shares one carrier
+    const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
+    const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
+    const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action], .side .editlive-pane`).first().waitFor({ timeout: 10000 }); };
+    // No form or wizard prints "null" for a missing tag, reset or button (Edit region/subregion/place and every wizard).
+    const nullHits = [];
+    const sideText = () => ui.evaluate(() => document.querySelector('.side')?.innerText ?? '');
+    for (const t of ['region:riverton', 'sub:riverton:drowned_rat', 'riverton:drowned_rat/common_room']) {
+        await ui.evaluate(x => globalThis.wsInspect(x), t); await ui.locator('.side .editlive').waitFor({ timeout: 10000 }); await ui.click('.side .editlive');
+        await ui.locator('.side .placeform').waitFor({ timeout: 10000 }); await ui.waitForTimeout(300);
+        if (/\bnull\b/.test(await sideText())) nullHits.push(`edit ${t}`);
+        if (t.includes('/')) { const empty = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit .pf-radios')].filter(g => !g.querySelector('input:checked')).map(g => g.closest('.pf-row')?.dataset.field));
+            check('Edit place: every exit radio group (type, See/Hear destination) has the effective value selected', !empty.length, JSON.stringify(empty));
+            const why = await ui.evaluate(() => document.querySelector('.side .pf-exit .pf-row[data-field="sight"] .pf-from')?.textContent ?? '');
+            check('Edit place: See destination shows a default/set-here tag', why === 'default' || why === 'set here', why);
+            const doorLabels = await ui.evaluate(() => { const b = [...document.querySelectorAll('.side .pf-exit')].find(x => x.querySelector('.pf-door .pf-row[data-field="closed_sight"]')); return b ? [...b.querySelectorAll('.pf-sense-head, .pf-row[data-field="sight"] .pf-label, .pf-row[data-field="sound"] .pf-label, .pf-door .pf-row[data-field^="closed_"] .pf-label')].map(r => r.textContent) : null; });
+            check('Edit place: with a door, "Sense transparency – unblocked" on each side and "– blocked" in the Door block', JSON.stringify(doorLabels) === JSON.stringify(['Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – unblocked', 'See destination', 'Hear destination', 'Sense transparency – blocked', 'See destination', 'Hear destination']), JSON.stringify(doorLabels));
+            const plainHead = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit')].find(x => !x.querySelector('.pf-door .pf-row'))?.querySelector('.pf-sense-head')?.textContent ?? null);
+            check('Edit place: without a door the heading is just "Sense transparency"', plainHead === null || plainHead === 'Sense transparency', plainHead); }
+    }
+    for (const [t, a] of [['world', 'create_region'], ['region:riverton', 'create_subregion'], ['sub:riverton:drowned_rat', 'create_place'], ['sub:riverton:drowned_rat', 'merge_places'],
+        ['sub:riverton:drowned_rat', 'delete_subregion'], ['sub:riverton:drowned_rat', 'move_subregion'], ['riverton:drowned_rat/common_room', 'move_place']]) {
+        try { await mwAct(t, a); await ui.waitForTimeout(300); if (/\bnull\b/.test(await sideText())) nullHits.push(`${a} on ${t}`); } catch (e) { nullHits.push(`${a} on ${t}: ${e.message.split('\n')[0]}`); }
+    }
+    check('no edit form or wizard contains the text "null"', !nullHits.length, JSON.stringify(nullHits));
+    const mwFORGE = 'riverton:smithy/forge';
+    let mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.evaluate(() => globalThis.wsInspect('sub:riverton:smithy')); await ui.locator('.side .mapact[data-action="create_place"]').waitFor({ timeout: 10000 });
+    const mwSubBtns = await ui.evaluate(() => [...document.querySelectorAll('.side .mapact')].map(b => b.textContent));
+    check('subregion inspector: Create place, Merge places, Move subregion, Delete subregion beside Edit', JSON.stringify(mwSubBtns) === JSON.stringify(['Create place', 'Merge places', 'Move subregion', 'Delete subregion']), JSON.stringify(mwSubBtns));
+    await mwAct(mwFORGE, 'delete_place');
+    const mwCasc = await ui.evaluate(() => ({ t: document.querySelector('.side .mw-cascade')?.textContent ?? '', b: [...document.querySelectorAll('.side .mapaction button')].map(b => b.textContent) }));
+    check('Delete the last place: required cascade warning with Confirm / Cancel / Add a place first', /Deleting the last place in Brask's Smithy will also delete Brask's Smithy/.test(mwCasc.t) && ['Confirm', 'Cancel', 'Add a place first'].every(x => mwCasc.b.includes(x)), JSON.stringify(mwCasc));
+    await ui.click('.side .mw-addfirst');
+    // Create place is the Edit place form, empty: every field, both sides of each exit named, one Door block.
+    await ui.locator('.side .editlive-pane[data-mode="create"]').waitFor({ timeout: 10000 });
+    const cpForm = await ui.evaluate(() => { const p = document.querySelector('.side .editlive-pane'); return { h: p.querySelector('h4')?.textContent, fields: [...p.querySelectorAll('.placeform > .pf-row')].map(r => r.dataset.field), sides: [...p.querySelectorAll('.pf-exit .pf-side')].map(s => s.dataset.side), doors: p.querySelectorAll('.pf-exit .pf-door').length, rz: getComputedStyle(p.querySelector('textarea')).resize }; });
+    check('Create place: the Edit place form, empty, with both exit sides, one Door block and vertical-only text boxes',
+        /Create place in Brask's Smithy/.test(cpForm.h) && ['name', 'description', 'exposure'].every(f => cpForm.fields.includes(f)) && JSON.stringify(cpForm.sides) === '["there","back"]' && cpForm.doors === 1 && cpForm.rz === 'vertical', JSON.stringify(cpForm));
+    await ui.fill('.side .placeform > .pf-row[data-field="name"] input', 'Coal Shed');
+    await ui.fill('.side .placeform > .pf-row[data-field="description"] textarea', 'Sacks of coal.');
+    await ui.click('.side .pf-exit .wspick-choose');
+    await ui.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    const pkOn = await ui.evaluate(() => ({ t: document.querySelector('.wspick-banner')?.innerText ?? '', p: globalThis.wsPicking() }));
+    await ui.click('.wspick-cancel');
+    const pkOff = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), name: document.querySelector('.side .placeform > .pf-row[data-field="name"] input')?.value, p: globalThis.wsPicking() }));
+    check('Pick mode: a big "Picking exit destination…" banner with Cancel; the form comes back intact on Cancel',
+        /Picking exit destination/.test(pkOn.t) && /Cancel/.test(pkOn.t) && pkOn.p?.kind === 'room' && !pkOff.b && pkOff.name === 'Coal Shed' && pkOff.p === null, JSON.stringify([pkOn, pkOff]));
+    await pickSet(ui.locator('.side .pf-exit .wspick'), mwFORGE);
+    await ui.fill('.side .pf-exit .pf-dir[data-field="direction"]', 'north');
+    const cpSides = await ui.evaluate(() => ({ heads: [...document.querySelectorAll('.side .pf-exit .pf-side-head')].map(h => h.textContent), back: document.querySelector('.side .pf-exit .pf-dir[data-field="back_direction"]')?.value }));
+    check('Create place: exit sides read "From Coal Shed, go ___ to reach …" / "From …, go ___ to get back", the way back filled in',
+        /^From Coal Shed, go\s*to reach Brask.s Smithy$/.test(cpSides.heads[0] ?? '') && /^From Brask.s Smithy, go\s*to get back$/.test(cpSides.heads[1] ?? '') && cpSides.back === 'south', JSON.stringify(cpSides));
+    try { await ui.waitForFunction(() => /Coal Shed/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('Create place: the diff shows the new place before Submit', /Coal Shed/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    await ui.click('.side button.pf-submit');
+    try { await ui.waitForFunction(() => document.querySelector('.side .mapaction')?.dataset.action === 'delete_place', null, { timeout: 12000 }); } catch {}
+    const mwCp = await mwLastMsg(mwNW);
+    const mwBack = await ui.evaluate(() => ({ a: document.querySelector('.side .mapaction')?.dataset.action, casc: !!document.querySelector('.side .mw-cascade'), sub: !!document.querySelector('.side .mw-submit') }));
+    check('Add a place first: stamps create_place (with its exit) and returns to the delete, now without the cascade', mwCp.grew && mwCp.sys && mwCp.ops[0]?.op === 'create_place' && mwCp.ops[0]?.exits?.[0]?.to === mwFORGE && mwBack.a === 'delete_place' && !mwBack.casc && mwBack.sub, JSON.stringify([mwCp, mwBack]));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwDp = await mwLastMsg(mwCp.n);
+    check('Delete place: stamps remove_location', mwDp.grew && mwDp.ops[0]?.op === 'remove_location' && mwDp.ops[0]?.loc === mwFORGE, JSON.stringify(mwDp));
+    await mwCut(mwNW);
+    // Move with a clash: the rename box is prefilled with a suggested unique id; never overwritten.
+    mwNW = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await mwAct('riverton:drowned_rat/common_room', 'move_place');
+    // A real pick: search shows full paths, a result jumps the map there, double-click asks "Choose …?", Yes fills it.
+    await ui.click('.side .mw-row[data-field="dest"] .wspick-choose');
+    await ui.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    await ui.fill('.wspick-search', 'gilded');
+    const pkRes = await ui.evaluate(() => [...document.querySelectorAll('.wspick-results li')].map(li => li.textContent));
+    await ui.click('.wspick-results li[data-id="riverton:gilded_goose"]');
+    const pkMap = await ui.evaluate(() => ({ p: globalThis.wsPicking(), ok: !!document.querySelector('.node.pickable[data-id="sub:riverton:gilded_goose"]'), dim: !!document.querySelector('.node.pickdim[data-id="sub:riverton:drowned_rat"]') }));
+    await ui.dispatchEvent('.node[data-id="sub:riverton:gilded_goose"]', 'dblclick');
+    const pkQ = await ui.evaluate(() => document.querySelector('.wspick-confirm')?.innerText ?? '');
+    await ui.click('.wspick-yes');
+    const pkDone = await ui.evaluate(() => ({ b: !!document.querySelector('.wspick-banner'), v: document.querySelector('.side .mw-row[data-field="dest"] .wspick')?.value, shown: document.querySelector('.side .mw-row[data-field="dest"] .wspick-value')?.textContent }));
+    check('Pick mode: search results carry full paths; picking one opens its level with valid targets highlighted and the edited one dimmed',
+        pkRes.some(t => / › .*Gilded/.test(t)) && pkMap.p?.layer === 'riverton:' && pkMap.ok && pkMap.dim, JSON.stringify([pkRes, pkMap]));
+    check('Pick mode: double-click asks "Choose …?", Yes fills the field (full path) and restores the form', /^Choose .*Gilded.*\?/.test(pkQ) && !pkDone.b && pkDone.v === 'riverton:gilded_goose' && / › /.test(pkDone.shown), JSON.stringify([pkQ, pkDone]));
+    await ui.locator('.side .mw-rename').waitFor({ timeout: 8000 });
+    check('Move place onto a taken id: rename prompt prefilled with a suggested id', (await ui.inputValue('.side .mw-rename')) === 'drowned_rat_common_room');
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwMp = await mwLastMsg(mwNW);
+    check('Move place: stamps move_location with the new id', mwMp.grew && mwMp.ops[0]?.op === 'move_location' && mwMp.ops[0]?.area === 'riverton:gilded_goose' && mwMp.ops[0]?.id === 'drowned_rat_common_room', JSON.stringify(mwMp));
+    await mwCut(mwNW);
+    // Delete a subregion, moving its places into another (how two subregions merge), clashes renamed.
+    await mwAct('sub:riverton:gilded_goose', 'delete_subregion');
+    await ui.selectOption('.side .mw-row[data-field="contents"] select', 'move');
+    await pickSet(ui.locator('.side .mw-row[data-field="into"] .wspick'), 'riverton:drowned_rat');
+    const mwRen = await ui.evaluate(() => [...document.querySelectorAll('.side .mw-rename')].map(i => i.value));
+    check('Delete subregion → move places: every clashing id gets a prefilled rename', JSON.stringify(mwRen) === JSON.stringify(['gilded_goose_common_room', 'gilded_goose_upstairs']), JSON.stringify(mwRen));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwDs = await mwLastMsg(mwNW);
+    check('Delete subregion with move: stamps remove_area with into and the renames', mwDs.grew && mwDs.ops[0]?.op === 'remove_area' && mwDs.ops[0]?.contents === 'move' && mwDs.ops[0]?.into === 'riverton:drowned_rat' && mwDs.ops[0]?.ids?.common_room === 'gilded_goose_common_room', JSON.stringify(mwDs));
+    await mwCut(mwNW);
+    // The starting region can't be deleted.
+    await mwAct('region:riverton', 'delete_region');
+    check('Delete region: the starting region is refused', /starting region/.test(await ui.evaluate(() => document.querySelector('.side .mw-blocked')?.textContent ?? '')) && await ui.isDisabled('.side .mw-submit'));
+    // Create region (world level) with Expand with AI: the prompt holds the exit's neighbor, never the whole world.
+    await mwAct('world', 'create_region');
+    await ui.fill('.side .mw-row[data-field="region_name"] input', 'Fen Marsh');
+    await ui.fill('.side .mw-row[data-field="sub_name"] input', 'Reeds');
+    await ui.fill('.side .mw-row[data-field="place_name"] input', 'Reed Hut');
+    await ui.click('.side .mw-addexit');
+    await pickSet(ui.locator('.side .mw-exit .wspick').first(), 'riverton:east_road/road');
+    await ui.fill('.side .mw-row[data-field="place_description"] textarea', 'a hut');
+    await queue([{ content: 'A hut on stilts above black water.' }]);
+    const mwNReq = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await ui.click('.side .mapaction .mw-ai >> nth=-1');
+    try { await ui.waitForFunction(() => /stilts/.test(document.querySelector('.side .mw-row[data-field="place_description"] textarea')?.value ?? ''), null, { timeout: 20000 }); } catch {}
+    const mwReqs = (await (await fetch(`${FAKE}/__requests`)).json()).slice(mwNReq), mwPr = JSON.stringify(mwReqs.at(-1)?.messages ?? []);
+    check('Expand with AI: fills the field from the model', /stilts/.test(await ui.inputValue('.side .mw-row[data-field="place_description"] textarea')));
+    check('Expand with AI: the prompt has the draft and the exit\'s neighbor, not the whole world', /a hut/.test(mwPr) && /East Road|road/i.test(mwPr) && !/Temple of the Tides|Larkspur/.test(mwPr), mwPr.slice(0, 600));
+    await ui.click('.side .mw-submit'); await mwSavedWait();
+    const mwCr = await mwLastMsg(mwNW);
+    check('Create region: stamps create_region with its first subregion and starting place', mwCr.grew && mwCr.ops[0]?.op === 'create_region' && mwCr.ops[0]?.subregion?.name === 'Reeds' && mwCr.ops[0]?.subregion?.place?.exits?.[0]?.to === 'riverton:east_road/road', JSON.stringify(mwCr));
+    await mwCut(mwNW);
+    // ---- Turning past changes off and on again: dependents confirm, can't-apply notes, hidden notes, inspector toggle.
+    const BURNT = 'riverton:drowned_rat/burnt_inn', YARD = 'riverton:drowned_rat/courtyard';
+    const nTog = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    const stamped = await page.evaluate(async ([mod, CR, YARD, BURNT]) => {
+        const m = await import(mod);
+        const a = await m.liveEdit([{ op: 'merge', locs: [CR, YARD], id: 'burnt_inn', name: 'Burnt Inn', description: 'Ash and beams.' }], 'fire', { separate: true });
+        const b = await m.liveEdit([{ op: 'set_description', loc: BURNT, text: 'Soot everywhere.' }], 'soot', { separate: true }); // its own message: this block toggles across messages
+        m.renderPatchCards(); return [a, b];
+    }, [wsMod, CR, YARD, BURNT]);
+    check('toggle setup: two stamped changes, the second built on the first', stamped.every(r => r.ok) && stamped[0].msg === nTog && stamped[1].msg === nTog + 1, JSON.stringify(stamped));
+    const tA = nTog, tB = nTog + 1;
+    const cardA = page.locator(`#chat .mes[mesid="${tA}"] .worldscrawl_patchcard`), cardB = page.locator(`#chat .mes[mesid="${tB}"] .worldscrawl_patchcard`);
+    for (const k of [tA, tB]) { const d = page.locator(`#chat .mes[mesid="${k}"] details.worldscrawl_carrier`); await d.waitFor({ timeout: 10000 }); if (!(await d.evaluate(e => e.open))) await d.locator('summary').first().click(); } // carriers start collapsed
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).waitFor({ timeout: 10000 });
+    check('kept change cards have a Turn off button', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 1);
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
+    const conf = page.locator('.worldscrawl_confirm');
+    await conf.waitFor({ timeout: 10000 });
+    const confText = await conf.innerText();
+    check('turning off asks first, listing the later change that needs it', confText.includes(`#${tB}`) && /Turn off all/.test(confText) && /Just this one/.test(confText) && /Cancel/.test(confText), confText);
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Cancel' }).click(); await page.waitForTimeout(500);
+    check('Cancel leaves it on, no note', await page.evaluate(([a, n]) => { const c = SillyTavern.getContext(); return !c.chat[a].extra.worldscrawl_patches[0].off && c.chat.length === n; }, [tA, tB + 1]));
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
+    await conf.waitFor({ timeout: 10000 });
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Just this one' }).click(); await page.waitForTimeout(1500);
+    const off1 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off ?? false, kept: c.chat[a].extra.worldscrawl_patches[0].ops.length, mes: m.mes, sys: m.is_system, notice: m.extra?.worldscrawl_notice }; }, [tA, tB]);
+    check('Just this one: only it is turned off, still stored on its message', off1.a === true && off1.b === false && off1.kept === 1, JSON.stringify(off1));
+    check('a hidden note says what was turned off', off1.mes === `Map edit: turned off the change from #${tA}` && off1.sys === true && off1.notice === true, JSON.stringify(off1));
+    try { await cardB.locator('.worldscrawl_inactive').waitFor({ timeout: 10000 }); } catch {}
+    check('the later change that needed it shows a greyed Inactive note naming why', (await cardB.innerText()).includes(`Inactive: depends on message #${tA}, which is turned off`), await cardB.innerText());
+    check('the inactive card hides Turn off and keeps Undo', await cardB.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).count() === 0 && await cardB.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).count() === 1, await cardB.innerText());
+    check('turned-off card offers Turn on', await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).count() === 1);
+    const mapCtxNow = await page.evaluate(async mod => { const m = await import(mod); return { changes: m.chatChanges(), now: m.chatElapsed(), world: SillyTavern.getContext().extensionSettings.worldscrawl.world || '' }; }, wsMod);
+    const mapRes = await stFetch(`/rooms${mapCtxNow.world ? `?world=${encodeURIComponent(mapCtxNow.world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addresses: [CR], changes: mapCtxNow.changes, now: mapCtxNow.now }) });
+    const mapOk = [mapRes.status, mapRes.ok ? (await mapRes.json()).rooms?.length : mapRes.text];
+    check('the map still works with the change off (the merged room is back)', mapOk[0] === 200 && mapOk[1] === 1, JSON.stringify(mapOk));
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).click(); await page.waitForTimeout(1500);
+    try { await page.waitForFunction(b => !document.querySelector(`#chat .mes[mesid="${b}"] .worldscrawl_cant_apply`), tB, { timeout: 10000 }); } catch {}
+    const on1 = await page.evaluate(a => { const c = SillyTavern.getContext(); return { off: c.chat[a].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, tA);
+    check('Turn on puts it back (with its own hidden note) and the red note goes', on1.off === undefined && on1.mes === `Map edit: turned on the change from #${tA}` && await cardB.locator('.worldscrawl_cant_apply').count() === 0, JSON.stringify(on1));
+    // The same toggle in the map window's inspector, Changes tab.
+    let tabOk = false;
+    for (let k = 0; k < 5 && !tabOk; k++) {
+        await ui.click(`.node[data-id="${BURNT}"]`).catch(() => {}); await ui.waitForTimeout(1200);
+        await ui.click('.side .tabs button:has-text("Changes")').catch(() => {}); await ui.waitForTimeout(500);
+        tabOk = await ui.locator(`.side li.change:has-text("Message #${tA}") .togglechange`).count() === 1;
+    }
+    check('inspector Changes tab has a Turn off button per change', tabOk);
+    await ui.click(`.side li.change:has-text("Message #${tA}") .togglechange`);
+    const uconf = ui.locator('.toggle-confirm');
+    try { await uconf.waitFor({ timeout: 10000 }); } catch {}
+    check('inspector asks first too, listing the dependent', (await uconf.count()) === 1 && (await uconf.innerText()).includes(`#${tB}`));
+    await uconf.locator('button:has-text("Turn off all")').click(); await page.waitForTimeout(2000);
+    const off2 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(); return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, [tA, tB]);
+    check('inspector Turn off all: both off, one hidden note naming both', off2.a === true && off2.b === true && off2.mes === `Map edit: turned off the change from #${tA} (and the changes from #${tB})`, JSON.stringify(off2));
+    try { await ui.waitForSelector(`.node[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
+    check('map shows the original rooms again', await ui.locator(`.node[data-id="${CR}"]`).count() === 1 && await ui.locator(`.node[data-id="${BURNT}"]`).count() === 0);
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), tA); await page.waitForTimeout(1500);

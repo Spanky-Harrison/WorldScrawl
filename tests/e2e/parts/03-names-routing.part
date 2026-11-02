@@ -1,0 +1,225 @@
+    // ---- New map: notes, two "Upstairs Rooms", routing via Market Lane.
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    const tour = ['out', 'west', 'inn', 'up', 'down', 'out', 'east', 'in'];
+    await queue(tour.map(t => ({ content: 'tour ' + t })));
+    for (const d of tour) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
+    check('tour back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    narr = JSON.stringify((await lastReq()).messages);
+    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Lore on file: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm')); await waitReqs(); // Hesk pours drinks from 16:00
+    await queue([{ content: 'Hesk eyes you.' }]);
+    await send('[lore] The Drowned Rat', 1);
+    narr = JSON.stringify((await lastReq()).messages);
+    const npcLine = await page.evaluate(async mod => { const m = await import(mod), c = SillyTavern.getContext(), id = c.chat.length - 1; return { line: [...document.querySelectorAll('#chat .mes')].at(-1)?.querySelector('.worldscrawl_npcs_here')?.textContent ?? null, names: m.namedNpcsAt(c.chat, id, c.chat[id].extra?.worldscrawl_location) }; }, '/scripts/extensions/third-party/WorldScrawl/index.js');
+    check('footer: Named NPCs present lists the carded NPCs here (Hesk in the tavern), display only', npcLine.names.length > 0 && npcLine.line === 'Named NPCs present: ' + npcLine.names.join(', ') && !narr.includes('Named NPCs present'), JSON.stringify(npcLine));
+    check('lore: [lore] feeds the tavern lore as background knowledge, {{npc:hesk}} as a name', narr.includes('Background knowledge (lore)') && narr.includes("Riverton's oldest tavern") && narr.includes('Hesk') && !narr.includes('{{npc:') && !narr.includes('Riverton is a small'), narr.slice(0, 400));
+    const lr = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
+    check('lore: the [lore] request is stamped {swipe, place, level, address, source}', lr.length === 1 && lr[0].source === 'bracket' && lr[0].place === 'The Drowned Rat' && lr[0].level === 'subregion' && lr[0].address === 'riverton:drowned_rat/common_room', JSON.stringify(lr));
+    await queue([{ content: 'stay' }, { content: 'She pours an ale. [ws_flag: lore | Riverton]' }]);
+    await send('I order an ale.');
+    narr = JSON.stringify((await lastReq()).messages);
+    check('lore: still fed later in the scene', narr.includes("Riverton's oldest tavern"));
+    const loreMes = await page.evaluate(() => SillyTavern.getContext().chat.at(-1).mes);
+    check('lore: the narrator flag tag is stripped from the reply', loreMes === 'She pours an ale.', loreMes);
+    await queue([{ content: 'stay' }, { content: 'You sip.' }]);
+    await send('I sip it.');
+    narr = JSON.stringify((await lastReq()).messages);
+    const lr2 = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_lore ?? []));
+    check('lore: the narrator flag feeds region lore the next turn', lr2.some(r => r.source === 'flag' && r.level === 'region') && narr.includes('Background knowledge (lore)') && /- Riverton: /.test(narr), JSON.stringify(lr2));
+    const lastNotice = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
+
+    // Typed "upstairs rooms": the model answers the bare name, which matches both -> which one?
+    await queue([{ content: 'Upstairs Rooms' }]);
+    await send('go to the upstairs rooms', 1);
+    let ln = await lastNotice();
+    const both = '["Upstairs Rooms (The Drowned Rat)","Upstairs Rooms (The Gilded Goose)"]';
+    check('ambiguous name: which-one message with both', ln.sys && ln.mes.startsWith('Which one do you mean?') && JSON.stringify(ln.btns) === both, JSON.stringify(ln));
+    check('ambiguous name: no narration call', (await (await fetch(`${FAKE}/__requests`)).json()).length === expected);
+    let iq = JSON.stringify((await lastReq()).messages);
+    check('intent: non-adjacent known place shown as Name (Subregion)', iq.includes('Upstairs Rooms (The Gilded Goose)') && iq.includes(', unclear?'), iq.slice(-300));
+
+    // /ws-go with the ambiguous name does the same; only the latest which-message is clickable; survives reload.
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Upstairs Rooms'));
+    await page.waitForTimeout(1500);
+    ln = await lastNotice();
+    check('/ws-go ambiguous: which-one message', ln.sys && JSON.stringify(ln.btns) === both, JSON.stringify(ln));
+    check('only latest which-message clickable', await page.evaluate(() => { const f = [...document.querySelectorAll('#chat .mes')].filter(e => /Which one do you mean/.test(e.textContent)); return f.length === 2 && f[0].querySelectorAll('.worldscrawl_candidate').length === 0; }));
+    await page.reload(); await page.waitForSelector('#send_textarea', { timeout: 60000 }); await page.waitForTimeout(3000);
+    await page.evaluate(async () => { await SillyTavern.getContext().selectCharacterById(0); });
+    await page.waitForTimeout(3000);
+    ln = await lastNotice();
+    check('which-message buttons survive reload', JSON.stringify(ln.btns) === both, JSON.stringify(ln));
+    await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
+    await page.waitForTimeout(3000);
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
+
+    // Click the Goose one: routes tavern -> square -> market lane -> goose -> upstairs (all visited).
+    await queue([{ content: 'The long walk.' }]); expected += 1;
+    await page.click('#chat .mes:last-child .worldscrawl_candidate[data-address="riverton:gilded_goose/upstairs"]');
+    await waitReqs();
+    check('which button routes to the Goose upstairs', (await stored()) === 'riverton:gilded_goose/upstairs', String(await stored()));
+    narr = JSON.stringify((await lastReq()).messages);
+    check('route via Market Lane narrated', narr.includes('User travelled from Common Room (The Drowned Rat) through Village Square (Riverton Streets), Market Lane (Riverton Streets), Common Room (The Gilded Goose) to Upstairs Rooms (The Gilded Goose)'), narr.slice(0, 400));
+
+    // 'unclear' answer -> which one, no generation.
+    await queue([{ content: 'unclear' }]);
+    await send('let us go somewhere', 1);
+    ln = await lastNotice();
+    check('unclear: which-one message with candidates', ln.sys && ln.mes.startsWith('Which one do you mean?') && ln.btns.length >= 2 && (await stored()) === 'riverton:gilded_goose/upstairs', JSON.stringify(ln));
+
+    // Footer stays short unless names collide.
+    const fx = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [
+        m.exitsText({ exits: [{ direction: 'down', to_name: 'The Gilded Goose', to_subregion: { name: 'The Gilded Goose' } }] }),
+        m.exitsText({ exits: [{ direction: 'left', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Drowned Rat' } }, { direction: 'right', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Gilded Goose' } }] })]; });
+    const bl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
+        return [m.exitsText(await get('riverton:streets/market_lane')), m.exitsText(await get('riverton:drowned_rat/courtyard')), m.exitsText({ exits: [{ direction: 'crack', hidden: true }] })]; });
+    check('exit labels: building on entrance, building + room otherwise, room within the building, hidden = label only',
+        bl[0] === "Exits: east (Village Square), inn (The Gilded Goose), store (Marlow's General Store), smithy (Brask's Smithy), gate (The Drowned Rat, Stable)"
+        && bl[1] === 'Exits: in (Common Room), kitchen, stable, trapdoor' && bl[2] === 'Exits: crack', JSON.stringify(bl));
+    const mn = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const mv = { direction: 'x', to_name: 'Secret Vault' };
+        return [m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
+            m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })]; });
+    const mv2 = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
+        const note = async (from, dir) => { const l = await get(from); const e = l.exits.find(x => x.direction === dir); return m.moveNote('User', { direction: dir, to_name: e.to_name }, e); };
+        return [await note('riverton:drowned_rat/courtyard', 'stable'), await note('riverton:streets/market_lane', 'gate'), await note('riverton:streets/market_lane', 'inn'),
+            await note('riverton:drowned_rat/stable', 'gate'), await note('riverton:drowned_rat/common_room', 'out')]; });
+    check('non-compass move messages say where they go', JSON.stringify(mv2) === JSON.stringify(['*User goes to the Stable.*', '*User goes through the gate to the Stable of The Drowned Rat.*', '*User goes to The Gilded Goose.*', '*User goes through the gate to Market Lane.*', '*User goes out.*']), JSON.stringify(mv2));
+    check('hidden exit move message never names the destination', JSON.stringify(mn) === JSON.stringify(['*User goes through the trapdoor.*', '*User takes the crawlspace exit.*', '*User goes north.*']), JSON.stringify(mn));
+    check('footer short / subregion only on collision', fx[0] === 'Exits: down (The Gilded Goose)' && fx[1] === 'Exits: left (Upstairs Rooms, The Drowned Rat), right (Upstairs Rooms, The Gilded Goose)', JSON.stringify(fx));
+
+    // ---- Area names and generic room names (Knarfy's reports).
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    const go = async (...dirs) => { await queue(dirs.map(d => ({ content: 'went ' + d }))); for (const d of dirs) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); } };
+    await go('out', 'north');
+    check('at the temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
+    // Only one Common Room known -> "flee to the common room" goes there even if the model says elsewhere.
+    await queue([{ content: 'elsewhere' }, { content: 'You flee.' }]);
+    await send('I flee to the common room', 2);
+    check('one known Common Room: goes there', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Walk to Marlow's, then the building name "The Drowned Rat" (typed) resolves to its entrance.
+    await go('out', 'west', 'store');
+    check('at the store', (await stored()) === 'riverton:general_store/shop', String(await stored()));
+    await queue([{ content: 'The Drowned Rat' }, { content: 'Back to the Rat.' }]);
+    await send('go to the drowned rat', 2);
+    check('typed building name -> entrance room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    check('building name narrated as journey', JSON.stringify((await lastReq()).messages).includes("travelled from Marlow's General Store through Market Lane (Riverton Streets), Village Square (Riverton Streets) to Common Room (The Drowned Rat)"));
+    await go("Marlow's General Store");
+    check('/ws-go shop name routes back', (await stored()) === 'riverton:general_store/shop', String(await stored()));
+    await go('The Drowned Rat');
+    check('/ws-go building name -> entrance', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Both Common Rooms known (the Goose was seen from Market Lane) -> which one.
+    await go('Temple of the Tides');
+    const nGen = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('I flee to the common room', 1);
+    const wn = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
+    check('two Common Rooms: which one', wn.sys && wn.mes.startsWith('Which one do you mean?') && JSON.stringify([...wn.btns].sort()) === '["Common Room (The Drowned Rat)","Common Room (The Gilded Goose)"]', JSON.stringify(wn));
+    check('two Common Rooms: no narration, no move', (await (await fetch(`${FAKE}/__requests`)).json()).length === nGen + 1 && (await stored()) === 'riverton:temple/nave');
+    const iq2 = JSON.stringify((await lastReq()).messages);
+    check('intent labels rooms with their building', iq2.includes('Common Room (The Drowned Rat)') && iq2.includes('Common Room (The Gilded Goose)'), iq2.slice(-400));
+    // Both Upstairs Rooms known -> "go upstairs" from the temple asks which one.
+    await go('Common Room (The Gilded Goose)', 'up', 'down', 'Temple of the Tides');
+    check('back at the temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
+    await queue([{ content: 'elsewhere' }]);
+    await send('go upstairs', 1);
+    const wu = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
+    check('"go upstairs" with both known: which one', wu.sys && JSON.stringify([...wu.btns].sort()) === '["Upstairs Rooms (The Drowned Rat)","Upstairs Rooms (The Gilded Goose)"]', JSON.stringify(wu));
+    const pm = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
+        const c = [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms (The Drowned Rat)', address: 'a' }, { name: 'Upstairs', label: 'Upstairs (The Gilded Goose)', address: 'b' }, { name: 'Common Room', label: 'Common Room (The Drowned Rat)', address: 'c' }, { name: 'Common Room', label: 'Common Room (The Gilded Goose)', address: 'd' }];
+        return [m.namedInText('I flee UPSTAIRS!', c).map(x => x.address).join(), m.namedInText('to the common room of the drowned rat', c).map(x => x.address).join(), m.namedInText('I smile', c).length]; });
+    check('name matching: partial words, case, building tiebreak', JSON.stringify(pm) === '["a,b","c",0]', JSON.stringify(pm));
+    // Already inside the named building/region: short notice, no move, no narration.
+    const nA = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('go to the temple', 1);
+    let al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_exit')].length }; });
+    check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square), grate" && al.btns === 2, JSON.stringify(al));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Riverton'));
+    await page.waitForTimeout(1500);
+    al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
+    check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square), grate", al);
+    check('already: no move, no narration', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nA + 1);
+
+    // Stable gate onto Market Lane: building travel uses the nearest room already stood in.
+    await go("Marlow's General Store", 'The Drowned Rat');
+    check('stable never visited: building -> common room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    // Leaving words: "I leave the Drowned Rat" takes the only exit out of the building; "we flee Riverton" has none -> not aware.
+    await queue([{ content: 'elsewhere' }, { content: 'You step out.' }]);
+    await send('I leave the Drowned Rat', 2);
+    check('leave the building: takes the one way out', (await stored()) === 'riverton:streets/square', String(await stored()));
+    await go('in');
+    const nF = (await (await fetch(`${FAKE}/__requests`)).json()).length;
+    await queue([{ content: 'elsewhere' }]);
+    await send('we flee Riverton', 1);
+    const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1]; });
+    check('flee the region with no way out: not aware, no move, no narration', fl.is_system && fl.mes.startsWith("You're not aware of such a place.") && (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nF + 1, fl.mes);
+    const lw = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.LEAVING_RE.test('we get away from here'), m.LEAVING_RE.test('I go to the temple') || m.LEAVING_RE.test('the stairs on the left'), m.whichText([{ label: 'out (Village Square)' }, { label: 'gate (Market Lane)' }], m.WAY_OUT_PREFIX)]; });
+    const pl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const grate = { direction: 'grate', description: 'A stone stair behind an iron grate.' };
+        return [m.sameWord('grate', 'grates'), m.sameWord('Stables', 'stable'), m.sameWord('box', 'boxes'), m.sameWord('kitchen', 'Kitchens'), m.sameWord('grate', 'grat'), m.sameWord('stable', 'stabl'), m.sameWord('box', 'boxe') && false,
+            m.sameLabel('Kitchens', 'kitchen'), m.sameLabel('The Forge', 'forge'), m.sameLabel('Stable', 'stables'), m.sameLabel('Upstairs Rooms', 'upstairs'),
+            m.sameAsDirection({ direction: 'stable', to_name: 'Stable' }), m.sameAsDirection({ direction: 'kitchen', to_label: 'Kitchens' }),
+            m.exitMentioned('I go through the grates', grate), m.exitMentioned('I take the stairs down', grate), m.exitMentioned('I go to the temple', grate),
+            m.namedInText('go upstairs', [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms', address: 'u' }]).length, m.namedInText('the common room', [{ name: 'Common Room', label: 'Common Room', address: 'c' }]).length]; });
+    check('plural-tolerant word matching (grate/grates, stable/stables, box/boxes, kitchen/kitchens; no stem mangling)',
+        JSON.stringify(pl) === '[true,true,true,true,false,false,false,true,true,true,false,true,true,true,true,false,1,1]', JSON.stringify(pl));
+    check('leaving words + way-out text', JSON.stringify(lw) === '[true,false,"Which way out? out (Village Square), gate (Market Lane)"]', JSON.stringify(lw));
+    await go('out', 'west', 'gate');
+    check('stable reached via the gate', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    await go('gate', 'store', 'The Drowned Rat');
+    check('after visiting the stable: building -> stable', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    // Building by name from further away (Goose upstairs: stable 3 steps, common room 4; the store: 2 vs 3).
+    const stableDesc = await page.evaluate(async () => (await (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent('riverton:drowned_rat/stable'))).json()).description);
+    const typedTo = async (text, answer) => { await queue([{ content: answer }, { content: 'You walk.' }]); await send(text, 2); };
+    await go('gate', 'inn', 'up');
+    await typedTo('go to the Drowned Rat', 'The Drowned Rat');
+    check('Goose upstairs -> "the Drowned Rat" lands in the stable', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    await go('gate', 'inn', 'up');
+    await typedTo('go to the Drowned Rat', 'Common Room (The Drowned Rat)');
+    check('model picks the entrance room for a building name: still the nearest room', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    await go('gate', 'store');
+    await typedTo('go to the Drowned Rat', 'Common Room (The Drowned Rat)');
+    check('store -> "the Drowned Rat" lands in the stable', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    const arrNote = JSON.stringify((await lastReq()).messages); // the arrival turn's own narration request
+    check('arrival note on the same turn: Stable is the current room, with its description, entered through the gate',
+        arrNote.includes('Current location: Stable, The Drowned Rat') && arrNote.includes('This location: ' + stableDesc)
+        && arrNote.includes('User arrives in the Stable of The Drowned Rat, entering through the gate from Market Lane. They are in the Stable, not the Common Room or any other part of The Drowned Rat.')
+        && (await lastReq()).messages.slice(-2).some(m => m.content.includes('[Engine: this turn ends in the Stable of The Drowned Rat. Do not narrate entering any other room. If the player\'s message assumes they arrive somewhere else or do things there, they actually stopped in the Stable of The Drowned Rat. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]'))
+        && arrNote.includes('ending with arriving in the Stable of The Drowned Rat') && !arrNote.includes('Current location: Common Room'), arrNote.slice(0, 1500));
+    await go('gate', 'smithy');
+    await typedTo('go to the Drowned Rat', 'The Drowned Rat');
+    check("Brask's Smithy -> the Drowned Rat lands in the stable", (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
+    await queue([{ content: 'stay' }, { content: 'You brush the horse.' }]);
+    await send('I brush the horse', 2);
+    check('no arrival reminder on a turn without a move', !JSON.stringify((await lastReq()).messages).includes('[Engine: this turn ends'));
+    await go('gate', 'store');
+    await typedTo('go to the common room of the Drowned Rat', 'Common Room (The Drowned Rat)');
+    check('room named explicitly: that room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+    const ta = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return ['"Common Room (The Drowned Rat)."', '(north)', '**Upstairs Rooms (The Gilded Goose)**', 'north)'].map(m.trimAnswer); });
+    check('answers keep a label\'s closing parenthesis', JSON.stringify(ta) === JSON.stringify(['Common Room (The Drowned Rat)', 'north', 'Upstairs Rooms (The Gilded Goose)', 'north']), JSON.stringify(ta));
+    await go('back', 'stable');
+
+    // Leaving from rooms with no exit out: route through visited rooms to the nearest way out.
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
+    await page.waitForTimeout(3000);
+    await go('up');
+    await queue([{ content: 'elsewhere' }, { content: 'Out you go.' }]);
+    await send('I leave the Drowned Rat', 2);
+    check('leave from upstairs -> Village Square', (await stored()) === 'riverton:streets/square', String(await stored()));
+    await go('in', 'back', 'kitchen');
+    await queue([{ content: 'elsewhere' }, { content: 'Out you go.' }]);
+    await send('I leave the Drowned Rat', 2);
+    check('leave from kitchens (stable unvisited) -> Village Square', (await stored()) === 'riverton:streets/square', String(await stored()));
+    await go('in', 'back', 'stable');
+    await queue([{ content: 'elsewhere' }, { content: 'Out the gate.' }]);
+    await send('I leave the Drowned Rat', 2);
+    check('leave from the stable -> out the gate to Market Lane', (await stored()) === 'riverton:streets/market_lane', String(await stored()));
+    await go('east', 'in');
+    await queue([{ content: 'elsewhere' }]);
+    await send('we take the stairs on the left in the Drowned Rat', 1);
+    const lf = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1]; });
+    check('"on the left" is not leaving', lf.is_system && lf.mes.startsWith("You're already in The Drowned Rat.") && (await stored()) === 'riverton:drowned_rat/common_room', lf.mes);
+

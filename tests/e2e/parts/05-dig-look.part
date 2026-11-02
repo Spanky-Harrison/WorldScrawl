@@ -1,0 +1,122 @@
+    // ---- Narrative digging: "I smash out the window" -> new two-way exit, small validated questions, stamped on the player's message.
+    await sw(true, true);
+    await go('up');
+    check('dig narrative: setup upstairs in the Drowned Rat', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
+    const near = (await (await stFetch('/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
+    const sqN = near.findIndex(r => r.address === 'riverton:streets/square') + 1;
+    check('nearby: rooms within 3 steps, nearest first, capped, Village Square included', sqN > 0 && near.length <= 12 && near[0].steps === 1 && near.every((r, i) => !i || near[i - 1].steps <= r.steps) && near.every(r => r.name && r.area && r.summary && !('exits' in r)), JSON.stringify(near.map(r => r.display_name)));
+    const changesOfE = u => { const c = u.extra.worldscrawl_change; return Array.isArray(c) ? c : c ? [c] : []; };
+    const lastU = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; for (let i = ch.length - 1; i >= 0; i--) if (ch[i].is_user) return { i, extra: ch[i].extra ?? {} }; return null; });
+    const reqsNow = async () => (await fetch(`${FAKE}/__requests`)).json();
+    const promptOf = r => JSON.stringify(r.messages ?? r);
+    const bre = await M(m => ['I smash out the window', 'I eat breakfast', 'I go into the tunnel', 'there is a hole here', 'I punch through the wall', 'I make a hole in the floor', 'I kick down the door', 'the smashing pumpkins'].map(t => m.BREAK_RE.test(t)));
+    check('break-word check: whole words and phrases only', JSON.stringify(bre) === '[true,false,false,false,true,true,true,true]', JSON.stringify(bre));
+    // Breakfast: no breaking word, so no "new opening" option; a stray "new opening" answer goes the normal way (yes/no follow-up), never a dig.
+    await queue([{ content: 'new opening' }, { content: 'no' }, { content: 'You eat.' }]);
+    const rB = (await reqsNow()).length;
+    await send('I eat breakfast', 3);
+    const bq = (await reqsNow()).slice(rB);
+    const luB = await lastU();
+    check('breakfast: no new opening offered, stray answer handled normally', !promptOf(bq[0]).includes('new opening') && promptOf(bq[1]).includes('Answer yes or no') && !luB.extra.worldscrawl_change && !luB.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(bq[1]).slice(-200));
+    // Guard: the model says "new opening" but the player only hits the wall -> no change.
+    await queue([{ content: 'new opening' }, { content: 'no' }, { content: 'You punch the wall.' }]);
+    await send('I punch the wall angrily', 3);
+    let lu = await lastU();
+    check('dig narrative: hitting a wall is not a breakthrough (no change, no follow-up questions)', !lu.extra.worldscrawl_change && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/upstairs', JSON.stringify(lu.extra));
+    const r0 = (await reqsNow()).length;
+    // Window -> Village Square in ONE JSON call; the first answer reuses "down" (taken) and the call is retried once with the error.
+    // The second answer names the place loosely ("Village Square") and says "go through": lenient key matching.
+    await queue([{ content: 'new opening' }, { content: '{"existing":"village_square","direction":"down","then":"go_through"}' }, { content: 'Sure: {"existing":"Village Square","direction":"Window","then":"go through"}' }, { content: 'You land in the square in a shower of glass.' }]);
+    await send('I run down the hall and leap through the window, breaking through the glass', 4);
+    lu = await lastU();
+    const rq = (await reqsNow()).slice(r0);
+    const ch1 = lu.extra.worldscrawl_change;
+    check('dig narrative: intent prompt offers the new opening choice', promptOf(rq[0]).includes('new opening: the player clearly breaks through'), promptOf(rq[0]).slice(0, 300));
+    check('dig narrative: one JSON question listing nearby places as keys + a new place (no numbers)', promptOf(rq[1]).includes('- village_square: Village Square') && promptOf(rq[1]).includes('Or it can lead to a new space nobody has seen yet') && promptOf(rq[1]).includes('Reply with JSON only') && !promptOf(rq[1]).includes('just the number'), promptOf(rq[1]).slice(0, 900));
+    check('dig narrative: a bad answer is retried once with the error, then narration', rq.length === 4 && promptOf(rq[2]).includes('Your last answer did not fit: there is already an exit') && promptOf(rq[2]).includes('down'), String(rq.length) + promptOf(rq[2]).slice(-300));
+    check('dig narrative: connect to an existing place = the linked exit pair stamped on the player message, return name "back"', ch1?.type === 'dig' && ch1.from === 'riverton:drowned_rat/upstairs' && ch1.to === 'riverton:streets/square' && ch1.direction === 'window' && ch1.return_direction === 'back' && lu.extra.worldscrawl_dig?.direction === 'window', JSON.stringify(lu.extra));
+    check('dig narrative: party moved through the window to Village Square (move stamped on the same message)', (await stored()) === 'riverton:streets/square' && lu.extra.worldscrawl_location === 'riverton:streets/square' && lu.extra.worldscrawl_move?.direction === 'window' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
+    check('dig narrative: narration told about breaking through and arriving', promptOf(rq[3]).includes('broke through, making a new opening (window) from Upstairs Rooms') && promptOf(rq[3]).includes('Narrate breaking through and arriving in Village Square'), promptOf(rq[3]).slice(-800));
+    const back1 = await (await stFetch('/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:streets/square', direction: 'back', changes: await M(m => m.chatChanges()) }) })).json();
+    check('dig narrative: the square has the way back', back1.address === 'riverton:drowned_rat/upstairs', JSON.stringify(back1).slice(0, 200));
+    // Swipe the reply: the change stays (it lives on the player's message, like a move).
+    await queue([{ content: 'Another take on the glass.' }]); expected += 1;
+    await page.evaluate(() => jQuery('#chat .last_mes .swipe_right').trigger('click')); await waitReqs();
+    const sw1 = await lastU();
+    check('dig narrative: swiping the reply keeps the change and the move', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await stored()) === 'riverton:streets/square' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
+    // Delete the player's message: the change is gone.
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    check('dig narrative: deleting the message undoes the dig and the move', (await stored()) === 'riverton:drowned_rat/upstairs' && !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
+    // "...and peer through": then "stay" -> dig only, the party stays.
+    await queue([{ content: 'new opening' }, { content: '{"existing":"village_square","direction":"hole","return_direction":"hole","then":"stay"}' }, { content: 'You peer through.' }]);
+    await send('I smash a hole in the wall and peer through', 3);
+    lu = await lastU();
+    check('dig narrative: "peer through" ("stay") -> dig, no move', lu.extra.worldscrawl_change?.direction === 'hole' && lu.extra.worldscrawl_change?.return_direction === 'hole' && !lu.extra.worldscrawl_move && (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('hole (Village Square') && promptOf(await lastReq()).includes('broke through, making a new opening (hole) from here'), await wsExits());
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    // Somewhere new: the same create_place edit discovery uses, in this building, walkable both ways; an unclear "then" goes through.
+    await queue([{ content: 'new opening' }, { content: '```json\n{"new":{"name":"dusty crawl space","description":"A cramped crawlspace full of cobwebs"},"direction":"the hole","then":"maybe"}\n```' }, { content: 'You climb down.' }]);
+    await send('I bash a hole through the floorboards', 3);
+    lu = await lastU();
+    const ch2 = lu.extra.worldscrawl_change, to2 = lu.extra.worldscrawl_dig?.to;
+    check('dig narrative: a new place is one create_place patch (engine-made id) in the current subregion', ch2?.type === 'patch' && ch2.ops?.length === 1 && ch2.ops[0].op === 'create_place' && ch2.ops[0].name === 'Dusty Crawl Space' && ch2.ops[0].description === 'A cramped crawlspace full of cobwebs.' && ch2.ops[0].exits?.[0]?.return_direction === 'hole' && ch2.ops[0].exits[0].direction === 'back' && String(to2).startsWith('riverton:drowned_rat/'), JSON.stringify(lu.extra));
+    check('dig narrative: unclear "then" -> goes through, party ends in the new room; narration gets its description', (await stored()) === to2 && promptOf(await lastReq()).includes('This location: A cramped crawlspace full of cobwebs.'), String(await stored()));
+    check('dig narrative: in the new room; its way back listed', (await stored()) === to2 && (await wsExits()) === 'Exits: back (Upstairs Rooms)', await wsExits());
+    await go('back');
+    // Failure: unreadable answer twice -> no change, a notice, narration says nothing gave way.
+    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: '{"existing":"the moon","direction":"up"}' }, { content: 'You strain.' }]);
+    const rF = (await reqsNow()).length;
+    await send('I smash the wall with my fist until it breaks', 4);
+    lu = await lastU();
+    const fq = (await reqsNow()).slice(rF);
+    check('dig narrative: failed validation -> no change, narrated as failed', !lu.extra.worldscrawl_change && lu.extra.worldscrawl_dig_failed === true && promptOf(await lastReq()).includes('nothing gave way') && promptOf(fq[2]).includes('the answer was not a JSON object'), JSON.stringify(lu.extra));
+    // Knarfy's playtest: the player names the courtyard. A "new" answer is refused (named existing place), a second unreadable one
+    // still links the named courtyard directly (on a free return name), never a new area.
+    await queue([{ content: 'new opening' }, { content: '{"new":{"name":"Precarious Ledge","description":"A narrow ledge above the yard."},"direction":"window","then":"go_through"}' }, { content: 'banana' }, { content: 'You drop into the courtyard.' }]);
+    const rK = (await reqsNow()).length;
+    await send('I break open the window, opening a precarious passage to the courtyard.', 4);
+    lu = await lastU();
+    const kq = (await reqsNow()).slice(rK), chK = lu.extra.worldscrawl_change;
+    check('dig courtyard: the named place is offered first and no new place is offered', /The player names Courtyard/.test(promptOf(kq[1])) && !promptOf(kq[1]).includes('Or it can lead to a new space'), promptOf(kq[1]).slice(0, 900));
+    check('dig courtyard: linked to the existing courtyard, not a new area', chK?.type === 'dig' && chK.to === 'riverton:drowned_rat/courtyard' && chK.direction === 'window' && !['in', 'kitchen', 'stable', 'trapdoor'].includes(chK.return_direction) && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/courtyard', JSON.stringify(lu.extra));
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    check('dig courtyard: undone', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
+    // A failure the narrator ignores: its [ws_flag: discover] is dropped, so no room appears.
+    const chBefore = await M(m => m.chatChanges().length);
+    await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'banana' }, { content: 'The wall bursts open onto a hidden attic. [ws_flag: discover | hole]' }]);
+    await send('I smash the wall with my fist until it breaks', 4);
+    await page.waitForTimeout(1500);
+    const flD = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
+    lu = await lastU();
+    const lpD = promptOf(await lastReq());
+    check('dig failed: the narrator is told it failed and its discover flag is ignored', lpD.includes('it FAILED') && lu.extra.worldscrawl_dig_failed === true && flD === null && (await M(m => m.chatChanges().length)) === chBefore, JSON.stringify({ flD, extra: lu.extra, prompt: lpD.slice(-700) }));
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
+    await sw(true, true);
+    await go('up');
+    const nearUp = (await (await stFetch('/nearby', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'riverton:drowned_rat/upstairs' }) })).json()).rooms;
+    const sqU = nearUp.findIndex(r => r.address === 'riverton:streets/square') + 1;
+    let rL = (await reqsNow()).length;
+    await queue([{ content: 'look' }, { content: 'Window.' }, { content: 'village square' }, { content: 'Below, the square bustles.' }]);
+    await send('I look out the window', 4);
+    let lq = (await reqsNow()).slice(rL), lk = await lastU();
+    check('look: intent offers look; target list has the exits plus a window', promptOf(lq[0]).includes('- look: the player looks, peers, peeks or listens') && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[1]).includes('- down: the down exit (to Common Room)') && promptOf(lq[1]).includes('- window: out a window or opening with no exit') && promptOf(lq[1]).includes('Reply with just the key.'), promptOf(lq[1]).slice(-400));
+    check('look: window view picked from the nearby list and stamped as a view link', promptOf(lq[2]).includes('Which place can they most likely see? Reply with just the key.') && JSON.stringify(lk.extra.worldscrawl_change) === JSON.stringify([{ type: 'view_link', from: 'riverton:drowned_rat/upstairs', to: 'riverton:streets/square' }]), JSON.stringify(lk.extra));
+    check('look: narration sees the square, party stays', promptOf(lq[3]).includes('looks out and sees Village Square') && promptOf(lq[3]).includes('Visible from here (no way through): Village Square') && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(lq[3]).slice(-900));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'look' }, { content: 'window' }, { content: 'The square again.' }]);
+    await send('I glance out the window again', 3);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('look: second look reuses the view link (no question, no new stamp)', lq.length === 3 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.to === 'riverton:streets/square', JSON.stringify(lk.extra));
+    // Look-only message: no move options, so "out" in "I look out the door" can't move the party (model answers "out" anyway).
+    await go('down');
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'out' }, { content: 'You eye the door.' }]);
+    await send('I look out the door', 2);
+    lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('look out the door: no move options offered, party stays', !promptOf(lq[0]).includes('the player goes through the') && !promptOf(lq[0]).includes('- elsewhere:') && (await stored()) === 'riverton:drowned_rat/common_room' && !lk.extra.worldscrawl_move, promptOf(lq[0]).slice(-700));
+    check('stay-put narration: still in the room, no leaving/arriving', promptOf(lq.at(-1)).includes('User has NOT moved this turn and is still at Common Room (The Drowned Rat). No move happened: do not describe User leaving'), promptOf(lq.at(-1)).slice(-700));
+    rL = (await reqsNow()).length;
+    await queue([{ content: 'out' }, { content: 'You step out.' }]);
+    await send('I go out', 2);
+    lq = (await reqsNow()).slice(rL);
+    check('I go out: move options offered and the party moves', promptOf(lq[0]).includes('- out: the player goes through the') && (await stored()) === 'riverton:streets/square', String(await stored()));

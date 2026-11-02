@@ -1,0 +1,267 @@
+    // ---- The WorldScrawl window (plugin/ui/): served by the plugin, follows the chat over BroadcastChannel.
+    const ui = await page.context().newPage(); await ui.setViewportSize({ width: 1200, height: 800 });
+    const uiErrors = []; ui.on('pageerror', e => { uiErrors.push(e.message); console.log('[ui pageerror]', e.message); });
+    const uiRes = await ui.goto(BASE + 'api/plugins/worldscrawl/ui/');
+    check('map window page is served', uiRes.status() === 200 && /WorldScrawl/.test(await ui.title()), String(uiRes.status()));
+    await ui.waitForTimeout(2500);
+    check('map window: friendly message when the chat has WorldScrawl off', /Open a chat with WorldScrawl on/.test(await ui.locator('#windows').innerText()));
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-on'));
+    try { await ui.waitForSelector('.node.here', { timeout: 15000 }); } catch {}
+    const m1 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, ids: [...document.querySelectorAll('.node')].map(n => n.dataset.id), side: document.querySelector('.side')?.innerText ?? '', btn: document.querySelector('[data-window="map"]')?.className }));
+    check('map window receives the broadcast and highlights the current room', m1.here === 'riverton:drowned_rat/common_room' && /Common Room/.test(m1.side) && /active/.test(m1.btn), JSON.stringify(m1).slice(0, 400));
+    {
+        const sp = await ui.$('.splitter'); const b = await sp.boundingBox(); const w0 = await ui.evaluate(() => document.querySelector('.side').getBoundingClientRect().width);
+        await ui.mouse.move(b.x + 3, b.y + 50); await ui.mouse.down(); await ui.mouse.move(b.x - 120, b.y + 50, { steps: 4 }); await ui.mouse.up();
+        const r = await ui.evaluate(() => ({ w: document.querySelector('.side').getBoundingClientRect().width, saved: localStorage.getItem('worldscrawl_sizes') }));
+        check('map/panel splitter drags wider and persists the size', r.w > w0 + 60 && /side:/.test(r.saved ?? ''), JSON.stringify({ w0, ...r }));
+        await sp.dblclick(); const w2 = await ui.evaluate(() => document.querySelector('.side').getBoundingClientRect().width);
+        check('double-clicking the splitter resets the panel size', Math.abs(w2 - w0) < 3, `${w0} ${w2}`);
+    }
+    check('map window shows no hidden place', !m1.ids.some(i => /cellar|tunnel|catacomb/.test(i)), JSON.stringify(m1.ids));
+    const themed = await ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
+    const stTheme = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim());
+    check('map window uses SillyTavern theme colours', !!themed && themed === stTheme, `${themed} vs ${stTheme}`);
+    await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go up'));
+    try { await ui.waitForFunction(() => document.querySelector('.node.here')?.dataset.id !== 'riverton:drowned_rat/common_room', null, { timeout: 15000 }); } catch {}
+    const m2 = await ui.evaluate(() => ({ here: document.querySelector('.node.here')?.dataset.id, stood: [...document.querySelectorAll('.node.stood')].map(n => n.dataset.id) }));
+    check('map window follows a move live', m2.here && m2.here !== 'riverton:drowned_rat/common_room' && m2.stood.includes('riverton:drowned_rat/common_room'), JSON.stringify(m2));
+    await ui.screenshot({ path: '/tmp/ws-e2e-map.png' });
+    // Layers: opens on the current room's subregion; breadcrumb goes up; double-click drills down.
+    const nodeIds = () => ui.evaluate(() => [...document.querySelectorAll('.node')].map(n => n.dataset.id));
+    const crumbText = () => ui.evaluate(() => [...document.querySelectorAll('#breadcrumb .crumb')].map(c => c.textContent));
+    check('map opens on the current room\'s area, with a breadcrumb', JSON.stringify(await crumbText()) === JSON.stringify(['World', 'Riverton', 'The Drowned Rat']), JSON.stringify(await crumbText()));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
+    const rIds = await nodeIds();
+    const rHere = await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id);
+    check('region layer: one node per discovered area, current area highlighted, nothing undiscovered', rIds.includes('sub:riverton:drowned_rat') && rIds.includes('sub:riverton:streets') && rHere === 'sub:riverton:drowned_rat'
+        && !rIds.some(i => /temple|docks|secret|smithy|general_store|gilded/.test(i)) && rIds.every(i => i.startsWith('sub:riverton:')), JSON.stringify(rIds));
+    await ui.screenshot({ path: '/tmp/ws-e2e-map-region.png' });
+    await ui.click('#breadcrumb .crumb[data-level="world"]'); await ui.waitForTimeout(300);
+    check('world layer: one node per region', JSON.stringify(await nodeIds()) === '["region:riverton"]', JSON.stringify(await nodeIds()));
+    await ui.dblclick('.node[data-id="region:riverton"]'); await ui.waitForTimeout(300);
+    await ui.dblclick('.node[data-id="sub:riverton:drowned_rat"]'); await ui.waitForTimeout(300);
+    const dIds = await nodeIds();
+    check('double-click drills down to the rooms', dIds.includes('riverton:drowned_rat/upstairs') && (await crumbText()).length === 3, JSON.stringify(dIds));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(300);
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
+    check('Centre goes back to the current room\'s layer', (await ui.evaluate(() => document.querySelector('.node.here')?.dataset.id)) === m2.here);
+    // Breadcrumbs: pills (the last one highlighted like a map node), no ⓘ, the Center button (icon + label) in its place.
+    const bc = await ui.evaluate(() => { const cs = [...document.querySelectorAll('#breadcrumb .crumb')], st = x => getComputedStyle(x);
+        return { n: cs.length, pill: cs.every(x => parseFloat(st(x).borderRadius) >= 8 && st(x).borderStyle !== 'none'), active: cs.at(-1)?.classList.contains('active') && st(cs.at(-1)).boxShadow !== 'none',
+            info: /ⓘ/.test(document.getElementById('breadcrumb').textContent), center: document.querySelector('#breadcrumb .centerbtn')?.textContent ?? '', centerLast: document.getElementById('breadcrumb').lastElementChild?.classList.contains('centerbtn') }; });
+    check('breadcrumb: pill crumbs, the current one highlighted, no ⓘ, "⌖ Center" in its place', bc.n === 3 && bc.pill && bc.active && !bc.info && /⌖\s*Center/.test(bc.center) && bc.centerLast, JSON.stringify(bc));
+    // Clicking a crumb shows the level with that entity's contents and selects that entity (not the player's child of it).
+    const pickOf = () => ui.evaluate(() => ({ sel: document.querySelector('.node.selected')?.dataset.id ?? null, h: document.querySelector('.side h3')?.textContent ?? '', area: document.querySelector('.side .area')?.textContent ?? '', crumbs: [...document.querySelectorAll('#breadcrumb .crumb')].map(x => x.textContent) }));
+    await ui.click('#breadcrumb .crumb[data-level="region"]'); await ui.waitForTimeout(400);
+    const pr = await pickOf(), prIds = await nodeIds();
+    check('region crumb: shows the region\'s subregions and selects the region itself', prIds.every(i => i.startsWith('sub:riverton:')) && pr.sel === null && pr.h === pr.crumbs.at(-1) && /Region/.test(pr.area) && pr.crumbs.length === 2, JSON.stringify([pr, prIds]));
+    await ui.click('#breadcrumb .crumb[data-level="world"]'); await ui.waitForTimeout(400);
+    const pw = await pickOf();
+    check('world crumb: shows the regions and selects the world', pw.sel === null && pw.h === 'World' && pw.crumbs.length === 1, JSON.stringify(pw));
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
+    await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(400);
+    const plc = await pickOf();
+    check('last crumb: stays on the current area and selects that area (not its parent, not the room)', plc.sel === null && plc.h === plc.crumbs.at(-1) && /Area/.test(plc.area) && plc.crumbs.length === 3, JSON.stringify(plc));
+    await ui.click('#breadcrumb .centerbtn'); await ui.waitForTimeout(300);
+    // Waiting / sleeping: /ws-wait stamps a message and advances the clock; the map's Wait picker asks this tab; delete undoes.
+    const clockNow = () => page.evaluate(async () => (await import('/scripts/extensions/third-party/WorldScrawl/index.js')).chatElapsed());
+    const t0 = await clockNow(), hereBefore = await stored();
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2h')); await waitReqs();
+    check('/ws-wait 2h: clock +2h, no move', (await clockNow()) - t0 === 7200 && (await stored()) === hereBefore, `${(await clockNow()) - t0}`);
+    const wq = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = ch.filter(m => m.is_user).pop(); return { mes: u.mes, w: u.extra.worldscrawl_wait }; });
+    check('/ws-wait: stamped user message', /waits for 2h/.test(wq.mes) && wq.w?.seconds === 7200, JSON.stringify(wq));
+    const lastBody = async () => JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).pop());
+    check('/ws-wait: narrator told how long and the new time', /waited here for 2h/.test(await lastBody()));
+    // Game-time labels: on every narrator message, live from the clock, with the elapsed time after the wait.
+    const tlabels = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; let n = ch.length - 1; while (n >= 0 && (ch[n].is_user || ch[n].is_system)) n--; return { n, last: document.querySelector(`#chat .mes[mesid="${n}"] .worldscrawl_time`)?.textContent ?? '', count: document.querySelectorAll('#chat .worldscrawl_time').length, narr: [...document.querySelectorAll('#chat .mes[mesid]')].filter(el => { const m = ch[Number(el.getAttribute('mesid'))]; return m && !m.is_user && !m.is_system && !m.extra?.worldscrawl_notice; }).length, stored: JSON.stringify(ch).includes('worldscrawl_time') }; });
+    try { await page.waitForFunction(() => /\+2h/.test(document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? ''), null, { timeout: 5000 }); } catch {}
+    const tl = await tlabels();
+    check('game-time labels on every narrator message, +2h after the wait, nothing stored', tl.count > 0 && tl.count === tl.narr && /\d:\d\d [AP]M \(\+2h\)/.test(tl.last) && !tl.stored, JSON.stringify(tl));
+    const relabel = await page.evaluate(async () => { const c = SillyTavern.getContext(); const u = c.chat.filter(m => m.is_user && m.extra?.worldscrawl_wait?.seconds === 7200).pop(); u.extra.worldscrawl_wait.seconds = 3600; await c.eventSource.emit(c.eventTypes.MESSAGE_UPDATED, c.chat.indexOf(u)); await new Promise(r => setTimeout(r, 1500)); const t = document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? ''; u.extra.worldscrawl_wait.seconds = 7200; await c.eventSource.emit(c.eventTypes.MESSAGE_UPDATED, c.chat.indexOf(u)); await new Promise(r => setTimeout(r, 1500)); return { edited: t, back: document.querySelector('#chat .mes:last-child .worldscrawl_time')?.textContent ?? '' }; });
+    check('game-time labels follow an edited earlier wait', /\(\+1h\)/.test(relabel.edited) && /\(\+2h\)/.test(relabel.back), JSON.stringify(relabel));
+    const cn = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch.filter(x => !x.is_user && !x.is_system).pop(); return m?.extra?.worldscrawl_calls?.[m.swipe_id ?? 0] ?? null; });
+    check('model-call notes: the narrator reply is noted (what it emitted, or no tool call)', Array.isArray(cn) && cn.some(n => n.kind === 'narrator reply' && (n.emitted?.length || n.reason === 'narrator made no tool call')), JSON.stringify(cn));
+    // A narrator generation that fails outright: noted on the player's message that triggered it.
+    await queue([{ content: 'stay' }, { error: 'fake model is down' }, { error: 'fake model is down' }]);
+    await send('I hum a tune quietly.');
+    const nf = await page.evaluate(async () => {
+        const c = SillyTavern.getContext(), i = c.chat.length - 1, m = c.chat[i];
+        const { messageActivity } = await import('/scripts/extensions/third-party/WorldScrawl/activity.mjs');
+        return { user: !!m.is_user, notes: m.extra?.worldscrawl_calls?.[m.swipe_id ?? 0] ?? null, act: messageActivity(m, i).filter(e => e.kind === 'call').map(e => `${e.label}: ${e.status} ${e.reason ?? ''}`) };
+    });
+    check('a failed narrator generation is noted on the player message (kind narrator, failed, reason) and shown in the activity log', nf.user && nf.notes?.some(n => n.kind === 'narrator' && n.status === 'failed' && /fake model is down|error|no reply/.test(n.reason ?? '')) && nf.act.some(t => /^narrator: failed/.test(t)), JSON.stringify(nf));
+    await queue([]);
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); if (c.chat[c.chat.length - 1]?.is_user) await c.executeSlashCommandsWithOptions('/cut ' + (c.chat.length - 1)); });
+    await page.waitForTimeout(1000);
+    const t1 = await clockNow();
+    expected += 1; await ui.selectOption('#waitPick', 'sleep|8h'); await waitReqs();
+    check('map Wait picker: sleep 8h via the chat tab', (await clockNow()) - t1 === 8 * 3600, `${(await clockNow()) - t1}`);
+    check('sleep: narrator told to wake up', /slept here for 8h/.test(await lastBody()));
+    try { await ui.waitForFunction(() => /slept 8h/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 5000 }); } catch {}
+    check('map clock shows the wait', /slept 8h/.test(await ui.evaluate(() => document.getElementById('status')?.textContent ?? '')));
+    const t2 = await clockNow();
+    expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until midnight')); await waitReqs();
+    const dm = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return m.gameDate(); });
+    check('/ws-wait until midnight lands on 00:00', (await clockNow()) > t2 && dm?.time === '00:00', JSON.stringify(dm));
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
+    check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
+    check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning')));
+    // ---- Editing a proposed map change before Keep, re-editing a kept one, and "Edit live" from the map window.
+    const CR = 'riverton:drowned_rat/common_room';
+    const wsMod = '/scripts/extensions/third-party/WorldScrawl/index.js';
+    const flagId = await page.evaluate(async ([CR, mod]) => {
+        const c = SillyTavern.getContext(), id = c.chat.findLastIndex(m => !m.is_system && !m.is_user);
+        c.chat[id].extra = c.chat[id].extra ?? {};
+        c.chat[id].extra.worldscrawl_flag = { status: 'review', start: id, swipe: c.chat[id].swipe_id ?? 0, note: 'fire', proposal: { ops: [{ op: 'set_description', loc: CR, text: 'Smoky.' }], summary: ['Common Room: description rewritten'], relocate: {}, before: { [CR]: { name: 'Common Room', description: 'Warm and loud.' } }, after: { [CR]: { name: 'Common Room', description: 'Smoky.' } } } };
+        (await import(mod)).renderPatchCards(); return id;
+    }, [CR, wsMod]);
+    const card = page.locator(`#chat .mes[mesid="${flagId}"] .worldscrawl_patchcard`);
+    await card.locator('.wsdiff-del').first().waitFor({ timeout: 10000 });
+    const diffLook = () => card.evaluate(c => { const bg = s => s ? getComputedStyle(s).backgroundColor : ''; const d = c.querySelector('.wsdiff-del'), i = c.querySelector('.wsdiff-ins'); return { del: d?.textContent ?? '', ins: i?.textContent ?? '', dbg: bg(d), ibg: bg(i), json: !!c.querySelector('.wsdiff pre'), raw: [...c.querySelectorAll('.wsdiff-toggle')].map(t => t.textContent).join('|') }; });
+    const dl1 = await diffLook();
+    check('review card: description change shows red removed / green added blocks (no JSON dump up front)', dl1.del.includes('Warm and loud.') && dl1.ins.includes('Smoky.') && /rgba\(200, 60, 60/.test(dl1.dbg) && /rgba\(60, 160, 90/.test(dl1.ibg) && /Raw JSON/.test(dl1.raw), JSON.stringify(dl1));
+    await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    await card.locator('.wspf-op').first().waitFor({ timeout: 10000 });
+    check('review card: Edit opens the change as a form (description textarea prefilled)', await card.locator('.wspf-text').first().inputValue() === 'Smoky.');
+    const pick = await card.evaluate(c => { const sel = c.querySelector('.wspf-op select.wspf-pick'); return sel ? sel.selectedOptions[0]?.textContent : null; });
+    check('review card: the place is a picker with a friendly name, not a raw address box', /^Common Room \(/.test(pick ?? ''), String(pick));
+    await card.locator('.wspf-text').first().fill('');
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await page.waitForTimeout(800);
+    check('review card: an empty description is refused inline, nothing stamped', /text/i.test(await card.innerText()) && await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId), await card.innerText());
+    await card.locator('.wspf-text').first().fill('Charred beams and ash.');
+    await page.waitForFunction(id => document.querySelector(`#chat .mes[mesid="${id}"] .worldscrawl_patchcard .wsdiff-ins`)?.textContent.includes('Charred beams'), flagId, { timeout: 10000 }).catch(() => {});
+    const dl2 = { ...(await diffLook()), dbgBox: await card.evaluate(c => { const b = c.querySelector('.worldscrawl_diff'); return b ? [b.style.opacity, b.title, c.querySelector('.wspf-text')?.value] : null; }) };
+    check('review card: the diff follows the form live, before Keep', dl2.ins.includes('Charred beams and ash.') && !dl2.ins.includes('Smoky.'), JSON.stringify(dl2));
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await page.waitForTimeout(1500);
+    const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
+    // Edit on a kept change opens the map editor in its own tab: one tab per touched place, place forms, no op dropdown.
+    const edTab = page.context().waitForEvent('page', { timeout: 15000 });
+    await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    const ed = await edTab;
+    const edErrors = []; ed.on('pageerror', e => { edErrors.push(e.message); console.log('[editor pageerror]', e.message); });
+    await ed.waitForSelector('.change-editor .ce-place', { timeout: 20000 }).catch(() => {});
+    const ed0 = await ed.evaluate(() => ({ url: location.search, tabs: [...document.querySelectorAll('.ce-tab')].map(t => t.dataset.target), desc: document.querySelector('.ce-place .placeform > .pf-row[data-field="description"] textarea')?.value, opSelect: !!document.querySelector('.wspf-op'), raw: !!document.querySelector('.ce-raw-box textarea') }));
+    check('kept change Edit: opens the editor tab for this message\'s change, one tab per touched place, place form starts after the change, no op dropdown, Raw JSON there', /edit=1/.test(ed0.url) && new RegExp(`msg=${flagId}`).test(ed0.url) && ed0.tabs.length === 1 && ed0.tabs[0] === CR && ed0.desc === 'Charred beams and ash.' && !ed0.opSelect && ed0.raw, JSON.stringify(ed0));
+    await ed.fill('.ce-place .placeform > .pf-row[data-field="description"] textarea', 'Rebuilt, smelling of fresh pine.');
+    await ed.waitForTimeout(800);
+    await ed.click('.ce-save');
+    try { await ed.waitForFunction(() => /Saved on message/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
+    const kept2 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('editor tab Save: the SillyTavern tab re-stamps the change on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops.at(-1).text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2) + await ed.evaluate(() => document.querySelector('.change-editor')?.innerText.slice(-300)));
+    await page.evaluate(id => { const p = SillyTavern.getContext().chat[id].extra.worldscrawl_patches[0]; p.ops = [{ ...p.ops.at(-1), text: 'Changed in the chat meanwhile.' }]; }, flagId);
+    await ed.click('.ce-save');
+    try { await ed.waitForFunction(() => /Not saved/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
+    const edStale = await ed.evaluate(() => document.querySelector('.change-editor')?.innerText ?? '');
+    const kept3 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
+    check('editor tab Save refused with a note when the change was edited since it opened', /edited since/.test(edStale) && kept3[0].ops.length === 1 && kept3[0].ops[0].text === 'Changed in the chat meanwhile.', edStale.slice(-300) + JSON.stringify(kept3));
+    check('editor tab: no page errors', !edErrors.length, edErrors.join(' | '));
+    await ed.close();
+    await card.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click(); await page.waitForTimeout(1000);
+    check('Undo removes the edited change', await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId));
+    // Edit live from the map window's inspector.
+    await ui.click('#editorToggle'); await ui.waitForTimeout(800);
+    await ui.click(`.node[data-id="${CR}"]`);
+    await ui.locator('.side .editlive').waitFor({ timeout: 10000 });
+    const descRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'description'); return tr ? [tr.querySelector('.val')?.textContent ?? '', tr.querySelector('.src')?.textContent ?? ''] : null; });
+    const dr0 = await descRow();
+    check('inspector Resolved shows the room\'s own description, from file', dr0 && dr0[0].length > 10 && /from file/.test(dr0[1] ?? dr0.join('')), JSON.stringify(dr0));
+    const nLiveEdit = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    check('room inspector button reads "Edit place"', (await ui.locator('.side .editlive').textContent()) === 'Edit place');
+    await ui.click('.side .editlive');
+    const descIn = ui.locator('.side .placeform > .pf-row[data-field="description"] textarea');
+    await descIn.waitFor({ timeout: 10000 });
+    const pf0 = await ui.evaluate(() => { const f = document.querySelector('.side .placeform'), r = k => f.querySelector(`.pf-row[data-field="${k}"]`);
+        return { name: r('name').querySelector('input').value, exp: r('exposure').classList.contains('inherited'), expTag: r('exposure').querySelector('.pf-from')?.textContent, expandable: r('expandable').querySelector('input').type,
+            radios: r('insulation').querySelectorAll('input[type=radio]').length, select: !!r('exposure').querySelector('select'), move: r('move').querySelector('.wspick')?.value, movePath: r('move').querySelector('.wspick-value')?.textContent,
+            exits: f.querySelectorAll('.pf-exit').length, collapsed: [...f.querySelectorAll('.pf-exit-body')].every(b => b.hidden), ops: !!document.querySelector('.side select.wspf-op') }; });
+    check('Edit place: a form with the place\'s data (inputs, checkbox, radios for 3 options, dropdown for 4+, move dropdown, collapsed exits)', pf0.name === 'Common Room' && pf0.expandable === 'checkbox' && pf0.radios === 3 && pf0.select && pf0.move === 'riverton:drowned_rat' && / › /.test(pf0.movePath) && pf0.exits === 3 && pf0.collapsed && !pf0.ops, JSON.stringify(pf0));
+    check('Edit place: inherited fields are greyed with a "from subregion" tag', pf0.exp && pf0.expTag === 'from subregion', JSON.stringify(pf0));
+    await descIn.fill('Burned to the rafters.');
+    try { await ui.waitForFunction(() => /Burned to the rafters/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('Edit place: the red/green diff shows the change before Submit', /Burned to the rafters/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    // Cast and Editor share the side pane: opening one closes the other, and the unsaved place form comes back intact.
+    await ui.click('#castToggle'); await ui.waitForTimeout(1200);
+    const cxSw1 = await ui.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), cast: !!document.querySelector('.side .castpanel'), form: !!document.querySelector('.side .placeform'), w: Math.round(document.querySelector('.side').getBoundingClientRect().width), draft: globalThis.wsSideDraft?.() }));
+    check('opening Cast while editing: Editor turns off, Cast fills the side pane (no form underneath), draft kept', cxSw1.casting && !cxSw1.editor && cxSw1.cast && !cxSw1.form && cxSw1.w >= 370 && cxSw1.draft, JSON.stringify(cxSw1));
+    await ui.click('#editorToggle'); await ui.waitForTimeout(1200);
+    const cxSw2 = await ui.evaluate(() => ({ casting: document.body.classList.contains('casting'), editor: document.body.classList.contains('editor'), cast: !!document.querySelector('.side .castpanel'), desc: document.querySelector('.side .placeform > .pf-row[data-field="description"] textarea')?.value, w: Math.round(document.querySelector('.side').getBoundingClientRect().width) }));
+    check('opening Editor from Cast: Cast turns off and the unsaved Edit place form is restored', !cxSw2.casting && cxSw2.editor && !cxSw2.cast && cxSw2.desc === 'Burned to the rafters.' && cxSw2.w >= 370, JSON.stringify(cxSw2));
+    await ui.click('.side button.pf-submit');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const le = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, p: m.extra?.worldscrawl_patches }; }, nLiveEdit);
+    check('GUI Edit place: SillyTavern adds a hidden system message carrying the stamp', le.grew && le.sys === true && /^Map edit: /.test(le.mes) && le.p?.[0]?.ops?.[0]?.text === 'Burned to the rafters.', JSON.stringify(le));
+    check('Edit place: only the changed field became an op (no inherited values copied in)', le.p?.[0]?.ops?.length === 1 && le.p[0].ops[0].op === 'set_description', JSON.stringify(le.p?.[0]?.ops));
+    try { await ui.waitForSelector(`.node.patched[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
+    check('map marks the patched room', await ui.locator(`.node.patched[data-id="${CR}"] .patchdot`).count() === 1);
+    await ui.click(`.node[data-id="${CR}"]`); await ui.waitForTimeout(1500);
+    const dr1 = await descRow();
+    check('Resolved is live: the new description, tagged with its message', dr1 && dr1[0] === 'Burned to the rafters.' && dr1.join(' ').includes(`from message #${nLiveEdit}`), JSON.stringify(dr1));
+    const told = await page.evaluate(async mod => (await import(mod)).chatElapsed !== undefined, wsMod);
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nLiveEdit); await page.waitForTimeout(1500);
+    try { await ui.waitForFunction(id => !document.querySelector(`.node.patched[data-id="${id}"]`), CR, { timeout: 10000 }); } catch {}
+    check('deleting the map-edit message undoes it (marker gone)', told && await ui.locator(`.node.patched[data-id="${CR}"]`).count() === 0 && await page.evaluate(() => !SillyTavern.getContext().chat.some(m => m.extra?.worldscrawl_patches)));
+    // Edit place: inherited checkbox + reset, exit blocks (collapse/expand, X removes the pair, Add exit), per-side vs shared.
+    await ui.click(`.node[data-id="${CR}"]`); await ui.waitForTimeout(1200);
+    const nPf = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.click('.side .editlive');
+    await ui.locator('.side .placeform .pf-exit').first().waitFor({ timeout: 10000 });
+    await ui.click('.side .pf-expand');
+    const allOpen = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit-body')].every(b => !b.hidden));
+    await ui.click('.side .pf-collapse');
+    const allShut = await ui.evaluate(() => [...document.querySelectorAll('.side .pf-exit-body')].every(b => b.hidden));
+    check('Edit place: Expand all / Collapse all toggle every exit block', allOpen && allShut);
+    const expRow = '.side .placeform > .pf-row[data-field="expandable"]';
+    await ui.click(`${expRow} input`);
+    const ex1 = await ui.evaluate(r => { const e = document.querySelector(r); return { inh: e.classList.contains('inherited'), reset: !e.querySelector('.pf-reset').hidden, on: e.querySelector('input').checked }; }, expRow);
+    await ui.click(`${expRow} .pf-reset`);
+    const ex2 = await ui.evaluate(r => { const e = document.querySelector(r); return { inh: e.classList.contains('inherited'), reset: !e.querySelector('.pf-reset').hidden, on: e.querySelector('input').checked, tag: e.querySelector('.pf-from')?.textContent }; }, expRow);
+    check('Edit place: overriding an inherited checkbox shows a reset button; reset goes back to the greyed inherited value', !ex1.inh && ex1.reset && ex1.on === false && ex2.inh && !ex2.reset && ex2.on === true && ex2.tag === 'default', JSON.stringify([ex1, ex2]));
+    await ui.click(`${expRow} input`); // off again: stays overridden
+    const block = dir => ui.locator('.side .pf-exit', { has: ui.locator(`.pf-exit-title:text-matches("^${dir} →")`) });
+    await block('up').locator('.pf-x').click();
+    await block('out').locator('.pf-toggle').click();
+    await block('out').locator('.pf-side[data-side="there"] .pf-row[data-field="sight"] input[value="clear"]').check();
+    const outDoor = await block('out').locator('.pf-row[data-field="door"] input').isChecked();
+    await ui.click('.side .pf-addexit');
+    const newBlk = ui.locator('.side .pf-exit').first();
+    await newBlk.locator('.pf-dir[data-field="direction"]').fill('side door');
+    await pickSet(newBlk.locator('.pf-row[data-field="to"] .wspick'), 'riverton:streets/market_lane');
+    await newBlk.locator('.pf-dir[data-field="back_direction"]').fill('tavern');
+    const nbTitle = await newBlk.locator('.pf-exit-title').textContent();
+    await ui.click('.side button.pf-submit');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const pfOps = await page.evaluate(n => { const c = SillyTavern.getContext(); return c.chat.length === n + 1 ? c.chat[n].extra?.worldscrawl_patches?.[0]?.ops : null; }, nPf);
+    const byOp = k => (pfOps ?? []).filter(o => o.op === k);
+    check('Edit place: the door field shows the shared door; a new block reads its name and destination', outDoor && nbTitle === 'side door → Market Lane', nbTitle);
+    check('Edit place Submit: expandable false, X → remove_exit, a per-side sight change → set_exit, Add exit → add_exit (nothing else)',
+        pfOps?.length === 4 && byOp('set_expandable')[0]?.value === false && byOp('remove_exit')[0]?.direction === 'up' && JSON.stringify(byOp('set_exit')[0]?.fields) === '{"sight":"clear"}'
+        && byOp('add_exit')[0]?.to === 'riverton:streets/market_lane' && byOp('add_exit')[0]?.return_direction === 'tavern', JSON.stringify(pfOps));
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nPf); await page.waitForTimeout(1500);
+    // Edit live on a region / subregion page: rename via update_area, stamped on a hidden message, tagged in Resolved.
+    await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(1200);
+    const areaKind = await ui.evaluate(() => document.querySelector('.side .area')?.textContent ?? '');
+    const nameRow = () => ui.evaluate(() => { const tr = [...document.querySelectorAll('.side table.resolved tr')].find(r => r.querySelector('th')?.textContent === 'name'); return tr ? { v: tr.querySelector('.val')?.textContent ?? '', src: tr.querySelector('.src')?.textContent ?? '', mark: !!tr.querySelector('.patchmark') } : null; });
+    const an0 = await nameRow();
+    check('area inspector has an Edit live button and an unmarked name row', /^(sub)?region/.test(areaKind) && await ui.locator('.side .editlive').count() === 1 && an0 && !an0.mark, areaKind + JSON.stringify(an0));
+    const nArea = await page.evaluate(() => SillyTavern.getContext().chat.length);
+    await ui.click('.side .editlive');
+    const nameIn = ui.locator('.side .placeform > .pf-row[data-field="name"] input').first();
+    await nameIn.waitFor({ timeout: 10000 });
+    const areaForm = await ui.evaluate(() => ({ kind: document.querySelector('.side .placeform')?.dataset.kind, btn: document.querySelector('.side .editlive')?.textContent, notes: !!document.querySelector('.side .placeform .pf-row[data-field="lore"] textarea'), stays: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-from')?.textContent ?? null, staysReset: document.querySelector('.side .placeform .pf-row[data-field="stays_open"] .pf-reset')?.hidden === false, regionNote: !!document.querySelector('.side .placeform .pf-parent-note[data-from="region"]') }));
+    check('area Edit form: same style, prefilled with the live name, notes textarea, defaults tagged', (await nameIn.inputValue()) === an0.v && /^(sub)?region$/.test(areaForm.kind) && /^Edit (sub)?region$/.test(areaForm.btn) && areaForm.notes && areaForm.stays === null && !areaForm.staysReset, await nameIn.inputValue() + JSON.stringify(areaForm));
+    await nameIn.fill('The Gilded Quarter');
+    try { await ui.waitForFunction(() => /Gilded Quarter/.test(document.querySelector('.side .editlive-diff')?.innerText ?? ''), null, { timeout: 8000 }); } catch {}
+    check('area Edit live: the red/green diff shows the rename', /Gilded Quarter/.test(await ui.evaluate(() => document.querySelector('.side .editlive-diff')?.innerText ?? '')));
+    await ui.click('.side button.pf-submit');
+    try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side')?.innerText ?? ''), null, { timeout: 10000 }); } catch {}
+    const ae = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length === n + 1, sys: m.is_system, mes: m.mes, op: m.extra?.worldscrawl_patches?.[0]?.ops?.[0] }; }, nArea);
+    check('area Edit live: hidden stamped message with update_area', ae.grew && ae.sys === true && /^Map edit: /.test(ae.mes) && ae.op?.op === 'update_area' && ae.op?.name === 'The Gilded Quarter' && !('lore' in ae.op), JSON.stringify(ae));
+    await ui.waitForTimeout(1500);
+    for (let k = 0; k < 4; k++) { // the map re-renders after the stamp; reopen the area page once it settles
+        await ui.click('#breadcrumb .crumb.active'); await ui.waitForTimeout(1000);
+        if ((await nameRow())?.v === 'The Gilded Quarter') break;
+    }
+    const an1 = await nameRow();
+    check('area Resolved: renamed, tagged with its message, orange marker', an1 && an1.v === 'The Gilded Quarter' && an1.src.includes(`from message #${nArea}`) && an1.mark, JSON.stringify(an1));
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}`), nArea); await page.waitForTimeout(1500);
