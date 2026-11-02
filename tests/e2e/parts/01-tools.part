@@ -1,0 +1,140 @@
+    // Part 1: the optional tool mode still works.
+    await page.evaluate(() => { const r = document.querySelector('input[name="worldscrawl_mode"][value="tools"]'); r.checked = true; r.dispatchEvent(new Event('change')); });
+    const tools = await page.evaluate(() => SillyTavern.getContext().ToolManager.tools.map(t => t.toFunctionOpenAI().function.name));
+    check('tools registered', tools.includes('ws_look') && tools.includes('ws_move'), JSON.stringify(tools));
+    check('settings panel present', await page.locator('#worldscrawl_url').count() === 1);
+    check('tool instructions injected', await page.evaluate(() => /call ws_look/.test(SillyTavern.getContext().extensionPrompts?.worldscrawl_nudge?.value ?? '')));
+
+    // Point the extension at the test server and connect ST to the fake model with function calling on.
+    await page.evaluate(() => { const c = SillyTavern.getContext(); c.extensionSettings.worldscrawl.serverUrl = ''; });
+    await page.evaluate(async fake => {
+        const $ = window.jQuery;
+        $('#main_api').val('openai').trigger('change');
+        $('#chat_completion_source').val('custom').trigger('change');
+        $('#custom_api_url_text').val(fake + '/v1').trigger('input');
+        $('#custom_model_id').val('fake-model').trigger('input');
+        $('#stream_toggle').prop('checked', false).trigger('input');
+        $('#openai_function_calling').prop('checked', true).trigger('input');
+    }, FAKE);
+    await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
+    await page.waitForTimeout(3000);
+    await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
+    check('tool calling supported', await page.evaluate(() => SillyTavern.getContext().isToolCallingSupported()));
+
+    // Open a chat with the bundled default character.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); await c.selectCharacterById(0); });
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => jQuery('#worldscrawl_test').trigger('click'));
+    await page.waitForTimeout(1000);
+    const status = await page.textContent('#worldscrawl_status');
+    check('Test connection button', status.startsWith('Connected'), status);
+
+    let expected = 0;
+    const send = async (text, n = 2) => {
+        expected += n;
+        const dlg = page.locator('dialog[open]');
+        if (await dlg.count()) { console.log('[dialog]', (await dlg.first().textContent()).trim().slice(0, 200)); await page.keyboard.press('Escape'); await page.waitForTimeout(500); }
+        await page.fill('#send_textarea', text);
+        await page.click('#send_but');
+        for (let i = 0; i < 60; i++) { const r = await (await fetch(`${FAKE}/__requests`)).json(); if (r.length >= expected) break; if (i === 59) { console.log(`[send] gave up: ${r.length} model requests, expected ${expected}`); } await page.waitForTimeout(500); }
+        await page.waitForFunction(() => !jQuery('#mes_stop').is(':visible'), null, { timeout: 30000 });
+        await page.waitForTimeout(2000);
+    };
+    const stored = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; for (let i = ch.length - 1; i >= 0; i--) if (ch[i]?.extra?.worldscrawl_location) return ch[i].extra.worldscrawl_location; return null; });
+
+    await queue([{ tool_calls: [{ name: 'ws_look' }] }, { content: 'You are in the tavern.' }]);
+    await send('Where am I?');
+    check('look stamps start location', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
+
+    await queue([{ tool_calls: [{ name: 'ws_move', arguments: { direction: 'out' } }] }, { content: 'You step into the square.' }]);
+    await send('I go outside.');
+    check('move out -> square', (await stored()) === 'riverton:streets/square', String(await stored()));
+    const reqs = await (await fetch(`${FAKE}/__requests`)).json();
+    const last = JSON.stringify(reqs[reqs.length - 1].messages);
+    const footer = () => page.evaluate(() => { const els = [...document.querySelectorAll('#chat .mes')]; return els[els.length - 1]?.querySelector('.worldscrawl_exits')?.textContent ?? null; });
+    const f1 = await footer();
+    check('exits footer shown under reply', /^Exits: .*\(/.test(f1 ?? '') && f1.includes('north'), String(f1));
+    check('no carded NPC in the square: no Named NPCs line', await page.evaluate(() => [...document.querySelectorAll('#chat .mes')].at(-1)?.querySelector('.worldscrawl_npcs_here') == null) && !/Named NPCs present/.test(f1 ?? ''), String(f1));
+    check('footer not in message text', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => /Exits:/.test(m.mes ?? ''))));
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_show_exits'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    check('footer toggles off', await page.locator('#chat .worldscrawl_exits').count() === 0);
+    await page.evaluate(() => { const c = document.getElementById('worldscrawl_show_exits'); c.checked = true; c.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(1000);
+    check('footer toggles back on', await page.locator('#chat .worldscrawl_exits').count() > 0);
+    check('model got the new location in the tool result', last.includes('Village Square'));
+    check('tools sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_move'));
+
+    await queue([{ tool_calls: [{ name: 'ws_move', arguments: { direction: 'sideways' } }] }, { content: 'You cannot go that way.' }]);
+    await send('I go sideways.');
+    check('bad move keeps location', (await stored()) === 'riverton:streets/square');
+    const reqs2 = await (await fetch(`${FAKE}/__requests`)).json();
+    check('bad move returns valid directions', JSON.stringify(reqs2[reqs2.length - 1].messages).includes('valid_directions'));
+
+    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - each waits on a Keep / Adjust / Discard card.
+    const waits = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_wait).filter(Boolean));
+    const waitCards = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_waitcard).filter(Boolean));
+    const cardClick = (label, amount) => page.evaluate(async ({ label, amount }) => {
+        const card = [...document.querySelectorAll('.worldscrawl_waitcard')].pop(); if (!card) return false;
+        if (amount != null) card.querySelector('.worldscrawl_wait_amount').value = amount;
+        const b = [...card.querySelectorAll('.menu_button, button, div')].find(x => x.textContent.trim() === label); if (!b) return false;
+        b.click(); await new Promise(r => setTimeout(r, 800)); return true; }, { label, amount });
+    check('ws_npc tool lists disposition with its values and a reason', (() => { const t = (reqs[0].tools ?? []).find(x => (x.function?.name ?? x.name) === 'ws_npc'); const ps = (t?.function ?? t)?.parameters?.properties ?? {}; return /disposition/.test(ps.action?.description ?? '') && JSON.stringify(ps.value?.enum) === JSON.stringify(['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful']) && !!ps.reason; })(), JSON.stringify((reqs[0].tools ?? []).map(x => x.function?.name ?? x.name)));
+    check('ws_wait tool sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_wait'));
+    check('Auto-keep waits is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.autoKeepWaits === false && !document.getElementById('worldscrawl_auto_keep_waits').checked));
+    check('ws_wait tool description comes from the prompt file (clearly 15 minutes or more, if unclear don\'t, reason)', JSON.stringify(reqs[0].tools ?? []).includes('clearly take 15 minutes or more') && JSON.stringify(reqs[0].tools ?? []).includes("isn't clear, don't") && JSON.stringify(reqs[0].tools ?? []).includes('"reason"'));
+    await queue([{ tool_calls: [{ name: 'ws_wait', arguments: { duration: '3h', reason: 'waiting for the ferry' } }] }, { content: 'You wait by the well.' }]);
+    await send('I wait three hours.');
+    let ws = await waits();
+    check('ws_wait tool: a card, nothing stamped yet', ws.length === 0 && (await waitCards()).length === 1 && await page.evaluate(() => /swipe/.test(document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')), JSON.stringify(await waitCards()));
+    check('ws_wait reason: on the card and in the inspector call log', (await waitCards())[0]?.reason === 'waiting for the ferry' && await page.evaluate(() => /Why: waiting for the ferry/.test(document.querySelector('.worldscrawl_waitcard .worldscrawl_wait_reason')?.textContent ?? '')), JSON.stringify(await waitCards()));
+    check('ws_wait keeps location', (await stored()) === 'riverton:streets/square');
+    check('ws_wait tool result tells model the time', JSON.stringify((await (await fetch(`${FAKE}/__requests`)).json()).at(-1).messages).includes('Time passes'));
+    check('Approve on the card stamps 3h', await cardClick('Approve') && (ws = await waits()).length === 1 && ws[0].seconds === 3 * 3600 && !ws[0].sleep && (await waitCards()).length === 0, JSON.stringify(ws));
+    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning | sleeping on the bench]' }]);
+    await send('I sleep.', 1);
+    check('[ws_wait] tag: a card with the amount', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 1, JSON.stringify(await waitCards()));
+    check('[ws_wait] tag reason shows on the card', /Why: sleeping on the bench/.test(await page.evaluate(() => document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')));
+    check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
+    check('Adjust stamps the edited amount (6h sleep) with its reason', await cardClick('Adjust', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600 && ws[1].reason === 'sleeping on the bench', JSON.stringify(ws));
+    await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
+    await send('I wait an hour.');
+    check('ws_flag wait alias: a card', (await waitCards()).length === 1 && (await waits()).length === 2);
+    check('Discard: no time passes', await cardClick('Discard') && (await waitCards()).length === 0 && (await waits()).length === 2, JSON.stringify(await waits()));
+    await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
+    await send('I wait an hour.');
+    await cardClick('Approve');
+    ws = await waits();
+    check('ws_flag wait alias kept stamps 1h', ws.length === 3 && ws[2].seconds === 3600, JSON.stringify(ws));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 11'); });
+    await page.waitForTimeout(1500);
+    check('deleting wait messages undoes them', (await waits()).length === 0, JSON.stringify(await waits()));
+    await queue([{ content: 'You pause briefly. [ws_wait: 10m]' }]);
+    await send('I catch my breath.', 1);
+    check('narrator wait under 15 minutes: no card, no clock change', (await waitCards()).length === 0 && (await waits()).length === 0, JSON.stringify(await waitCards()));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 2'); }); await page.waitForTimeout(1000);
+    await queue([{ content: 'Two hours drag by. [ws_wait: 1h]' }]);
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2h'); }); expected += 1; for (let i = 0; i < 60 && (await (await fetch(`${FAKE}/__requests`)).json()).length < expected; i++) await page.waitForTimeout(500); await page.waitForTimeout(2000);
+    ws = await waits();
+    check('explicit /ws-wait applies directly; the narrator\'s wait on that turn gets no card', ws.length === 1 && ws[0].seconds === 7200 && (await waitCards()).length === 0, JSON.stringify([ws, await waitCards()]));
+    await page.evaluate(async () => { await SillyTavern.getContext().executeSlashCommandsWithOptions('/del 2'); }); await page.waitForTimeout(1500);
+    check('explicit wait removed again', (await waits()).length === 0, JSON.stringify(await waits()));
+
+    await queue([{ tool_calls: [{ name: 'ws_move', arguments: { direction: 'north' } }] }, { content: 'The temple.' }]);
+    await send('Up to the temple.');
+    check('move north -> temple', (await stored()) === 'riverton:temple/nave');
+
+    // Deleting the last exchange (user msg, tool record, reply) rolls the location back.
+    await page.evaluate(async () => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions('/del 3'); });
+    await page.waitForTimeout(1500);
+    check('deleting messages rolls location back', (await stored()) === 'riverton:streets/square', String(await stored()));
+
+    // Survives reload (saved with the chat).
+    await page.reload(); await page.waitForSelector('#send_textarea', { timeout: 60000 }); await page.waitForTimeout(3000);
+    await page.evaluate(async () => { await SillyTavern.getContext().selectCharacterById(0); });
+    await page.waitForTimeout(3000);
+    check('location persisted with chat', (await stored()) === 'riverton:streets/square', String(await stored()));
+    check('footer re-rendered on chat load', ((await footer()) ?? '').startsWith('Exits:'), String(await footer()));
+    const reqs3 = await (await fetch(`${FAKE}/__requests`)).json();
+    check('footer never sent to model', !reqs3.some(r => JSON.stringify(r.messages).includes('Exits: ')));
+    check('facts injected (tool mode)', reqs3.some(r => JSON.stringify(r.messages).includes('World state from the game engine')));
+

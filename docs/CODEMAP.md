@@ -49,7 +49,9 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 
 | Path | What |
 |---|---|
-| node/*.test.mjs | Unit tests, one per topic (`node --test tests/node/*.test.mjs`). `helpers.mjs` (incl. `extSource()`), `ststub.mjs` (SillyTavern stub), `useprompts.mjs`, `fixtures/` |
-| e2e/run.sh, e2e/e2e.mjs, e2e/fake-openai.mjs | Real SillyTavern + browser end-to-end run with a fake model |
+| node/*.test.mjs | Unit tests, one file per topic (27 files; run `node --test tests/node/*.test.mjs`): actors, barred, calllog, cast, dig, discover, exits, expiry, flags, inspect, mapactions, modeledits, notices, npc (incl. NPC card, live schedule/places, lore), patches (incl. patch form, toggles, diff view, move diff, change editor), placeform, placeless, position, prompts, snapcache, time, ui (incl. menus, picker), wait, weather, words (incl. brackets, carriers), world (incl. slugs, bases), worlds. Merged files keep each original file's tests in its own `{ }` block under a `// ---- from <old file>` comment. Helpers: `helpers.mjs` (incl. `extSource()`), `ststub.mjs` (SillyTavern stub), `useprompts.mjs`, `fixtures/` |
+| e2e/run.sh, e2e/fake-openai.mjs | Starts a throwaway SillyTavern with the plugin and a fake model, then runs `E2E_SCRIPT` (default `e2e.mjs`) |
+| e2e/e2e.mjs | Run-all: joins `e2e/parts/*.part` in order into `e2e/.assembled.mjs` (git-ignored) and runs it |
+| e2e/parts/NN-topic.part | The e2e checks by topic, as chapters of one browser session that share variables (not standalone modules): 00-setup, 01-tools, 02-movement, 03-names-routing, 04-requests-reveals, 05-dig-look, 06-doors-exits, 07-map-window-edits, 08-wizards-toggles, 09-discovery, 10-menus-prompts, 11-cast, 99-teardown |
 | e2e/snapshot.mjs, e2e/prompts.golden.json | Prompt snapshot: every model request in a scripted chat vs. the golden file |
 | bench/snapcache.bench.mjs | Snapshot cache benchmark |

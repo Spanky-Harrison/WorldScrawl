@@ -1,0 +1,5 @@
+} finally {
+    await browser.close();
+}
+console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
+process.exit(failures ? 1 : 0);
