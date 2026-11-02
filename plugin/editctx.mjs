@@ -2,8 +2,8 @@
 // file, plus this chat's changes, says), what each unset field inherits and from where, its exits with their pair's
 // shared door, and the lists the dropdowns offer. Read-only; the form's Submit becomes patch ops (plugin/ui/placeform.mjs).
 import { inspect } from './inspect.mjs';
-import { flipBar } from './ui/doorbar.mjs';
-import { FIELD_KEYS, EXIT_SIDE_KEYS, getRoom } from './ui/patches.mjs';
+import { flipBar } from './shared/doorbar.mjs';
+import { FIELD_KEYS, EXIT_SIDE_KEYS, getRoom } from './shared/patches.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);

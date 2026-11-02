@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { OPS, OP_DOCS, opDocs, readChangeAnswer, applyPatch } from '../../plugin/ui/patches.mjs';
+import { OPS, OP_DOCS, opDocs, readChangeAnswer, applyPatch } from '../../plugin/shared/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
 const src = extSource();

@@ -12,9 +12,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCalendar, checkStart, defaultTravel, parseDuration } from './ui/calendar.mjs';
+import { checkCalendar, checkStart, defaultTravel, parseDuration } from './shared/calendar.mjs';
 import { buildWeather, checkPlace } from './weather-config.mjs';
-import { BAR_SIDES, flipBar } from './ui/doorbar.mjs';
+import { BAR_SIDES, flipBar } from './shared/doorbar.mjs';
 export { BAR_SIDES, flipBar };
 
 export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;

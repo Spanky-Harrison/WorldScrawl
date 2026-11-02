@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
 import { initialState, placeOps, areaOps, newExit, formProblems, setDirection, ROOM_FIELDS, EXIT_FIELDS } from '../../plugin/ui/placeform.mjs';
-import { applyPatch, getRoom, PatchError } from '../../plugin/ui/patches.mjs';
+import { applyPatch, getRoom, PatchError } from '../../plugin/shared/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 const loadRaw = () => read_world_raw(RIVERTON)[1];
 

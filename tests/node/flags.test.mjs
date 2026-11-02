@@ -66,7 +66,7 @@ test('discoveries are kept at once (no Keep / Discard card)', () => {
 
 
 const ext = await import('../../extension/index.js');
-const pl = await import('../../plugin/ui/patches.mjs');
+const pl = await import('../../plugin/shared/patches.mjs');
 
 test('cant reply: a "can\'t show this on the map" note with Retry', () => {
     const ans = pl.readChangeAnswer(ext.parseJsonAnswer('{"cant": "a mind dimension is not a place on the map"}'));

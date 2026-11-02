@@ -2,7 +2,7 @@
 import { WAIT_TAG, waitArgs, parseWaitTag, normalizeWsTags, unreadTags } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';

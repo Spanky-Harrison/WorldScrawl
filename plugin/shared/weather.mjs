@@ -1,6 +1,6 @@
 // Weather: a pure function of (world seed, weather region, absolute game time). Nothing is saved, so swipes and deletes
 // stay consistent and two chats in the same world at the same moment see the same sky. Shared by the server plugin, the
-// map window and the extension (served at /api/plugins/worldscrawl/ui/weather.mjs).
+// map window and the extension (served at /api/plugins/worldscrawl/shared/weather.mjs).
 //
 // The config (built by the server from world.json, region files, plugin/climates/*.json, sky_types.json and
 // wind_levels.json; see weatherConfig in world.mjs) looks like

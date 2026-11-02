@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { carrierLine, clip, isCarrier, patchLib, proactiveDiscovery, snapCarriers } from './carriers.mjs';
 import { chatChanges, chatElapsed, defaultWorldId } from './clock.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
@@ -11,7 +11,7 @@ import { cardButton, renderPatchCards } from './waits.mjs';
 
 // ---- Map patches: lasting changes to places (a fire, a collapse, a smashed door). A patch is stamped on the message
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
-// (plugin/ui/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
+// (plugin/shared/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
 // flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
 export const flagHint = (on = proactiveDiscovery()) => P('narration.flag_hint', { discover: P(on ? 'narration.discover_proactive' : 'narration.discover_strict') });
 export const flagToolText = (on = proactiveDiscovery()) => P('narration.flag_tool', { discover: P(on ? 'narration.flag_tool_proactive' : 'narration.flag_tool_strict') });

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { SnapshotCache, nextExpiry } from '../../plugin/snapcache.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
-import { activeChanges } from '../../plugin/ui/patches.mjs';
+import { activeChanges } from '../../plugin/shared/patches.mjs';
 import { RIVERTON, SQUARE } from './helpers.mjs';
 
 const [WJ, RAW] = read_world_raw(RIVERTON);

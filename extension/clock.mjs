@@ -1,4 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
+import { calendar, weather } from './shared.mjs';
 import { api } from './doors.mjs';
 import { fetchRaw, newRoom, renderAllExits } from './footer.mjs';
 import { CHANGE_KEY, WORLD_KEY, activeWorld, baseUrl, ctx, isOn } from './index.js';
@@ -21,11 +22,11 @@ const rememberWorlds = body => {
 // them and deleting the message undoes them. Clock = the chat world's start_date + the seconds stamped after the latest
 // rebase (a save bakes everything before it into the saved world's start_date).
 let calendarLib = null;
-/** calendar.mjs, served by the plugin (also used by the map window); null until loaded or if unavailable. */
+/** calendar.mjs from plugin/shared/ (also used by the server and the map window); null if it could not be loaded. */
 export async function loadCalendar() {
     if (calendarLib) return calendarLib;
-    try { calendarLib = await import(`${baseUrl()}/ui/calendar.mjs`); } catch (e) { console.warn('[WorldScrawl] calendar unavailable:', e.message); }
-    if (calendarLib && !weatherLib) { try { weatherLib = await import(`${baseUrl()}/ui/weather.mjs`); } catch (e) { console.warn('[WorldScrawl] weather unavailable:', e.message); } }
+    if (calendar.dateAt) calendarLib = calendar; // plugin/shared/, loaded at startup (shared.mjs)
+    if (calendarLib && !weatherLib && weather.placeWeather) weatherLib = weather;
     return calendarLib;
 }
 let weatherLib = null;

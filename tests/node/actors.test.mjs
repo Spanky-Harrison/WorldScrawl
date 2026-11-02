@@ -6,7 +6,7 @@ import { PLAYER, readPositions, playerAddress, partyAddresses, partyIds, followe
 import { resolveActors, relocateMap } from '../../plugin/position.mjs';
 import { SnapshotCache } from '../../plugin/snapcache.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
-import { activeChanges } from '../../plugin/ui/patches.mjs';
+import { activeChanges } from '../../plugin/shared/patches.mjs';
 import { build_world, read_world_raw } from '../../plugin/world.mjs';
 import { buildGraph } from '../../plugin/ui/mapdata.mjs';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';

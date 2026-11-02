@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P, hasPrompts } from './prompts.mjs';
+import { render as P, hasPrompts } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, placeStamp } from './actors.mjs';
 import { chatChanges, chatWorld, clockAt, rememberWorlds, worldSeed } from './clock.mjs';
 import { registerTools } from './discovery.mjs';

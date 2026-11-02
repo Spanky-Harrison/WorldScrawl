@@ -6,6 +6,7 @@ import { exitsCache, renderAllExits } from './footer.mjs';
 import { DEFAULTS, DEFAULT_NUDGE, applyChatState, ctx, isOn, refreshSaveName, saveWorld, setEnabled, settings } from './index.js';
 import { fillWorlds, openMapWindow, openWorldFolder, testConnection } from './mapwindow.mjs';
 import { applyFacts } from './scene.mjs';
+import { sharedLoadedFrom, sharedUrl } from './shared.mjs';
 
 function addSettingsPanel() {
     const html = `
@@ -59,6 +60,12 @@ function addSettingsPanel() {
     const input = document.getElementById('worldscrawl_url');
     input.value = settings().serverUrl;
     input.addEventListener('input', () => { settings().serverUrl = input.value.trim(); exitsCache.clear(); ctx().saveSettingsDebounced(); });
+    input.addEventListener('change', () => { // shared code was loaded from the old server at startup: reload once the setting is saved
+        if (sharedUrl() === sharedLoadedFrom) return;
+        try { toastr.info(`WorldScrawl will reload the page to load its shared code from ${sharedUrl()}.`); } catch {}
+        ctx().saveSettingsDebounced();
+        setTimeout(() => location.reload(), 3000);
+    });
     const who = document.getElementById('worldscrawl_who');
     who.value = settings().whoMoves ?? DEFAULTS.whoMoves;
     who.addEventListener('input', () => { settings().whoMoves = who.value; applyFacts(); ctx().saveSettingsDebounced(); });

@@ -10,11 +10,11 @@
 //   {"type": "open_door" | "close_door", "from": A, "direction": "out", ...}   door state: replayed by the client;
 //       checked here (the exit must exist) but never written into a saved world
 //   {"type": "view_link", "from": A, "to": B}   what A's window (no exit) looks out on; saved into A's "views"
-//   {"type": "patch", "ops": [...], ...}   a map patch (fire, collapse, merged rooms): see ui/patches.mjs
+//   {"type": "patch", "ops": [...], ...}   a map patch (fire, collapse, merged rooms): see shared/patches.mjs
 // The extension stamps changes on chat messages; the server applies them per request (/move, /travel) and when
 // rendering a new world folder. Anything else is rejected, so new types must be added here deliberately.
 import { WorldError, has, isObj, plen, repr, strip } from './world.mjs';
-import { applyPatch, PatchError } from './ui/patches.mjs';
+import { applyPatch, PatchError } from './shared/patches.mjs';
 
 export const CHANGE_TYPES = ['add_exit', 'remove_exit', 'dig', 'add_room', 'open_door', 'close_door', 'view_link', 'patch'];
 export const MAX_NAME = 60, MAX_DIRECTION = 30, MAX_DESCRIPTION = 400;

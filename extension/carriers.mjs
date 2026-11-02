@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P, hasPrompts } from './prompts.mjs';
+import { render as P, hasPrompts, patches } from './shared.mjs';
 import { baseReply, gen, mergeDuplicates, nearbyRooms } from './dig.mjs';
 import { analyzeDiscovery, keepFlag, syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, ensurePrompts } from './doors.mjs';
@@ -84,7 +84,7 @@ export async function restoreCarriers(lost = lastLostCarriers) {
 globalThis.worldscrawlRestoreCarriers = restoreCarriers;
 globalThis.worldscrawlResolve = address => api('/resolve', { method: 'POST', body: JSON.stringify({ address, ...mapCtx() }) }).then(r => r.body); // e2e / console
 globalThis.worldscrawlLostCarriers = () => lastLostCarriers.length;
-async function loadPatchLib() { try { patchLib ??= await import(`${baseUrl()}/ui/patches.mjs`); } catch (e) { console.warn('[WorldScrawl] patches lib unavailable:', e.message); } return patchLib; }
+async function loadPatchLib() { if (patches.applyPatch) patchLib ??= patches; return patchLib; } // plugin/shared/, loaded at startup (shared.mjs)
 
 /** Where the story range for a flag on message `end` starts: after the previous flag, or at the last move into or out of `loc`; at most ~10 messages back. */
 export function suggestStart(chat, end, loc) {

@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { stayPutLine } from './words.mjs';
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { LORE_KEY } from './npc.mjs';
 import { askValid, narrativeDig } from './dig.mjs';
 import { barHere, barrierOf, changesOf, currentLocation, doorCandidates, doorChange, ensurePrompts, isBarredNow, isOpenNow, sightOf, soundOf } from './doors.mjs';

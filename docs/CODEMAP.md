@@ -26,7 +26,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | settings.mjs | The settings panel | `addSettingsPanel` |
 | npc.mjs | Copy of plugin/npc.mjs (a test checks they match). NPC records, flags, `judgeFound` / `foundEditOk` | see plugin/npc.mjs |
 | actors.mjs | Per-actor positions and the party (browser only; the server never needs them) | `positionOf`, `playerAddress`, `positionsAt` |
-| prompts.mjs | Copy of plugin/ui/prompts.mjs | — |
+| shared.mjs | Loads plugin/shared/ once at startup from `<server>/shared/` (follows the Map server URL setting; a change reloads the page). If it fails, `sharedError` names the URL and startup shows it. Re-exports the prompt helpers (`render`, `setPrompts`, `hasPrompts`) | `calendar`, `patches`, `doorbar`, `weather`, `prompts`, `sharedError`, `sharedUrl` |
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
 | notices.mjs | Shared in-chat notice layout and decisions | `addNotice` (via brackets), `markDecided` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
@@ -44,7 +44,8 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static serving of plugin/ui/ (`/ui/*`) and plugin/shared/ (`/shared/*`) |
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |
 | config.example.json, package.json | Config template, package metadata |
-| ui/ | The map window: `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, calendar, castdata, castpanel, changeedit, diffview, doorbar, mapactions, mapdata, menus, patches, patchform, picker, placeform, prompteditor, prompts, weather |
+| ui/ | The map window (browser only): `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, castdata, castpanel, changeedit, diffview, mapactions, mapdata, menus, patchform, picker, placeform, prompteditor. The extension also imports patchform and diffview from `/ui/` |
+| shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer) |
 
 ## tests/
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { addCallNote, callNotes, markCall, narratorNote, CALLS_KEY, CALL_CAP } from '../../extension/calllog.mjs';
 import { messageActivity } from '../../extension/activity.mjs';
 import { timeLabel, elapsedText } from '../../extension/timelabels.mjs';
-import { dateAt, clockAt } from '../../plugin/ui/calendar.mjs';
+import { dateAt, clockAt } from '../../plugin/shared/calendar.mjs';
 
 test('call notes: per swipe, retries merge, capped and truncated, mirrored to swipe_info, shown in the activity log', () => {
     const msg = { mes: 'x', swipe_id: 0, swipe_info: [{ extra: {} }, { extra: {} }], extra: {} };

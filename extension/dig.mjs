@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { addCallNote, markCall } from './calllog.mjs';
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { loadPatchLib, parseJsonAnswer } from './carriers.mjs';
 import { chatElapsed } from './clock.mjs';
 import { api } from './doors.mjs';

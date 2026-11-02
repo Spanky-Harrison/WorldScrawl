@@ -4,7 +4,7 @@ import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
-import { applyPatch, getRoom, PatchError, suggestId, idClash } from '../../plugin/ui/patches.mjs';
+import { applyPatch, getRoom, PatchError, suggestId, idClash } from '../../plugin/shared/patches.mjs';
 import { build_world, read_world_raw } from '../../plugin/world.mjs';
 import { expandPrompt } from '../../plugin/ui/placeform.mjs';
 

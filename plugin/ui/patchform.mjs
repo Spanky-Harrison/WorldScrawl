@@ -2,7 +2,7 @@
 // map window's "Edit live" button. The pure helpers (cleanOp, formOps, checkOps, errorsByOp, blankOp, liveOps) run in
 // node too; buildPatchForm needs a DOM `document`. The form never changes the map itself: the caller previews the
 // ops on the server and stamps them on a chat message.
-import { OPS, parseLasts, newRoomId } from './patches.mjs';
+import { OPS, parseLasts, newRoomId } from '../shared/patches.mjs';
 
 export const EXIT_OPS = ['block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit'];
 export const OP_LABELS = {

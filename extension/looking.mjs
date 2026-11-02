@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { LOOK_RE, lookOnly } from './words.mjs';
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { LEAVING_RE, LOOK_AROUND_RE, WAY_OUT_PREFIX, checkExitChoice } from './brackets.mjs';
 import { askValid, baseReply, gen, narrativeDig, nearbyRooms } from './dig.mjs';
 import { barrierOf, barrierWord, changesOf, currentLocation, doorCandidates, doorChange, doorOverrides, ensurePrompts, isStuck, openChanges, sightOf, soundOf, stuckWhy, viewOf } from './doors.mjs';

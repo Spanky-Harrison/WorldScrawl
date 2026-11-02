@@ -1,4 +1,3 @@
-// Copy of plugin/ui/prompts.mjs (the extension cannot import plugin files statically). Keep them the same; a test checks.
 // Prompt text for every model call. The text lives in plugin/prompts/default.json (layered with the selected profile's
 // overrides on the server); code only fills in {{placeholders}}. render() never re-reads what it put in.
 let current = null;
@@ -18,9 +17,3 @@ export const fill = (text, vars = {}) => String(text).replace(/\{\{(\w+)\}\}/g, 
 export const render = (id, vars = {}) => fill(promptText(id), vars);
 /** The placeholder names used in a text. */
 export const placeholdersIn = text => [...new Set([...String(text).matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))];
-/** Fetch the active (default + selected profile) prompts from the plugin. */
-export async function loadPrompts(base = '/api/plugins/worldscrawl') {
-    const r = await fetch(`${base}/prompts/active`);
-    if (!r.ok) throw new Error(`prompts: server answered ${r.status}`);
-    return setPrompts((await r.json()).prompts);
-}
