@@ -1,4 +1,4 @@
-// shared/ stays pure: it is loaded by the Node server and by the browser, so it may only import other shared/ files
+// plugin/shared/ stays pure: it is loaded by the Node server and by the browser, so it may only import other plugin/shared/ files
 // and may not touch DOM, Node, fetch or similar host-only globals. Each file must also load with those globals gone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const dir = fileURLToPath(new URL('../../shared/', import.meta.url));
+const dir = fileURLToPath(new URL('../../plugin/shared/', import.meta.url));
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.m?js$/.test(f)) : [];
 const BANNED = ['window', 'document', 'navigator', 'location', 'localStorage', 'sessionStorage', 'fetch', 'XMLHttpRequest',
     'WebSocket', 'BroadcastChannel', 'Worker', 'process', 'require', 'module', '__dirname', '__filename', 'Buffer',
