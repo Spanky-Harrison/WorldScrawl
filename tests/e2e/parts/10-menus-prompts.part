@@ -118,7 +118,7 @@
         await page.waitForFunction(n => SillyTavern.getContext().chat.length > n, n0, { timeout: 10000 }).catch(() => {});
         const rev = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length > n, kind: m.extra?.worldscrawl_notice_kind, n: m.extra?.worldscrawl_reveal?.addresses?.length ?? 0 }; }, n0);
         check('Debug > Reveal map asks first (cancel does nothing), then reveals like /ws-reveal all', nNo === n0 && rev.grew && rev.kind === 'reveal' && rev.n > 10, JSON.stringify({ nNo, n0, rev }));
-        await page.evaluate(async n => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n}-${c.chat.length - 1}`); }, n0); await page.waitForTimeout(800);
+        await page.evaluate(async n => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n}-${c.chat.length - 1}`); }, n0); await settle(800);
         ui.off('dialog', dlg);
     }
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
@@ -139,7 +139,7 @@
     // The remember call is prefetched as soon as the card shows, so its answer is queued first.
     await queue([{ content: '{"name":"Maren","unknownAs":"the knife-grinder","personality":{"summary":"A traveling knife-grinder with a squeaky cart."},"appearance":{"summary":"wiry woman with a cart","outfit":"a patched smock"},"invented":["grey eyes"]}' }]);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Maren'));
-    await page.waitForTimeout(500);
+    await settle(500);
     await page.waitForFunction(() => !!document.querySelector('.worldscrawl_remembercard .worldscrawl_remember_proposal'), null, { timeout: 10000 }).catch(() => {});
     const prop = await page.evaluate(() => {
         const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
@@ -149,7 +149,7 @@
     const reqsPrefetched = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /Maren \(shown as "the knife-grinder"/.test(prop.head) && /squeaky cart.*wiry woman/.test(prop.head) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 1, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
     await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); m.renderPatchCards(); m.renderPatchCards(); });
-    await page.waitForTimeout(500);
+    await settle(500);
     check('remember prefetch: redraws do not call again', (await (await fetch(`${FAKE}/__requests`)).json()).length === reqsPrefetched);
     const remembered = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
@@ -173,8 +173,8 @@
     await approveBtn.dblclick();
     const saving = await page.evaluate(() => window.__wsSaw);
     await page.evaluate(() => { const b = [...document.querySelectorAll('.worldscrawl_remembercard .worldscrawl_card_btn')].find(x => x.textContent === 'Approve'); b?.click(); b?.click(); });
-    for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await page.waitForTimeout(250);
-    await page.waitForTimeout(1500);
+    for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await settle(250);
+    await settle(1500);
     const dbl = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
         const m = [...ch].reverse().find(x => x.extra?.worldscrawl_remember);
@@ -205,10 +205,10 @@
     await page.waitForFunction(() => /Corwin/.test(([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.querySelector('input')?.value ?? '')) && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
     const preparing = /Preparing…/.test(await lastCardText());
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ }).last().click();
-    await page.waitForTimeout(300);
+    await settle(300);
     const savingSlow = /Saving…/.test(await lastCardText());
     await page.waitForFunction(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_create' && s.name === 'Corwin')), null, { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await settle(1000);
     const slow = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Corwin').map(s => s.line));
     const reqsAfterSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('remember prefetch: Approve during the prefetch shows Preparing… then Saving…, waits, and makes exactly one call', preparing && savingSlow && slow.length === 1 && slow[0] === 'A ferry hand.' && reqsAfterSlow === reqsBeforeSlow + 1, JSON.stringify({ preparing, savingSlow, slow, calls: reqsAfterSlow - reqsBeforeSlow }));
@@ -227,7 +227,7 @@
     check('a fact tag becomes a Character changed here bar and leaves the story', /Character changed here: Maren: a scar/.test(factBar.text) && factBar.fact === 'a scar on her knuckle' && factBar.stripped, JSON.stringify(factBar));
     const factRow = page.locator('.worldscrawl_npcchange', { hasText: 'a scar' });
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
-    await page.waitForTimeout(400);
+    await settle(400);
     check('Turn off keeps the fact but stops using it', await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.off === true))));
     await queue([{ content: 'stay' }, { content: 'Maren narrows her eyes. [ws_npc: memory | maren | The stranger lied to me about the knife.] [ws_npc: disposition | maren | unfriendly | caught in a lie]' }]);
     await send('I lie to Maren about the knife.', 2);
@@ -240,7 +240,7 @@
         && ['lied to me about the knife', 'caught in a lie'].every(w => mdBar.rows.some(r => r.t.includes(w) && r.b.includes('Edit') && r.b.includes('Turn off'))), JSON.stringify(mdBar));
     await queue([{ content: 'stay' }, { content: 'Maren shrugs. [WS_Memory|maren|The stranger shrugged at me.] [ws_bogus | huh]' }]);
     await send('I shrug at Maren.', 2);
-    await page.waitForTimeout(400);
+    await settle(400);
     const lt = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat; const m = ch.slice(-1)[0];
         const el = document.querySelector(`#chat .mes[mesid="${ch.length - 1}"] .worldscrawl_badtag`);
@@ -250,7 +250,7 @@
     check('lenient tag: [WS_Memory|...] read and hidden; unreadable [ws_bogus] stays visible, marked, and logged as a warning',
         lt.mem && !/WS_Memory/i.test(lt.mes) && /\[ws_bogus \| huh\]/.test(lt.mes) && lt.bad?.[0]?.tags?.[0] === '[ws_bogus | huh]' && lt.mark?.title === "WorldScrawl couldn't read this tag" && lt.call, JSON.stringify(lt));
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click();
-    await page.waitForTimeout(400);
+    await settle(400);
     check('Undo removes the fact stamp', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'))));
     // The narrator flags people itself ([ws_flag: npc | Name]); no name scanning, so a date header is never offered.
     const flagReply = n => `**Saturday, 9 PM**\nBrannoc the ferryman leans in and asks how your crossing was (${n}); Ysolde pours. [ws_flag: npc | Brannoc] [ws_flag: npc | Ysolde]`;
@@ -262,11 +262,11 @@
     });
     check('npc flags: tag stripped, counted, no card before 3, never Saturday', !/ws_flag/.test(fl2.shown) && fl2.rows.length === 2 && fl2.rows[0].name === 'Brannoc' && fl2.rows.every(r => r.count === 2) && !fl2.card, JSON.stringify(fl2));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc'));
-    await page.waitForTimeout(500);
+    await settle(500);
     const bare = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch.slice(-1)[0].extra?.worldscrawl_remember ?? null; });
     check('bare /ws-npc targets the most recently flagged unsaved person', bare?.name === 'Brannoc' && bare.status === 'review' && !bare.suggested, JSON.stringify(bare));
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: 'Discard' }).last().click();
-    await page.waitForTimeout(400);
+    await settle(400);
     await queue([{ content: 'stay' }, { content: flagReply(3) }]); await send('I shrug.', 2);
     const fl3 = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch.slice(-1)[0].extra?.worldscrawl_remember ?? null; });
     check('third flag shows a Remember card, but not for the scene no', fl3?.name === 'Ysolde' && fl3.suggested === true, JSON.stringify(fl3));
@@ -278,7 +278,7 @@
     const afterWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('/ws-wait until 5pm parses with no extra model call', five?.until === '17:00' && five.seconds > 0 && afterWait === beforeWait + 1, JSON.stringify({ five, calls: afterWait - beforeWait }));
     await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).filter({ hasText: 'Maren' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).first().click();
-    await page.waitForTimeout(600);
+    await settle(600);
     const exportWorld = await M(m => m.effectiveWorld());
     const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
     check('Export to cast writes Maren without replacing Hesk', cast1.npcs?.some(n => n.id === 'hesk') && cast1.npcs?.some(n => n.id === 'maren' && /knife-grinder/.test(n.line ?? '')), JSON.stringify({ world: exportWorld, ids: cast1.npcs?.map(n => n.id) }));
@@ -286,11 +286,11 @@
     await send('I ask what Hesk keeps under the bar.', 2);
     const knife = page.locator('.worldscrawl_npcchange', { hasText: 'a knife under the bar' });
     await knife.locator('.worldscrawl_card_btn', { hasText: 'Update Hesk' }).click();
-    await page.waitForTimeout(200);
+    await settle(200);
     const diffText = await knife.locator('.worldscrawl_castdiff').innerText();
     check('Update Hesk shows a diff against the cast file', /facts/.test(diffText) && /a knife under the bar/.test(diffText), diffText);
     await knife.locator('.worldscrawl_card_btn', { hasText: 'Confirm' }).click();
-    await page.waitForTimeout(600);
+    await settle(600);
     const cast2 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
     const heskNow = cast2.npcs?.find(n => n.id === 'hesk');
     check('Update writes Hesk in place and does not add hesk-2', heskNow?.facts?.includes('a knife under the bar') && cast2.npcs?.some(n => n.id === 'maren') && !cast2.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast2.npcs?.map(n => n.id)));

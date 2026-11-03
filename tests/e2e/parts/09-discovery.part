@@ -33,7 +33,7 @@
         return { r, loc: st.location, off: c.chat[id].extra.worldscrawl_patches[0].off };
     }, [wsMod, nDisc, DROOM]);
     check('discovery: turning it off while standing in it moves the party to the hallway', offDisc.off === true && offDisc.loc === UPST, JSON.stringify(offDisc));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n - 1); await c.saveChat(); await c.reloadCurrentChat(); }, nDisc); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n - 1); await c.saveChat(); await c.reloadCurrentChat(); }, nDisc); await settle(1500);
     // Flagging the player's own message checks the narrator's reply right after it (from the player's message on).
     await queue([{ content: '{"rooms": [], "areas": []}' }]);
     const uf = await page.evaluate(async ([mod, UPST]) => {
@@ -45,7 +45,7 @@
         return { u, t, userFlag: !!c.chat[u].extra.worldscrawl_flag, reply: c.chat[n].extra.worldscrawl_flag };
     }, [wsMod, UPST]);
     check('flagging the player\'s message flags the narrator reply after it, from the player\'s message on', !uf.userFlag && uf.reply?.start === uf.u && uf.reply?.status === 'nothing', JSON.stringify(uf));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, uf.u); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, uf.u); await settle(1500);
     // The change call: "can't express this" is shown plainly; three new rooms off a hub come back as one reviewable change.
     const changeFlag = async (answers) => { await queue(answers); return page.evaluate(async ([mod, UPST]) => {
         const m = await import(mod), c = SillyTavern.getContext();
@@ -59,14 +59,14 @@
     }, [wsMod, UPST]); };
     const cant = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ cant: 'The hallway now floats above the town.' }) }]);
     check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /Can't show this on the map: The hallway now floats/.test(cant.card) && /Retry/.test(cant.card), JSON.stringify(cant));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, cant.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, cant.id); await settle(1500);
     // A manual flag never ends silently: an empty {"ops": []} reply, an unreadable answer, a model error.
     const empty = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [] }) }]);
     check('manual flag: an empty {"ops": []} reply shows "no map change found" with Retry', empty.status === 'nothing' && /No map change found/.test(empty.card) && /Retry/.test(empty.card), JSON.stringify(empty));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, empty.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, empty.id); await settle(1500);
     const junk = await changeFlag([{ content: 'I cannot help with portals.' }]);
     check('manual flag: an unreadable answer shows an error in the bar with Retry', junk.status === 'error' && /Map change failed: .*not JSON/.test(junk.card) && /Retry/.test(junk.card), JSON.stringify(junk));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, junk.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, junk.id); await settle(1500);
     await queue([]);
     const dbg = await page.evaluate(async ([mod, UPST]) => {
         const m = await import(mod), c = SillyTavern.getContext(), seen = [], orig = console.info;
@@ -82,15 +82,15 @@
         const f = c.chat[id].extra.worldscrawl_flag;
         return { id, threw, status: f?.status, seen };
     }, [wsMod, UPST]);
-    await page.evaluate(() => SillyTavern.getContext().reloadCurrentChat()); await page.waitForTimeout(2000); // the pushed message gets its block
+    await page.evaluate(() => SillyTavern.getContext().reloadCurrentChat()); await settle(2000); // the pushed message gets its block
     dbg.card = await page.evaluate(id => document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '', dbg.id);
     check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Approve/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await settle(1500);
     const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
     const hubR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Crystal Room', 'crystal arch'), mk('Ember Room', 'ember arch'), mk('Tide Room', 'tide arch')] }) }]);
     check('change call: three new rooms off a hub in one change, engine-made ids', hubR.status === 'review' && hubR.ops?.length === 3 && hubR.ops.every(o => o.op === 'create_place' && o.id !== 'bogus' && o.story === true)
         && JSON.stringify(hubR.ops.map(o => o.id)) === JSON.stringify(['crystal_room', 'ember_room', 'tide_room']), JSON.stringify(hubR).slice(0, 600));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, hubR.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, hubR.id); await settle(1500);
     // Duplicate-room guard: a "new" Courtyard two steps away is connected to the existing one; the card offers to make it a new room instead.
     const dupR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Courtyard', 'side stair')] }) }]);
     check('duplicate guard: the new Courtyard becomes a door to the existing one, with a Make it a new room instead button', dupR.status === 'review' && dupR.ops?.every(o => o.op === 'add_exit') && /Connected to/.test(dupR.card) && /Make it a new room instead/.test(dupR.card), JSON.stringify(dupR).slice(0, 600));
@@ -100,7 +100,7 @@
         const p = SillyTavern.getContext().chat[id].extra.worldscrawl_flag?.proposal; return { ops: p?.ops, summary: p?.summary, unmerged: !!p?.unmerged };
     }, [wsMod, dupR.id]);
     check('Make it a new room instead: the proposal becomes a create_place for a new room', unm?.ops?.length === 1 && unm.ops[0].op === 'create_place' && unm.ops[0].name === 'Courtyard' && !unm.unmerged && unm.summary?.some(x => /Added as a new room/.test(x)), JSON.stringify(unm));
-    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dupR.id); await page.waitForTimeout(1500);
+    await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dupR.id); await settle(1500);
     // A door no description mentions: "I open a door down the hall" in the upstairs hallway. The intent check offers
     // "try another door", the narrator is told to open it only if it fits, and its flag adds the room.
     const mode0 = await page.evaluate(async ([mod, UPST]) => {
@@ -109,11 +109,11 @@
         c.chat.push({ name: 'Narrator', is_user: false, mes: 'You stand in the upstairs hallway.', extra: { worldscrawl_location: UPST } });
         await c.saveChat(); await c.reloadCurrentChat(); return { was, n: c.chat.length };
     }, [wsMod, UPST]);
-    await page.waitForTimeout(1500);
+    await settle(1500);
     expected = (await reqsNow()).length; rL = expected;
     await queue([{ content: 'try another door' }, { content: 'Halfway down the hall a plain door gives under your hand. [ws_flag: discover | a door down the hall]' }, { content: ROOMJ }]);
     await send('I open a door down the hall', 3);
-    for (let k = 0; k < 40; k++) { const st = await page.evaluate(() => SillyTavern.getContext().chat.at(-1)?.extra?.worldscrawl_flag?.status); if (st && st !== 'working') break; await page.waitForTimeout(250); }
+    for (let k = 0; k < 40; k++) { const st = await page.evaluate(() => SillyTavern.getContext().chat.at(-1)?.extra?.worldscrawl_flag?.status); if (st && st !== 'working') break; await settle(250); }
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('undescribed door: the intent check offers "try another door"', lq.length >= 1 && promptOf(lq[0]).includes('try another door: the player opens or tries a door'), promptOf(lq[0] ?? {}).slice(-600));
     check('undescribed door: the message is marked and the narrator is told to open it only if it fits', lk.extra.worldscrawl_new_door === true && promptOf(lq[1] ?? {}).includes('tries a door that is not among the exits') && promptOf(lq[1] ?? {}).includes('If no such door fits'), promptOf(lq[1] ?? {}).slice(-700));
@@ -150,6 +150,7 @@
     await ui.click('#editorToggle'); await ui.waitForTimeout(300);
     // Carriers: consecutive editor edits condense into one visible compact message; one change can be undone or turned off alone;
     // a bulk delete that sweeps the carrier up warns and can put it back.
+    await page.waitForTimeout(3500); // the lost-carrier toast gathers deletes within 3s: keep an earlier one out of this burst
     const cr = await page.evaluate(async () => {
         const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), R = 'riverton:drowned_rat/common_room';
         const n0 = c.chat.length, w = c.extensionSettings.worldscrawl.world || '';
@@ -228,7 +229,7 @@
     const owoMap = await waitHere('riverton:green/green');
     check('round trip on → walk → off → on keeps the party on the Green (never relocated by a toggle)', owo.s0 === 'riverton:green/green' && owo.off === 'larkspur:green/green', JSON.stringify(owo));
     check('off → walk to the Green → on: the move redirects the party forward to the Green in Riverton (map follows)', owo.on === 'riverton:green/green' && owoMap === 'riverton:green/green', JSON.stringify([owo, owoMap]));
-    await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await page.waitForTimeout(1500);
+    await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await settle(1500);
     // /ws-reveal: stamps places as been-there (map + /ws-known + /ws-go use it); "off" and deleting the message undo it.
     const rvl = await page.evaluate(async () => {
         const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), n0 = c.chat.length;
