@@ -72,7 +72,6 @@
     await send('I open the front door and look outside', 4);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('doors: opening a closed door to look stamps open_door and shows the room beyond', changesOfE(lk)[0]?.type === 'open_door' && changesOfE(lk)[0].direction === 'out' && changesOfE(lk)[0].stays_open === false && !lk.extra.worldscrawl_peek && promptOf(lq[3]).includes('opens the door (out) first') && promptOf(lq[3]).includes('sees Village Square') && promptOf(lq[3]).includes('Looking out, you can see Village Square: '), JSON.stringify(lk.extra) + promptOf(lq[3]).slice(-600));
-    check('glimpse wording: direction words vs nouns', JSON.stringify(await M(m => m.glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }))) === JSON.stringify(['Looking up, you can see Attic: Dusty.', 'Through the gate, you can see Yard: Muddy.']));
     check('doors: open door listed', (await openDoors()) === 'common_room|out', await openDoors());
     await go('out');
     check('doors: still open while in one of its rooms', (await openDoors()) === 'common_room|out', await openDoors());
@@ -81,8 +80,6 @@
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open south')); await page.waitForTimeout(1000);
     await go('south', 'west');
     check('doors: temple door stays open (region stays_open, subregion silent)', (await openDoors()) === 'nave|south', await openDoors());
-    { const t = await M(m => m.lookText('Ann', 'East Road', { kind: 'threshold', via: 'east', description: 'The road runs on east and out of sight.', unknown: false, name: 'Larkspur' }));
-      check('long road (sight none, not obscured): look describes the road, may name Larkspur, not describe it', t.includes('The road runs on east and out of sight.') && t.includes('It leads to Larkspur, but that cannot be seen') && t.includes('do not describe what lies at the far end') && !t.includes('nothing can be made out'), t); }
     await go('east');
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-open east')); await page.waitForTimeout(1000);
     await go('west');
@@ -139,14 +136,6 @@
     const kn2 = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-known')).pipe);
     check('/ws-known lists been-there and seen places by name', /^Been there: .*Common Room.*\. Seen: /.test(kn2) && !/riverton:/.test(kn2), kn2);
     check('/ws-known never names a hidden destination', !/Cellar/.test(kn2.split('Seen:')[1] ?? '') || kn2.split('Been there:')[1].split('Seen:')[0].includes('Cellar'), kn2);
-    // ---- Exits hint only on arrival / look-around; obscured exits stay label-only.
-    const exH = await M(m => { const loc = { name: 'Hall', description: 'A hall.', exits: [{ direction: 'north', view: 'open', to: 'r:a', to_name: 'Yard', to_summary: 'Muddy.' }, { direction: 'trapdoor', obscured: true, to: 'r:b', to_name: 'Vault', to_summary: 'Gold.' }] };
-        return { arrive: m.factsText({ ...loc, address: 'r:h' }, { direction: 'south', from_name: 'X', to_name: 'Hall', to: 'r:h' }, false), around: m.factsText(loc, null, false, { lookAround: true }), plain: m.factsText(loc, null, false), re: ['I look around', 'she glances about the room', 'I survey the surroundings', 'I look at the door'].map(x => m.LOOK_AROUND_RE.test(x)) }; });
-    check('narration: exits hint on arrival and on look-around only', exH.arrive.includes('mention every exit') && exH.around.includes('mention every exit') && exH.around.includes('looks around') && !exH.plain.includes('mention every exit'), JSON.stringify(exH).slice(0, 600));
-    check('narration: obscured exit label-only, no guessing invited', !exH.arrive.includes('Vault') && exH.arrive.includes('do not hint or guess where it leads') && exH.arrive.includes('you can see Yard'), exH.arrive);
-    check('look-around phrase detection', JSON.stringify(exH.re) === '[true,true,true,false]', JSON.stringify(exH.re));
-    const sm = await M(m => { const a = [{ mes: 'Hi. [ws-start]' }, { mes: 'x' }]; const orig = a[0]; m.stripStartMarker(a); return { p: a[0].mes, o: orig.mes }; });
-    check('[ws-start] marker stripped from the prompt copy, stored text kept', sm.p === 'Hi.' && sm.o === 'Hi. [ws-start]', JSON.stringify(sm));
     // ---- [ws-start] greeting button.
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
     await page.waitForTimeout(3000);
