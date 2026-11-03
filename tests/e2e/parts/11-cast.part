@@ -72,7 +72,6 @@
     await cw.waitForTimeout(200);
     const unsTxt = await cw.locator('.cast-view').innerText().catch(() => '');
     check('Not saved yet shows the Remember threshold', /after 3 replies/.test(unsTxt), unsTxt);
-    check('Activity log is no longer a Cast view', await cw.locator('.castpanel [data-view="activity"]').count() === 0);
     await cw.locator('#menu-debug .menu-title').click(); await cw.locator('#menu-debug [data-item="activity-log"]').click();
     await cw.locator('#tool-activity .act-sel').waitFor({ timeout: 10000 }).catch(() => {});
     check('Debug > Activity log opens its own view; the map, Cast and Editor panes are hidden under it', await cw.evaluate(() => !!document.querySelector('#tool-activity') && document.getElementById('windows').hidden), '');

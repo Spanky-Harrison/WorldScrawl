@@ -79,3 +79,44 @@ test('carrier line: one change reads as its summary', () => {
     assert.doesNotMatch(t, /changes\)/);
 });
 }
+
+// ---- from e2e 00-setup, 02-movement, 03-names-routing (pure text functions; no browser needed)
+{
+const m = await import('../../extension/index.js');
+
+test('answer parsing: think tags, prefixes, exact match; yes/no', () => {
+    const p = m.parseIntentAnswer;
+    assert.deepEqual([p('<think>they want to leave</think>\nOut.', ['out', 'up']), p('Answer: Elsewhere', ['out']), p('STAY', ['out']), p('the temple', ['out']), p('<think>unfinished', ['out'])],
+        ['out', 'elsewhere', 'stay', null, null]);
+    assert.equal(m.parseYesNo('<think>hmm</think>\nYes.'), 'yes');
+    assert.equal(m.parseYesNo('maybe'), null);
+});
+
+test('answers keep a label\'s closing parenthesis', () => {
+    assert.deepEqual(['"Common Room (The Drowned Rat)."', '(north)', '**Upstairs Rooms (The Gilded Goose)**', 'north)'].map(m.trimAnswer),
+        ['Common Room (The Drowned Rat)', 'north', 'Upstairs Rooms (The Gilded Goose)', 'north']);
+});
+
+test('name matching: partial words, case, building tiebreak', () => {
+    const c = [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms (The Drowned Rat)', address: 'a' }, { name: 'Upstairs', label: 'Upstairs (The Gilded Goose)', address: 'b' }, { name: 'Common Room', label: 'Common Room (The Drowned Rat)', address: 'c' }, { name: 'Common Room', label: 'Common Room (The Gilded Goose)', address: 'd' }];
+    assert.equal(m.namedInText('I flee UPSTAIRS!', c).map(x => x.address).join(), 'a,b');
+    assert.equal(m.namedInText('to the common room of the drowned rat', c).map(x => x.address).join(), 'c');
+    assert.equal(m.namedInText('I smile', c).length, 0);
+});
+
+test('leaving words and the way-out question', () => {
+    assert.equal(m.LEAVING_RE.test('we get away from here'), true);
+    assert.equal(m.LEAVING_RE.test('I go to the temple') || m.LEAVING_RE.test('the stairs on the left'), false);
+    assert.equal(m.whichText([{ label: 'out (Village Square)' }, { label: 'gate (Market Lane)' }], m.WAY_OUT_PREFIX), 'Which way out? out (Village Square), gate (Market Lane)');
+});
+
+test('plural-tolerant word matching (grate/grates, stable/stables, box/boxes, kitchen/kitchens; no stem mangling)', () => {
+    const grate = { direction: 'grate', description: 'A stone stair behind an iron grate.' };
+    const got = [m.sameWord('grate', 'grates'), m.sameWord('Stables', 'stable'), m.sameWord('box', 'boxes'), m.sameWord('kitchen', 'Kitchens'), m.sameWord('grate', 'grat'), m.sameWord('stable', 'stabl'),
+        m.sameLabel('Kitchens', 'kitchen'), m.sameLabel('The Forge', 'forge'), m.sameLabel('Stable', 'stables'), m.sameLabel('Upstairs Rooms', 'upstairs'),
+        m.sameAsDirection({ direction: 'stable', to_name: 'Stable' }), m.sameAsDirection({ direction: 'kitchen', to_label: 'Kitchens' }),
+        m.exitMentioned('I go through the grates', grate), m.exitMentioned('I take the stairs down', grate), m.exitMentioned('I go to the temple', grate),
+        m.namedInText('go upstairs', [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms', address: 'u' }]).length, m.namedInText('the common room', [{ name: 'Common Room', label: 'Common Room', address: 'c' }]).length];
+    assert.deepEqual(got.map(x => typeof x === 'number' ? x : !!x), [true, true, true, true, false, false, true, true, true, false, true, true, true, true, false, 1, 1]);
+});
+}

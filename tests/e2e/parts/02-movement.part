@@ -185,6 +185,4 @@
     check('no route message exits clickable', JSON.stringify(nb[nb.length - 1]) === '["out (Village Square)","up (Upstairs Rooms)","back (Courtyard)"]', JSON.stringify(nb));
     await page.unroute(squareStub);
     await page.evaluate(() => { const i = document.getElementById('worldscrawl_url'); i.dispatchEvent(new Event('input')); }); // drop the stubbed location from the cache
-    const nr = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.noticePrefix('Temple of the Tides'), m.unreachableText({ exits: [{ direction: 'out', to_name: 'Village Square' }] }, 'Temple of the Tides')]; });
-    check('no-route message text', nr[0] === "You don't know a way to Temple of the Tides from here." && nr[1] === "You don't know a way to Temple of the Tides from here. Exits: out (Village Square)", JSON.stringify(nr));
 

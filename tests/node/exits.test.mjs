@@ -140,3 +140,41 @@ test('obscured forces sight none (and closed_sight none), warning on explicit ot
     const d = client(makeWorld(tmpPath(), { r: two({ sight: 'none' }, {}) })).get('/location/' + A).json().exits[0];
     assert.equal(d.to, B); assert.equal(d.to_name, 'B'); // still known where it goes
 });
+
+// ---- from e2e 00-setup, 02-movement, 03-names-routing (pure exit text and routing; no browser needed)
+{
+await import('./ststub.mjs');
+const m = await import('../../extension/index.js');
+
+test('routing: shortest path; refused through unvisited rooms; long way via visited; hidden exits never used', async () => {
+    const g = { a: ['b'], b: ['a', 'c'], c: ['b'] };
+    const getLoc = async x => ({ exits: g[x.split(':')[1]].map(t => ({ direction: 'to_' + t, to: 'r:' + t })) });
+    assert.deepEqual(await m.findPath('r:a', 'r:c', getLoc), [{ direction: 'to_b', to: 'r:b' }, { direction: 'to_c', to: 'r:c' }]);
+    const G = { a: [['east', 'b'], ['south', 'd'], ['secret', 'c', true]], b: [['east', 'c']], d: [['east', 'e']], e: [['north', 'c']], c: [] };
+    const gl = async x => ({ exits: G[x.split(':')[1]].map(([direction, t, hidden]) => ({ direction, to: 'r:' + t, hidden: !!hidden })) });
+    const path = async vis => JSON.stringify((await m.findPath('r:a', 'r:c', gl, new Set(vis.map(v => 'r:' + v))))?.map(x => x.direction) ?? null);
+    assert.equal(await path(['a']), 'null');
+    assert.equal(await path(['a', 'd', 'e']), '["south","east","north"]');
+    assert.equal(await path(['a', 'b']), '["east","east"]');
+    assert.equal(await path(['a', 'b', 'd', 'e']), '["east","east"]');
+});
+
+test('exit labels: hidden = label only; footer stays short unless names collide; no-route text', () => {
+    const hid = { exits: [{ direction: 'north', to_name: 'Secret Vault', hidden: true }, { direction: 'out', to_name: 'Village Square' }] };
+    assert.equal(m.exitsText(hid), 'Exits: north, out (Village Square)');
+    assert.equal(m.exitLabel(hid.exits[0]), 'north');
+    assert.equal(m.revealsDestination(hid.exits[1]), true);
+    assert.equal(m.exitsText({ exits: [{ direction: 'crack', hidden: true }] }), 'Exits: crack');
+    assert.equal(m.exitsText({ exits: [{ direction: 'down', to_name: 'The Gilded Goose', to_subregion: { name: 'The Gilded Goose' } }] }), 'Exits: down (The Gilded Goose)');
+    assert.equal(m.exitsText({ exits: [{ direction: 'left', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Drowned Rat' } }, { direction: 'right', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Gilded Goose' } }] }), 'Exits: left (Upstairs Rooms, The Drowned Rat), right (Upstairs Rooms, The Gilded Goose)');
+    assert.equal(m.noticePrefix('Temple of the Tides'), "You don't know a way to Temple of the Tides from here.");
+    assert.equal(m.unreachableText({ exits: [{ direction: 'out', to_name: 'Village Square' }] }, 'Temple of the Tides'), "You don't know a way to Temple of the Tides from here. Exits: out (Village Square)");
+});
+
+test('hidden exit move message never names the destination', () => {
+    const mv = { direction: 'x', to_name: 'Secret Vault' };
+    assert.deepEqual([m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
+        m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })],
+        ['*User goes through the trapdoor.*', '*User takes the crawlspace exit.*', '*User goes north.*']);
+});
+}
