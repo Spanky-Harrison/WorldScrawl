@@ -1064,9 +1064,6 @@ export function takeLoreFlags(text) {
     return { places, text: cleaned };
 }
 
-/** "Lore on file: The Drowned Rat, Riverton" for a lore chain (innermost first); '' when there is none. */
-export const loreIndexLine = chain => (chain?.length ? `Lore on file: ${chain.map(c => c.name).join(', ')}` : '');
-
 /** The chain entries a request names: "" / "here" / "all" -> every one; else the entry whose name matches. */
 export function loreFor(chain, place) {
     const p = normName(place);
@@ -1137,6 +1134,3 @@ export function activeLore(chat, index, chain, playerAt, extra = []) {
     for (let i = from; i <= end && i < n; i++) for (const r of loreRequestsOn(chat[i])) stub(r);
     return chain.filter(c => levels.has(c.level) || (c.level === 'elsewhere' && elseIds.has(c.id ?? c.address)));
 }
-
-/** The fed-lore block for the narrator ('' when nothing is fed), tokens left in (render afterwards). */
-export const loreBlock = fed => (fed?.length ? `Background knowledge (lore; what locals know, not what the senses show; use it only where it fits):\n${fed.map(c => `- ${c.name}: ${c.text}`).join('\n')}` : '');
