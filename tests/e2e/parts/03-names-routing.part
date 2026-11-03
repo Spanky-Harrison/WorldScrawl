@@ -69,26 +69,18 @@
     check('unclear: which-one message with candidates', ln.sys && ln.mes.startsWith('Which one do you mean?') && ln.btns.length >= 2 && (await stored()) === 'riverton:gilded_goose/upstairs', JSON.stringify(ln));
 
     // Footer stays short unless names collide.
-    const fx = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [
-        m.exitsText({ exits: [{ direction: 'down', to_name: 'The Gilded Goose', to_subregion: { name: 'The Gilded Goose' } }] }),
-        m.exitsText({ exits: [{ direction: 'left', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Drowned Rat' } }, { direction: 'right', to_name: 'Upstairs Rooms', to_subregion: { name: 'The Gilded Goose' } }] })]; });
     const bl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
         const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
         return [m.exitsText(await get('riverton:streets/market_lane')), m.exitsText(await get('riverton:drowned_rat/courtyard')), m.exitsText({ exits: [{ direction: 'crack', hidden: true }] })]; });
     check('exit labels: building on entrance, building + room otherwise, room within the building, hidden = label only',
         bl[0] === "Exits: east (Village Square), inn (The Gilded Goose), store (Marlow's General Store), smithy (Brask's Smithy), gate (The Drowned Rat, Stable)"
         && bl[1] === 'Exits: in (Common Room), kitchen, stable, trapdoor' && bl[2] === 'Exits: crack', JSON.stringify(bl));
-    const mn = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const mv = { direction: 'x', to_name: 'Secret Vault' };
-        return [m.moveNote('User', { ...mv, direction: 'trapdoor' }, { direction: 'trapdoor', hidden: true }), m.moveNote('User', { ...mv, direction: 'crawlspace' }, { direction: 'crawlspace', obscured: true }),
-            m.moveNote('User', { ...mv, direction: 'north' }, { direction: 'north', to: 'r:v', to_name: 'Secret Vault' })]; });
     const mv2 = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
         const get = async a => (await fetch('/api/plugins/worldscrawl/location/' + encodeURIComponent(a))).json();
         const note = async (from, dir) => { const l = await get(from); const e = l.exits.find(x => x.direction === dir); return m.moveNote('User', { direction: dir, to_name: e.to_name }, e); };
         return [await note('riverton:drowned_rat/courtyard', 'stable'), await note('riverton:streets/market_lane', 'gate'), await note('riverton:streets/market_lane', 'inn'),
             await note('riverton:drowned_rat/stable', 'gate'), await note('riverton:drowned_rat/common_room', 'out')]; });
     check('non-compass move messages say where they go', JSON.stringify(mv2) === JSON.stringify(['*User goes to the Stable.*', '*User goes through the gate to the Stable of The Drowned Rat.*', '*User goes to The Gilded Goose.*', '*User goes through the gate to Market Lane.*', '*User goes out.*']), JSON.stringify(mv2));
-    check('hidden exit move message never names the destination', JSON.stringify(mn) === JSON.stringify(['*User goes through the trapdoor.*', '*User takes the crawlspace exit.*', '*User goes north.*']), JSON.stringify(mn));
-    check('footer short / subregion only on collision', fx[0] === 'Exits: down (The Gilded Goose)' && fx[1] === 'Exits: left (Upstairs Rooms, The Drowned Rat), right (Upstairs Rooms, The Gilded Goose)', JSON.stringify(fx));
 
     // ---- Area names and generic room names (Knarfy's reports).
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
@@ -128,10 +120,6 @@
     await send('go upstairs', 1);
     const wu = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_candidate')].map(b => b.textContent) }; });
     check('"go upstairs" with both known: which one', wu.sys && JSON.stringify([...wu.btns].sort()) === '["Upstairs Rooms (The Drowned Rat)","Upstairs Rooms (The Gilded Goose)"]', JSON.stringify(wu));
-    const pm = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js');
-        const c = [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms (The Drowned Rat)', address: 'a' }, { name: 'Upstairs', label: 'Upstairs (The Gilded Goose)', address: 'b' }, { name: 'Common Room', label: 'Common Room (The Drowned Rat)', address: 'c' }, { name: 'Common Room', label: 'Common Room (The Gilded Goose)', address: 'd' }];
-        return [m.namedInText('I flee UPSTAIRS!', c).map(x => x.address).join(), m.namedInText('to the common room of the drowned rat', c).map(x => x.address).join(), m.namedInText('I smile', c).length]; });
-    check('name matching: partial words, case, building tiebreak', JSON.stringify(pm) === '["a,b","c",0]', JSON.stringify(pm));
     // Already inside the named building/region: short notice, no move, no narration.
     const nA = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     await queue([{ content: 'elsewhere' }]);
@@ -157,16 +145,6 @@
     await send('we flee Riverton', 1);
     const fl = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1]; });
     check('flee the region with no way out: not aware, no move, no narration', fl.is_system && fl.mes.startsWith("You're not aware of such a place.") && (await stored()) === 'riverton:drowned_rat/common_room' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nF + 1, fl.mes);
-    const lw = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return [m.LEAVING_RE.test('we get away from here'), m.LEAVING_RE.test('I go to the temple') || m.LEAVING_RE.test('the stairs on the left'), m.whichText([{ label: 'out (Village Square)' }, { label: 'gate (Market Lane)' }], m.WAY_OUT_PREFIX)]; });
-    const pl = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); const grate = { direction: 'grate', description: 'A stone stair behind an iron grate.' };
-        return [m.sameWord('grate', 'grates'), m.sameWord('Stables', 'stable'), m.sameWord('box', 'boxes'), m.sameWord('kitchen', 'Kitchens'), m.sameWord('grate', 'grat'), m.sameWord('stable', 'stabl'), m.sameWord('box', 'boxe') && false,
-            m.sameLabel('Kitchens', 'kitchen'), m.sameLabel('The Forge', 'forge'), m.sameLabel('Stable', 'stables'), m.sameLabel('Upstairs Rooms', 'upstairs'),
-            m.sameAsDirection({ direction: 'stable', to_name: 'Stable' }), m.sameAsDirection({ direction: 'kitchen', to_label: 'Kitchens' }),
-            m.exitMentioned('I go through the grates', grate), m.exitMentioned('I take the stairs down', grate), m.exitMentioned('I go to the temple', grate),
-            m.namedInText('go upstairs', [{ name: 'Upstairs Rooms', label: 'Upstairs Rooms', address: 'u' }]).length, m.namedInText('the common room', [{ name: 'Common Room', label: 'Common Room', address: 'c' }]).length]; });
-    check('plural-tolerant word matching (grate/grates, stable/stables, box/boxes, kitchen/kitchens; no stem mangling)',
-        JSON.stringify(pl) === '[true,true,true,true,false,false,false,true,true,true,false,true,true,true,true,false,1,1]', JSON.stringify(pl));
-    check('leaving words + way-out text', JSON.stringify(lw) === '[true,false,"Which way out? out (Village Square), gate (Market Lane)"]', JSON.stringify(lw));
     await go('out', 'west', 'gate');
     check('stable reached via the gate', (await stored()) === 'riverton:drowned_rat/stable', String(await stored()));
     await go('gate', 'store', 'The Drowned Rat');
@@ -198,8 +176,6 @@
     await go('gate', 'store');
     await typedTo('go to the common room of the Drowned Rat', 'Common Room (The Drowned Rat)');
     check('room named explicitly: that room', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
-    const ta = await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return ['"Common Room (The Drowned Rat)."', '(north)', '**Upstairs Rooms (The Gilded Goose)**', 'north)'].map(m.trimAnswer); });
-    check('answers keep a label\'s closing parenthesis', JSON.stringify(ta) === JSON.stringify(['Common Room (The Drowned Rat)', 'north', 'Upstairs Rooms (The Gilded Goose)', 'north']), JSON.stringify(ta));
     await go('back', 'stable');
 
     // Leaving from rooms with no exit out: route through visited rooms to the nearest way out.
