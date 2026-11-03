@@ -1,6 +1,6 @@
     // ---- New map: notes, two "Upstairs Rooms", routing via Market Lane.
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
-    await page.waitForTimeout(3000);
+    await settle(3000);
     const tour = ['out', 'west', 'inn', 'up', 'down', 'out', 'east', 'in'];
     await queue(tour.map(t => ({ content: 'tour ' + t })));
     for (const d of tour) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
@@ -41,17 +41,17 @@
 
     // /ws-go with the ambiguous name does the same; only the latest which-message is clickable; survives reload.
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Upstairs Rooms'));
-    await page.waitForTimeout(1500);
+    await settle(1500);
     ln = await lastNotice();
     check('/ws-go ambiguous: which-one message', ln.sys && JSON.stringify(ln.btns) === both, JSON.stringify(ln));
     check('only latest which-message clickable', await page.evaluate(() => { const f = [...document.querySelectorAll('#chat .mes')].filter(e => /Which one do you mean/.test(e.textContent)); return f.length === 2 && f[0].querySelectorAll('.worldscrawl_candidate').length === 0; }));
-    await page.reload(); await page.waitForSelector('#send_textarea', { timeout: 60000 }); await page.waitForTimeout(3000);
+    await page.reload(); await page.waitForSelector('#send_textarea', { timeout: 60000 }); await settle(3000);
     await page.evaluate(async () => { await SillyTavern.getContext().selectCharacterById(0); });
-    await page.waitForTimeout(3000);
+    await settle(3000);
     ln = await lastNotice();
     check('which-message buttons survive reload', JSON.stringify(ln.btns) === both, JSON.stringify(ln));
     await page.evaluate(() => jQuery('#api_button_openai').trigger('click'));
-    await page.waitForTimeout(3000);
+    await settle(3000);
     await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.stream_openai = false; });
 
     // Click the Goose one: routes tavern -> square -> market lane -> goose -> upstairs (all visited).
@@ -84,7 +84,7 @@
 
     // ---- Area names and generic room names (Knarfy's reports).
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
-    await page.waitForTimeout(3000);
+    await settle(3000);
     const go = async (...dirs) => { await queue(dirs.map(d => ({ content: 'went ' + d }))); for (const d of dirs) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); } };
     await go('out', 'north');
     check('at the temple', (await stored()) === 'riverton:temple/nave', String(await stored()));
@@ -127,7 +127,7 @@
     let al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const m = ch[ch.length - 1]; const els = [...document.querySelectorAll('#chat .mes')]; return { sys: !!m.is_system, mes: m.mes, btns: [...els[els.length - 1].querySelectorAll('.worldscrawl_exit')].length }; });
     check('typed: already in the temple', al.sys && al.mes === "You're already in Temple of the Tides. Exits: south (Village Square), grate" && al.btns === 2, JSON.stringify(al));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go Riverton'));
-    await page.waitForTimeout(1500);
+    await settle(1500);
     al = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].mes; });
     check('/ws-go: already in Riverton', al === "You're already in Riverton. Exits: south (Village Square), grate", al);
     check('already: no move, no narration', (await stored()) === 'riverton:temple/nave' && (await (await fetch(`${FAKE}/__requests`)).json()).length === nA + 1);
@@ -180,7 +180,7 @@
 
     // Leaving from rooms with no exit out: route through visited rooms to the nearest way out.
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/newchat'));
-    await page.waitForTimeout(3000);
+    await settle(3000);
     await go('up');
     await queue([{ content: 'elsewhere' }, { content: 'Out you go.' }]);
     await send('I leave the Drowned Rat', 2);

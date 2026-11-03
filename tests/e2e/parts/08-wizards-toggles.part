@@ -2,7 +2,7 @@
     // (rename prefilled), Delete subregion moving its places (= merge), Create region with Expand with AI, start region.
     const mwLastMsg = n => page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; const ps = m.extra?.worldscrawl_patches ?? []; return { grew: c.chat.length > n || ps.length > 1, sys: m.is_system, ops: ps.at(-1)?.ops ?? [], n: c.chat.length }; }, n); // a run of edits shares one carrier
     const mwSavedWait = async () => { try { await ui.waitForFunction(() => /Saved as message/.test(document.querySelector('.side .mapaction')?.innerText ?? ''), null, { timeout: 10000 }); } catch {} };
-    const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await page.waitForTimeout(1500); };
+    const mwCut = async n => { await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), n); await settle(1500); };
     const mwAct = async (target, action) => { await ui.evaluate(t => globalThis.wsInspect(t), target); await ui.locator(`.side .mapact[data-action="${action}"]`).waitFor({ timeout: 10000 }); await ui.click(`.side .mapact[data-action="${action}"]`); await ui.locator(`.side .mapaction[data-action], .side .editlive-pane`).first().waitFor({ timeout: 10000 }); };
     // No form or wizard prints "null" for a missing tag, reset or button (Edit region/subregion/place and every wizard).
     const nullHits = [];
@@ -139,11 +139,11 @@
     await conf.waitFor({ timeout: 10000 });
     const confText = await conf.innerText();
     check('turning off asks first, listing the later change that needs it', confText.includes(`#${tB}`) && /Turn off all/.test(confText) && /Just this one/.test(confText) && /Cancel/.test(confText), confText);
-    await conf.locator('.worldscrawl_card_btn', { hasText: 'Cancel' }).click(); await page.waitForTimeout(500);
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Cancel' }).click(); await settle(500);
     check('Cancel leaves it on, no note', await page.evaluate(([a, n]) => { const c = SillyTavern.getContext(); return !c.chat[a].extra.worldscrawl_patches[0].off && c.chat.length === n; }, [tA, tB + 1]));
     await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
     await conf.waitFor({ timeout: 10000 });
-    await conf.locator('.worldscrawl_card_btn', { hasText: 'Just this one' }).click(); await page.waitForTimeout(1500);
+    await conf.locator('.worldscrawl_card_btn', { hasText: 'Just this one' }).click(); await settle(1500);
     const off1 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off ?? false, kept: c.chat[a].extra.worldscrawl_patches[0].ops.length, mes: m.mes, sys: m.is_system, notice: m.extra?.worldscrawl_notice }; }, [tA, tB]);
     check('Just this one: only it is turned off, still stored on its message', off1.a === true && off1.b === false && off1.kept === 1, JSON.stringify(off1));
     check('a hidden note says what was turned off', off1.mes === `Map edit: turned off the change from #${tA}` && off1.sys === true && off1.notice === true, JSON.stringify(off1));
@@ -155,7 +155,7 @@
     const mapRes = await stFetch(`/rooms${mapCtxNow.world ? `?world=${encodeURIComponent(mapCtxNow.world)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addresses: [CR], changes: mapCtxNow.changes, now: mapCtxNow.now }) });
     const mapOk = [mapRes.status, mapRes.ok ? (await mapRes.json()).rooms?.length : mapRes.text];
     check('the map still works with the change off (the merged room is back)', mapOk[0] === 200 && mapOk[1] === 1, JSON.stringify(mapOk));
-    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).click(); await page.waitForTimeout(1500);
+    await cardA.locator('.worldscrawl_card_btn', { hasText: 'Turn on' }).click(); await settle(1500);
     try { await page.waitForFunction(b => !document.querySelector(`#chat .mes[mesid="${b}"] .worldscrawl_cant_apply`), tB, { timeout: 10000 }); } catch {}
     const on1 = await page.evaluate(a => { const c = SillyTavern.getContext(); return { off: c.chat[a].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, tA);
     check('Turn on puts it back (with its own hidden note) and the red note goes', on1.off === undefined && on1.mes === `Map edit: turned on the change from #${tA}` && await cardB.locator('.worldscrawl_cant_apply').count() === 0, JSON.stringify(on1));
@@ -171,9 +171,9 @@
     const uconf = ui.locator('.toggle-confirm');
     try { await uconf.waitFor({ timeout: 10000 }); } catch {}
     check('inspector asks first too, listing the dependent', (await uconf.count()) === 1 && (await uconf.innerText()).includes(`#${tB}`));
-    await uconf.locator('button:has-text("Turn off all")').click(); await page.waitForTimeout(2000);
+    await uconf.locator('button:has-text("Turn off all")').click(); await settle(2000);
     const off2 = await page.evaluate(([a, b]) => { const c = SillyTavern.getContext(); return { a: c.chat[a].extra.worldscrawl_patches[0].off, b: c.chat[b].extra.worldscrawl_patches[0].off, mes: c.chat[c.chat.length - 1].mes }; }, [tA, tB]);
     check('inspector Turn off all: both off, one hidden note naming both', off2.a === true && off2.b === true && off2.mes === `Map edit: turned off the change from #${tA} (and the changes from #${tB})`, JSON.stringify(off2));
     try { await ui.waitForSelector(`.node[data-id="${CR}"]`, { timeout: 10000 }); } catch {}
     check('map shows the original rooms again', await ui.locator(`.node[data-id="${CR}"]`).count() === 1 && await ui.locator(`.node[data-id="${BURNT}"]`).count() === 0);
-    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), tA); await page.waitForTimeout(1500);
+    await page.evaluate(n => SillyTavern.getContext().executeSlashCommandsWithOptions(`/cut ${n}-${SillyTavern.getContext().chat.length - 1}`), tA); await settle(1500);

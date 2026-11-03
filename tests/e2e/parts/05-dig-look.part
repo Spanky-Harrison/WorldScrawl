@@ -43,14 +43,14 @@
     const sw1 = await lastU();
     check('dig narrative: swiping the reply keeps the change and the move', sw1.i === lu.i && sw1.extra.worldscrawl_change?.direction === 'window' && (await stored()) === 'riverton:streets/square' && (await wsExits()).includes('back (The Drowned Rat, Upstairs Rooms)'), await wsExits());
     // Delete the player's message: the change is gone.
-    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await settle(1500);
     check('dig narrative: deleting the message undoes the dig and the move', (await stored()) === 'riverton:drowned_rat/upstairs' && !(await wsExits()).includes('window') && (await M(m => m.chatChanges().length)) === 0, await wsExits());
     // "...and peer through": then "stay" -> dig only, the party stays.
     await queue([{ content: 'new opening' }, { content: '{"existing":"village_square","direction":"hole","return_direction":"hole","then":"stay"}' }, { content: 'You peer through.' }]);
     await send('I smash a hole in the wall and peer through', 3);
     lu = await lastU();
     check('dig narrative: "peer through" ("stay") -> dig, no move', lu.extra.worldscrawl_change?.direction === 'hole' && lu.extra.worldscrawl_change?.return_direction === 'hole' && !lu.extra.worldscrawl_move && (await stored()) === 'riverton:drowned_rat/upstairs' && (await wsExits()).includes('hole (Village Square') && promptOf(await lastReq()).includes('broke through, making a new opening (hole) from here'), await wsExits());
-    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await settle(1500);
     // Somewhere new: the same create_place edit discovery uses, in this building, walkable both ways; an unclear "then" goes through.
     await queue([{ content: 'new opening' }, { content: '```json\n{"new":{"name":"dusty crawl space","description":"A cramped crawlspace full of cobwebs"},"direction":"the hole","then":"maybe"}\n```' }, { content: 'You climb down.' }]);
     await send('I bash a hole through the floorboards', 3);
@@ -76,18 +76,18 @@
     const kq = (await reqsNow()).slice(rK), chK = lu.extra.worldscrawl_change;
     check('dig courtyard: the named place is offered first and no new place is offered', /The player names Courtyard/.test(promptOf(kq[1])) && !promptOf(kq[1]).includes('Or it can lead to a new space'), promptOf(kq[1]).slice(0, 900));
     check('dig courtyard: linked to the existing courtyard, not a new area', chK?.type === 'dig' && chK.to === 'riverton:drowned_rat/courtyard' && chK.direction === 'window' && !['in', 'kitchen', 'stable', 'trapdoor'].includes(chK.return_direction) && !lu.extra.worldscrawl_dig_failed && (await stored()) === 'riverton:drowned_rat/courtyard', JSON.stringify(lu.extra));
-    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await settle(1500);
     check('dig courtyard: undone', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
     // A failure the narrator ignores: its [ws_flag: discover] is dropped, so no room appears.
     const chBefore = await M(m => m.chatChanges().length);
     await queue([{ content: 'new opening' }, { content: 'banana' }, { content: 'banana' }, { content: 'The wall bursts open onto a hidden attic. [ws_flag: discover | hole]' }]);
     await send('I smash the wall with my fist until it breaks', 4);
-    await page.waitForTimeout(1500);
+    await settle(1500);
     const flD = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return ch[ch.length - 1].extra?.worldscrawl_flag ?? null; });
     lu = await lastU();
     const lpD = promptOf(await lastReq());
     check('dig failed: the narrator is told it failed and its discover flag is ignored', lpD.includes('it FAILED') && lu.extra.worldscrawl_dig_failed === true && flD === null && (await M(m => m.chatChanges().length)) === chBefore, JSON.stringify({ flD, extra: lu.extra, prompt: lpD.slice(-700) }));
-    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await page.waitForTimeout(1500);
+    await page.evaluate(async i => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); }, lu.i); await settle(1500);
     // ---- Looking: the upstairs window (no exit) -> a nearby place, stamped as a view link, same answer next time.
     await sw(true, true);
     await go('up');

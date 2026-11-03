@@ -49,7 +49,7 @@
     const ratLink = cw.locator('.cast-stamps li', { hasText: 'hates rats' }).locator('.cast-msglink');
     const ratMsg = Number(await ratLink.getAttribute('data-msg'));
     await ratLink.click();
-    await page.waitForTimeout(400);
+    await settle(400);
     check('a message link flashes that message in SillyTavern', await page.evaluate(n => !!document.querySelector(`#chat .mes[mesid="${n}"]`)?.style.outline, ratMsg), String(ratMsg));
     await cw.locator('.cast-update').click();
     const mapDiff = await cw.locator('.cast-diff').innerText().catch(() => '');

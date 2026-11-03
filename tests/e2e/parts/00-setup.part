@@ -27,6 +27,17 @@ try {
         }, [API + path, opts]);
         return { ...r, json: async () => JSON.parse(r.text) };
     };
+    // settle(max): wait until the page has no request in flight and no generation running for 250ms, capped at max ms (replaces fixed sleeps).
+    const inflight = new Set();
+    page.on('request', r => inflight.add(r)); page.on('requestfinished', r => inflight.delete(r)); page.on('requestfailed', r => inflight.delete(r));
+    const settle = async max => {
+        const end = Date.now() + max; let quiet = 0;
+        while (Date.now() < end) {
+            const busy = inflight.size > 0 || await page.evaluate(() => jQuery('#mes_stop').is(':visible')).catch(() => true);
+            quiet = busy ? 0 : quiet + 50; if (quiet >= 250) return;
+            await page.waitForTimeout(50);
+        }
+    };
     page.on('pageerror', e => console.log('[pageerror]', e.message));
     await page.goto(BASE);
     await page.waitForSelector('#send_textarea', { timeout: 90000 });
