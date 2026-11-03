@@ -2,7 +2,8 @@
 // and skipped. The world still loads.
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_ID, NPC_TOKEN, exportRecord, freeId, nameIn, nearIndexFrom, npcTokenIds, validateRecord } from './npc.mjs';
+import { NPC_ID, NPC_TOKEN, exportRecord, freeId, nameIn, npcTokenIds } from './shared/npc.mjs';
+import { nearIndexFrom, validateRecord } from './npc.mjs';
 import { isDir, isFile, isObj, loadJson } from './world.mjs';
 
 export function castFiles(root) {

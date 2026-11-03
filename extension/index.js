@@ -12,7 +12,8 @@ import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecide
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts, sharedError } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, npcForName, nameStampFor, judgeFound, foundEditOk, offMapReport, scheduleAt, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
+import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, npcForName, nameStampFor, judgeFound, foundEditOk, offMapReport, scheduleAt, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
 import { WHICH_PREFIX, addNotice, bracketIntent, helpText, parseBracket, unbracket } from './brackets.mjs';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';

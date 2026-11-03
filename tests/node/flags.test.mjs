@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { normalizeWsTags, unreadTags, parseWaitTag } from '../../extension/words.mjs';
-import { takeNpcTags, takeFoundFlags, takeNameFlags, takeNpcFlags, takeLoreFlags } from '../../plugin/npc.mjs';
+import { takeNpcTags, takeFoundFlags, takeNameFlags, takeNpcFlags, takeLoreFlags } from '../../extension/npc.mjs';
 import { messageActivity } from '../../extension/activity.mjs';
 
 // ---- from flagreply.test.mjs

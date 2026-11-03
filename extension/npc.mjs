@@ -1,51 +1,34 @@
-// Copy of plugin/npc.mjs (the extension cannot import plugin files statically). Keep them the same; a test checks.
 // NPC records, stamps and context slices. The server stores nothing during play: a cast file is the
 // template, and every change is a stamp on the message (extra.worldscrawl_npc), per swipe.
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
+import { npc } from './shared.mjs';
+
+const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
+
 export const NPC_KEY = 'worldscrawl_npc';
+
 export const FOUND_KEY = 'worldscrawl_found';
+
 export const PLAYER = 'player';
+
 export const SUGGEST_AFTER = 3;
-export const MEMORY_CAP = 8;
+
 export const READBACK_CAP = 24;
+
 export const STAY_SECONDS = 3600;
-export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
-export const DISPOSITION_ALL = ['unknown', ...DISPOSITIONS];
-export const IMPORTANCE = ['low', 'normal', 'high'];
-export const NPC_ID = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+
 const LADDER = DISPOSITIONS;
-/** Appearance (docs/npc-design.md): 2-4 sentences, physical only. A phase-1 bridge; phase 2 is a structured body and wardrobe. */
-export const APPEARANCE_MAX = 800;
-export const HISTORY_MAX = 1200;
+
 /** Card text fields a stamp can set: stamp field -> folded key. Legacy names (manner, voice, appearance) still apply. */
 export const CARD_FIELDS = { line: 'line', 'personality.summary': 'line', 'personality.manner': 'manner', 'personality.speech': 'voice', manner: 'manner', voice: 'voice',
     'appearance.summary': 'looks', 'appearance.body': 'body', 'appearance.outfit': 'outfit', appearance: 'body', unknownAs: 'unknownAs' };
+
 const DAY_MINUTES = 1440;
 
-const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const cleanList = (v, cap) => (Array.isArray(v) ? v.map(x => (typeof x === 'string' ? x.trim().slice(0, 200) : '')).filter(Boolean).slice(0, cap) : []);
+
 const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
-
-/** Lowercase, punctuation to spaces. */
-export const normName = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-
-/** A name as a whole word in text. */
-export function nameIn(text, name) {
-    const n = normName(name);
-    if (!n) return false;
-    return ` ${normName(text)} `.includes(` ${n} `);
-}
-
-/** Lenient text key: exact, or the one key that is a whole word in the answer. */
-export function matchEnum(text, keys) {
-    const n = normName(text);
-    if (!n) return null;
-    const exact = keys.find(k => normName(k) === n);
-    if (exact) return exact;
-    const hits = keys.filter(k => ` ${n} `.includes(` ${normName(k)} `));
-    return hits.length === 1 ? hits[0] : null;
-}
 
 /** 0-99, stable for the same seed. Same seed all day, so a swipe cannot flip a sighting. */
 export function hashRoll(seed) {
@@ -72,15 +55,6 @@ export function sightChance(distance, peak = 0.5) {
     return Math.min(base, p);
 }
 
-/** "HH:MM" -> minutes, or null. */
-export function parseHm(text) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim());
-    if (!m) return null;
-    const h = +m[1], mi = +m[2];
-    if (h > 23 || mi > 59) return null;
-    return h * 60 + mi;
-}
-
 /** True when `minutes` sits in [from, to). A window that passes midnight wraps. No times means always. */
 export function inTimeWindow(minutes, from, to, dayMinutes = DAY_MINUTES) {
     if (from == null && to == null) return true;
@@ -90,215 +64,6 @@ export function inTimeWindow(minutes, from, to, dayMinutes = DAY_MINUTES) {
     return minutes >= start || minutes < end;
 }
 
-const slug = s => String(s ?? '').toLowerCase().replace(/['\u2019\u2018]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
-/** An id for a person met in play. A clash gets -2, -3, ... */
-export function freeId(name, taken = new Set()) {
-    let id = slug(name) || 'npc';
-    if (!NPC_ID.test(id)) id = 'npc';
-    if (!taken.has(id)) return id;
-    let n = 2;
-    while (taken.has(`${id}-${n}`)) n++;
-    return `${id}-${n}`;
-}
-
-function str(v, max) {
-    if (typeof v !== 'string') return null;
-    const t = v.trim();
-    if (!t || (max && t.length > max)) return null;
-    return t;
-}
-
-/**
- * One cast record. Never throws. `places` (a Set of addresses), when given, marks a schedule or
- * sighting place that is not in the world as broken. A place that exists here can still expire later;
- * that is decided when the schedule is resolved, not here.
- */
-export function validateRecord(raw, { file = 'npc', places = null, nearIndex = null } = {}) {
-    const problems = [];
-    const errors = [];
-    const fail = m => { problems.push(m); errors.push(m); };
-    const note = m => problems.push(m);
-    if (!isObj(raw)) return { ok: false, id: '', name: '', line: '', problems: [`${file}: not an object`], schedule: [], from: 'cast' };
-    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
-    if (!NPC_ID.test(id)) fail(`${file}: "id" must be a lowercase slug (letters, digits, dashes or underscores)`);
-    const stem = String(file).replace(/\.json$/i, '');
-    if (id && stem && stem !== id && stem !== 'npc') note(`${file}: file name should match "id" (${id})`);
-    const name = str(raw.name, 80);
-    if (!name) fail(`${file}: "name" is required`);
-    const sub = (obj, key, max, label) => {
-        const v = obj?.[key];
-        if (v == null || v === '') return '';
-        const s = str(v, max);
-        if (!s) fail(`${file}: "${label}" must be a short string`);
-        return s ?? '';
-    };
-    if (raw.personality != null && !isObj(raw.personality)) fail(`${file}: "personality" must be {summary, manner, speech}`);
-    const pers = isObj(raw.personality) ? raw.personality : {};
-    // personality.summary is the card's one-line identity (kept as `line` inside; an old top-level "line" still loads).
-    const line = sub(pers, 'summary', 400, 'personality.summary') || str(raw.line, 400);
-    if (!line) fail(`${file}: "personality.summary" is required (a few words: stern, watchful, sharp-tongued)`);
-    // Legacy top-level manner / voice load into personality.manner / personality.speech.
-    const manner = sub(pers, 'manner', 400, 'personality.manner') || sub(raw, 'manner', 400, 'manner');
-    const voice = sub(pers, 'speech', 400, 'personality.speech') || sub(raw, 'voice', 400, 'voice');
-    let looks = '', body = '', outfit = '';
-    if (typeof raw.appearance === 'string') body = sub(raw, 'appearance', APPEARANCE_MAX, 'appearance'); // the phase-1 string loads as the body
-    else if (isObj(raw.appearance)) {
-        looks = sub(raw.appearance, 'summary', 240, 'appearance.summary');
-        body = sub(raw.appearance, 'body', APPEARANCE_MAX, 'appearance.body');
-        outfit = sub(raw.appearance, 'outfit', APPEARANCE_MAX, 'appearance.outfit');
-    } else if (raw.appearance != null) fail(`${file}: "appearance" must be {summary, body, outfit}`);
-    const history = sub(raw, 'history', HISTORY_MAX, 'history');
-    const unknownAs = sub(raw, 'unknownAs', 80, 'unknownAs');
-    const disposition = {};
-    if (raw.disposition != null) {
-        if (!isObj(raw.disposition)) fail(`${file}: "disposition" must be an object keyed by person`);
-        else for (const [who, row] of Object.entries(raw.disposition)) {
-            if (!isObj(row)) { fail(`${file}: disposition.${who} must be {value, reason}`); continue; }
-            const value = matchEnum(row.value, DISPOSITION_ALL);
-            if (!value || value === 'unknown') { note(`${file}: disposition.${who} value must be one of ${DISPOSITIONS.join(', ')}`); continue; }
-            disposition[who] = { value, reason: str(row.reason, 240) ?? '' };
-        }
-    }
-    const schedule = [];
-    if (raw.schedule != null) {
-        if (!Array.isArray(raw.schedule)) fail(`${file}: "schedule" must be a list`);
-        else raw.schedule.forEach((e, i) => schedule.push(validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex)));
-    }
-    let seen_at = null;
-    if (raw.seen_at != null) {
-        if (!isObj(raw.seen_at)) fail(`${file}: "seen_at" must be {place, hour, chance}`);
-        else {
-            const place = str(raw.seen_at.place, 200);
-            const hour = raw.seen_at.hour;
-            const chance = raw.seen_at.chance == null ? 0.5 : raw.seen_at.chance;
-            const bad = !place || !Number.isInteger(hour) || hour < 0 || hour > 23 || typeof chance !== 'number' || chance < 0 || chance > 1;
-            if (bad) note(`${file}: "seen_at" needs a place, an hour 0-23, and a chance from 0 to 1`);
-            else {
-                const missing = places && !places.has(place);
-                if (missing) note(`${file}: seen_at place ${place} is not in this world`);
-                seen_at = { place, hour, chance, ...(missing ? { broken: true, problem: 'place is not in this world' } : {}) };
-            }
-        }
-    }
-    const deep = cleanDeep(raw.deep, file, fail);
-    if (history) deep.history = history;
-    const facts = Array.isArray(raw.facts) ? raw.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 24) : [];
-    const memory = Array.isArray(raw.memory) ? raw.memory.map(f => (typeof f === 'string' ? f.trim() : isObj(f) ? str(f.note, 240) : '')).filter(Boolean).slice(-MEMORY_CAP) : [];
-    const ok = errors.length === 0 && !!id && !!name && !!line;
-    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
-}
-
-function validateEntry(e, where, places, fail, nearIndex = null) {
-    if (!isObj(e)) { fail(`${where}: must be an object`); return { place: '', activity: '', broken: true, problem: 'not an object' }; }
-    const place = str(e.place, 200) ?? '';
-    const activity = str(e.activity, 200) ?? '';
-    const whereLabel = str(e.where, 80) ?? '';
-    const near = str(e.near, 200) ?? '';
-    const problems = [];
-    // A place puts them on the map. No place is a placeless entry: off the map, with activity required.
-    if (!activity) problems.push('activity is required');
-    if (!place && !activity) problems.push('activity is required');
-    let fromMin = null, toMin = null, from = null, to = null;
-    if (e.from != null && String(e.from).trim()) {
-        fromMin = parseHm(e.from);
-        if (fromMin == null) problems.push('from must look like "08:00"');
-        else from = String(e.from).trim();
-    }
-    if (e.to != null && String(e.to).trim()) {
-        toMin = parseHm(e.to);
-        if (toMin == null) problems.push('to must look like "17:00"');
-        else to = String(e.to).trim();
-    }
-    let importance = null;
-    if (e.importance != null && String(e.importance).trim()) {
-        importance = matchEnum(e.importance, IMPORTANCE);
-        if (!importance) problems.push('importance must be low, normal or high');
-    }
-    let nearNote = '';
-    if (!place && near && nearIndex) {
-        const resolved = resolveNear(near, nearIndex);
-        if (resolved.kind === 'text' && resolved.warn === 'typo') {
-            nearNote = 'probably a typo';
-            fail(`${where}: near "${near}" matches no place and no stub region (a single word; probably a typo)`);
-        } else if (resolved.kind === 'text') nearNote = 'not in the list';
-    }
-    let broken = problems.length > 0;
-    let problem = problems.join('; ');
-    if (!broken && place && places && !places.has(place)) {
-        broken = true;
-        problem = 'place is not in this world';
-        fail(`${where}: ${problem} (${place})`);
-    } else if (broken) fail(`${where}: ${problem}`);
-    return {
-        ...(place ? { place } : {}), activity,
-        ...(!place && whereLabel ? { where: whereLabel } : {}),
-        ...(!place && near ? { near } : {}),
-        ...(nearNote ? { nearNote } : {}),
-        ...(from ? { from } : {}), ...(to ? { to } : {}), fromMin, toMin,
-        ...(importance ? { importance } : {}), ...(broken ? { broken: true, problem } : {}),
-    };
-}
-
-function cleanDeep(raw, file, fail) {
-    if (raw == null) return {};
-    if (!isObj(raw)) { fail(`${file}: "deep" must be an object`); return {}; }
-    const out = {};
-    if (raw.history != null) {
-        const h = str(raw.history, HISTORY_MAX);
-        if (!h) fail(`${file}: deep.history must be a string`);
-        else out.history = h;
-    }
-    if (raw.secrets != null) {
-        if (!Array.isArray(raw.secrets)) fail(`${file}: deep.secrets must be a list of strings`);
-        else out.secrets = raw.secrets.map(s => (typeof s === 'string' ? s.trim() : '')).filter(Boolean).slice(0, 12);
-    }
-    if (raw.relationships != null) {
-        if (!isObj(raw.relationships)) fail(`${file}: deep.relationships must be an object`);
-        else {
-            out.relationships = {};
-            for (const [k, v] of Object.entries(raw.relationships)) {
-                const t = str(v, 240);
-                if (t) out.relationships[k] = t;
-                else fail(`${file}: deep.relationships.${k} must be a short string`);
-            }
-        }
-    }
-    return out;
-}
-
-/** Follow a relocate map. Expired (removed, and the target is gone) is not a crash. Missing means it was never here. */
-export function resolveSchedulePlace(place, { exists, relocate = {} } = {}) {
-    const live = a => typeof a === 'string' && a && exists?.(a) && !Object.prototype.hasOwnProperty.call(relocate, a);
-    if (live(place)) return { ok: true, address: place, how: 'here' };
-    let a = place;
-    const seen = new Set();
-    while (typeof a === 'string' && relocate[a] && !seen.has(a) && seen.size < 32) { seen.add(a); a = relocate[a]; }
-    if (live(a)) return { ok: true, address: a, how: 'merged' };
-    if (seen.size || (typeof place === 'string' && Object.prototype.hasOwnProperty.call(relocate, place))) return { ok: false, how: 'expired', from: place };
-    return { ok: false, how: 'missing', from: place };
-}
-
-/**
- * What a schedule `near` string points at, in order: a real map address (room, subregion `region:sub`, or region id),
- * a stub-region id, or plain text. `index` is {rooms, subs, regions, stubs (Map), nameOf, exists, relocate}.
- * A single word that matches nothing is `warn: 'typo'` (a load warning). Multi-word text is `warn: 'note'`
- * (an inspector note only: "not in the list").
- */
-export function resolveNear(near, index = null) {
-    const raw = typeof near === 'string' ? near.trim() : '';
-    if (!raw) return { kind: 'none' };
-    const nameOf = index?.nameOf ?? (a => a);
-    if (typeof index?.exists === 'function') {
-        const r = resolveSchedulePlace(raw, { exists: index.exists, relocate: index.relocate ?? {} });
-        if (r.ok) return { kind: 'map', scope: 'room', address: r.address, name: nameOf(r.address) };
-    } else if (index?.rooms?.has?.(raw)) return { kind: 'map', scope: 'room', address: raw, name: nameOf(raw) };
-    if (index?.subs?.has?.(raw)) return { kind: 'map', scope: 'subregion', address: raw, name: nameOf(raw) };
-    if (index?.regions?.has?.(raw)) return { kind: 'map', scope: 'region', address: raw, name: nameOf(raw) };
-    const stub = index?.stubs?.get?.(raw);
-    if (stub && !index?.regions?.has?.(raw)) return { kind: 'stub', id: raw, name: stub.name || raw, about: stub.about || '', lore: stub.lore || '' };
-    return { kind: 'text', text: raw, warn: /\s/.test(raw) ? 'note' : 'typo' };
-}
-
 /** True when room address `here` is the mapped place `near` (a room, anywhere in that subregion, or anywhere in that region). */
 export function withinNear(here, near) {
     if (!here || !near || near.kind !== 'map') return false;
@@ -306,17 +71,6 @@ export function withinNear(here, near) {
     if (near.scope === 'subregion') return here === near.address || here.startsWith(`${near.address}/`);
     if (near.scope === 'region') return here.split(':')[0] === near.address;
     return false;
-}
-
-/** Index for resolveNear from a loaded world (rooms, subregions, regions, stub regions). */
-export function nearIndexFrom(world) {
-    if (!world?.locations) return null;
-    const rooms = new Set(world.locations.keys());
-    const subs = new Set(world.subregions?.keys?.() ?? []);
-    const regions = new Set(world.regions?.keys?.() ?? []);
-    const stubs = world.elsewhere instanceof Map ? world.elsewhere : new Map();
-    const nameOf = a => world.locations.get(a)?.name || world.subregions?.get(a)?.name || world.regions?.get(a)?.name || stubs.get(a)?.name || a;
-    return { rooms, subs, regions, stubs, nameOf, exists: a => rooms.has(a), relocate: {} };
 }
 
 const nearOf = (entry, env) => resolveNear(entry?.near, env?.index ? { ...env.index, exists: env.exists ?? env.index.exists, relocate: env.relocate ?? env.index.relocate ?? {} } : null);
@@ -959,6 +713,7 @@ export function sceneStartOf(chat, index, playerAt) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     return sceneStart(end, i => playerAt(Math.min(i, end)));
 }
+
 export function declinesInScene(chat, index, playerAt) {
     const end = Math.max(-1, Math.min(index ?? -1, (chat?.length ?? 0) - 1));
     if (end < 0) return new Set();
@@ -969,7 +724,9 @@ export function declinesInScene(chat, index, playerAt) {
 }
 
 const DEEP_RE = /\b(secrets?|past|histor(?:y|ies)|used to|childhood|owes?|sister|brother|mother|father|think of (?:me|us|you)|remember when)\b/i;
+
 const TALK_RE = /\b(talk(?:s|ed|ing)?|speak(?:s|ing)?|spoke|ask(?:s|ed|ing)?|tell(?:s|ing)?|told|greet(?:s|ed|ing)?|approach(?:es|ed|ing)?|chat(?:s|ted|ting)?)\b/i;
+
 const LOOK_AT_RE = /\b(look(?:s|ed|ing)?|watch(?:es|ed|ing)?|stud(?:y|ies|ied)|examin(?:e|es|ed)|inspect(?:s|ed|ing)?)\b/i;
 
 /**
@@ -1055,12 +812,6 @@ export function npcTiers(present, focus, { chat = [], index = -1, said = '', ask
     return out;
 }
 
-/** How the narrator is told to refer to p: the name, or unknownAs with the real name for consistency only. */
-function label(p) {
-    if (p.known?.known === false && p.unknownAs) return `${p.unknownAs} [${p.id}] (the player does not know this person's name yet; it is ${p.name}. Do not have the player's character use it until it is learned; when someone says it to them, end your reply with [ws_flag: name | ${p.name}])`;
-    return `${p.name} (${p.id})`;
-}
-
 /**
  * Prompt slices by tier (see npcTiers). Everyone present gets one line: label, appearance.summary, personality.summary,
  * activity. Engaged people add body, outfit, manner, speech, disposition and their last few memories; topical adds history.
@@ -1104,54 +855,6 @@ export function npcSlices(present, focus = {}, { tiers = null } = {}) {
     return { npcs_present: lines.join('\n'), npc_focus };
 }
 
-/** A clean cast file from a played NPC (base fields plus facts, memory and disposition). Following stays in the chat. */
-export function exportRecord(npc) {
-    if (!npc?.id) return null;
-    // A file-shaped record (nested personality / appearance, top-level history) reads as its folded form.
-    if (isObj(npc.personality)) {
-        const p = npc.personality, a = isObj(npc.appearance) ? npc.appearance : {};
-        npc = { ...npc, line: p.summary, manner: p.manner, voice: p.speech, looks: a.summary, body: a.body, outfit: a.outfit,
-            deep: { ...(npc.deep ?? {}), ...(npc.history ? { history: npc.history } : {}) } };
-    }
-    const out = { id: npc.id, name: npc.name };
-    if (npc.unknownAs) out.unknownAs = npc.unknownAs;
-    out.personality = { summary: npc.line };
-    if (npc.manner) out.personality.manner = npc.manner;
-    if (npc.voice) out.personality.speech = npc.voice;
-    const appearance = {};
-    if (npc.looks) appearance.summary = npc.looks;
-    if (npc.body) appearance.body = npc.body;
-    if (npc.outfit) appearance.outfit = npc.outfit;
-    if (Object.keys(appearance).length) out.appearance = appearance;
-    if (npc.deep?.history) out.history = npc.deep.history;
-    const disposition = {};
-    for (const [who, row] of Object.entries(npc.disposition ?? {})) if (row?.value && row.value !== 'unknown') disposition[who] = { value: row.value, ...(row.reason ? { reason: row.reason } : {}) };
-    if (Object.keys(disposition).length) out.disposition = disposition;
-    if (npc.facts?.length) out.facts = npc.facts.slice();
-    if (npc.memory?.length) out.memory = npc.memory.slice();
-    const deep = {};
-    if (npc.deep?.secrets?.length) deep.secrets = npc.deep.secrets.slice();
-    if (npc.deep?.relationships && Object.keys(npc.deep.relationships).length) deep.relationships = { ...npc.deep.relationships };
-    if (Object.keys(deep).length) out.deep = deep;
-    const schedule = (npc.schedule ?? []).filter(e => e && !e.broken).map(e => {
-        const row = { activity: e.activity };
-        if (e.place) row.place = e.place;
-        else {
-            if (e.where) row.where = e.where;
-            if (e.near) row.near = e.near;
-        }
-        if (e.from) row.from = e.from;
-        if (e.to) row.to = e.to;
-        if (e.importance) row.importance = e.importance;
-        // place first when they have one, so a saved file reads like the other entries
-        if (row.place) { const { place, activity, ...rest } = row; return { place, activity, ...rest }; }
-        return row;
-    });
-    if (schedule.length) out.schedule = schedule;
-    else if (npc.seen_at && !npc.seen_at.broken) out.seen_at = { place: npc.seen_at.place, hour: npc.seen_at.hour, chance: npc.seen_at.chance ?? 0.5 };
-    return out;
-}
-
 function diffLine(field, from, to, lines) {
     const a = from ?? '', b = to ?? '';
     if (a === b) return;
@@ -1186,27 +889,34 @@ export function recordDiff(before, after) {
 }
 
 export const NPC_FLAG_KEY = 'worldscrawl_npc_flags';
+
 /** The narrator's [ws_flag: npc | Name] tags: the names come back, the text without the tags. */
 export const NPC_FLAG_TAG = /\s*\[ws_flag:\s*npc\s*\|\s*([^\]|]{1,60})\]/gi;
+
 export function takeNpcFlags(text) {
     const names = [];
     const cleaned = String(text ?? '').replace(NPC_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
     return { names, text: cleaned };
 }
+
 /** The narrator's [ws_flag: name | Name] tags (the player just learned that person's name): the names, the text without them. */
 export const NAME_FLAG_TAG = /\s*\[ws_flag:\s*name\s*\|\s*([^\]|]{1,60})\]/gi;
+
 export function takeNameFlags(text) {
     const names = [];
     const cleaned = String(text ?? '').replace(NAME_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
     return { names, text: cleaned };
 }
+
 /** The narrator's [ws_flag: found | Name] tags: the names, the text without them. */
 export const FOUND_FLAG_TAG = /\s*\[ws_flag:\s*found\s*\|\s*([^\]|]{1,80})\]/gi;
+
 export function takeFoundFlags(text) {
     const names = [];
     const cleaned = String(text ?? '').replace(FOUND_FLAG_TAG, (_all, n) => { const v = n.trim(); if (v) names.push(v); return ''; });
     return { names, text: cleaned };
 }
+
 /** The saved person a name flag means: exact name or id first, then a name contained either way. Null when none or several. */
 export function npcForName(npcs, name) {
     const key = normName(name);
@@ -1216,6 +926,7 @@ export function npcForName(npcs, name) {
     const loose = list.filter(n => nameIn(name, n.name) || nameIn(n.name, name));
     return loose.length === 1 ? loose[0] : null;
 }
+
 /** Names the narrator flagged on message m (the shown swipe). */
 export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
 
@@ -1328,13 +1039,6 @@ export function stampSummary(s, name = '') {
     return who;
 }
 
-// ---- Place lore (docs/lore.md). A place has a sensory description (fed on moves and looks) and lore: background
-// knowledge, fed only when the narrator asks with [ws_flag: lore | Place] (or the ws_flag tool's "lore" action) or the
-// player writes [lore]. The narrator always sees a one-line index of the lore on file. Cast NPCs are written as
-// {{npc:castId}} tokens in lore and descriptions; the engine renders them as names before SillyTavern's macros run.
-export const NPC_TOKEN = /\{\{\s*npc\s*:\s*([^{}\s]*)\s*\}\}/gi;
-/** The cast ids in a text's {{npc:id}} tokens, in order, unique. */
-export const npcTokenIds = text => [...new Set([...String(text ?? '').matchAll(NPC_TOKEN)].map(m => m[1].toLowerCase()))];
 /**
  * {{npc:id}} -> that NPC's name. An unknown id renders as the bare id ("someone" when empty) and is passed to `onUnknown`.
  * `cast` is a list of {id, name} (or a Map id -> name).
@@ -1350,15 +1054,19 @@ export function renderNpcTokens(text, cast, onUnknown = null) {
 }
 
 export const LORE_KEY = 'worldscrawl_lore';
+
 /** The narrator's [ws_flag: lore | Place] tags: the places come back, the text without the tags. */
 export const LORE_FLAG_TAG = /\s*\[ws_flag:\s*lore\s*(?:\|\s*([^\]|]{0,80}))?\]/gi;
+
 export function takeLoreFlags(text) {
     const places = [];
     const cleaned = String(text ?? '').replace(LORE_FLAG_TAG, (_all, n) => { places.push(String(n ?? '').trim()); return ''; });
     return { places, text: cleaned };
 }
+
 /** "Lore on file: The Drowned Rat, Riverton" for a lore chain (innermost first); '' when there is none. */
 export const loreIndexLine = chain => (chain?.length ? `Lore on file: ${chain.map(c => c.name).join(', ')}` : '');
+
 /** The chain entries a request names: "" / "here" / "all" -> every one; else the entry whose name matches. */
 export function loreFor(chain, place) {
     const p = normName(place);
@@ -1367,6 +1075,7 @@ export function loreFor(chain, place) {
     if (exact.length) return exact;
     return (chain ?? []).filter(c => nameIn(place, c.name) || nameIn(c.name, place)).slice(0, 1);
 }
+
 /**
  * A lore request, stamped on the message it came from: {swipe, place, level, address, source: 'flag' | 'bracket'}.
  * `place` is the place's name as matched in the lore chain (or as asked, when nothing matched; then level is '').
@@ -1376,8 +1085,10 @@ export function addLoreRequest(msg, req) {
     const list = Array.isArray(msg.extra[LORE_KEY]) ? msg.extra[LORE_KEY] : [];
     msg.extra[LORE_KEY] = [...list, { swipe: msg.swipe_id ?? 0, place: String(req.place ?? ''), level: String(req.level ?? ''), address: String(req.address ?? ''), source: req.source === 'bracket' ? 'bracket' : 'flag' }];
 }
+
 /** The lore requests on message m (its shown swipe). */
 export const loreRequestsOn = m => (Array.isArray(m?.extra?.[LORE_KEY]) ? m.extra[LORE_KEY] : []).filter(r => r && (r.swipe ?? 0) === (m?.swipe_id ?? 0));
+
 /**
  * Every lore request in a chat, oldest first, for the inspector's lore-request log:
  * [{index, place, level, address, source: 'flag' | 'bracket'}] (index = the message it is stamped on).
@@ -1387,6 +1098,7 @@ export function loreRequests(chat) {
     (chat ?? []).forEach((m, index) => { for (const r of loreRequestsOn(m)) out.push({ index, place: r.place, level: r.level, address: r.address, source: r.source }); });
     return out;
 }
+
 /** The part of an address a lore level covers: "riverton:drowned_rat/common_room" -> region "riverton", subregion "riverton:drowned_rat", room the whole. */
 export function loreScope(address, level) {
     const a = String(address ?? '');
@@ -1394,6 +1106,7 @@ export function loreScope(address, level) {
     if (level === 'subregion') return a.includes('/') ? a.slice(0, a.lastIndexOf('/')) : a;
     return a;
 }
+
 /**
  * The lore to feed at message `index`: chain entries (innermost first) that were asked for while the player has been
  * inside them. A request for a level stays active as long as the player stays inside that level (room: the same room;
@@ -1424,5 +1137,6 @@ export function activeLore(chat, index, chain, playerAt, extra = []) {
     for (let i = from; i <= end && i < n; i++) for (const r of loreRequestsOn(chat[i])) stub(r);
     return chain.filter(c => levels.has(c.level) || (c.level === 'elsewhere' && elseIds.has(c.id ?? c.address)));
 }
+
 /** The fed-lore block for the narrator ('' when nothing is fed), tokens left in (render afterwards). */
 export const loreBlock = fed => (fed?.length ? `Background knowledge (lore; what locals know, not what the senses show; use it only where it fits):\n${fed.map(c => `- ${c.name}: ${c.text}`).join('\n')}` : '');

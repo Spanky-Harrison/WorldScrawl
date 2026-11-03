@@ -7,7 +7,7 @@ import { WorldError, load_world } from '../../plugin/world.mjs';
 import { ROOT, SQUARE, TAVERN, TestClient, caplog, client, makeWorld, mkdir, tmpPath, write } from './helpers.mjs';
 import { slugId, newRoomId } from '../../plugin/shared/patches.mjs';
 import { slugFor } from '../../plugin/ui/castdata.mjs';
-import { freeId } from '../../plugin/npc.mjs';
+import { freeId } from '../../plugin/shared/npc.mjs';
 import { slugify } from '../../plugin/server.mjs';
 
 // ---- from world.test.mjs

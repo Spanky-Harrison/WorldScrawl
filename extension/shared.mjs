@@ -3,7 +3,7 @@
 // index.js cannot be imported here (it imports this file), so the setting is read straight from SillyTavern.
 // Under Node (unit tests) the repo's plugin/shared/ next to extension/ is loaded instead.
 // If loading fails, every module below is empty, `sharedError` says which URL was tried, and startup shows it.
-const NAMES = ['calendar', 'patches', 'doorbar', 'weather', 'prompts'];
+const NAMES = ['calendar', 'patches', 'doorbar', 'weather', 'prompts', 'npc'];
 const PLUGIN_URL = '/api/plugins/worldscrawl';
 
 /** The URL shared/ is loaded from, for the current Map server URL setting. */
@@ -30,6 +30,8 @@ async function loadShared() {
 }
 
 const S = await loadShared();
-export const { calendar, patches, doorbar, weather, prompts } = S;
+export const { calendar, patches, doorbar, weather, prompts, npc } = S;
 // Prompt text helpers, used everywhere in the extension.
 export const { render, setPrompts, hasPrompts } = S.prompts;
+// NPC record helpers the server uses too (cast files, exports, ids).
+export const { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } = S.npc;
