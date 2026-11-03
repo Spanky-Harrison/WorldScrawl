@@ -5,7 +5,8 @@ import { defaultWorldId, worldMissing } from './clock.mjs';
 import { applyNudge, chatKey } from './expiry.mjs';
 import { exitsCache, fetchLocationCached } from './footer.mjs';
 import { CHANGE_KEY, MOVE_KEY, NOT_RUNNING, activeWorld, addChangeMessage, baseUrl, csrfHeaders, ctx, expiryPending, mapVersion, missingRoomFallback, noteMapVersion, syncWorld } from './index.js';
-import { revealsDestination, syncDoors } from './movement.mjs';
+import { syncDoors } from './movement.mjs';
+import { revealsDestination } from './shared.mjs';
 import { patchSig, relocateFrom } from './patches.mjs';
 
 // ---- Doors. A closed exit ("view": "closed", default for hidden/obscured) can be opened/closed by changes on

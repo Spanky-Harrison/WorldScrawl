@@ -64,7 +64,8 @@ const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
 const str = v => (typeof v === 'string' ? v.trim() : '');
 const lc = s => String(s ?? '').toLowerCase();
-const SLUG = /^[a-z0-9]+(_[a-z0-9]+)*$/;
+/** A place id: lowercase letters and digits, single underscores between words. */
+export const SLUG = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 /** "3d", "12h", "1w 2d", "90m", "45s" -> seconds. Throws on anything else. */
 export function parseLasts(v) {

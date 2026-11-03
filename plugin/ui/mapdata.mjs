@@ -1,4 +1,5 @@
 // Pure helpers for the play-mode map: which rooms the chat knows, and where to draw them. No DOM; unit-tested in node.
+import { revealsDestination } from '../shared/exits.mjs';
 
 /** Where the party marker goes: the player's position. `location` is that same address; `positions.player` is it once positions are per actor. The id matches PLAYER in actors.mjs (this file cannot import outside plugin/ui/). */
 export const partyHere = state => {
@@ -26,7 +27,6 @@ export function newRooms(changes, rooms) {
 }
 
 const lc = s => String(s ?? '').toLowerCase();
-export const revealsDestination = e => !(e?.hidden || e?.obscured) || !!e?.revealed;
 
 /**
  * A room as this chat knows it: exits behind passed doors get their destination (from POST /doors data:

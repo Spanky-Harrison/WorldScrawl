@@ -25,7 +25,8 @@ import { applyNudge, applyTools, chatKey, describe, ensureStartStamp, excerptOf,
 import { START_MARKER, exitsCache, exitsText, fetchLocationCached, primeCache, renderAllExits, renderStartButton, warmRooms } from './footer.mjs';
 import { DIG_FAILED_NOTICE, parseIntent } from './looking.mjs';
 import { mapState, openMapChannel, openMapWindow } from './mapwindow.mjs';
-import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, revealsDestination, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
+import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
+import { revealsDestination } from './shared.mjs';
 import { changeEditUrl, mapCtx } from './patches.mjs';
 import { applyFacts, applyFound, learnNameOn, offerRemember, prepareNpcs } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
@@ -34,12 +35,13 @@ export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiv
 export { doorOverrides, doorStates, barrierOf, isOpenNow, sightOf, soundOf, barStates, isBarredNow, isBarredAway, barHere, isStuck, viewOf, roomToken, doorChange, doorCandidates, openChanges, barAction, doorAction, cacheInfo, cacheKeys, ensurePrompts, getStoredLocation } from './doors.mjs';
 export { expiryOptions, expiryPickPrompt, excerptOf, expiryNarrationLine, narratedView, expiredNotice, relocationNote, ensureStartStamp } from './expiry.mjs';
 export { discoverSys, discoverPrompt, existingDiscovery, unmergeFlag, flagMessage, onReplyForFlags, BADTAG_TITLE, markUnreadTags, digFailedBefore } from './discovery.mjs';
-export { trimAnswer, parseChoice, normKey, keyFor, matchKey, optionLines, pickKey, revealsDestination, stepsTaken, syncDoors, applyReveals, sameWord, sameLabel, sameAsDirection, exitLabel, destLabel, collidingNames, exitLabels, placeLabel, displayName, previousAddress, findPath, matchCandidates, namedInText, alreadyText, whoMoves, partyMembers, partyText, moveNote, narrate, STAY, ELSEWHERE, UNCLEAR, OPEN, BREAK_RE, cleanAnswer, parseIntentAnswer, parseYesNo } from './movement.mjs';
+export { trimAnswer, parseChoice, normKey, keyFor, matchKey, optionLines, pickKey, stepsTaken, syncDoors, applyReveals, sameWord, sameLabel, sameAsDirection, exitLabel, destLabel, collidingNames, exitLabels, placeLabel, displayName, previousAddress, findPath, matchCandidates, namedInText, alreadyText, whoMoves, partyMembers, partyText, moveNote, narrate, STAY, ELSEWHERE, UNCLEAR, OPEN, BREAK_RE, cleanAnswer, parseIntentAnswer, parseYesNo } from './movement.mjs';
 export { baseReply, digSys, DIG_TRIES, pickSys, COMPASS, closeName, duplicatePlace, mergeDuplicates, NEW_PLACE, digOptions, digPrompt, readDigAnswer, namedPlace, digWordFrom } from './dig.mjs';
 export { LOOK, OPEN_DOOR, CLOSE_DOOR, NEW_DOOR, DOOR_OPEN_RE, DOOR_CLOSE_RE, NO_EXIT, AROUND, WINDOW_WORD_RE, offerWindow, lookOptions, lookTargetPrompt, DOOR_LOOK, closedDoorPrompt, roomOptions, viewPickPrompt, doorOptions, doorPickPrompt, DIG_FAILED_NOTICE, travelSys, travelYesNoPrompt, intentSys, intentPrompt } from './looking.mjs';
 export { VERBS, parseBracket, unbracket, SLASH_ONLY, helpText, bracketTargetPrompt, bracketIntent, exitMentioned, checkExitChoice, WHICH_PREFIX, WAY_OUT_PREFIX, LEAVING_RE, noticePrefix, unreachableText, whichText, arrival, arrivalReminder, isDirWord, glimpseLines, lookText, LOOK_AROUND_RE, newDoorLine, factsText } from './brackets.mjs';
 export { renderTokens, fedLore, loreBits, refreshLivePlaces, flaggedInScene } from './scene.mjs';
 export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
+export { revealsDestination } from './shared.mjs';
 export { themeVars, mapState, expandSys, openMapWindow, openWorldFolder } from './mapwindow.mjs';
 export { flagHint, flagToolText, flagActionText, waitHint, patchesOn, previewOps, restampChange, opsHash, changeEditUrl, changeEditMismatch, changeDependents, toggleChange, liveEdit } from './patches.mjs';
 export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagCardView, USER_FLAG_NOTE, replyAfter, SCENE_KEY, sceneOverrides, setSceneOverride, proactiveDiscovery } from './carriers.mjs';

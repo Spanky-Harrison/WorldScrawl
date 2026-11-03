@@ -1,9 +1,9 @@
 // The cast browser and editor's data side (pure, no DOM): the list (cast files plus people created in play), search and
 // filters, the editor form <-> cast record, inline validation, the in-play view's rows, and the map's NPC markers.
 // The server validates again on save (plugin/npc.mjs validateRecord); these checks are for showing problems inline.
+import { NPC_ID } from '../shared/npc.mjs';
 export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
 export const IMPORTANCE = ['low', 'normal', 'high'];
-export const NPC_ID = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const HM = /^(\d{1,2}):(\d{2})$/;
 const hmOk = t => { const m = HM.exec(String(t ?? '').trim()); return !!m && +m[1] < 24 && +m[2] < 60; };
 const s = v => (typeof v === 'string' ? v.trim() : '');

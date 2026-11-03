@@ -6,7 +6,8 @@ import { registerTools } from './discovery.mjs';
 import { api, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
 import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld, toolsOn } from './index.js';
-import { displayName, keyFor, optionLines, partyText, revealsDestination } from './movement.mjs';
+import { displayName, keyFor, optionLines, partyText } from './movement.mjs';
+import { revealsDestination } from './shared.mjs';
 import { flagHint, mapCtx, patchSig, waitHint } from './patches.mjs';
 
 const expiryNarrated = new Set();

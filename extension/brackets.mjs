@@ -7,7 +7,8 @@ import { barHere, barrierOf, changesOf, currentLocation, doorCandidates, doorCha
 import { exitsText } from './footer.mjs';
 import { CHANGE_KEY, ctx, toolsOn } from './index.js';
 import { doorOptions, exitTargetLabel, lookOptions, narrativeDoor, narrativeLook } from './looking.mjs';
-import { ELSEWHERE, STAY, alreadyText, displayName, engineMove, engineTravel, keyFor, namedInText, optionLines, partyText, pickKey, revealsDestination, sameName, sameWord, stamp, travelCandidates, words } from './movement.mjs';
+import { ELSEWHERE, STAY, alreadyText, displayName, engineMove, engineTravel, keyFor, namedInText, optionLines, partyText, pickKey, sameName, sameWord, stamp, travelCandidates, words } from './movement.mjs';
+import { revealsDestination } from './shared.mjs';
 import { applyFound, castPack, learnNameOn, loreChain, offerRemember, renderTokens, requestLore } from './scene.mjs';
 import { planWait, stampWait } from './waits.mjs';
 
