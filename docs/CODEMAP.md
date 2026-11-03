@@ -1,6 +1,6 @@
 # Code map
 
-Where things live. Every PR that moves or adds a file updates this page (see CONTRIBUTING.md).
+Where things live. Every PR that moves or adds a file updates this page. Rules: [CONTRIBUTING.md](CONTRIBUTING.md) (process), [PRINCIPLES.md](PRINCIPLES.md) (engine), [STYLE.md](STYLE.md) (UI and code). Design notes: npc-design.md, lore.md.
 
 ## extension/ (SillyTavern UI extension; runs in the browser)
 
