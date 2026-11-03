@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exportRecord, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, nameKnown, narratorView, npcForName, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreIndexLine, loreFor, addLoreRequest, loreRequests, activeLore, loreBlock, renderNpcTokens } from '../../extension/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, nameKnown, narratorView, npcForName, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore, renderNpcTokens } from '../../extension/npc.mjs';
 import { castNameWarnings, loadCast, writeCastNpc, saveCastNpc, tidyRecord } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath, makeWorld } from './helpers.mjs';
 import { chatStamps, formFromPlay, formFromRecord, recordFromForm, liveSchedule, permanentProblem, CHAT_ONLY_ROOM } from '../../plugin/ui/castdata.mjs';
@@ -672,14 +672,10 @@ test('the shipped worlds use lore, not notes', () => {
     for (const f of fs.readdirSync(dir)) assert.ok(!/"(inherit_(region_|subregion_)?)?notes"\s*:/.test(fs.readFileSync(new URL(f, dir), 'utf8')), f);
 });
 const chain = [{ level: 'subregion', name: 'The Drowned Rat', text: 'Run by {{npc:hesk}}.' }, { level: 'region', name: 'Riverton', text: 'A river town.' }];
-test('index line, lookup and the background-knowledge block', () => {
-    assert.equal(loreIndexLine(chain), 'Lore on file: The Drowned Rat, Riverton');
-    assert.equal(loreIndexLine([]), '');
+test('lore lookup', () => {
     assert.deepEqual(loreFor(chain, 'drowned rat').map(c => c.level), ['subregion']);
     assert.deepEqual(loreFor(chain, '').map(c => c.level), ['subregion', 'region']);
     assert.deepEqual(loreFor(chain, 'Larkspur'), []);
-    assert.match(loreBlock([chain[1]]), /^Background knowledge \(lore[^\n]*\n- Riverton: A river town\.$/);
-    assert.equal(loreBlock([]), '');
 });
 test('takeLoreFlags strips the tags and returns the places', () => {
     const r = takeLoreFlags('She pours.\n[ws_flag: lore | The Drowned Rat] [ws_flag: lore]');
