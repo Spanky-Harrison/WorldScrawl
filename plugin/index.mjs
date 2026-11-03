@@ -1,5 +1,5 @@
-// SillyTavern server plugin: serves the WorldScrawl map API at /api/plugins/worldscrawl/
-// and the WorldScrawl window (map) at /api/plugins/worldscrawl/ui/.
+// SillyTavern server plugin: serves the WorldScrawl map API at /api/plugins/worldscrawl/,
+// the WorldScrawl window (map) at /api/plugins/worldscrawl/ui/, and plugin/shared/ at /api/plugins/worldscrawl/shared/.
 // Install: link or copy this folder to SillyTavern/plugins/worldscrawl and set enableServerPlugins: true in config.yaml.
 // Worlds folder: WORLDSCRAWL_WORLDS_DIR, else "worldsDir" in plugin/config.json (relative to this folder),
 // else the repo's worlds/ folder next to this one.

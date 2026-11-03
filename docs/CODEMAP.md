@@ -41,7 +41,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | world.mjs, position.mjs, changes.mjs, snapcache.mjs | World loading/validation, position resolver, per-chat changes, map snapshot cache |
 | npc.mjs, cast.mjs | NPC records and stamps (`judgeFound`, `foundEditOk`), cast files |
 | prompts.mjs, prompts/default.json | Prompt profiles per user; the default prompt text for every model call |
-| inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static UI serving |
+| inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static serving of plugin/ui/ (`/ui/*`) and plugin/shared/ (`/shared/*`) |
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |
 | config.example.json, package.json | Config template, package metadata |
 | ui/ | The map window: `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, calendar, castdata, castpanel, changeedit, diffview, doorbar, mapactions, mapdata, menus, patches, patchform, picker, placeform, prompteditor, prompts, weather |

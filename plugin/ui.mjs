@@ -1,22 +1,26 @@
-// Static files for the WorldScrawl window (plugin/ui/), served at /api/plugins/worldscrawl/ui/. No build step.
+// Static files, no build step: the WorldScrawl window (plugin/ui/) at /api/plugins/worldscrawl/ui/, and the code both sides
+// share (plugin/shared/) at /api/plugins/worldscrawl/shared/ (the extension imports it from there).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
+export const SHARED_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'shared');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
     '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.ico': 'image/x-icon' };
 
 /**
  * What to answer for a request path (relative to the plugin mount): null = not a UI path (the map API handles it),
- * {redirect}, {status: 404}, or {file, type}. Never serves anything outside plugin/ui/.
+ * {redirect}, {status: 404}, or {file, type}. Never serves anything outside plugin/ui/ or plugin/shared/.
  */
-export function uiFile(urlPath, dir = UI_DIR) {
+export function uiFile(urlPath, dir = UI_DIR, sharedDir = SHARED_DIR) {
     let p = String(urlPath ?? '').split('?')[0];
     try { p = decodeURIComponent(p); } catch { return { status: 404 }; }
     if (p === '/ui') return { redirect: 'ui/' };
-    if (!p.startsWith('/ui/')) return null;
-    let rel = p.slice(4) || 'index.html';
+    if (p.startsWith('/shared/')) { dir = sharedDir; p = p.slice(7); }
+    else if (!p.startsWith('/ui/')) return null;
+    else p = p.slice(3);
+    let rel = p.slice(1) || 'index.html';
     if (rel.endsWith('/')) rel += 'index.html';
     if (rel.includes('\0') || rel.split(/[\\/]/).some(s => s === '..' || s.startsWith('.'))) return { status: 404 };
     const base = path.resolve(dir), file = path.resolve(base, rel);
