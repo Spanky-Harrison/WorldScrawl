@@ -120,3 +120,9 @@ test('plural-tolerant word matching (grate/grates, stable/stables, box/boxes, ki
     assert.deepEqual(got.map(x => typeof x === 'number' ? x : !!x), [true, true, true, true, false, false, true, true, true, false, true, true, true, true, false, 1, 1]);
 });
 }
+
+const { BREAK_RE } = await import('../../extension/movement.mjs');
+test('break-word check: whole words and phrases only', () => {
+    assert.deepEqual(['I smash out the window', 'I eat breakfast', 'I go into the tunnel', 'there is a hole here', 'I punch through the wall', 'I make a hole in the floor', 'I kick down the door', 'the smashing pumpkins'].map(t => BREAK_RE.test(t)),
+        [true, false, false, false, true, true, true, true]);
+});
