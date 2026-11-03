@@ -27,3 +27,6 @@ Read first every build: this page, then [CODEMAP.md](CODEMAP.md). Engine and beh
 3. An e2e check stays if it tests that things connect in the browser. It goes if it only retests logic a unit test already covers. Judge e2e cost by run time, not by check count.
 4. Tests that guard a rule going forward stay. Checks that only prove a one-time change was safe (before/after comparisons, migration diffs, id checks after a rename) run once and are reported in the PR body, not kept.
 5. e2e parts share one browser session and can't run alone; run them through `e2e/e2e.mjs`.
+6. No retaining one-time tests.
+7. No e2e check that could be a unit test.
+8. While working, run only the tests that touch the change. Run the full e2e and the prompt snapshot once before merging; in a build, that's once at the end of the build, before the final merge.

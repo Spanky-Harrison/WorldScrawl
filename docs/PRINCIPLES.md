@@ -14,7 +14,7 @@ How WorldScrawl is supposed to work. Process rules are in [CONTRIBUTING.md](CONT
 ## The player is omnipotent
 - Restrict player input only when it's invalid or would break something.
 - Guards and plausibility checks (near/within, one-step limits, duplicate-room checks and so on) apply to the model only. A player action that bypasses a guard goes through, and the inspector notes it as a player override.
-- Things the model sets can only be moved backwards by a player edit where a feature says so (e.g. relationship state).
+- Things the model sets can only be moved backwards by a player edit where a feature says so (e.g. relationship state). (inferred, confirm)
 
 ## Visibility
 - Everything the engine feeds the model or decides shows in the inspector: what was decided, why, and what the model was told. Don't ship engine behaviour Knarfy can't see.
