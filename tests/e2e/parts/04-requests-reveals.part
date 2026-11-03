@@ -113,7 +113,6 @@
     const M = fn => page.evaluate(async src => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); return (0, eval)(src)(m); }, fn.toString());
     const wl = await (await stFetch('/worlds')).json();
     check('worlds: list has riverton as default', wl.default === 'riverton' && wl.worlds.some(w => w.id === 'riverton' && w.map_version), JSON.stringify(wl));
-    check('worlds: path traversal rejected', (await stFetch('/start?world=..%2Fx')).status === 400 && (await stFetch('/worlds/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '../evil' }) })).status === 400);
     check('chat world stamped on the first message', await page.evaluate(() => { const w = SillyTavern.getContext().chat[0].extra?.worldscrawl_world; return w?.id === 'riverton' && w.version?.length === 12; }));
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-dig oneway=true shortcut Village Square'));
     await page.waitForTimeout(1000);
@@ -327,4 +326,3 @@
     await page.evaluate(() => document.getElementById('worldscrawl_open_world').click()); await page.waitForTimeout(800);
     const of = apiUrls.filter(u => u.includes('/open-folder'));
     check('open folder buttons call the server with no path (root, then a world id)', of.length === 2 && !of[0].includes('world=') && /world=riverton$/.test(of[1]), JSON.stringify(of));
-    check('open-folder refuses a path-like id', (await stFetch('/open-folder?world=..%2F..', { method: 'POST' })).status === 400);

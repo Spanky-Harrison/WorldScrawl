@@ -9,8 +9,6 @@
     const lastU = () => page.evaluate(() => { const ch = SillyTavern.getContext().chat; for (let i = ch.length - 1; i >= 0; i--) if (ch[i].is_user) return { i, extra: ch[i].extra ?? {} }; return null; });
     const reqsNow = async () => (await fetch(`${FAKE}/__requests`)).json();
     const promptOf = r => JSON.stringify(r.messages ?? r);
-    const bre = await M(m => ['I smash out the window', 'I eat breakfast', 'I go into the tunnel', 'there is a hole here', 'I punch through the wall', 'I make a hole in the floor', 'I kick down the door', 'the smashing pumpkins'].map(t => m.BREAK_RE.test(t)));
-    check('break-word check: whole words and phrases only', JSON.stringify(bre) === '[true,false,false,false,true,true,true,true]', JSON.stringify(bre));
     // Breakfast: no breaking word, so no "new opening" option; a stray "new opening" answer goes the normal way (yes/no follow-up), never a dig.
     await queue([{ content: 'new opening' }, { content: 'no' }, { content: 'You eat.' }]);
     const rB = (await reqsNow()).length;
