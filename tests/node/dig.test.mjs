@@ -189,3 +189,32 @@ test('every pick-one prompt asks for a key, not a number', async () => {
     assert.ok(def.prompts.find(e => e.id === 'pick.system').locked);
 });
 }
+
+{
+const ext = await import('../../extension/index.js');
+test('glimpse wording: direction words vs nouns', () => {
+    assert.deepEqual(ext.glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }),
+        ['Looking up, you can see Attic: Dusty.', 'Through the gate, you can see Yard: Muddy.']);
+});
+test('long road (sight none, not obscured): look describes the road, may name Larkspur, not describe it', () => {
+    const t = ext.lookText('Ann', 'East Road', { kind: 'threshold', via: 'east', description: 'The road runs on east and out of sight.', unknown: false, name: 'Larkspur' });
+    assert.ok(t.includes('The road runs on east and out of sight.') && t.includes('It leads to Larkspur, but that cannot be seen') && t.includes('do not describe what lies at the far end') && !t.includes('nothing can be made out'), t);
+});
+test('narration: exits hint on arrival and look-around only; obscured exit label-only; look-around phrases', () => {
+    const loc = { name: 'Hall', description: 'A hall.', exits: [{ direction: 'north', view: 'open', to: 'r:a', to_name: 'Yard', to_summary: 'Muddy.' }, { direction: 'trapdoor', obscured: true, to: 'r:b', to_name: 'Vault', to_summary: 'Gold.' }] };
+    const arrive = ext.factsText({ ...loc, address: 'r:h' }, { direction: 'south', from_name: 'X', to_name: 'Hall', to: 'r:h' }, false);
+    const around = ext.factsText(loc, null, false, { lookAround: true }), plain = ext.factsText(loc, null, false);
+    assert.ok(arrive.includes('mention every exit') && around.includes('mention every exit') && around.includes('looks around') && !plain.includes('mention every exit'));
+    assert.ok(!arrive.includes('Vault') && arrive.includes('do not hint or guess where it leads') && arrive.includes('you can see Yard'), arrive);
+    assert.deepEqual(['I look around', 'she glances about the room', 'I survey the surroundings', 'I look at the door'].map(x => ext.LOOK_AROUND_RE.test(x)), [true, true, true, false]);
+});
+test('[ws-start] marker stripped from the prompt copy, stored text kept', () => {
+    const a = [{ mes: 'Hi. [ws-start]' }, { mes: 'x' }], orig = a[0];
+    ext.stripStartMarker(a);
+    assert.equal(a[0].mes, 'Hi.'); assert.equal(orig.mes, 'Hi. [ws-start]');
+});
+test('/ws-reveal scopes: region, subregion, a subregion id, a region id, a place id', () => {
+    assert.deepEqual([ext.revealScope('region', ['a:x/1', 'a:y/2', 'b:z/3'], 'a:x/1'), ext.revealScope('subregion', ['a:x/1', 'a:y/2'], 'a:x/1'), ext.revealScope('a:y', ['a:x/1', 'a:y/2'], 'a:x/1'), ext.revealScope('b', ['a:x/1', 'b:z/3'], 'a:x/1'), ext.revealScope('a:x/1', ['a:x/1', 'a:x/2'], '')],
+        [['a:x/1', 'a:y/2'], ['a:x/1'], ['a:y/2'], ['b:z/3'], ['a:x/1']]);
+});
+}
