@@ -16,7 +16,7 @@
 // active list from that change on, likewise.
 import crypto from 'node:crypto';
 import { apply_changes } from './changes.mjs';
-import { activeChanges, parseLasts } from './ui/patches.mjs';
+import { activeChanges, parseLasts } from './shared/patches.mjs';
 
 export const CHECKPOINT_EVERY = 25;
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);

@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P } from './prompts.mjs';
+import { render as P } from './shared.mjs';
 import { PLAYER } from './actors.mjs';
 import { removeChange } from './carriers.mjs';
 import { calendarLib, defaultWorldId, gameDate, listedWorlds, loadCalendar, placeWeatherNow, rememberWorlds, weatherLib, worldName, worldTimes } from './clock.mjs';

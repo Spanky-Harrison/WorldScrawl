@@ -1,9 +1,9 @@
 // The WorldScrawl window. Windows are registered in WINDOWS; the top bar gets one button per window.
 // Live state comes from the extension over BroadcastChannel('worldscrawl'); room data from the plugin API.
-import { changeText } from './patches.mjs';
-import { placeWeather, fmtTemp } from './weather.mjs';
+import { changeText } from '../shared/patches.mjs';
+import { placeWeather, fmtTemp } from '../shared/weather.mjs';
 import { buildEditForm, expandPrompt } from './placeform.mjs';
-import { loadPrompts } from './prompts.mjs';
+import { setPrompts } from '../shared/prompts.mjs';
 import { sessionFromUrl, openChangeEditor } from './changeedit.mjs';
 import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
 import { activityView } from './activitylog.mjs';
@@ -14,6 +14,12 @@ import { pickSearch, pickValid, pathOf } from './picker.mjs';
 import { castPanel } from './castpanel.mjs';
 import { markersByPlace, markersAt } from './castdata.mjs';
 import { buildGraph, knownRoom, layoutGraph, newRooms, hueFor, expandChanges, layerGraph, layerOf, layerKey, breadcrumb, partyHere } from './mapdata.mjs';
+/** Fetch the active (default + selected profile) prompts from the plugin. */
+async function loadPrompts(base = '/api/plugins/worldscrawl') {
+    const r = await fetch(`${base}/prompts/active`);
+    if (!r.ok) throw new Error(`prompts: server answered ${r.status}`);
+    return setPrompts((await r.json()).prompts);
+}
 
 const API = '/api/plugins/worldscrawl';
 const channel = new BroadcastChannel('worldscrawl');

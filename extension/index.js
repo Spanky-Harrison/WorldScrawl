@@ -10,7 +10,7 @@ import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, noticeRow, lockRow, markPending, NOTICE_CSS, resolvedText } from './notices.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
-import { render as P, setPrompts, hasPrompts } from './prompts.mjs';
+import { render as P, setPrompts, hasPrompts, sharedError } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, exportRecord, focusRules, followersAt, framesOf, freeId, nameIn, normName, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, npcForName, nameStampFor, judgeFound, foundEditOk, offMapReport, scheduleAt, resolveSchedulePlace, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, renderNpcTokens, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
 import { WHICH_PREFIX, addNotice, bracketIntent, helpText, parseBracket, unbracket } from './brackets.mjs';
@@ -744,6 +744,7 @@ const openCarriers = new WeakSet();
 
 (function init() {
     settings();
+    if (sharedError) { try { toastr.error(sharedError, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} } // also logged by shared.mjs
     applyTools();
     registerSlashCommands();
     const { eventSource, eventTypes } = ctx();

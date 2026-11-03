@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { GREGORIAN, advanceStart, checkCalendar, dateAt, formatDuration, monthDays, parseDuration, partOfDay, secondsBetween, sumTravel, yearDays } from '../../plugin/ui/calendar.mjs';
+import { GREGORIAN, advanceStart, checkCalendar, dateAt, formatDuration, monthDays, parseDuration, partOfDay, secondsBetween, sumTravel, yearDays } from '../../plugin/shared/calendar.mjs';
 import { WorldError, load_world } from '../../plugin/world.mjs';
 import { RIVERTON, SQUARE, TestClient, copytree, makeWorld, read, tmpPath } from './helpers.mjs';
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
 import { build_world, read_world_raw, WorldError } from '../../plugin/world.mjs';
-import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom, roomMatches, readChangeAnswer, opDocs, OPS } from '../../plugin/ui/patches.mjs';
+import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom, roomMatches, readChangeAnswer, opDocs, OPS } from '../../plugin/shared/patches.mjs';
 import fs from 'node:fs';
 import { cleanOp, formOps, checkOps, errorsByOp, blankOp, liveOps, editLine, OP_FIELDS } from '../../plugin/ui/patchform.mjs';
 import { blockDiff, fieldDiffs, mergeLines, exitState, wordDiff, moveGroups, inheritLine } from '../../plugin/ui/diffview.mjs';

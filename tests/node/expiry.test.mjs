@@ -2,7 +2,7 @@ import './ststub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD, extSource } from './helpers.mjs';
-import { clockAt, sumTravel } from '../../plugin/ui/calendar.mjs';
+import { clockAt, sumTravel } from '../../plugin/shared/calendar.mjs';
 import fs from 'node:fs';
 
 // ---- from expiry.test.mjs
@@ -142,7 +142,7 @@ test('inactive notes: a chain says which message it depends on; a turned-off cau
 });
 
 test('change text: a note that repeats a summary line is shown once', async () => {
-    const { changeText } = await import('../../plugin/ui/patches.mjs');
+    const { changeText } = await import('../../plugin/shared/patches.mjs');
     const t = changeText({ note: 'new exit to Courtyard (back: Broken Window)', summary: ['Stable window: new exit to Courtyard (back: Broken Window)', 'Stable window: new exit to Courtyard (back: Broken Window)'] });
     assert.equal(t, ': Stable window: new exit to Courtyard (back: Broken Window)');
     assert.equal(changeText({ note: 'fire', summary: ['Square: description changed'] }), ' · fire: Square: description changed');

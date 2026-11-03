@@ -6,15 +6,15 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { apply_changes } from './changes.mjs';
 import { SnapshotCache, stable as stableJson } from './snapcache.mjs';
-import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './ui/patches.mjs';
+import { activeChanges, applyPatch, PatchError, getRoom, normalizeRefs, neighborsOf, mentionsOf } from './shared/patches.mjs';
 import { inspect, inspectIndex } from './inspect.mjs';
 import { inheritNotes, moveNames } from './movenotes.mjs';
 import { editContext, outline, aiContext } from './editctx.mjs';
 import { resolvePosition, relocateMap } from './position.mjs';
 import { castFiles, deleteCastNpc, loadCast, saveCastNpc, worldPlaces, writeCastNpc } from './cast.mjs';
 import { nearIndexFrom } from './npc.mjs';
-import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './ui/calendar.mjs';
-import { opActive, parseLasts } from './ui/patches.mjs';
+import { GREGORIAN, advanceStart, checkCalendar, checkStart, dateAt, shortDate } from './shared/calendar.mjs';
+import { opActive, parseLasts } from './shared/patches.mjs';
 import { World, WorldError, attachElsewhere, build_world, has, isDir, isFile, isObj, log, read_world_raw, regionFiles, repr, strip } from './world.mjs';
 
 export const DEFAULT_WORLD_ID = 'riverton';

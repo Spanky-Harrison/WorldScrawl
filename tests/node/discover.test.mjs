@@ -3,7 +3,7 @@ import './useprompts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { applyPatch, PatchError, discoverToCreate } from '../../plugin/ui/patches.mjs';
+import { applyPatch, PatchError, discoverToCreate } from '../../plugin/shared/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
 const c = client(RIVERTON);
@@ -78,7 +78,7 @@ test('discover: turning it off removes the room, its dependents fail, the party 
 });
 
 import { build_world, load_world } from '../../plugin/world.mjs';
-import { expandableOf } from '../../plugin/ui/patches.mjs';
+import { expandableOf } from '../../plugin/shared/patches.mjs';
 
 test('expandable cascades world > region > subregion > room; nearest setting wins', () => {
     const [wj, raw0] = read_world_raw(RIVERTON);

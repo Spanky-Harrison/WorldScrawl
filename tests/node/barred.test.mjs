@@ -5,7 +5,7 @@ import { RIVERTON, YARD } from './helpers.mjs';
 import './ststub.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
 import { build_world, read_world_raw, WorldError, flipBar } from '../../plugin/world.mjs';
-import { applyPatch, getRoom } from '../../plugin/ui/patches.mjs';
+import { applyPatch, getRoom } from '../../plugin/shared/patches.mjs';
 import { editContext } from '../../plugin/editctx.mjs';
 import { DOOR_FIELDS } from '../../plugin/ui/placeform.mjs';
 const X = await import('../../extension/index.js');

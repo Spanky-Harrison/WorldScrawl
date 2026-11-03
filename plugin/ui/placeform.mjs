@@ -2,9 +2,9 @@
 // form into patch ops) are node-tested; buildEditForm makes the DOM. The form starts from /edit/context: `own` holds
 // what the place itself sets, `inherited` what an unset field gets and from where. Only fields the user explicitly
 // changed become ops, so submitting an untouched form never copies inherited values into the place.
-import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS, newRoomId } from './patches.mjs';
+import { FIELD_KEYS, EXIT_SIDE_KEYS, ENUMS, newRoomId } from '../shared/patches.mjs';
 import { pickField, pathOf } from './picker.mjs';
-import { render as P } from './prompts.mjs';
+import { render as P } from '../shared/prompts.mjs';
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);

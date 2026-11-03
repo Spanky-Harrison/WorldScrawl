@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSULATION, fToC } from './ui/weather.mjs';
+import { INSULATION, fToC } from './shared/weather.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const readJson = p => JSON.parse(fs.readFileSync(p, 'utf8'));

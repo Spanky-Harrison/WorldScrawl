@@ -1,6 +1,6 @@
 // Tools > Prompt Editor: edit the prompt text per profile. Default is read-only; a profile keeps only its overrides.
 // Server routes: GET /prompts, POST /prompts/select|profile|override|reset (plugin/prompts.mjs).
-import { placeholdersIn } from './prompts.mjs';
+import { placeholdersIn } from '../shared/prompts.mjs';
 
 /** Placeholders the default text has that this text dropped (the game fills them; leaving one out loses that part). */
 export const missingPlaceholders = (entry, text) => {

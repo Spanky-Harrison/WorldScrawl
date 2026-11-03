@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { setPrompts, hasPrompts } from './prompts.mjs';
+import { setPrompts, hasPrompts } from './shared.mjs';
 import { PLAYER, LOC_KEY, partyAddresses, positionOf, actorHistory } from './actors.mjs';
 import { defaultWorldId, worldMissing } from './clock.mjs';
 import { applyNudge, chatKey } from './expiry.mjs';
@@ -118,7 +118,6 @@ export function ensurePrompts(force = false) {
         if (!res.ok) throw new Error(`WorldScrawl could not load its prompts (server answered ${res.status}). ${NOT_RUNNING()}`);
         const { prompts } = await res.json();
         setPrompts(prompts);
-        try { (await import(`${baseUrl()}/ui/prompts.mjs`)).setPrompts(prompts); } catch (e) { console.warn('[WorldScrawl] prompt module unavailable:', e.message); }
         applyNudge();
     })().finally(() => { promptsLoading = null; });
     return promptsLoading;

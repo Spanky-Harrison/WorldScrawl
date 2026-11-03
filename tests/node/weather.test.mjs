@@ -2,9 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { GREGORIAN, dateAt, secondsBetween } from '../../plugin/ui/calendar.mjs';
+import { GREGORIAN, dateAt, secondsBetween } from '../../plugin/shared/calendar.mjs';
 import { INSULATION, MAX_STRETCH, MIN_STRETCH, absSeconds, daylightHours, dayCurve, feelsLike, fToC, cToF, groundAt, groundWords,
-    indoorTemp, placeWeather, precipForm, seasonAt, stretchAt, sunTimes, weatherAt } from '../../plugin/ui/weather.mjs';
+    indoorTemp, placeWeather, precipForm, seasonAt, stretchAt, sunTimes, weatherAt } from '../../plugin/shared/weather.mjs';
 import { CLIMATES, SKY_TYPES, WIND_LEVELS, buildWeather } from '../../plugin/weather-config.mjs';
 import { WorldError, build_world, load_world } from '../../plugin/world.mjs';
 import { RIVERTON, makeWorld, tmpPath } from './helpers.mjs';

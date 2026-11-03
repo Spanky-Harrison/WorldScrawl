@@ -1,5 +1,5 @@
 // Game time: calendars, dates and durations. Pure functions, shared by the server plugin, the map window and the
-// extension (served at /api/plugins/worldscrawl/ui/calendar.mjs). The clock is always a number of elapsed seconds since
+// extension (served at /api/plugins/worldscrawl/shared/calendar.mjs). The clock is always a number of elapsed seconds since
 // a world's start_date; this module turns that into a date and back.
 //
 // Calendar shape (world.json "calendar", optional; default = modern Gregorian):

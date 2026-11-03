@@ -6,7 +6,7 @@
 // Every wizard builds patch ops (create_region / create_subregion / create_place / merge / remove_location /
 // remove_area / move_location / move_area); the engine checks them again. Id clashes are caught here first from the
 // outline (a rename box prefilled with a suggested id) and again from the server's 400 {clash}. Nothing is overwritten.
-import { suggestId, slugId } from './patches.mjs';
+import { suggestId, slugId } from '../shared/patches.mjs';
 import { pickField } from './picker.mjs';
 import { opposite, sideLabels } from './placeform.mjs';
 
