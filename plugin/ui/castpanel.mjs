@@ -1,15 +1,18 @@
-// The Cast panel in the map window's side pane (phase 1.5): browse worlds/<world>/cast/ and the people created in this chat,
-// filter them, see where they are and what changed in play, and edit cast files. Places are always picked on the map.
+// The Cast panel in the map window's side pane: browse worlds/<world>/cast/ and the people created in this chat,
+// filter them, see where they are and what changed in play. The open person uses the same tabs as the place inspector.
+// One Edit button stamps this chat. Update, Save as new and New person write a cast file from an authoring form
+// seeded with the base plus lasting changes (not a temporary transformation). Places are always picked on the map.
 // io: { load() -> GET /cast, outline() -> POST /edit/outline, save(npc, original, originalFile), del({id, file}),
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses) }
 import { permanentProblem, liveSchedule } from './castdata.mjs';
-import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance } from './castdata.mjs';
+import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 
 export function castPanel(doc, io) {
     const $ = (tag, attrs = {}, ...kids) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v); } e.append(...kids.flat().filter(x => x !== null && x !== undefined && x !== false)); return e; };
-    let data = null, outline = null, rows = [], selKey = null, tab = 'summary', editing = null, view = 'people', narrSel = null;
+    let data = null, outline = null, rows = [], selKey = null, tab = 'resolved', editing = null, view = 'people', narrSel = null;
+    const drafts = new Map(); // personKey:mode -> {f, seed, el}. Closing a tab keeps the draft; Cancel drops it.
     const filt = { q: '', place: '', status: '', disposition: '' };
     const root = $('div', { class: 'castpanel' });
     const msg = $('div', { class: 'cast-msg muted' });
@@ -28,7 +31,7 @@ export function castPanel(doc, io) {
     const viewBar = $('div', { class: 'tabs cast-views' });
     const drawViews = () => viewBar.replaceChildren(...VIEWS.map(([k, l]) => $('button', { type: 'button', class: `tab${k === view ? ' active' : ''}`, 'data-view': k, onclick: () => { view = k; drawViews(); drawView(); } }, l)));
     peopleBox.append($('div', { class: 'cast-filters' }, q, $('div', {}, status, ' ', disp), placeBox), who, list, detail);
-    root.append($('div', { class: 'cast-head' }, $('h3', {}, 'Cast'), $('button', { type: 'button', class: 'crumb cast-new', onclick: () => { view = 'people'; drawViews(); drawView(); startEdit(null); } }, 'New person')),
+    root.append($('div', { class: 'cast-head' }, $('h3', {}, 'Cast'), $('button', { type: 'button', class: 'crumb cast-new', title: 'Write a new cast file. This does not stamp the chat.', onclick: () => { view = 'people'; drawViews(); drawView(); openDraft(null, 'new'); } }, 'New person')),
         viewBar, msg, peopleBox, viewBox);
     drawViews();
     const say = (t, bad = false) => { msg.textContent = t ?? ''; msg.classList.toggle('bad', bad); };
@@ -50,7 +53,7 @@ export function castPanel(doc, io) {
         const stubs = report?.stubs ?? data?.elsewhere ?? [];
         if (!stubs.length && !report?.people?.length) { viewBox.replaceChildren($('p', { class: 'muted' }, 'This world has no stub regions, and nobody is off the map.')); return; }
         const whoLine = p => (p.activity || 'away') + (p.where ? ' (' + p.where + ')' : '');
-        const jump = (id, name) => $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(id, 'play') }, name);
+        const jump = (id, name) => $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(id, 'state') }, name);
         const kids = [$('p', { class: 'muted' }, 'Stub regions are places in the fiction that are not on the map yet. A real region with the same id takes over, and nothing is rewritten.')];
         for (const s of stubs) {
             const who = s.who?.length ? s.who.map(w => $('li', { 'data-id': w.id }, jump(w.id, w.name), ' — ' + whoLine(w))) : [$('li', { class: 'muted' }, 'Nobody is off in here right now.')];
@@ -68,7 +71,7 @@ export function castPanel(doc, io) {
         who.replaceChildren($('b', {}, `Who's here: ${placeName(filt.place)}`), !list ? $('p', { class: 'muted' }, 'Open a chat to see who is here right now.')
             : !list.length ? $('p', { class: 'muted' }, 'Nobody is due here, and no schedule or sighting points here.')
                 : $('ul', { class: 'cast-wholist' }, ...list.map(x => $('li', { class: x.here ? 'here' : 'away', 'data-id': x.id },
-                    $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(x.id, 'play') }, x.name), ' ',
+                    $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(x.id, 'state') }, x.name), ' ',
                     $('span', { class: `cast-badge ${x.here ? 'here' : 'away'}` }, x.here ? (x.inScene ? 'here, in your scene' : 'here') : 'not here'),
                     x.activity ? ` ${x.activity}` : '', $('div', { class: 'muted' }, x.reason)))));
     }
@@ -108,86 +111,118 @@ export function castPanel(doc, io) {
         if (!shown.length) list.append($('li', { class: 'muted' }, rows.length ? 'Nobody matches.' : 'No cast yet. New person adds one.'));
     }
     const row = () => rows.find(r => r.key === selKey) ?? null;
+    const TABS = ['resolved', 'raw', 'state', 'warnings', 'changes'];
+    const liveChat = () => { const at = io.chatAt?.(); return !!(at && at.msg >= 0); };
     function select(key, t = null) {
-        selKey = key; editing = null; tab = t ?? (tab === 'edit' ? 'summary' : tab === 'chatedit' ? 'play' : tab);
+        selKey = key; editing = null;
+        if (t && TABS.includes(t)) tab = t;
         drawList(); drawDetail();
         const r = row(), at = r?.play?.position?.place ?? r?.places?.[0];
         if (at) io.showPlace?.(at);
         io.highlight?.([...new Set([r?.play?.position?.place, ...(r?.places ?? [])].filter(Boolean))], r?.play?.position?.place ?? null);
     }
-    const kv = pairs => $('table', { class: 'resolved' }, ...pairs.map(([k, v]) => $('tr', {}, $('th', {}, k), $('td', {}, v))));
-    function drawDetail() {
-        const r = row();
-        if (editing) return;
-        if (!r) { detail.replaceChildren($('p', { class: 'muted' }, 'Pick someone to see them. Click a place on the map to see who is there.')); return; }
-        if (!tabsOf(r).some(([k]) => k === tab)) tab = 'summary';
-        const bar = tabBar(r, tab);
-        const pane = $('div', { class: `tabpane cast-${tab}` });
-        if (tab === 'edit') return startEdit(r);
-        if (tab === 'chatedit') return startEdit(r, null, 'chat');
-        if (tab === 'summary') {
-            const rec = r.rec?.ok ? r.rec : r.play ?? r.rec ?? {};
-            const app = cardAppearance(r.rec, r.play);
-            const pairs = [['Id', r.id || '(none)'], ...(rec.unknownAs ? [['Known as', rec.unknownAs]] : []), ['Personality', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Speech', rec.voice]] : []),
-                ...[['Looks', app.looks], ['Body', app.body], ['Outfit', app.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
-                ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
-            pane.append(kv(pairs));
-            if (app.changed) pane.append($('p', { class: 'muted cast-appearnote' }, 'Looks, Body and Outfit above are this chat. The cast file is unchanged (Edit: Base).'));
-            // Live: the card's schedule with this chat's changes folded in; the entry in force is marked.
-            const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
-                ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
-                ...e.notes.map(n => $('span', { class: 'cast-schednote' }, ` · ${n}`)), e.current ? $('b', { class: 'cast-schednow' }, ' ← now') : '', $('span', { class: 'muted' }, e.src === 'card' ? ' (card)' : ''))) : (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
-                ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near ? ` near ${e.near}` : ''}${e.nearNote ? ` · ${e.nearNote}` : ''}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
-            if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
-            if (places.length) pane.append($('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places));
-            if (r.problems.length) pane.append($('b', {}, 'Problems'), $('ul', { class: 'warnings' }, ...r.problems.map(p => $('li', {}, p))));
-            if (r.play) pane.append($('b', {}, 'In this chat'), kv(playSummary(r.play, placeName).map(([k, v]) => [k, k === 'Where' && r.play.position?.place ? placeLink(r.play.position.place, false, v) : v])));
-            const acts = $('div', { class: 'cast-acts' });
-            if (r.rec) acts.append($('button', { type: 'button', class: 'crumb cast-edit', onclick: () => { tab = 'edit'; startEdit(r); } }, 'Edit'),
-                $('button', { type: 'button', class: 'crumb cast-dup', onclick: () => duplicate(r) }, 'Duplicate'),
-                $('button', { type: 'button', class: 'crumb cast-del', onclick: () => confirmDelete(r, acts) }, 'Delete'));
-            pane.append(acts);
-        }
-        if (tab === 'play') pane.append(playPane(r));
-        if (tab === 'raw') pane.append($('p', { class: 'muted' }, r.rec ? `cast/${r.rec.file ?? `${r.id}.json`}` : 'Not in a cast file yet (created in this chat).'),
-            $('pre', { class: 'raw' }, JSON.stringify(r.rec?.raw ?? r.play?.record ?? r.rec ?? {}, null, 2)));
-        detail.replaceChildren($('h3', {}, r.name), bar, pane);
+    function tabLabel(r, k) {
+        if (k === 'warnings') return `Warnings${r.problems?.length ? ` (${r.problems.length})` : ''}`;
+        if (k === 'changes') { const n = r.play ? stampRows(r.play).length : 0; return `Changes${n ? ` (${n})` : ''}`; }
+        return { resolved: 'Resolved', raw: 'Raw', state: 'State' }[k];
     }
-    const tabsOf = r => [['summary', 'Summary'], ...(r.play ? [['play', 'Under the hood']] : []), ...(r.rec ? [['edit', 'Edit: Base (cast file)']] : []), ...(r.play ? [['chatedit', 'Edit: In this chat']] : []), ['raw', 'Raw JSON']];
-    const tabBar = (r, active) => $('div', { class: 'tabs' }, ...tabsOf(r).map(([k, l]) => $('button', { type: 'button', class: `tab${k === active ? ' active' : ''}`, 'data-tab': k, onclick: () => { if (k === active && editing) return; editing = null; tab = k; if (k === 'edit') startEdit(r); else if (k === 'chatedit') startEdit(r, null, 'chat'); else drawDetail(); } }, l)));
     function placeLink(a, broken = false, label = null) {
         return $('button', { type: 'button', class: `linkish cast-placelink${broken ? ' broken' : ''}`, 'data-place': a, title: broken ? 'Not in this world' : 'Show on the map', onclick: () => io.showPlace?.(a) }, label ?? placeName(a));
     }
-    function playPane(r) {
-        const box = $('div', {});
-        const st = stampRows(r.play);
+    function sourcedTable(cardRows, { cls = '' } = {}) {
+        const tbl = $('table', { class: `resolved${cls ? ` ${cls}` : ''}` });
+        for (const row of cardRows) {
+            const changed = /message #|effect:|this chat|created in this chat/.test(row.source ?? '');
+            tbl.append($('tr', { 'data-key': row.key }, $('th', {}, row.key), $('td', {},
+                $('div', { class: 'val' }, row.value ?? ''),
+                row.source ? $('div', { class: `src${row.source === 'cast file' ? ' own' : ''}${row.stale ? ' stale' : ''}${row.pending ? ' pending' : ''}` }, ...(changed ? [$('span', { class: 'patchmark', title: 'changed in this chat' })] : []), row.source) : null)));
+        }
+        return tbl;
+    }
+    function scheduleBlock(r) {
+        const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
+            ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
+            ...e.notes.map(n => $('span', { class: 'cast-schednote' }, ` · ${n}`)), e.current ? $('b', { class: 'cast-schednow' }, ' ← now') : '', $('span', { class: 'muted' }, e.src === 'card' ? ' (card)' : ''))) : (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
+            ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near ? ` near ${e.near}` : ''}${e.nearNote ? ` · ${e.nearNote}` : ''}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
+        if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
+        return places.length ? [$('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places)] : [];
+    }
+    function drawResolved(r, pane) {
+        const app = cardAppearance(r.rec, r.play);
+        const landedLooks = ['Looks', app.looks];
+        const card = resolvedCard(r.rec, r.play).map(row => row.key === 'Looks' && row.landed ? { ...row, value: landedLooks[1] } : row);
+        pane.append(sourcedTable(card), ...scheduleBlock(r));
+    }
+    function paintEffective(box, play, rec) {
+        if (!play) { box.hidden = true; box.replaceChildren(); return; }
+        box.hidden = false;
+        const app = cardAppearance(rec, play);
+        const pending = play.appearanceHow === 'pending';
+        const line = (label, text) => $('div', {}, $('b', {}, label), ' ', pending ? 'pending rebuild' : (text || '—'));
+        const stale = pending && ['looks', 'body', 'outfit'].some(k => (play[k] ?? '') !== (play.base?.[k] ?? ''));
+        box.replaceChildren($('b', {}, 'Narrator now (read-only)'), line('Looks', app.looks), line('Body', app.body), line('Outfit', app.outfit),
+            pending ? $('div', { class: 'cast-pending' }, 'pending rebuild — not narrator text yet') : null,
+            stale ? $('div', { class: 'muted' }, 'An older preview is stale.') : null);
+    }
+    function permanentBox(r) {
+        const founds = r.play ? activeFounds(r.play) : [];
+        if (!r.rec?.ok || !founds.length) return null;
+        const perm = $('div', { class: 'cast-permanent' });
+        for (const f of founds) perm.append($('button', { type: 'button', class: 'crumb cast-makepermanent', 'data-where': f.where, onclick: () => makePermanent(r, f, perm) },
+            `Make this permanent${f.where ? ` (${f.where})` : ''}: ${placeName(f.place)}`));
+        return perm;
+    }
+    function statePane(r) {
+        if (!r.play) return [$('p', { class: 'muted' }, 'Open a chat to see where they are and why.')];
         const why = whyRows(r.play, placeName);
-        if (why.length) box.append($('b', {}, 'Right now'), $('table', { class: 'resolved cast-why' }, ...why.map(([k, v]) => $('tr', { 'data-row': k }, $('th', {}, k), $('td', {}, v)))));
-        box.append($('b', {}, 'Changed in this chat'));
-        box.append(st.length ? $('ul', { class: 'cast-stamps' }, ...st.map(x => $('li', { class: x.off ? 'off' : '', 'data-type': x.type },
+        const chat = playSummary(r.play, placeName).map(([k, v]) => ({ key: k, value: k === 'Where' && r.play.position?.place ? placeLink(r.play.position.place, false, v) : v }));
+        return [why.length ? $('b', {}, 'Right now') : null, why.length ? $('table', { class: 'resolved cast-why' }, ...why.map(([k, v]) => $('tr', { 'data-row': k }, $('th', {}, k), $('td', {}, v)))) : null,
+            $('b', {}, 'In this chat'), sourcedTable(chat, { cls: 'cast-inchat' }), permanentBox(r)].filter(Boolean);
+    }
+    function changesPane(r) {
+        if (!r.play) return [$('p', { class: 'muted' }, 'Open a chat to see what changed.')];
+        const st = stampRows(r.play);
+        return [st.length ? $('ul', { class: 'cast-stamps' }, ...st.map(x => $('li', { class: x.off ? 'off' : '', 'data-type': x.type },
             $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '')))
-            : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'));
-        const out = $('div', { class: 'cast-export' });
-        if (r.status === 'play') out.append($('button', { type: 'button', class: 'crumb cast-exportnew', onclick: () => doExport(r, false, out) }, 'Export to cast'));
-        else if (r.play?.diff) {
-            const d = r.play.diff;
-            if (!d.changed) out.append($('p', { class: 'muted' }, 'The cast file already matches this chat.'));
-            else out.append($('button', { type: 'button', class: 'crumb cast-update', onclick: () => {
-                out.querySelector('.cast-diff')?.remove();
-                out.append($('div', { class: 'cast-diff' }, $('ul', {}, ...d.lines.map(l => $('li', {}, $('b', {}, l.field), `: ${l.from ?? '(none)'} → ${l.to ?? '(none)'}`))),
-                    $('button', { type: 'button', class: 'crumb cast-confirm', onclick: () => doExport(r, true, out) }, 'Confirm'),
-                    $('button', { type: 'button', class: 'crumb', onclick: () => out.querySelector('.cast-diff')?.remove() }, 'Cancel')));
-            } }, `Update ${r.name}`));
-        }
-        const founds = activeFounds(r.play);
-        if (r.rec?.ok && founds.length) {
-            const perm = $('div', { class: 'cast-permanent' });
-            for (const f of founds) perm.append($('button', { type: 'button', class: 'crumb cast-makepermanent', 'data-where': f.where, onclick: () => makePermanent(r, f, perm) },
-                `Make this permanent${f.where ? ` (${f.where})` : ''}: ${placeName(f.place)}`));
-            box.append(perm);
-        }
-        box.append(out);
+            : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'), permanentBox(r)].filter(Boolean);
+    }
+    function warnPane(r) {
+        return r.problems?.length ? [$('ul', { class: 'warnings' }, ...r.problems.map(p => $('li', {}, p)))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
+    }
+    function rawPane(r) {
+        const hasFile = !!r.rec;
+        const label = hasFile ? `cast/${r.rec.file ?? `${r.id}.json`}` : "Not in a cast file (this chat's played record).";
+        const body = hasFile ? (r.rec.raw ?? r.rec) : (r.play?.record ?? {});
+        return [$('p', { class: 'muted' }, label), $('pre', { class: 'raw' }, JSON.stringify(body, null, 2))];
+    }
+    function fileActs(r) {
+        const live = liveChat() && !!r.play;
+        const box = $('div', { class: 'area cast-fileacts' });
+        box.append($('span', { class: 'muted' }, r.status === 'play' ? 'in this chat' : r.status === 'broken' ? 'broken cast file' : 'cast file'),
+            $('button', { type: 'button', class: 'crumb editlive cast-edit', title: live ? 'Change this in this chat only. It is stamped on the latest message. The cast file is not touched.' : 'Open a WorldScrawl chat to edit', ...(live ? {} : { disabled: '' }), onclick: () => openDraft(r, 'chat') }, 'Edit'),
+            $('button', { type: 'button', class: 'crumb cast-saveas', title: 'Write a new cast file from the base plus lasting chat changes. A temporary transformation is not included.', onclick: () => openDraft(r, 'saveas') }, 'Save as new NPC'));
+        if (r.rec && r.play && authoringChanges(r.rec, r.play).length) box.append($('button', { type: 'button', class: 'crumb cast-update', title: 'Open the authoring form. Confirm shows exactly what will be written to the cast file.', onclick: () => openDraft(r, 'update') }, `Update ${r.name}`));
+        if (r.rec) box.append($('button', { type: 'button', class: 'crumb cast-del', onclick: () => confirmDelete(r, box) }, 'Delete'));
         return box;
+    }
+    function drawDetail() {
+        const r = row();
+        if (!r && !editing) { detail.replaceChildren($('p', { class: 'muted' }, 'Pick someone to see them. Click a place on the map to see who is there.')); return; }
+        if (!r) { detail.replaceChildren($('h3', {}, editing.title || 'New person'), $('div', { class: 'tabpane cast-edit' }, editing.el)); return; }
+        if (!TABS.includes(tab)) tab = 'resolved';
+        const bar = $('div', { class: 'tabs' }, ...TABS.map(k => $('button', { type: 'button', class: `tab${k === tab && !editing ? ' active' : ''}`, 'data-tab': k, onclick: () => { editing = null; tab = k; drawDetail(); } }, tabLabel(r, k))));
+        const pane = $('div', { class: `tabpane cast-${editing ? 'edit' : tab}` });
+        if (editing) {
+            if (!editing.el) editing.el = buildForm(editing);
+            pane.append(editing.el);
+            const box = editing.el.querySelector('.cf-effective');
+            if (box) paintEffective(box, r.play, r.rec);
+        } else if (tab === 'resolved') drawResolved(r, pane);
+        else if (tab === 'raw') pane.append(...rawPane(r));
+        else if (tab === 'state') pane.append(...statePane(r));
+        else if (tab === 'warnings') pane.append(...warnPane(r));
+        else pane.append(...changesPane(r));
+        detail.replaceChildren($('h3', {}, r.name), fileActs(r), bar, pane);
     }
     async function makePermanent(r, found, box) {
         const raw = r.rec?.raw ?? r.rec;
@@ -204,70 +239,83 @@ export function castPanel(doc, io) {
             await refresh(`file:${res.file}`);
         } catch (e) { say(`Not saved: ${e.message}`, true); box.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
     }
-    async function doExport(r, update, out) {
-        out.querySelectorAll('button').forEach(b => { b.disabled = true; });
-        const res = await io.exportNpc(r.id, update);
-        if (!res?.ok) { say(res?.error ?? 'SillyTavern did not answer.', true); out.querySelectorAll('button').forEach(b => { b.disabled = false; }); return; }
-        say(update ? `Updated cast/${res.file}.` : `Wrote cast/${res.file}.`);
-        await refresh(`file:${res.file}`);
-    }
-    function duplicate(r) {
-        const f = formFromRecord(r.rec);
-        f.name = `${f.name} (copy)`; f.id = slugFor(f.id || f.name, takenIds(null));
-        startEdit(null, f);
-    }
     function confirmDelete(r, acts) {
         acts.querySelector('.cast-confirmdel')?.remove();
         const file = r.rec?.file ?? `${r.id}.json`;
-        acts.append($('div', { class: 'cast-confirmdel' }, `Delete cast/${file}? Chats that met ${r.name} keep their changes, but the cast file is gone.`, ' ',
+        acts.append($('div', { class: 'cast-confirmdel' }, `Delete cast/${file}? The file is removed. Chats keep their stamps.`, ' ',
             $('button', { type: 'button', class: 'crumb cast-delyes', onclick: async () => {
                 try { await io.del(r.rec?.ok ? { id: r.id } : { file }); } catch (e) { return say(`Delete failed: ${e.message}`, true); }
-                say(`Deleted cast/${file}.`); selKey = null; await refresh();
+                for (const k of [...drafts.keys()]) if (k.startsWith(`${r.key}:`)) drafts.delete(k);
+                say(`Deleted cast/${file}.`); editing = null; selKey = null; await refresh();
             } }, 'Yes, delete'), $('button', { type: 'button', class: 'crumb cast-delno', onclick: ev => ev.target.closest('.cast-confirmdel').remove() }, 'No')));
     }
     const takenIds = own => new Set(rows.filter(x => x.rec && x.id && x.id !== own).map(x => x.id).concat(rows.filter(x => x.rec?.file && x.id !== own).map(x => x.rec.file.replace(/\.json$/, ''))));
 
-    // ---- The editor.
-    function startEdit(r, preset = null, mode = 'base') {
-        const chatMode = mode === 'chat' && !!r?.play;
-        const f = preset ?? (chatMode ? formFromPlay(r.play) : formFromRecord(r?.rec ?? null));
-        const original = r?.rec?.ok ? r.id : null, originalFile = r?.rec && !r.rec.ok ? r.rec.file : null;
-        const before = chatMode ? null : recordFromForm(formFromRecord(r?.rec ?? null));
-        editing = { f, original, originalFile, mode: chatMode ? 'chat' : 'base', at: chatMode ? io.chatAt?.() ?? null : null };
-        const ids = takenIds(original ?? (originalFile ? originalFile.replace(/\.json$/, '') : null));
-        const places = new Set((data?.places ?? []));
-        let idTouched = !!(original || originalFile || preset);
-        const form = $('div', { class: 'castform' });
+    function openDraft(r, mode) {
+        if (r) selKey = r.key; else selKey = null;
+        const key = `${r?.key ?? 'new'}:${mode}`;
+        if (!drafts.has(key)) {
+            const seed = mode === 'new' ? formFromRecord(null) : editSeed(r?.play, r?.rec ?? null);
+            const f = structuredClone(seed);
+            if (mode === 'saveas') {
+                f.name = `${String(f.name || r?.name || 'Someone').replace(/ \(copy\)$/, '')} (copy)`;
+                f.id = slugFor(f.id || f.name, takenIds(null));
+            }
+            drafts.set(key, {
+                key, mode, f, seed: structuredClone(f), el: null,
+                personKey: r?.key ?? null, personId: r?.id ?? null,
+                original: mode === 'update' && r?.rec?.ok ? r.id : null,
+                originalFile: mode === 'update' && r?.rec && !r.rec.ok ? r.rec.file : null,
+                title: mode === 'new' ? 'New person' : mode === 'saveas' ? `Save ${r?.name ?? f.name} as new` : mode === 'update' ? `Update ${r?.name ?? f.name}` : `Edit ${r?.name ?? f.name}`,
+            });
+        }
+        editing = drafts.get(key);
+        if (!editing.el) editing.el = buildForm(editing);
+        if (view !== 'people') { view = 'people'; drawViews(); drawView(); }
+        drawList(); drawDetail();
+    }
+    // The live Edit form and the file authoring form. The DOM node is kept on the draft, so switching tabs does not drop what was typed.
+    function buildForm(ed) {
+        const chatMode = ed.mode === 'chat';
+        const f = ed.f;
+        const current = () => rows.find(x => x.key === ed.personKey) ?? null;
+        const ownId = () => (ed.mode === 'update' ? (ed.original ?? (ed.originalFile ? ed.originalFile.replace(/\.json$/, '') : null)) : null);
+        let idTouched = ed.mode !== 'new';
+        const form = $('div', { class: `castform castform-${ed.mode}`, 'data-mode': ed.mode });
         const errs = new Map();
         const err = key => { const e = $('div', { class: 'cf-err', 'data-for': key }); errs.set(key, e); return e; };
         const fieldRow = (key, label, input, help = null) => $('div', { class: 'cf-row', 'data-field': key }, $('label', { class: 'pf-label' }, label), input, help ? $('div', { class: 'muted' }, help) : null, err(key));
         const text = (key, { area = false, ph = '' } = {}) => {
             const i = $(area ? 'textarea' : 'input', { ...(area ? { rows: 2 } : { type: 'text' }), class: 'pf-input', placeholder: ph });
             i.value = f[key] ?? '';
-            i.addEventListener('input', () => { f[key] = i.value; if (key === 'name' && !idTouched) { f.id = slugFor(i.value, ids); idIn.value = f.id; } check(); });
+            i.addEventListener('input', () => { f[key] = i.value; if (key === 'name' && !idTouched) { f.id = slugFor(i.value, takenIds(ownId())); idIn.value = f.id; } check(); });
             return i;
         };
         const lines = key => { const i = $('textarea', { rows: 3, class: 'pf-input' }); i.value = (f[key] ?? []).join('\n'); i.addEventListener('input', () => { f[key] = i.value.split('\n'); check(); }); return i; };
         const idIn = $('input', { type: 'text', class: 'pf-input', spellcheck: 'false' }); idIn.value = f.id;
         idIn.addEventListener('input', () => { idTouched = true; f.id = idIn.value; check(); });
+        const effBox = $('div', { class: 'cf-effective' });
         form.append(fieldRow('name', 'Name', text('name')), fieldRow('id', 'Id', idIn, 'The cast file name. Lowercase, like old-tam.'),
             fieldRow('unknownAs', 'Known as (before the name)', text('unknownAs', { ph: 'the landlady' }), 'What the player calls them until they learn the name. Empty: the name is used from the start.'),
             $('b', {}, 'Personality'),
             fieldRow('line', 'Summary', text('line', { ph: 'stern, watchful, sharp-tongued' }), 'Always fed while they are here.'),
             fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Speech', text('voice')),
-            $('b', {}, 'Appearance'),
+            $('b', {}, 'Appearance'), effBox,
+            $('p', { class: 'muted' }, chatMode
+                ? 'These fields start from the base (the file plus lasting changes). The narrator text above is not copied into a fact unless you change a field.'
+                : 'These fields are what will be written. They start from the base plus lasting chat changes, not from a temporary transformation.'),
             fieldRow('looks', 'Summary', text('looks', { ph: 'big woman with copper braids, in plain work clothes' }), 'Always fed while they are here.'),
             fieldRow('body', 'Body', text('body', { area: true, ph: 'Physical only: build, age, face, hair, marks' })),
             fieldRow('outfit', 'Outfit', text('outfit', { area: true, ph: 'What they usually wear and carry' }), 'Body, outfit, manner and speech are fed when the player looks at or deals with them.'),
             fieldRow('history', 'History', text('history', { area: true, ph: 'Their life before the game starts' }), 'Fed only when a lore request names them ([lore] Hesk).'));
-        if (chatMode && r.play?.invented?.length) form.append($('p', { class: 'muted cf-invented' }, `Made up when remembered (not in the story): ${r.play.invented.join('; ')}`));
+        const invented = current()?.play?.invented;
+        if (chatMode && invented?.length) form.append($('p', { class: 'muted cf-invented' }, `Made up when remembered (not in the story): ${invented.join('; ')}`));
         const dsel = $('select', { class: 'pf-input' }, $('option', { value: '' }, 'unknown'), ...DISPOSITIONS.map(d => $('option', { value: d }, d)));
         dsel.value = f.disposition; dsel.addEventListener('change', () => { f.disposition = dsel.value; check(); });
         form.append(fieldRow('disposition', 'Starts toward the player', dsel), fieldRow('reason', 'Because', text('reason')));
-        // Schedule: places come from the map picker only.
         const schedBox = $('div', { class: 'cf-schedule' });
         const drawSched = () => {
-            schedBox.replaceChildren(...f.schedule.map((e, i) => {
+            schedBox.replaceChildren(...(f.schedule ?? []).map((e, i) => {
                 const off = $('input', { type: 'checkbox', class: 'cf-offmap' }); off.checked = !!e.offmap;
                 off.addEventListener('change', () => { e.offmap = off.checked; if (off.checked) e.place = ''; drawSched(); check(); });
                 const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.offmap ? '' : e.place });
@@ -285,8 +333,9 @@ export function castPanel(doc, io) {
             }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
         };
         drawSched();
-        if (!chatMode) form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'), schedBox);
-        // Sighting: a place they are sometimes seen, at an hour, with a chance.
+        form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, chatMode
+            ? 'A change here is stamped on the latest message and applies only in this chat. It is not written to the cast file.'
+            : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'), schedBox);
         const seenBox = $('div', { class: 'cf-seen' });
         const drawSeen = () => {
             const on = $('input', { type: 'checkbox', class: 'cf-seenon' }); on.checked = !!f.seen;
@@ -299,11 +348,9 @@ export function castPanel(doc, io) {
             const ch = $('input', { type: 'number', min: 0, max: 1, step: 0.05, class: 'pf-input cf-chance' }); ch.value = f.seen.chance; ch.addEventListener('input', () => { f.seen.chance = ch.value; check(); });
             seenBox.append(pk, err('seen.place'), $('div', { class: 'cf-schedrow' }, $('span', { class: 'muted' }, 'hour'), hr, $('span', { class: 'muted' }, 'chance'), ch), err('seen.hour'), err('seen.chance'));
         };
-        drawSeen();
-        if (!chatMode) form.append($('b', {}, 'Sighting'), seenBox);
-        // Deep tiers (shown only when the scene calls for them), facts and memory.
+        if (!chatMode) { drawSeen(); form.append($('b', {}, 'Sighting'), seenBox); }
         const relBox = $('div', { class: 'cf-rels' });
-        const drawRels = () => relBox.replaceChildren(...f.relationships.map((x, i) => {
+        const drawRels = () => relBox.replaceChildren(...(f.relationships ?? []).map((x, i) => {
             const w = $('input', { type: 'text', class: 'pf-input cf-relwho', placeholder: 'who' }); w.value = x.who; w.addEventListener('input', () => { x.who = w.value; check(); });
             const t = $('input', { type: 'text', class: 'pf-input cf-reltext', placeholder: 'how they stand' }); t.value = x.text; t.addEventListener('input', () => { x.text = t.value; check(); });
             return $('div', { class: 'cf-rel' }, w, t, $('button', { type: 'button', class: 'pf-x', onclick: () => { f.relationships.splice(i, 1); drawRels(); check(); } }, '✕'), err(`relationships.${i}.who`));
@@ -312,20 +359,23 @@ export function castPanel(doc, io) {
         form.append($('details', { class: 'cf-deep' }, $('summary', {}, 'Deep (secrets, relationships)'),
             fieldRow('secrets', 'Secrets (one per line)', lines('secrets')), $('b', {}, 'Relationships'), relBox),
             fieldRow('facts', 'Facts (one per line)', lines('facts')), fieldRow('memory', 'Memory highlights (one per line)', lines('memory')));
-        if (chatMode) { form.querySelector('[data-field="id"]')?.remove(); form.prepend($('p', { class: 'muted cf-modenote' }, `Saves a "Character changed here" stamp on the latest message of this chat. The cast file is not touched. Schedule and sighting are edited in the base record.`)); }
-        else form.prepend($('p', { class: 'muted cf-modenote' }, `Saves worldscrawl's cast/${originalFile ?? `${f.id || 'new'}.json`}. Chats keep their own changes on top.`));
-        const save = $('button', { type: 'button', class: 'crumb cast-save', onclick: () => review() }, chatMode ? 'Save in this chat' : original || originalFile ? 'Save' : 'Create');
-        const cancel = $('button', { type: 'button', class: 'crumb cast-cancel', onclick: () => { editing = null; tab = chatMode ? 'play' : 'summary'; drawDetail(); } }, 'Cancel');
+        const fileName = () => ed.originalFile ?? `${recordFromForm(f).id || 'new'}.json`;
+        if (chatMode) { form.querySelector('[data-field="id"]')?.remove(); form.prepend($('p', { class: 'muted cf-modenote' }, 'Stamps the latest message of this chat. The cast file is not touched. Schedule changes here stay in this chat.')); }
+        else form.prepend($('p', { class: 'muted cf-modenote' }, `Writes cast/${fileName()}. A temporary transformation is not copied in. Chats keep their stamps.`));
+        const save = $('button', { type: 'button', class: 'crumb cast-save', onclick: () => review() }, chatMode ? 'Save in this chat' : ed.mode === 'update' ? 'Update' : 'Create');
+        const cancel = $('button', { type: 'button', class: 'crumb cast-cancel', onclick: () => { drafts.delete(ed.key); if (editing === ed) editing = null; tab = 'resolved'; drawDetail(); } }, 'Cancel');
         const raw = $('pre', { class: 'raw cf-raw' });
         const reviewBox = $('div', { class: 'cast-review' });
         form.append($('div', { class: 'cast-acts' }, save, cancel), reviewBox, ...(chatMode ? [] : [$('details', { class: 'cf-advanced' }, $('summary', {}, 'Advanced: raw JSON'), raw)]));
-        /** Show the diff first; Confirm does the save. */
         function review() {
             if (Object.keys(check()).length) return;
             let lines = [], notes = [];
-            if (chatMode) { const c = chatStamps(r.play, f); editing.stamps = c.stamps; lines = chatStampLines(c.stamps); notes = c.cannot.map(x => `Can't ${x}.`); }
-            else lines = recordChanges(before ?? {}, recordFromForm(f)).map(x => `${x.field}: ${x.from || '(none)'} → ${x.to || '(none)'}`);
-            reviewBox.replaceChildren($('div', { class: 'cast-diff' }, $('b', {}, chatMode ? 'Stamps to add in this chat' : `Changes to cast/${originalFile ?? `${recordFromForm(f).id}.json`}`),
+            if (chatMode) { const c = chatStamps(ed.seed, f); ed.stamps = c.stamps; lines = chatStampLines(c.stamps); notes = c.cannot.map(x => `Can't ${x}.`); }
+            else {
+                const before = ed.mode === 'update' && current()?.rec ? recordFromForm(formFromRecord(current().rec)) : recordFromForm(formFromRecord(null));
+                lines = recordChanges(before, recordFromForm(f)).map(x => `${x.field}: ${x.from || '(none)'} → ${x.to || '(none)'}`);
+            }
+            reviewBox.replaceChildren($('div', { class: 'cast-diff' }, $('b', {}, chatMode ? 'Stamps to add in this chat' : `This will be written to cast/${fileName()}`),
                 lines.length ? $('ul', {}, ...lines.map(l => $('li', {}, l))) : $('p', { class: 'muted' }, 'Nothing changed.'),
                 notes.length ? $('ul', { class: 'warnings' }, ...notes.map(l => $('li', {}, l))) : null,
                 lines.length ? $('button', { type: 'button', class: 'crumb cast-confirm', onclick: () => doSave() }, 'Confirm') : null,
@@ -333,7 +383,9 @@ export function castPanel(doc, io) {
         }
         function check() {
             reviewBox.replaceChildren();
-            const p = formProblems(f, { places: chatMode ? null : places, ids: chatMode ? new Set() : ids });
+            const places = chatMode ? null : new Set(data?.places ?? []);
+            const ids = chatMode ? new Set() : takenIds(ownId());
+            const p = formProblems(f, { places, ids });
             for (const [k, e] of errs) e.textContent = p[k] ?? '';
             form.querySelectorAll('.cf-row, .cf-sched').forEach(x => x.classList.remove('bad'));
             for (const k of Object.keys(p)) errs.get(k)?.parentElement?.classList.add('bad');
@@ -345,21 +397,23 @@ export function castPanel(doc, io) {
             if (Object.keys(check()).length) return;
             save.disabled = true;
             if (chatMode) {
-                const res = await io.chatEdit?.(r.id, editing.stamps ?? [], editing.at);
+                const at = io.chatAt?.();
+                if (!at || at.msg < 0) { say('Open the chat in SillyTavern first.', true); save.disabled = false; return; }
+                const res = await io.chatEdit?.(current()?.id ?? ed.personId, ed.stamps ?? [], at);
                 if (!res?.ok) { say(`Not saved: ${res?.error ?? 'SillyTavern did not answer.'}`, true); save.disabled = false; return; }
-                say(`Saved ${res.count} change${res.count === 1 ? '' : 's'} on message #${res.msg}.`); editing = null; tab = 'play'; drawDetail();
+                say(`Saved ${res.count} change${res.count === 1 ? '' : 's'} on message #${res.msg}.`);
+                drafts.delete(ed.key); if (editing === ed) editing = null; tab = 'changes'; drawDetail();
                 return;
             }
             try {
-                const res = await io.save(recordFromForm(f), original, originalFile);
-                say(`Saved cast/${res.file}.`); editing = null; tab = 'summary';
+                const res = await io.save(recordFromForm(f), ed.original, ed.originalFile);
+                say(`Saved cast/${res.file}.`);
+                drafts.delete(ed.key); if (editing === ed) editing = null; tab = 'resolved';
                 await refresh(`file:${res.file}`);
             } catch (e) { say(`Not saved: ${e.message}`, true); save.disabled = false; }
         }
-        const title = chatMode ? `${r.name} in this chat` : original || originalFile ? `Edit ${r?.name ?? f.name}` : 'New person';
-        const head = r ? tabBar(r, chatMode ? 'chatedit' : 'edit') : null;
-        detail.replaceChildren($('h3', {}, title), head, $('div', { class: 'tabpane cast-edit' }, form));
         check();
+        return form;
     }
 
     async function refresh(selectKey) {
@@ -371,11 +425,13 @@ export function castPanel(doc, io) {
         drawList(); drawDetail();
         io.changed?.();
     }
-    /** New map state (a chat turn): the in-play side changes; an open editor is left alone. */
+    /** New map state (a chat turn): redraw the open person. An open form keeps its draft; only the read-only narrator text updates. */
     function setPlay() {
         if (!data) return;
         rows = castRows(data.npcs ?? [], io.play?.() ?? []);
         drawList();
+        const box = editing?.el?.querySelector?.('.cf-effective');
+        if (box) { const r = rows.find(x => x.key === editing.personKey); paintEffective(box, r?.play, r?.rec); }
         if (!editing) drawDetail();
         if (view !== 'people') drawView();
     }

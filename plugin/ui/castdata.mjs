@@ -1,7 +1,7 @@
 // The cast browser and editor's data side (pure, no DOM): the list (cast files plus people created in play), search and
 // filters, the editor form <-> cast record, inline validation, the in-play view's rows, and the map's NPC markers.
 // The server validates again on save (plugin/npc.mjs validateRecord); these checks are for showing problems inline.
-import { NPC_ID } from '../shared/npc.mjs';
+import { NPC_ID, authorRecord } from '../shared/npc.mjs';
 export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
 export const IMPORTANCE = ['low', 'normal', 'high'];
 const HM = /^(\d{1,2}):(\d{2})$/;
@@ -190,6 +190,143 @@ export function cardAppearance(rec, play) {
     return { looks, body, outfit, changed };
 }
 
+const APP = ['looks', 'body', 'outfit'];
+const APP_NAME = { looks: 'Looks', body: 'Body', outfit: 'Outfit' };
+const APP_FACT = { looks: ['appearance.summary', 'looks'], body: ['appearance.body', 'body', 'appearance'], outfit: ['appearance.outfit', 'outfit'] };
+const TEXT_FACT = {
+    line: ['personality.summary', 'line'], manner: ['personality.manner', 'manner'], voice: ['personality.speech', 'voice'],
+    unknownAs: ['unknownAs'], history: ['history', 'deep.history'],
+};
+const onStamps = play => (play?.stamps ?? []).filter(s => s && !s.off && !s.pending);
+const effectKeyOf = s => `${String(s.intent ?? '').trim().toLowerCase()}|${(s.fields ?? APP).slice().sort().join('+')}`;
+const activeEffectKeys = play => new Set((play?.effects ?? []).map(effectKeyOf));
+/** Join source labels. A value that still equals the cast file keeps that label beside any stamps that also wrote it. */
+function fieldSource(play, rec, value, fileValue, extras = []) {
+    const fromFile = !!(rec && (rec.ok || rec.file || rec.raw));
+    const same = (value ?? '') === (fileValue ?? '');
+    const labels = [];
+    if (play && same && fromFile) labels.push('cast file');
+    for (const x of extras) if (x && !labels.includes(x)) labels.push(x);
+    if (!labels.length) {
+        if (!play) return 'cast file';
+        if (fromFile && same) return 'cast file';
+        const created = onStamps(play).find(s => s.type === 'npc_create');
+        if (!fromFile && created) return `message #${created.msg}`;
+        return fromFile ? 'this chat' : 'created in this chat';
+    }
+    return labels.join(', ');
+}
+function factLabels(play, fields) {
+    const want = new Set(fields);
+    return onStamps(play).filter(s => s.type === 'npc_fact' && want.has(s.field || 'fact')).map(s => `message #${s.msg}`);
+}
+function narrExtras(play, field) {
+    const active = activeEffectKeys(play);
+    const out = factLabels(play, APP_FACT[field]);
+    for (const s of onStamps(play)) {
+        if (s.type === 'npc_appearance' && (s.fields ?? APP).includes(field)) {
+            if (active.size && !active.has(effectKeyOf(s))) continue;
+            out.push(`message #${s.msg}`);
+            if (s.intent) out.push(`effect: ${s.intent}`);
+        }
+        if (s.type === 'npc_appearance_cache' && s.key && s.key === play?.appearanceKey && (play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model')) out.push(`message #${s.msg}`);
+    }
+    // A body or outfit rewrite also rewrites Looks, so the effect belongs on that row once the cache has landed.
+    if ((play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model') && (play?.[field] ?? '') !== (play?.base?.[field] ?? '')) {
+        for (const e of play?.effects ?? []) if (e.intent) out.push(`effect: ${e.intent}`);
+    }
+    return out;
+}
+function baseExtras(play, field) {
+    const active = activeEffectKeys(play);
+    const out = factLabels(play, APP_FACT[field]);
+    for (const s of onStamps(play)) {
+        if (s.type === 'npc_appearance' && s.lasting && (s.fields ?? APP).includes(field) && !active.has(effectKeyOf(s))) {
+            out.push(`message #${s.msg}`);
+            if (s.intent) out.push(`effect: ${s.intent}`);
+        }
+    }
+    return out;
+}
+function appearanceRows(rec, play) {
+    const file = { looks: rec?.looks ?? '', body: rec?.body ?? '', outfit: rec?.outfit ?? '' };
+    const base = play?.base ?? file;
+    if (play?.appearanceHow === 'pending') {
+        const rows = APP.map(k => ({ key: APP_NAME[k], value: 'pending rebuild', source: 'pending rebuild', pending: true, landed: false }));
+        const seen = new Set();
+        const addStale = (k, value) => {
+            const id = `${k}:${value}`;
+            if (!value || seen.has(id)) return;
+            seen.add(id);
+            rows.push({ key: `${APP_NAME[k]} preview`, value, source: 'stale', stale: true, landed: false });
+        };
+        const cur = play.appearanceKey ?? '';
+        for (const [key, entry] of Object.entries(play.caches ?? {})) {
+            if (!entry || typeof entry !== 'object' || key === cur) continue;
+            for (const k of APP) addStale(k, entry[k]);
+        }
+        for (const k of APP) if ((play[k] ?? '') !== (base[k] ?? '')) addStale(k, play[k]);
+        const touched = new Set((play.effects ?? []).flatMap(e => (e.fields?.length ? e.fields : APP)));
+        if (touched.has('body') || touched.has('outfit')) touched.add('looks');
+        const pendingFx = (play.effects ?? []).map(e => (e.intent ? `effect: ${e.intent}` : '')).filter(Boolean);
+        for (const row of rows) if (row.pending && pendingFx.length) row.source = ['pending rebuild', ...pendingFx].join(', ');
+        for (const k of APP) if (touched.has(k)) {
+            const baseV = base[k] ?? '';
+            rows.push({ key: `Base ${k}`, value: baseV || '(none)', source: fieldSource(play, rec, baseV, file[k], baseExtras(play, k)), landed: false });
+        }
+        return rows;
+    }
+    const eff = play ? { looks: play.looks ?? '', body: play.body ?? '', outfit: play.outfit ?? '' } : file;
+    const rows = [];
+    const effects = play?.effects ?? [];
+    for (const k of APP) {
+        if (!(eff[k] || base[k] || file[k])) continue;
+        rows.push({ key: APP_NAME[k], value: eff[k], source: fieldSource(play, rec, eff[k], file[k], play ? narrExtras(play, k) : []), landed: !!play });
+        if (effects.length && (eff[k] ?? '') !== (base[k] ?? '')) rows.push({ key: `Base ${k}`, value: base[k] || '(none)', source: fieldSource(play, rec, base[k], file[k], baseExtras(play, k)), landed: false });
+    }
+    return rows;
+}
+const dispText = d => (!d?.value || d.value === 'unknown' ? 'unknown' : `${d.value}${d.reason ? ` (${d.reason})` : ''}`);
+/**
+ * Resolved rows for one person: {key, value, source, landed?, pending?, stale?}.
+ * Personality comes from the folded card when a chat is open. Looks/Body/Outfit are the narrator text once a
+ * rebuild has landed. While a rebuild is pending the row says so — cast-file prose is not labeled as narrator text.
+ * An old cache, or a partial preview, is marked stale. Base looks/body/outfit are their own rows when an effect changed them.
+ */
+export function resolvedCard(rec, play) {
+    const file = rec && (rec.ok || rec.file || rec.raw) ? rec : null;
+    const rows = [{ key: 'Id', value: play?.id || file?.id || '(none)', source: file ? 'cast file' : 'created in this chat' }];
+    const text = (key, label, value, fileValue, factFields) => {
+        if (!value) return;
+        rows.push({ key: label, value, source: fieldSource(play, file, value, fileValue ?? '', play ? factLabels(play, factFields) : []) });
+    };
+    const known = play ? (play.unknownAs ?? '') : (file?.unknownAs ?? '');
+    text('unknownAs', 'Known as', known, file?.unknownAs ?? '', TEXT_FACT.unknownAs);
+    const line = play ? (play.line ?? '') : (file?.line ?? '');
+    rows.push({ key: 'Personality', value: line, source: fieldSource(play, file, line, file?.line ?? '', play ? factLabels(play, TEXT_FACT.line) : []) });
+    text('manner', 'Manner', play ? (play.manner ?? '') : (file?.manner ?? ''), file?.manner ?? '', TEXT_FACT.manner);
+    text('voice', 'Speech', play ? (play.voice ?? '') : (file?.voice ?? ''), file?.voice ?? '', TEXT_FACT.voice);
+    rows.push(...appearanceRows(file, play));
+    const history = play ? (play.deep?.history ?? '') : (file?.deep?.history ?? '');
+    text('history', 'History', history, file?.deep?.history ?? '', TEXT_FACT.history);
+    const d = play?.disposition?.player ?? file?.disposition?.player;
+    const dFile = dispText(file?.disposition?.player);
+    const dNow = dispText(d);
+    rows.push({ key: 'Disposition', value: play ? dNow : dFile, source: fieldSource(play, file, play ? dNow : dFile, dFile, onStamps(play).filter(s => s.type === 'npc_disposition').map(s => `message #${s.msg}`)) });
+    return rows;
+}
+/** The Edit / Update / Save-as-new seed: base appearance plus lasting chat changes. Not the resolved card. */
+export function editSeed(play, rec = null) {
+    if (!play) return formFromRecord(rec ?? null);
+    const authored = authorRecord(play);
+    return formFromRecord(authored ?? play.record ?? play);
+}
+/** Field changes Update would write. Empty when a temporary transformation is the only difference. */
+export function authoringChanges(rec, play) {
+    if (!rec || !play) return [];
+    return recordChanges(recordFromForm(formFromRecord(rec)), recordFromForm(editSeed(play, rec)));
+}
+
 /** The in-play summary rows for one person: [label, text]. */
 export function playSummary(play, placeName = a => a) {
     if (!play) return [];
@@ -241,12 +378,16 @@ export function formFromPlay(play) {
     if (d) { f.disposition = d.value === 'unknown' ? '' : d.value ?? ''; f.reason = d.reason ?? ''; }
     return f;
 }
+/** A cast editor form (not a play record): relationships are [{who, text}] and disposition is a string. */
+const isForm = x => !!x && Array.isArray(x.relationships) && typeof x.disposition === 'string' && Array.isArray(x.schedule);
+const scheduleJson = f => JSON.stringify(recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f?.schedule ?? [] }).schedule ?? null);
 /**
- * The stamps that make the chat match the form: changed line / manner / voice / history, new facts, secrets, relationships
- * and memories, and a disposition change (dramatic, so it may jump the ladder). Removals cannot be stamped; they are reported.
+ * The stamps that make the chat match the form, diffed against the opening seed (a form) or, if given a play
+ * record, against that record as it is now. Unchanged fields, including appearance the user did not edit, are not stamped.
+ * Removals of facts, secrets and memories cannot be stamped; they are reported. A schedule change is one npc_schedule stamp.
  */
-export function chatStamps(play, f) {
-    const base = formFromPlay(play);
+export function chatStamps(playOrSeed, f) {
+    const base = isForm(playOrSeed) ? playOrSeed : formFromPlay(playOrSeed);
     const stamps = [], cannot = [];
     for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`); }
     const added = (now, was) => now.map(s).filter(Boolean).filter(x => !was.map(s).includes(x));
@@ -254,15 +395,16 @@ export function chatStamps(play, f) {
     for (const t of added(f.facts ?? [], base.facts)) stamps.push({ type: 'npc_fact', field: 'fact', text: t });
     for (const t of added(f.secrets ?? [], base.secrets)) stamps.push({ type: 'npc_fact', field: 'deep.secrets', text: t });
     for (const t of added(f.memory ?? [], base.memory)) stamps.push({ type: 'npc_memory', note: t });
-    for (const r of f.relationships ?? []) { const was = base.relationships.find(x => x.who === s(r.who)); if (s(r.who) && s(r.text) && s(was?.text) !== s(r.text)) stamps.push({ type: 'npc_fact', field: `deep.relationships.${s(r.who)}`, text: s(r.text) }); }
-    for (const [k, list] of [['facts', 'fact'], ['memory', 'memory'], ['secrets', 'secret']]) for (const t of removed(f[k] ?? [], base[k])) cannot.push(`remove ${list} "${t}" (turn its stamp off in the chat instead)`);
+    for (const r of f.relationships ?? []) { const was = (base.relationships ?? []).find(x => x.who === s(r.who)); if (s(r.who) && s(r.text) && s(was?.text) !== s(r.text)) stamps.push({ type: 'npc_fact', field: `deep.relationships.${s(r.who)}`, text: s(r.text) }); }
+    for (const [k, list] of [['facts', 'fact'], ['memory', 'memory'], ['secrets', 'secret']]) for (const t of removed(f[k] ?? [], base[k] ?? [])) cannot.push(`remove ${list} "${t}" (turn its stamp off in the chat instead)`);
     if (s(f.disposition) !== s(base.disposition) || (s(f.disposition) && s(f.reason) !== s(base.reason))) {
         if (s(f.disposition)) stamps.push({ type: 'npc_disposition', who: 'player', value: s(f.disposition), reason: s(f.reason), dramatic: true });
         else cannot.push('set disposition back to unknown');
     }
+    if (scheduleJson(f) !== scheduleJson(base)) stamps.push({ type: 'npc_schedule', schedule: recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f.schedule ?? [] }).schedule ?? [] });
     return { stamps, cannot };
 }
-const stampText = x => (x.type === 'npc_memory' ? `memory: ${x.note}` : x.type === 'npc_disposition' ? `toward the player: ${x.value}${x.reason ? ` (${x.reason})` : ''}` : `${x.field === 'fact' ? 'fact' : x.field}: ${x.text}`);
+const stampText = x => (x.type === 'npc_memory' ? `memory: ${x.note}` : x.type === 'npc_disposition' ? `toward the player: ${x.value}${x.reason ? ` (${x.reason})` : ''}` : x.type === 'npc_schedule' ? `schedule: ${(x.schedule ?? []).map(e => `${e.place || e.where || 'off the map'} — ${e.activity || ''}`).join('; ') || '(none)'}` : `${x.field === 'fact' ? 'fact' : x.field}: ${x.text}`);
 export const chatStampLines = stamps => stamps.map(stampText);
 
 /** Latest found room per `where` label (off stamps are ignored; a later stamp for the same label wins). */

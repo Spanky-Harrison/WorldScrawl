@@ -6,7 +6,7 @@ import { npc } from './shared.mjs';
 import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild } from './npceffects.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild };
 
-const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
+const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 
 export const NPC_KEY = 'worldscrawl_npc';
 
@@ -384,6 +384,27 @@ function applyStamp(state, s, index, elapsed = null) {
         return;
     }
     if (s.type === 'npc_seek') { if (Number.isInteger(s.day)) n.seeks.push({ day: s.day, at: index }); return; }
+    if (s.type === 'npc_schedule') {
+        if (!Array.isArray(s.schedule)) return;
+        n.schedule = s.schedule.filter(e => e && typeof e === 'object').map(e => {
+            const activity = str(e.activity, 200) ?? '';
+            if (!activity) return null;
+            const x = { activity };
+            const place = str(e.place, 200);
+            if (place) x.place = place;
+            else {
+                const where = str(e.where, 80), near = str(e.near, 200);
+                if (where) x.where = where;
+                if (near) x.near = near;
+            }
+            const from = str(e.from, 8), to = str(e.to, 8), importance = str(e.importance, 20);
+            if (from) x.from = from;
+            if (to) x.to = to;
+            if (importance) x.importance = importance;
+            return x;
+        }).filter(Boolean);
+        return;
+    }
     if (s.type === 'npc_appearance') {
         const intent = str(s.intent, 240);
         if (!intent) return;
@@ -687,7 +708,14 @@ export function npcPlayState(chat, cast, env) {
         if (Array.isArray(list)) for (const s of list) {
             if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
             if (!stamps.has(s.id)) stamps.set(s.id, []);
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...(s.type === 'npc_fact' || s.type === 'npc_appearance' ? { expiry: expiryOf(s, i, end, env) } : {}) });
+            const extra = {};
+            if (s.type === 'npc_fact') { extra.field = s.field ?? 'fact'; extra.text = typeof s.text === 'string' ? s.text : ''; }
+            else if (s.type === 'npc_appearance') { extra.intent = typeof s.intent === 'string' ? s.intent : ''; extra.fields = effectFields(s.fields); extra.lasting = !lastsMinutes(s.lasts); }
+            else if (s.type === 'npc_appearance_cache') extra.key = typeof s.key === 'string' ? s.key : '';
+            else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
+            else if (s.type === 'npc_disposition') extra.value = s.value ?? '';
+            else if (s.type === 'npc_schedule') extra.count = Array.isArray(s.schedule) ? s.schedule.length : 0;
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' ? { expiry: expiryOf(s, i, end, env) } : {}) });
         }
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -1084,6 +1112,14 @@ export function recordDiff(before, after) {
     return { changed: lines.length > 0, lines, text, invented };
 }
 
+/** Diff a cast file against what Update may write. Temporary appearance and temporary facts are not in the diff. */
+export function fileDiff(before, npc) {
+    const rec = authorRecord(npc);
+    if (!rec) return recordDiff(before, npc ?? {});
+    const after = Array.isArray(npc?.invented) && npc.invented.length ? { ...rec, invented: npc.invented.slice() } : rec;
+    return recordDiff(before, after);
+}
+
 export const NPC_FLAG_KEY = 'worldscrawl_npc_flags';
 
 /** The narrator's [ws_flag: npc | Name] tags: the names come back, the text without the tags. */
@@ -1264,6 +1300,10 @@ export function stampSummary(s, name = '') {
         return `${who}: appearance — ${s.intent}${fields !== 'looks+body+outfit' ? ` [${fields}]` : ''}${lasts ? ` (for ${lastsText(lasts)})` : ''}${s.by === 'player' ? ' (player)' : ''}`;
     }
     if (s.type === 'npc_appearance_cache') return `${who}: appearance rebuild (${s.how || 'model'})`;
+    if (s.type === 'npc_schedule') {
+        const n = Array.isArray(s.schedule) ? s.schedule.length : 0;
+        return `${who}: schedule (${n} ${n === 1 ? 'entry' : 'entries'})`;
+    }
     return who;
 }
 
