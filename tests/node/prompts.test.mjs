@@ -291,11 +291,28 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
     assert.equal(P('narration.npc_tags').locked, 'The game reads these [ws_npc: …] tags.');
     assert.equal(P('narration.npc_tools').locked, 'The game reads the ws_npc tool.');
     const tags = P('narration.npc_tags').text;
+    const tools = P('narration.npc_tools').text;
+    const tool = P('narration.npc_tool').text;
+    // Appearance leads; concrete example; fact lasts drop disguise; tools intent-enough.
+    assert.match(tags, /^When someone's Looks, Body or Outfit changes/);
+    assert.match(tags, /\[ws_npc: appearance \| hesk \| magically young \| body \| 1 hour\]/);
+    assert.doesNotMatch(tags, /a bruise, a mood, a disguise/);
+    assert.match(tags, /a bruise, a mood/);
+    assert.match(tools, /^When someone's Looks, Body or Outfit changes/);
+    assert.match(tools, /magically young/);
+    assert.match(tools, /Intent, fields and lasts are enough/);
+    assert.doesNotMatch(tools, /rewritten looks\/body\/outfit text/);
+    assert.match(tool, /magically young/);
+    assert.match(tool, /Intent, fields and lasts are enough/);
     assert.match(tags, /\[ws_npc: memory \| their-id \|/); assert.match(tags, /\[ws_npc: disposition \| their-id \| value \| short reason\]/);
     assert.match(tags, /\[ws_npc: appearance \| their-id \|/);
     assert.match(P('change.style').text, /people-here/);
     for (const [, body] of tags.matchAll(/\[ws_npc:\s*([^\]]+)\]/g)) if (!/their-id/.test(body)) assert.ok(parseNpcTag(body), `example parses: ${body}`);
-    assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(P('narration.npc_tools').text));
+    assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(tools));
+    // Rebuild side-call prompts exist and stay locked to JSON fields.
+    assert.match(P('npc.appearance_rebuild_system').text, /JSON object/);
+    assert.match(P('npc.appearance_rebuild').text, /Active intents/);
+    assert.ok(P('npc.appearance_rebuild_system').locked);
 });
 
 test('the tag parser takes memory and disposition tags, and strips them', () => {
