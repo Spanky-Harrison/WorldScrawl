@@ -133,11 +133,14 @@ export function planAppearanceRebuild(npc) {
     const caches = npc.caches ?? {};
     const resolved = resolveAppearance(base, effects, caches);
     if (!resolved.needsModel) return null;
+    // Looks is the one-line summary of Body/Outfit: a rewrite of either also rewrites Looks so it never stays on the base.
+    const fields = resolved.modelFields.slice();
+    if (!fields.includes('looks') && fields.some(f => f === 'body' || f === 'outfit')) fields.unshift('looks');
     return {
         id: npc.id,
         key: resolved.key,
-        fields: resolved.modelFields.slice(),
-        inputs: rebuildInputs(base, effects, resolved.modelFields),
+        fields,
+        inputs: rebuildInputs(base, effects, fields),
         base: cloneApp(base),
     };
 }

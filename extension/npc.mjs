@@ -633,6 +633,7 @@ function publicNpc(n) {
         id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
         base: { ...(n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' }) },
         effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
+        caches: clone(n.caches ?? {}),
         appearanceHow: n.appearanceHow ?? 'base', appearanceKey: n.appearanceKey ?? '',
         unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
