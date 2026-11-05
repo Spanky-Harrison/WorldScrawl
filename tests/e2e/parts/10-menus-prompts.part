@@ -217,6 +217,13 @@
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
     await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
     await send('I look at Maren\'s hands.', 2);
+    // A lasting model fact waits for Approve (no lasts given), then becomes the bar.
+    const pend = page.locator('.worldscrawl_npcpending', { hasText: 'a scar' });
+    const pendShown = await pend.count() > 0;
+    const pendStamp = await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.pending)));
+    check('a lasting fact tag waits as an Approve/Discard card', pendShown && pendStamp, JSON.stringify({ pendShown, pendStamp }));
+    await pend.locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click();
+    await settle(400);
     const factBar = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
         const m = [...ch].reverse().find(x => (x.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'));
@@ -284,6 +291,7 @@
     check('Export to cast writes Maren without replacing Hesk', cast1.npcs?.some(n => n.id === 'hesk') && cast1.npcs?.some(n => n.id === 'maren' && /knife-grinder/.test(n.line ?? '')), JSON.stringify({ world: exportWorld, ids: cast1.npcs?.map(n => n.id) }));
     await queue([{ content: 'stay' }, { content: 'She taps the bar. [ws_npc: fact | hesk | a knife under the bar]' }]);
     await send('I ask what Hesk keeps under the bar.', 2);
+    await page.locator('.worldscrawl_npcpending', { hasText: 'a knife under the bar' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(400); // lasting fact: approve first
     const knife = page.locator('.worldscrawl_npcchange', { hasText: 'a knife under the bar' });
     await knife.locator('.worldscrawl_card_btn', { hasText: 'Update Hesk' }).click();
     await settle(200);
