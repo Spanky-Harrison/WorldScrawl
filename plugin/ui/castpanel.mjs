@@ -87,6 +87,7 @@ export function castPanel(doc, io) {
                         $('td', { class: 'cast-tier' }, `${x.tier}: ${x.why}${x.topical ? `; + history (${x.topical})` : ''}`),
                         $('td', { class: 'cast-name' }, x.nameWhy), $('td', {}, x.depth), $('td', {}, x.memories.length ? x.memories.join('; ') : '—'))) : [$('tr', {}, $('td', { colspan: 5, class: 'muted' }, 'Nobody was listed.'))])),
                 $('p', { class: 'muted' }, v.focus?.id ? `Focus: ${v.focus.id} (${v.focus.depth}${v.focus.stored ? ', from the stored focus' : ', from the focus rules'})` : 'No focus: nobody was named or addressed.'),
+                ...block('Came and went since the last reply (sent with {{npcs_present}})', (v.comings ?? []).join('\n') || '(nobody)'),
                 ...block('{{npcs_present}}', v.npcs_present), ...block('{{npc_focus}}', v.npc_focus)));
     }
     function drawUnsaved() {

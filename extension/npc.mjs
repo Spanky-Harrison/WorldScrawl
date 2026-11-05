@@ -719,7 +719,38 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
         memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [],
         tier: tiers[p.id].tier, why: tiers[p.id].why, topical: tiers[p.id].topical ? tiers[p.id].topicalWhy : '',
         known: p.known?.known !== false, nameWhy: p.known?.reason ?? '', shownAs: p.known?.known === false ? p.unknownAs : p.name }));
-    return { reply, user: ui, focus: focus ? { id: focus.id ?? null, depth: focus.depth ?? 'present', stored: !!(stored && stored.depth) } : null, listed, ...slices };
+    let comings = [];
+    try { comings = comingsAndGoings(chat, before, cast, env); } catch { comings = []; }
+    return { reply, user: ui, focus: focus ? { id: focus.id ?? null, depth: focus.depth ?? 'present', stored: !!(stored && stored.depth) } : null, listed, comings, ...slices };
+}
+
+const hhmm = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+/**
+ * Saved people who came or went between the last narrator reply and `end` while the player stayed put and game time passed:
+ * ['[14:20] Hesk arrives.', '[15:00] Maren leaves.']. Only people outside the scene come and go (presentAt keeps anyone
+ * already in the scene, so they never snap back to their schedule). The time is the schedule's start (arrival) or end
+ * (departure) when it falls inside the wait, else the time now.
+ */
+export function comingsAndGoings(chat, end, cast, env) {
+    let p = -1;
+    for (let i = Math.min(end, (chat?.length ?? 0) - 1); i >= 0; i--) if (chat[i] && !chat[i].is_user && i < end) { p = i; break; }
+    if (p < 0) return [];
+    let before, now, c0, c1;
+    try {
+        if (env.playerAt(p) !== env.playerAt(end)) return [];
+        c0 = env.clock(p); c1 = env.clock(end);
+        if (!(c1?.elapsed > c0?.elapsed)) return [];
+        before = presentAt(chat, p, cast, env); now = presentAt(chat, end, cast, env);
+    } catch { return []; }
+    const was = new Set(before.map(n => n.id)), is = new Set(now.map(n => n.id));
+    const span = Math.round((c1.elapsed - c0.elapsed) / 60);
+    const inside = m => m != null && ((m - (c0.minutes ?? 0)) % 1440 + 1440) % 1440 <= span;
+    const at = m => `[${hhmm(inside(m) ? m : c1.minutes ?? 0)}]`;
+    const shown = n => (n.known?.known === false && n.unknownAs ? n.unknownAs : n.name);
+    const lines = [];
+    for (const n of now) if (!was.has(n.id)) lines.push(`${at(scheduleAt(n, c1, env)?.entry?.fromMin)} ${shown(n)} arrives.`);
+    for (const n of before) if (!is.has(n.id)) lines.push(`${at(scheduleAt(n, c0, env)?.entry?.toMin)} ${shown(n)} leaves.`);
+    return lines.sort();
 }
 
 /**
