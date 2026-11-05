@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_KEY, acceptAppearanceRebuild, npcPlayState, planAppearanceRebuild } from '../../extension/npc.mjs';
+import { NPC_KEY, acceptAppearanceRebuild, fileDiff, npcPlayState, planAppearanceRebuild } from '../../extension/npc.mjs';
 import { deleteCastNpc, loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { cardAppearance, castRows, filterRows, formFromRecord, formProblems, markersAt, markersByPlace, recordFromForm, slugFor, stampRows, playSummary, within } from '../../plugin/ui/castdata.mjs';
 import { client, copytree, RIVERTON, tmpPath } from './helpers.mjs';
@@ -108,7 +108,7 @@ test('npcPlayState: stamps with message numbers, and an exportable record', () =
 });
 
 import { npcWhy, whoAt, narratorView, unsavedPeople, framesOf } from '../../extension/npc.mjs';
-import { recordChanges, chatStamps, formFromPlay, whyRows, chatStampLines } from '../../plugin/ui/castdata.mjs';
+import { recordChanges, chatStamps, formFromPlay, whyRows, chatStampLines, resolvedCard, editSeed, authoringChanges } from '../../plugin/ui/castdata.mjs';
 
 const inspEnv = (hour, at = BAR) => ({
     exists: a => [BAR, UP, SQUARE, 'riverton:drowned_rat/courtyard'].includes(a), relocate: {},
@@ -246,4 +246,75 @@ test('card appearance: the Summary reads this chat, not the cast file, after a r
     assert.equal(formFromRecord(play.record).looks, rewrite.looks);
     assert.equal(formFromRecord(play.record).body, rewrite.body);
     assert.equal(formFromRecord(play.record).outfit, rewrite.outfit);
+});
+
+test('person pane: pending is not narrator text, and a temporary transformation is not written to the file', () => {
+    const src = fs.readFileSync(new URL('../../plugin/ui/castpanel.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /Edit: Base/);
+    assert.match(src, /Save as new NPC/);
+
+    const cast = client(RIVERTON).get('/cast').json().npcs;
+    const hesk = cast.find(n => n.id === 'hesk');
+    const tag = { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit', lasts: 60 };
+    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, ...tag }] } }];
+    const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => BAR, clock: () => ({ day: 1, hour: 18, minute: 0, minutes: 1080, elapsed: 0 }) };
+    const pending = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
+    const pendingRows = resolvedCard(hesk, pending);
+    for (const key of ['Looks', 'Body', 'Outfit']) {
+        const row = pendingRows.find(r => r.key === key);
+        assert.equal(row.value, 'pending rebuild', key);
+        assert.match(row.source, /pending rebuild/);
+        assert.doesNotMatch(row.source, /cast file/);
+    }
+    assert.ok(pendingRows.some(r => r.key === 'Base body' && r.source === 'cast file'));
+    const hand = resolvedCard(hesk, {
+        ...pending, appearanceKey: 'young|body+outfit',
+        caches: { 'old|looks': { looks: 'a previous preview' } },
+    });
+    assert.equal(hand.find(r => r.key === 'Looks preview').value, 'a previous preview');
+    assert.equal(hand.find(r => r.key === 'Looks preview').source, 'stale');
+
+    const plan = planAppearanceRebuild(pending);
+    const rewrite = { looks: 'a young woman with copper braids', body: 'Years younger.', outfit: 'A bright dress.' };
+    const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    const play = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
+    const landed = resolvedCard(hesk, play);
+    assert.equal(landed.find(r => r.key === 'Looks').value, rewrite.looks);
+    assert.match(landed.find(r => r.key === 'Body').source, /effect: magically young/);
+    assert.match(landed.find(r => r.key === 'Body').source, /message #0/);
+    assert.equal(landed.find(r => r.key === 'Base body').value.startsWith('A tall'), true);
+    assert.equal(authoringChanges(hesk, play).length, 0);
+    assert.equal(fileDiff(hesk, play).changed, false);
+    const seed = editSeed(play, hesk);
+    assert.equal(seed.looks, hesk.looks);
+    assert.equal(seed.body, hesk.body);
+    assert.equal(seed.outfit, hesk.outfit);
+
+    const edited = structuredClone(seed);
+    edited.line = 'kinder tonight';
+    assert.deepEqual(chatStamps(seed, edited).stamps.map(s => s.field ?? s.type), ['personality.summary']);
+    const againstLive = chatStamps(play, edited);
+    assert.ok(againstLive.stamps.some(s => s.field === 'appearance.summary'), 'diffing the live card would stamp the transformation');
+
+    const withFact = [{ mes: 'x', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'hates rats' }, { swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'soaked to the skin', lasts: 30 }, { swipe: 0, ...tag }] } }];
+    const both = npcPlayState(withFact, cast, env).find(n => n.id === 'hesk');
+    const wrote = authoringChanges(hesk, both);
+    assert.deepEqual(wrote.map(x => x.field), ['facts']);
+    assert.match(wrote[0].to, /hates rats/);
+    assert.doesNotMatch(wrote[0].to, /soaked to the skin/);
+    assert.doesNotMatch(JSON.stringify(wrote), /bright dress|Years younger|young woman/);
+
+    const two = resolvedCard({ ...hesk, line: 'old' }, { line: 'new', stamps: [{ type: 'npc_fact', field: 'personality.summary', msg: 2 }, { type: 'npc_fact', field: 'personality.summary', msg: 5 }] });
+    assert.equal(two.find(r => r.key === 'Personality').source, 'message #2, message #5');
+
+    const sched = structuredClone(seed);
+    sched.schedule[0].activity = 'mopping';
+    assert.equal(chatStamps(seed, sched).stamps[0].type, 'npc_schedule');
+    const applied = framesOf([{ mes: 's', is_user: false, swipe_id: 0, extra: { [NPC_KEY]: [{ swipe: 0, type: 'npc_schedule', id: 'hesk', schedule: [{ place: BAR, activity: 'mopping' }, { activity: 'asleep', where: 'her own room', near: 'riverton:drowned_rat' }, { activity: '' }] }] } }], 0, cast)[0].get('hesk');
+    assert.equal(applied.schedule[0].activity, 'mopping');
+    assert.equal(applied.schedule[0].place, BAR);
+    assert.equal(applied.schedule[1].where, 'her own room');
+    assert.equal(applied.schedule[1].place, undefined);
+    assert.equal(applied.schedule.length, 2);
 });
