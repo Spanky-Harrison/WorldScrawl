@@ -128,7 +128,10 @@
     "lore_places": "the names of the places here with lore on file, innermost first",
     "how": "how to ask for lore (the tags or tools piece)",
     "lore": "the lore asked for, one place per line",
-    "line": "One sentence about a person: who they are, as already said in the story or the cast file."
+    "line": "One sentence about a person: who they are, as already said in the story or the cast file.",
+    "base": "The person's current base Looks, Body and/or Outfit lines, one per field, before active intents are applied.",
+    "fields": "Which appearance fields to rewrite this call: looks, body, and/or outfit (comma-separated).",
+    "intents": "Active appearance intents that touch those fields, oldest first (intent text and which fields each touches)."
   },
   "prompts": [
     {
@@ -1618,7 +1621,7 @@
       "piece": true,
       "locked": "The game reads these [ws_npc: …] tags.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood, a disguise), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | hesk | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. If their Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), report it with [ws_npc: appearance | their-id | short intent | fields | lasts]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 2 hours) when temporary, omit when lasting. Do not put appearance changes in a fact note, and do not rewrite the room description for a saved person on the people-here list — use appearance (or fact/memory) for them; room rewrites stay for unnamed scenery people. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
+      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), end your reply with [ws_npc: appearance | their-id | short intent | fields | lasts], e.g. [ws_npc: appearance | hesk | magically young | body | 1 hour]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 1 hour) when temporary, omit when lasting. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | hesk | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not rewrite the room description for a saved person on the people-here list — use appearance (or fact/memory) for them; room rewrites stay for unnamed scenery people. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tools",
@@ -1628,7 +1631,7 @@
       "piece": true,
       "locked": "The game reads the ws_npc tool.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood, a disguise). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. If their Looks, Body or Outfit changes, call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), lasts when temporary, and the rewritten looks/body/outfit text for the fields you changed. Do not put appearance changes in a fact note, and do not rewrite the room for a saved person on the people-here list — use appearance for them; room rewrites stay for unnamed scenery. Do not re-report a fact or appearance already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
+      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), and lasts when temporary (e.g. \"1 hour\"); e.g. intent \"magically young\", fields \"body\", lasts \"1 hour\". Intent, fields and lasts are enough — do not rewrite looks/body/outfit in this call; the engine rebuilds those. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not rewrite the room for a saved person on the people-here list — use appearance for them; room rewrites stay for unnamed scenery. Do not re-report a fact or appearance already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tool",
@@ -1637,7 +1640,42 @@
       "group": "narration",
       "locked": "Names the ws_npc actions the game reads.",
       "placeholders": [],
-      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, appearance, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact and detail, put the text in text. For appearance, intent is what changed; fields is looks/body/outfit (omit for all); lasts when temporary; put the rewritten looks, body and/or outfit text in those fields. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important."
+      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, appearance, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For appearance: intent is what changed (e.g. \"magically young\"); fields is looks/body/outfit (omit for all); lasts when temporary (e.g. \"1 hour\"). Intent, fields and lasts are enough — do not put rewritten looks/body/outfit here. For fact and detail, put the text in text. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important."
+    },
+    {
+      "id": "npc.appearance_rebuild_system",
+      "title": "People: rewrite appearance fields",
+      "description": "Step 1 of 1: rewrite Looks/Body/Outfit from base + active intents (never a previous combined text). The game reads the JSON fields.",
+      "group": "npc",
+      "locked": "The game reads the answer as JSON with only the asked fields.",
+      "placeholders": [
+        {
+          "name": "reply"
+        }
+      ],
+      "text": "You rewrite a person's appearance for a text adventure. {{reply}}: a JSON object with only the fields you were asked to rewrite (looks, body, and/or outfit). Write present-tense description text for each. Apply every active intent in order to the base for that field. Never copy a previous combined description; start from the base. No other keys, no commentary."
+    },
+    {
+      "id": "npc.appearance_rebuild",
+      "title": "People: appearance rebuild question",
+      "description": "Step 1 of 1: base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer.",
+      "group": "npc",
+      "locked": "The game rebuilds only the listed fields from this answer.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "fields"
+        },
+        {
+          "name": "base"
+        },
+        {
+          "name": "intents"
+        }
+      ],
+      "text": "Rewrite {{fields}} for {{name}}.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
     },
     {
       "id": "npc.who",

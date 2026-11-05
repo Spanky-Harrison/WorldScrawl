@@ -15,7 +15,7 @@ import { FLAG_KEY, PATCH_KEY, broadcastMapState, ctx, isOn, lookAction, moveActi
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, judgeFoundNow, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, judgeFoundNow, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
 function registerTools() {
@@ -116,11 +116,11 @@ function registerTools() {
                 value: { type: 'string', enum: ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'], description: 'For disposition: their attitude toward the player now: hostile, unfriendly, indifferent, friendly, or helpful.' },
                 reason: { type: 'string', description: 'For disposition: a few words on why their attitude toward the player changed.' },
                 lasts: { type: 'string', description: 'For fact or appearance: how long it lasts in game time (e.g. "2 hours", "3 days") when it is temporary. Leave out for a lasting change.' },
-                intent: { type: 'string', description: 'For appearance: what changed (e.g. "blonde hair", "polymorphed into a gnoll").' },
+                intent: { type: 'string', description: 'For appearance: what changed (e.g. "magically young", "blonde hair", "polymorphed into a gnoll").' },
                 fields: { type: 'string', description: 'For appearance: which of looks, body, outfit changed (comma-separated). Omit or "all" when a full rewrite.' },
-                looks: { type: 'string', description: 'For appearance: the rewritten Looks line for the fields you changed.' },
-                body: { type: 'string', description: 'For appearance: the rewritten Body text when body changed.' },
-                outfit: { type: 'string', description: 'For appearance: the rewritten Outfit text when outfit changed.' },
+                looks: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Looks.' },
+                body: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Body.' },
+                outfit: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Outfit.' },
             },
             required: ['action', 'id'],
         },
@@ -415,6 +415,7 @@ export async function onReplyForFlags(id) {
         }
         const clock = npcClock(c.chat, id);
         const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+        const appearIds = [];
         for (const s0 of stamped) {
             const t = npcTarget(folded, s0.id);
             if (!t) { noteCall(id, { kind: `${s0.type}`, status: 'failed', reason: `no saved person has the id "${s0.id}"` }); continue; }
@@ -431,9 +432,12 @@ export async function onReplyForFlags(id) {
                 if (place) stamp = { ...s, place };
             }
             addNpcStamp(msg, stamp);
+            // Temps apply at once: rebuild Looks now. Lasting waits for Approve.
+            if (s.type === 'npc_appearance' && stamp.pending !== true) appearIds.push(t);
         }
         syncSwipeExtra(msg);
         await c.saveChat?.();
+        if (appearIds.length) await ensureAppearanceRebuilds(id, { ids: [...new Set(appearIds)] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
     }
     const bad = unreadTags(msg.mes ?? '');
     msg.extra = msg.extra ?? {};
