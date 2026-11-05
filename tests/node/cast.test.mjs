@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_KEY, npcPlayState } from '../../extension/npc.mjs';
+import { NPC_KEY, acceptAppearanceRebuild, npcPlayState, planAppearanceRebuild } from '../../extension/npc.mjs';
 import { deleteCastNpc, loadCast, saveCastNpc } from '../../plugin/cast.mjs';
-import { castRows, filterRows, formFromRecord, formProblems, markersAt, markersByPlace, recordFromForm, slugFor, stampRows, playSummary, within } from '../../plugin/ui/castdata.mjs';
+import { cardAppearance, castRows, filterRows, formFromRecord, formProblems, markersAt, markersByPlace, recordFromForm, slugFor, stampRows, playSummary, within } from '../../plugin/ui/castdata.mjs';
 import { client, copytree, RIVERTON, tmpPath } from './helpers.mjs';
 
 const BAR = 'riverton:drowned_rat/common_room';
@@ -193,4 +193,57 @@ test('activity log: entries from message data, session calls, and plug-in kinds'
     assert.match(renderEntry(e.find(x => x.kind === 'roll'), $).text, /rolled 71 vs 40% → no-show/);
     registerRenderer('lore', (x, h) => h('span', {}, `LORE ${x.text}`));
     assert.equal(renderEntry({ kind: 'lore', text: 'flood' }, $).text, 'LORE flood');
+});
+
+test('card appearance: the Summary reads this chat, not the cast file, after a rebuild', () => {
+    const src = fs.readFileSync(new URL('../../plugin/ui/castpanel.mjs', import.meta.url), 'utf8');
+    assert.match(src, /cardAppearance\(r\.rec, r\.play\)/);
+    assert.match(src, /\['Looks', app\.looks\]/);
+    assert.doesNotMatch(src, /\['Looks', rec\.looks\]/);
+
+    const cast = client(RIVERTON).get('/cast').json().npcs;
+    const hesk = cast.find(n => n.id === 'hesk');
+    const file = cardAppearance(hesk, null);
+    assert.equal(file.looks, hesk.looks);
+    assert.equal(file.body, hesk.body);
+    assert.equal(file.outfit, hesk.outfit);
+    assert.equal(file.changed, false);
+    assert.deepEqual(cardAppearance(hesk, { looks: hesk.looks, body: hesk.body, outfit: hesk.outfit, appearanceHow: 'base' }).changed, false);
+
+    // Young-for-an-hour on body and outfit: no rewritten text on the tag, so the card stays on the file until the cache lands.
+    const tag = { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit', lasts: 60 };
+    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, ...tag }] } }];
+    const pending = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
+    assert.equal(pending.appearanceHow, 'pending');
+    const before = cardAppearance(hesk, pending);
+    assert.equal(before.changed, false);
+    assert.equal(before.looks, hesk.looks);
+    assert.equal(before.outfit, hesk.outfit);
+
+    const plan = planAppearanceRebuild(pending);
+    assert.ok(plan);
+    assert.deepEqual(plan.fields, ['looks', 'body', 'outfit']);
+    const rewrite = {
+        looks: 'a young woman with copper braids, in a bright dress',
+        body: 'Years younger: the same raw-boned frame, but the grey is gone.',
+        outfit: 'A bright linen dress instead of widow\'s black.',
+    };
+    const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
+    assert.equal(stamp.type, 'npc_appearance_cache');
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+
+    const play = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
+    const card = cardAppearance(hesk, play);
+    assert.equal(play.appearanceHow, 'reuse');
+    assert.equal(card.looks, rewrite.looks);
+    assert.equal(card.body, rewrite.body);
+    assert.equal(card.outfit, rewrite.outfit);
+    assert.equal(card.changed, true);
+    assert.notEqual(card.looks, hesk.looks);
+    assert.notEqual(card.body, hesk.body);
+    assert.notEqual(card.outfit, hesk.outfit);
+    // Edit: In this chat reads the same effective text (the folded record), not the file.
+    assert.equal(formFromRecord(play.record).looks, rewrite.looks);
+    assert.equal(formFromRecord(play.record).body, rewrite.body);
+    assert.equal(formFromRecord(play.record).outfit, rewrite.outfit);
 });
