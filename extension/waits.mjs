@@ -13,7 +13,7 @@ import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { REMEMBER_KEY, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, appearJobs, applyFacts, castPack, discardRemember, ensureAppearanceRebuilds, exportNpc, keepRemember, npcEnv, prefetchRemember, refreshLivePlaces, retryAppearance, retryRemember } from './scene.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -238,6 +238,10 @@ function pendingNpcCard(msg, s, who) {
                 s.intent = next;
             } else s.text = inp.value.trim() || s.text;
             delete s.pending; done();
+            if (isApp) {
+                const mid = (ctx().chat ?? []).indexOf(msg);
+                if (mid >= 0) ensureAppearanceRebuilds(mid, { ids: [s.id] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+            }
         }, `Add this to ${who} for good (with the words in the box)`, true),
         cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
     return d;
@@ -266,7 +270,8 @@ export function renderPatchCards() {
         const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_seek', 'npc_decline'].includes(s.type));
         const foundNotes = (msg.extra?.[FOUND_KEY] ?? []).filter(x => x && (x.swipe ?? 0) === swipeOf(msg));
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length) continue;
+        const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -357,6 +362,20 @@ export function renderPatchCards() {
         for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
+        for (const job of appearJobs(msg)) {
+            if (job.status === 'working') {
+                const d = line(`Appearance rebuild for ${job.name || job.id}: working…`);
+                d.className = 'worldscrawl_appearpending';
+                card.append(d);
+            } else if (job.status === 'failed') {
+                const d = markPending(document.createElement('div'));
+                d.classList.add('worldscrawl_appearpending');
+                const t = line(`Appearance rebuild for ${job.name || job.id} failed.`);
+                t.className = 'worldscrawl_remember_failed';
+                d.append(t, rowOf(cardButton('Retry', () => retryAppearance(id, job.id, job.key), 'Ask the model again to rewrite Looks/Body/Outfit', true)));
+                card.append(d);
+            }
+        }
         let exported = new Set();
         for (const s of npcStamps) {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
@@ -389,6 +408,10 @@ export function renderPatchCards() {
                             s[textKey] = next;
                         }
                         syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
+                        if (s.type === 'npc_appearance') {
+                            const mid = (ctx().chat ?? []).indexOf(msg);
+                            if (mid >= 0) ensureAppearanceRebuilds(mid, { ids: [s.id] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+                        }
                     });
                     fields.append(inp, save); d.insertBefore(fields, nrow);
                 }, 'Edit this note'));

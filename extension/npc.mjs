@@ -3,8 +3,8 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
-import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs } from './npceffects.mjs';
-export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs };
+import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild } from './npceffects.mjs';
+export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 

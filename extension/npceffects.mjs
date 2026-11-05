@@ -106,3 +106,56 @@ export function alreadyEffect(npc, intent, fields) {
     return (npc.effects ?? []).some(e => String(e.intent ?? '').trim().toLowerCase() === intentKey
         && effectFields(e.fields).slice().sort().join('+') === want);
 }
+
+/** Parsed model rewrite: only non-empty looks/body/outfit strings. null when unusable. */
+export function readAppearanceAnswer(ans) {
+    if (!ans || typeof ans !== 'object' || Array.isArray(ans)) return null;
+    const out = {};
+    for (const f of APPEARANCE_FIELDS) {
+        if (typeof ans[f] === 'string' && ans[f].trim()) out[f] = ans[f].trim();
+    }
+    return Object.keys(out).length ? out : null;
+}
+
+/** True when two appearance bases match field-for-field (empty and missing count the same). */
+export function sameAppearanceBase(a = {}, b = {}) {
+    return APPEARANCE_FIELDS.every(f => String(a[f] ?? '') === String(b[f] ?? ''));
+}
+
+/**
+ * Plan a rebuild for an NPC whose current appearance needs the model.
+ * Returns null when nothing to do, else { id, key, fields, inputs, base }.
+ */
+export function planAppearanceRebuild(npc) {
+    if (!npc?.id) return null;
+    const base = npc.base ?? { looks: npc.looks ?? '', body: npc.body ?? '', outfit: npc.outfit ?? '' };
+    const effects = npc.effects ?? [];
+    const caches = npc.caches ?? {};
+    const resolved = resolveAppearance(base, effects, caches);
+    if (!resolved.needsModel) return null;
+    return {
+        id: npc.id,
+        key: resolved.key,
+        fields: resolved.modelFields.slice(),
+        inputs: rebuildInputs(base, effects, resolved.modelFields),
+        base: cloneApp(base),
+    };
+}
+
+/**
+ * Accept a rebuild answer against the live NPC. Returns a cache stamp, or
+ * { stale: true } when the active set moved on, or { failed: true } when the answer is unusable.
+ */
+export function acceptAppearanceRebuild(plan, answer, currentNpc) {
+    if (!plan?.key || !plan.id) return { failed: true };
+    const curBase = currentNpc?.base ?? { looks: currentNpc?.looks ?? '', body: currentNpc?.body ?? '', outfit: currentNpc?.outfit ?? '' };
+    const cur = resolveAppearance(curBase, currentNpc?.effects ?? [], currentNpc?.caches ?? {});
+    if (cur.key !== plan.key || !sameAppearanceBase(curBase, plan.base)) return { stale: true };
+    const got = readAppearanceAnswer(answer);
+    if (!got) return { failed: true };
+    // Must cover every field the plan asked for.
+    for (const f of plan.fields) if (!got[f]) return { failed: true };
+    const stamp = { type: 'npc_appearance_cache', id: plan.id, key: plan.key, how: 'model' };
+    for (const f of APPEARANCE_FIELDS) if (got[f]) stamp[f] = got[f];
+    return { stamp };
+}
