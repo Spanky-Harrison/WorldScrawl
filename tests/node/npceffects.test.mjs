@@ -221,16 +221,17 @@ test('plan/acceptAppearanceRebuild: needs model, covers fields, stale base/key, 
     const plan = planAppearanceRebuild(npc);
     assert.ok(plan);
     assert.equal(plan.key, 'magically young|body');
-    assert.deepEqual(plan.fields, ['body']);
+    assert.deepEqual(plan.fields, ['looks', 'body']); // Looks summarizes Body: rewritten with it
     assert.equal(plan.inputs.intents[0].intent, 'magically young');
     assert.equal(planAppearanceRebuild({ ...npc, effects: [{ ...e, text: { body: 'young' } }] }), null);
 
-    const ok = acceptAppearanceRebuild(plan, { body: 'a young sturdy woman' }, npc);
+    assert.deepEqual(acceptAppearanceRebuild(plan, { body: 'no looks' }, npc), { failed: true });
+    const ok = acceptAppearanceRebuild(plan, { looks: 'young copper braids', body: 'a young sturdy woman' }, npc);
     assert.equal(ok.stamp?.type, 'npc_appearance_cache');
     assert.equal(ok.stamp.body, 'a young sturdy woman');
     assert.equal(ok.stamp.key, plan.key);
 
-    assert.deepEqual(acceptAppearanceRebuild(plan, { body: 'x' }, { ...npc, base: { ...base, looks: 'changed' } }), { stale: true });
+    assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'x', body: 'x' }, { ...npc, base: { ...base, looks: 'changed' } }), { stale: true });
     assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'only looks' }, npc), { failed: true });
     assert.deepEqual(acceptAppearanceRebuild(plan, null, npc), { failed: true });
     assert.equal(readAppearanceAnswer({ body: '  young  ', looks: '' }).body, 'young');
@@ -250,17 +251,21 @@ test('full path: appearance tag → mocked rewrite → cache + Looks → expiry 
     assert.equal(before.body, 'sturdy'); // still base until cache
     const plan = planAppearanceRebuild(before);
     assert.ok(plan);
-    assert.deepEqual(plan.fields, ['body']);
+    assert.deepEqual(plan.fields, ['looks', 'body']);
 
-    const accepted = acceptAppearanceRebuild(plan, { body: 'a magically young, sturdy woman' }, before);
+    const accepted = acceptAppearanceRebuild(plan, { looks: 'young, copper braids', body: 'a magically young, sturdy woman' }, before);
     assert.ok(accepted.stamp);
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...accepted.stamp });
 
     const after = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(after.body, 'a magically young, sturdy woman');
     assert.ok(['reuse', 'model'].includes(after.appearanceHow) || after.caches[plan.key], after.appearanceHow);
-    assert.equal(after.looks, 'copper braids');
+    assert.equal(after.looks, 'young, copper braids');
     assert.equal(after.base.body, 'sturdy');
+    // The public npc (what scene.mjs plans from) carries the cache, so no second rebuild is asked for.
+    chat.push(bot());
+    assert.equal(planAppearanceRebuild(npcAt(chat, 0, [], 'hesk')), null);
+    chat.pop();
 
     // Advance game time past 1 hour: effect expires, base restored (no peel to a wrong layer).
     chat.push(bot());
@@ -281,7 +286,9 @@ test('full path via takeNpcTags: strip tag, stamp, rebuild, Looks change', () =>
     const chat = [bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, stamps[0]])];
     const n = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     const plan = planAppearanceRebuild(n);
-    const { stamp } = acceptAppearanceRebuild(plan, { body: 'young Hesk' }, n);
+    const { stamp } = acceptAppearanceRebuild(plan, { looks: 'young Hesk, copper braids', body: 'young Hesk' }, n);
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
-    assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').body, 'young Hesk');
+    const got = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(got.body, 'young Hesk');
+    assert.equal(got.looks, 'young Hesk, copper braids');
 });
