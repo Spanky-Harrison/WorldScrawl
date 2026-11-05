@@ -222,14 +222,20 @@ function rememberProposalEl(got) {
 /** A lasting character change the model asked for: nothing changes until Approve (Edit, then Approve, changes the words). */
 function pendingNpcCard(msg, s, who) {
     const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_npcpending');
-    const t = document.createElement('div'); t.textContent = `Lasting change for ${who}: ${s.text}`; d.append(t);
+    const isApp = s.type === 'npc_appearance';
+    const label = isApp ? `Lasting appearance for ${who}: ${s.intent}` : `Lasting change for ${who}: ${s.text}`;
+    const t = document.createElement('div'); t.textContent = label; d.append(t);
     const inp = document.createElement('input');
-    inp.type = 'text'; inp.value = s.text ?? ''; inp.className = 'text_pole';
+    inp.type = 'text'; inp.value = isApp ? (s.intent ?? '') : (s.text ?? ''); inp.className = 'text_pole';
     inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
     inp.addEventListener('click', e => e.stopPropagation());
     const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState(); }; // the map's cast panel follows the decision
     d.append(fieldsOf(inp), rowOf(
-        cardButton('Approve', () => { s.text = inp.value.trim() || s.text; delete s.pending; done(); }, `Add this to ${who} for good (with the words in the box)`, true),
+        cardButton('Approve', () => {
+            if (isApp) { s.intent = inp.value.trim() || s.intent; s.by = s.by || 'model'; }
+            else s.text = inp.value.trim() || s.text;
+            delete s.pending; done();
+        }, `Add this to ${who} for good (with the words in the box)`, true),
         cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
     return d;
 }
@@ -365,8 +371,8 @@ export function renderPatchCards() {
             }
             if (s.off) d.style.opacity = '0.6';
             const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
-            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
-            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
+            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : s.type === 'npc_appearance' ? 'intent' : 'text';
+            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create' || s.type === 'npc_appearance')) {
                 nrow.append(cardButton('Edit', () => {
                     const inp = document.createElement('input');
                     inp.type = 'text'; inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? ''); inp.className = 'text_pole';

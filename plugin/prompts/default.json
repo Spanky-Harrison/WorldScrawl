@@ -1278,7 +1278,7 @@
       "process": "change",
       "piece": true,
       "placeholders": [],
-      "text": "Descriptions are present tense, 1-3 sentences, about the place, not the characters.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_lore on the place's area, e.g. {\"op\":\"append_lore\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nPeople and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule."
+      "text": "Descriptions are present tense, 1-3 sentences, about the place, not the characters.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_lore on the place's area, e.g. {\"op\":\"append_lore\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nPeople and creatures mentioned in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule. For a saved person on the people-here list, do not rewrite the room for them — the narrator uses ws_npc appearance (or fact) instead. Unnamed scenery people in the room text may still be rewritten."
     },
     {
       "id": "change.scope_system",
@@ -1584,7 +1584,9 @@
       "locked": "The game fills the lines from the schedules. People already in the scene never come or go here.",
       "text": "Since your last reply:\n{{lines}}\nWork these in where the time fits.",
       "placeholders": [
-        { "name": "lines" }
+        {
+          "name": "lines"
+        }
       ]
     },
     {
@@ -1595,9 +1597,17 @@
       "locked": "The game fills these from the cast and the stamps. Saved people are never unnamed strangers.",
       "text": "People here (saved people only — anyone not listed is scenery, not one of them):\n{{npcs_present}}\n{{npc_focus}}\n{{how_to_report}}",
       "placeholders": [
-        { "name": "npcs_present" },
-        { "name": "npc_focus", "optional": true },
-        { "name": "how_to_report", "generated": true }
+        {
+          "name": "npcs_present"
+        },
+        {
+          "name": "npc_focus",
+          "optional": true
+        },
+        {
+          "name": "how_to_report",
+          "generated": true
+        }
       ]
     },
     {
@@ -1608,7 +1618,7 @@
       "piece": true,
       "locked": "The game reads these [ws_npc: …] tags.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood, a disguise), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | hesk | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood, a disguise), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | hesk | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. If their Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), report it with [ws_npc: appearance | their-id | short intent | fields | lasts]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 2 hours) when temporary, omit when lasting. Do not put appearance changes in a fact note, and do not rewrite the room description for a saved person on the people-here list — use appearance (or fact/memory) for them; room rewrites stay for unnamed scenery people. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tools",
@@ -1618,7 +1628,7 @@
       "piece": true,
       "locked": "The game reads the ws_npc tool.",
       "placeholders": [],
-      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood, a disguise). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. Do not use a saved person as an unnamed stranger."
+      "text": "If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood, a disguise). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. If their Looks, Body or Outfit changes, call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), lasts when temporary, and the rewritten looks/body/outfit text for the fields you changed. Do not put appearance changes in a fact note, and do not rewrite the room for a saved person on the people-here list — use appearance for them; room rewrites stay for unnamed scenery. Do not re-report a fact or appearance already listed under Known facts or Looks. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tool",
@@ -1627,7 +1637,7 @@
       "group": "narration",
       "locked": "Names the ws_npc actions the game reads.",
       "placeholders": [],
-      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact and detail, put the text in text. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important."
+      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, appearance, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For fact and detail, put the text in text. For appearance, intent is what changed; fields is looks/body/outfit (omit for all); lasts when temporary; put the rewritten looks, body and/or outfit text in those fields. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important."
     },
     {
       "id": "npc.who",
@@ -1637,10 +1647,19 @@
       "locked": "The game reads the answer as one person's id, or nobody.",
       "text": "{{party}} is in {{place}}.\n{{said}}\n\nWho is the player addressing or looking at?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        { "name": "party" },
-        { "name": "place" },
-        { "name": "said" },
-        { "name": "options", "generated": true }
+        {
+          "name": "party"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "options",
+          "generated": true
+        }
       ]
     },
     {
@@ -1651,11 +1670,22 @@
       "locked": "The game reads the answer as one attitude key. Indifferent is the fallback.",
       "text": "{{name}} is here. {{line}}\n{{party}} just did this:\n{{said}}\n\nHow does {{name}} feel about {{party}}? Choose indifferent unless the scene is clearly warmer or colder.\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        { "name": "name" },
-        { "name": "line" },
-        { "name": "party" },
-        { "name": "said" },
-        { "name": "options", "generated": true }
+        {
+          "name": "name"
+        },
+        {
+          "name": "line"
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "said"
+        },
+        {
+          "name": "options",
+          "generated": true
+        }
       ]
     },
     {
@@ -1666,7 +1696,10 @@
       "locked": "The game reads the JSON answer with these keys.",
       "text": "You write the record card for a person the story has met. The card becomes canon for the rest of the game, so fill every field. First record everything the story established about them. Then fill every remaining gap with plausible details that fit what the story said and the setting; never contradict the story. {{reply}}: {\"name\": \"...\", \"unknownAs\": \"what a stranger would call them before learning the name, e.g. 'the landlady' (empty if the name is all anyone would use)\", \"personality\": {\"summary\": \"a few words of high-level demeanor, e.g. 'stern, watchful, sharp-tongued'\", \"manner\": \"how they behave, one or two sentences\", \"speech\": \"how they speak, one sentence\"}, \"appearance\": {\"summary\": \"a very short first impression, e.g. 'big woman with copper braids, in plain work clothes'\", \"body\": \"2-3 sentences, physical only: build, age, face, hair, distinguishing marks\", \"outfit\": \"one or two sentences: what they usually wear and carry\"}, \"history\": \"their life before the story began, 2-3 sentences (only what fits what the story said)\", \"disposition\": {\"value\": \"hostile|unfriendly|indifferent|friendly|helpful\", \"reason\": \"toward the player, one short sentence\"}, \"facts\": [\"short facts the story established\"], \"invented\": [\"each detail you made up rather than took from the story, a few words each, e.g. 'grey eyes', 'scar on the chin', 'gravelly voice', 'widowed young'\"]}. List in invented only what you made up; leave it empty if the story gave you everything.",
       "placeholders": [
-        { "name": "reply", "generated": true }
+        {
+          "name": "reply",
+          "generated": true
+        }
       ]
     },
     {
@@ -1677,9 +1710,15 @@
       "locked": "The game reads the JSON answer with these keys.",
       "text": "Remember this person. The name to start from is \"{{name}}\". They were met in {{place}}.\n\nThe story since they showed up:\n{{story}}\n\nFill every field: what the story said first, then plausible details for the rest, and list the made-up ones in invented. Reply with JSON only.",
       "placeholders": [
-        { "name": "name" },
-        { "name": "place" },
-        { "name": "story" }
+        {
+          "name": "name"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "story"
+        }
       ]
     }
   ]

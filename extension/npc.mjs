@@ -3,6 +3,8 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
+import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs } from './npceffects.mjs';
+export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 
@@ -224,9 +226,12 @@ export function clampDisposition(from, to, dramatic = false) {
 }
 
 function blankFrom(rec) {
+    const looks = rec.looks ?? '', body = rec.body ?? '', outfit = rec.outfit ?? '';
+    const base = rec.base ? { looks: rec.base.looks ?? looks, body: rec.base.body ?? body, outfit: rec.base.outfit ?? outfit } : { looks, body, outfit };
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
-        looks: rec.looks ?? '', body: rec.body ?? '', outfit: rec.outfit ?? '', unknownAs: rec.unknownAs ?? '', rel: clone(rec.rel ?? {}),
+        looks, body, outfit, base, effects: [], caches: {}, appearanceHow: 'base', appearanceKey: '',
+        unknownAs: rec.unknownAs ?? '', rel: clone(rec.rel ?? {}),
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
@@ -239,6 +244,9 @@ function snapshot(state) {
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
         fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
+        base: { ...(n.base ?? { looks: n.looks, body: n.body, outfit: n.outfit }) },
+        effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
+        caches: clone(n.caches ?? {}),
         following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
         found: Object.fromEntries(Object.entries(n.found ?? {}).map(([k, v]) => [k, { ...v }])),
     });
@@ -316,7 +324,15 @@ function applyStamp(state, s, index, elapsed = null) {
         if (!text) return;
         const lasts = lastsMinutes(s.lasts);
         if (lasts) { n.temps.push({ text, at: index, lasts, start: elapsed }); return; }
-        if (CARD_FIELDS[field]) n[CARD_FIELDS[field]] = text;
+        if (CARD_FIELDS[field]) {
+            const key = CARD_FIELDS[field];
+            n[key] = text;
+            // Appearance card fields update the base so resolveAppearance does not wipe them.
+            if (APPEARANCE_FIELDS.includes(key)) {
+                n.base = n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' };
+                n.base[key] = text;
+            }
+        }
         else if (field === 'history') n.deep.history = text;
         else if (field.startsWith('deep.')) setDeep(n.deep, field, text);
         else if (!n.facts.includes(text)) n.facts.push(text); // a cast fact restamped in chat stays single
@@ -367,7 +383,42 @@ function applyStamp(state, s, index, elapsed = null) {
         n.appearances.push({ place: s.place, day: s.day, hour: s.hour, at: index });
         return;
     }
-    if (s.type === 'npc_seek') { if (Number.isInteger(s.day)) n.seeks.push({ day: s.day, at: index }); }
+    if (s.type === 'npc_seek') { if (Number.isInteger(s.day)) n.seeks.push({ day: s.day, at: index }); return; }
+    if (s.type === 'npc_appearance') {
+        const intent = str(s.intent, 240);
+        if (!intent) return;
+        const fields = effectFields(s.fields);
+        const lasts = lastsMinutes(s.lasts);
+        const text = {};
+        for (const f of APPEARANCE_FIELDS) {
+            if (typeof s[f] === 'string' && s[f].trim()) text[f] = str(s[f], f === 'looks' ? 240 : APPEARANCE_MAX);
+        }
+        if (isObj(s.text)) for (const f of APPEARANCE_FIELDS) {
+            if (typeof s.text[f] === 'string' && s.text[f].trim()) text[f] = str(s.text[f], f === 'looks' ? 240 : APPEARANCE_MAX);
+        }
+        n.effects = n.effects ?? [];
+        n.caches = n.caches ?? {};
+        n.effects = n.effects.filter(e => !(String(e.intent).toLowerCase() === intent.toLowerCase()
+            && effectFields(e.fields).slice().sort().join('+') === fields.slice().sort().join('+')));
+        n.effects.push({
+            intent, fields, lasts: lasts || null, start: Number.isFinite(elapsed) ? elapsed : 0, at: index,
+            by: s.by === 'player' ? 'player' : 'model',
+            text: Object.keys(text).length ? text : undefined,
+        });
+        if (Object.keys(text).length) n.caches[effectSetKey([{ intent, fields }])] = { ...text, how: s.by === 'player' ? 'player' : 'model' };
+        return;
+    }
+    if (s.type === 'npc_appearance_cache' && s.key) {
+        n.caches = n.caches ?? {};
+        const entry = { how: s.how === 'engine' || s.how === 'player' || s.how === 'reuse' ? s.how : 'model' };
+        for (const f of APPEARANCE_FIELDS) {
+            if (typeof s[f] === 'string') entry[f] = str(s[f], f === 'looks' ? 240 : APPEARANCE_MAX);
+        }
+        if (isObj(s.text)) for (const f of APPEARANCE_FIELDS) {
+            if (typeof s.text[f] === 'string') entry[f] = str(s.text[f], f === 'looks' ? 240 : APPEARANCE_MAX);
+        }
+        n.caches[String(s.key)] = entry;
+    }
 }
 
 /** Stamps on one message that count (a turned-off stamp does not). `swipe` keeps each swipe's own list. */
@@ -389,7 +440,28 @@ export function framesOf(chat, index, cast = [], clock = null) {
         for (const s of stampsOn(chat[i])) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
         const flagged = flagsOn(chat[i]).map(normName);
         if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag');
-        if (Number.isFinite(el)) for (const n of state.values()) if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
+        if (Number.isFinite(el)) for (const n of state.values()) {
+            if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
+            // Drop expired appearance effects (lasts in game minutes from start; start is elapsed seconds).
+            n.effects = (n.effects ?? []).filter(e => !(e.lasts > 0 && Number.isFinite(e.start) && el >= e.start + e.lasts * 60));
+        }
+        for (const n of state.values()) {
+            n.base = n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' };
+            n.caches = n.caches ?? {};
+            n.effects = n.effects ?? [];
+            const lasting = n.effects.filter(e => !e.lasts);
+            const tempsE = n.effects.filter(e => e.lasts);
+            if (lasting.length) {
+                const fold = resolveAppearance(n.base, lasting, n.caches);
+                if (!fold.needsModel) {
+                    n.base = { looks: fold.looks, body: fold.body, outfit: fold.outfit };
+                    n.effects = tempsE;
+                }
+            }
+            const resolved = resolveAppearance(n.base, n.effects, n.caches);
+            n.looks = resolved.looks; n.body = resolved.body; n.outfit = resolved.outfit;
+            n.appearanceHow = resolved.how; n.appearanceKey = resolved.key;
+        }
         frames.push(snapshot(state));
     }
     return frames;
@@ -559,6 +631,9 @@ function publicNpc(n) {
     if (!disposition[PLAYER]) disposition[PLAYER] = { value: 'unknown', reason: '' };
     return {
         id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
+        base: { ...(n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' }) },
+        effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
+        appearanceHow: n.appearanceHow ?? 'base', appearanceKey: n.appearanceKey ?? '',
         unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
@@ -611,7 +686,7 @@ export function npcPlayState(chat, cast, env) {
         if (Array.isArray(list)) for (const s of list) {
             if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
             if (!stamps.has(s.id)) stamps.set(s.id, []);
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...(s.type === 'npc_fact' ? { expiry: expiryOf(s, i, end, env) } : {}) });
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...(s.type === 'npc_fact' || s.type === 'npc_appearance' ? { expiry: expiryOf(s, i, end, env) } : {}) });
         }
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -779,6 +854,22 @@ export function comingsAndGoings(chat, end, cast, env) {
     const lines = [];
     for (const n of now) if (!was.has(n.id)) lines.push(`${at(scheduleAt(n, c1, env)?.entry?.fromMin)} ${shown(n)} arrives.`);
     for (const n of before) if (!is.has(n.id)) lines.push(`${at(scheduleAt(n, c0, env)?.entry?.toMin)} ${shown(n)} leaves.`);
+    // Appearance effects that expired while the person was still in the scene.
+    const beforeMap = new Map(before.map(n => [n.id, n]));
+    for (const n of now) {
+        const prev = beforeMap.get(n.id);
+        if (!prev) continue;
+        const still = new Set((n.effects ?? []).map(e => `${String(e.intent).toLowerCase()}|${effectFields(e.fields).join('+')}`));
+        for (const e of (prev.effects ?? [])) {
+            if (!e.lasts) continue;
+            const key = `${String(e.intent).toLowerCase()}|${effectFields(e.fields).join('+')}`;
+            if (still.has(key)) continue;
+            const expiryMin = Number.isFinite(e.start) && e.lasts
+                ? Math.round((e.start + e.lasts * 60) / 60) % 1440
+                : (c1.minutes ?? 0);
+            lines.push(`${at(expiryMin)} ${shown(n)}'s ${e.intent} fades (expired ${hhmm(expiryMin)}).`);
+        }
+    }
     return lines.sort();
 }
 
@@ -1075,7 +1166,7 @@ export function readBack(messages, name, cap = READBACK_CAP) {
     return { start: first < 0 ? 0 : (list[first].index ?? first), messages: sliced, truncated: span.length > sliced.length };
 }
 
-const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', seek: 'npc_seek' };
+const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', seek: 'npc_seek', appearance: 'npc_appearance' };
 
 /** One [ws_npc: ...] body -> a stamp, or null when it does not parse. */
 export function parseNpcTag(body) {
@@ -1097,6 +1188,19 @@ export function parseNpcTag(body) {
     }
     if (type === 'npc_follow') return { type, id, who: NPC_ID.test(p[2] ?? '') ? p[2] : PLAYER };
     if (type === 'npc_seek') return { type, id };
+    if (type === 'npc_appearance') {
+        // appearance|id|intent|fields?|lasts?  — fields omit/"all" → all three; lasts omit → lasting
+        const intent = (p[2] ?? '').trim();
+        if (!intent) return null;
+        const rest = p.slice(3);
+        let lasts = null, fields = null;
+        if (rest.length) {
+            const maybeLasts = lastsMinutes(rest.at(-1));
+            if (maybeLasts) { lasts = maybeLasts; rest.pop(); }
+            if (rest.length) fields = rest.join('|');
+        }
+        return { type, id, intent, ...(fields ? { fields } : {}), ...(lasts ? { lasts } : {}) };
+    }
     return { type, id };
 }
 
@@ -1153,6 +1257,12 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
     if (s.type === 'npc_seek') return `Looking for ${who}`;
+    if (s.type === 'npc_appearance') {
+        const lasts = lastsMinutes(s.lasts);
+        const fields = effectFields(s.fields).join('+');
+        return `${who}: appearance — ${s.intent}${fields !== 'looks+body+outfit' ? ` [${fields}]` : ''}${lasts ? ` (for ${lastsText(lasts)})` : ''}${s.by === 'player' ? ' (player)' : ''}`;
+    }
+    if (s.type === 'npc_appearance_cache') return `${who}: appearance rebuild (${s.how || 'model'})`;
     return who;
 }
 
