@@ -297,16 +297,24 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
 });
 
 test('the tag parser takes memory and disposition tags, and strips them', () => {
-    const { stamps, text } = takeNpcTags('She scowls. [ws_npc: memory | hesk | The stranger lied to me.] [ws_npc: disposition | hesk | unfriendly | caught lying]');
-    assert.deepEqual(stamps, [{ type: 'npc_memory', id: 'hesk', note: 'The stranger lied to me.' }, { type: 'npc_disposition', id: 'hesk', who: 'player', value: 'unfriendly', reason: 'caught lying' }]);
+    const { stamps, text } = takeNpcTags('She scowls. [ws_npc: memory | hesk | Joe lied to me.] [ws_npc: disposition | hesk | unfriendly | caught lying]');
+    assert.deepEqual(stamps, [{ type: 'npc_memory', id: 'hesk', note: 'Joe lied to me.' }, { type: 'npc_disposition', id: 'hesk', who: 'player', value: 'unfriendly', reason: 'caught lying' }]);
     assert.ok(!/ws_npc/.test(text));
     assert.equal(parseNpcTag('disposition | hesk | grumpy | x'), null);
 });
 
 test('memory and disposition stamps show in the activity log with their text', () => {
-    const msg = { mes: 'x', extra: { worldscrawl_npc: [{ type: 'npc_memory', id: 'hesk', note: 'The stranger lied to me.' }, { type: 'npc_disposition', id: 'hesk', who: 'player', value: 'unfriendly', reason: 'caught lying' }] } };
+    const msg = { mes: 'x', extra: { worldscrawl_npc: [{ type: 'npc_memory', id: 'hesk', note: 'Joe lied to me.' }, { type: 'npc_disposition', id: 'hesk', who: 'player', value: 'unfriendly', reason: 'caught lying' }] } };
     const txt = JSON.stringify(messageActivity(msg, 3));
-    assert.match(txt, /npc_memory/); assert.match(txt, /The stranger lied to me/);
+    assert.match(txt, /npc_memory/); assert.match(txt, /Joe lied to me/);
     assert.match(txt, /npc_disposition/); assert.match(txt, /hesk: unfriendly toward player — caught lying/);
 });
 }
+
+test('npc memory prompts demand real names', async () => {
+  const { readFileSync } = await import('node:fs');
+  const s = readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8');
+  const j = JSON.parse(s); const all = JSON.stringify(j);
+  assert.doesNotMatch(all, /The stranger lied/);
+  assert.equal((all.match(/never \\"the stranger\\"/g) || []).length, 2);
+});
