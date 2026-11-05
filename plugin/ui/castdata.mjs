@@ -175,6 +175,21 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
 }
 
 const KIND = { follow: 'following', stay: 'staying', sight: 'seen here', schedule: 'on schedule', scene: 'here' };
+/**
+ * Looks, Body and Outfit the cast card shows. In a chat that is the effective appearance
+ * (base plus active effects and rebuild caches — the same text the narrator is told).
+ * With no chat state it is the cast file. `changed` is true when a chat rewrite differs from the file.
+ */
+export function cardAppearance(rec, play) {
+    const file = rec?.ok ? rec : null;
+    const src = play ?? file ?? rec ?? {};
+    const looks = src.looks ?? '';
+    const body = src.body ?? '';
+    const outfit = src.outfit ?? '';
+    const changed = !!(file && play && ['looks', 'body', 'outfit'].some(k => (src[k] ?? '') !== (file[k] ?? '')));
+    return { looks, body, outfit, changed };
+}
+
 /** The in-play summary rows for one person: [label, text]. */
 export function playSummary(play, placeName = a => a) {
     if (!play) return [];
