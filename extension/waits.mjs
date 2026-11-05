@@ -232,8 +232,11 @@ function pendingNpcCard(msg, s, who) {
     const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState(); }; // the map's cast panel follows the decision
     d.append(fieldsOf(inp), rowOf(
         cardButton('Approve', () => {
-            if (isApp) { s.intent = inp.value.trim() || s.intent; s.by = s.by || 'model'; }
-            else s.text = inp.value.trim() || s.text;
+            if (isApp) {
+                const next = inp.value.trim() || s.intent;
+                if (next !== s.intent) s.by = 'player';
+                s.intent = next;
+            } else s.text = inp.value.trim() || s.text;
             delete s.pending; done();
         }, `Add this to ${who} for good (with the words in the box)`, true),
         cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
@@ -380,8 +383,12 @@ export function renderPatchCards() {
                     inp.addEventListener('click', e => e.stopPropagation());
                     const save = cardButton('Save', () => {
                         if (s.type === 'npc_create') { s.line = inp.value.trim() || s.line; if (s.name) npcNames.set(s.id, s.name); }
-                        else s[textKey] = inp.value.trim();
-                        syncSwipeExtra(msg); ctx().saveChat?.(); renderPatchCards();
+                        else {
+                            const next = inp.value.trim();
+                            if (s.type === 'npc_appearance' && next && next !== s[textKey]) s.by = 'player';
+                            s[textKey] = next;
+                        }
+                        syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
                     });
                     fields.append(inp, save); d.insertBefore(fields, nrow);
                 }, 'Edit this note'));
