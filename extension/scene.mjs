@@ -4,7 +4,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -114,6 +114,7 @@ function npcEnv(chat, loc) {
         actorAt: (i, id) => positionOf(chat, Math.min(Math.max(i, 0), end), id)?.address || '',
         clock: i => npcClock(chat, Math.min(Math.max(i, 0), end)),
         timeAt: clockOf,
+        pc: ctx().name1 || 'the player',
         index: pack ? {
             rooms: addresses, subs: pack.subs ?? new Set(), regions: pack.regions ?? new Set(),
             stubs: new Map((pack.elsewhere ?? []).map(s => [s.id, s])),
@@ -168,6 +169,20 @@ async function learnNameOn(msg, name) {
     syncSwipeExtra(msg);
     await ctx().saveChat?.();
     return r;
+}
+/** /ws-know <name> | unmet|met|named: the player sets what the PC and this person know of each other (the only way back). */
+async function setRelOn(msg, arg) {
+    const { name, state } = parseRelArg(arg);
+    if (!name || !state) return { ok: false, reason: 'Say who and how well, e.g. /ws-know Hesk | met (unmet, met or named).' };
+    const chat = ctx().chat ?? [];
+    const id = Math.max(0, chat.indexOf(msg));
+    const folded = [...(framesOf(chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+    const n = npcForName(folded, name) ?? folded.find(x => x.id === name);
+    if (!n) return { ok: false, reason: `No saved person is called ${name}.` };
+    addNpcStamp(msg, { type: 'npc_rel', id: n.id, who: PLAYER, state });
+    syncSwipeExtra(msg);
+    await ctx().saveChat?.();
+    return { ok: true, name: n.name, state };
 }
 /** Judge a found name against the room the party is in right now (for the tool's answer, before the reply is stamped). */
 async function judgeFoundNow(name) {
@@ -232,7 +247,7 @@ function npcPromptBits(loc) {
         const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
         const focus = stored && stored.depth ? stored : focusRules(said, present);
         const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
-        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }) });
+        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
@@ -565,4 +580,4 @@ async function applyFacts() {
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
 }
 
-export { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp };
+export { REMEMBER_KEY, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp };

@@ -226,7 +226,7 @@ export function clampDisposition(from, to, dramatic = false) {
 function blankFrom(rec) {
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
-        looks: rec.looks ?? '', body: rec.body ?? '', outfit: rec.outfit ?? '', unknownAs: rec.unknownAs ?? '', knownBy: { ...(rec.knownBy ?? {}) },
+        looks: rec.looks ?? '', body: rec.body ?? '', outfit: rec.outfit ?? '', unknownAs: rec.unknownAs ?? '', rel: clone(rec.rel ?? {}),
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
@@ -238,7 +238,7 @@ function snapshot(state) {
     const out = new Map();
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
-        fromCast: new Set(n.fromCast), knownBy: { ...n.knownBy }, invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
+        fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
         following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
         found: Object.fromEntries(Object.entries(n.found ?? {}).map(([k, v]) => [k, { ...v }])),
     });
@@ -273,6 +273,26 @@ export function lastsText(min) {
     return `${d ? `${d}d` : ''}${h ? `${h}h` : ''}${m ? `${m}m` : ''}` || '0m';
 }
 
+/** How well an actor knows this person, in order. Automatic changes only move forward; a player edit (npc_rel) can go back. */
+export const REL_STATES = ['unmet', 'met', 'named'];
+/** Move `who`'s relationship with `n` forward to `state` (never back). The first meeting moves an unknown attitude to indifferent. */
+function relUp(n, who, state, at, by) {
+    n.rel = n.rel ?? {};
+    const cur = n.rel[who]?.state ?? 'unmet';
+    if (REL_STATES.indexOf(state) <= REL_STATES.indexOf(cur)) return;
+    n.rel[who] = { state, at, by };
+    if (cur === 'unmet' && (n.disposition[who]?.value ?? 'unknown') === 'unknown') n.disposition[who] = { value: 'indifferent', reason: 'just met' };
+}
+export const REL_TEXT = { unmet: "hasn't met them", met: "met, doesn't know the name", named: 'knows the name' };
+const REL_WORDS = { unmet: 'unmet', "hasn't met": 'unmet', 'not met': 'unmet', never: 'unmet', met: 'met', named: 'named', name: 'named', 'knows the name': 'named', known: 'named' };
+/** '/ws-know Hesk | met' → {name, state}; null state when the word is not one of them. */
+export function parseRelArg(text) {
+    const [name, word = ''] = String(text ?? '').split('|').map(x => x.trim());
+    return { name: name ?? '', state: REL_WORDS[word.toLowerCase()] ?? null };
+}
+/** The relationship record for `who`: {state, at, by}; unmet (at null) when nothing set it. */
+export const relOf = (n, who = PLAYER) => n?.rel?.[who] ?? { state: 'unmet', at: null, by: '' };
+
 function applyStamp(state, s, index, elapsed = null) {
     if (!s || s.off === true || s.pending === true || typeof s.type !== 'string') return;
     const id = s.id;
@@ -284,7 +304,7 @@ function applyStamp(state, s, index, elapsed = null) {
         const history = t('history', HISTORY_MAX);
         // Whoever remembered them knows their name (the player, unless the stamp says otherwise).
         state.set(id, blankFrom({ id, name, line, manner: t('manner'), voice: t('voice'), looks: t('looks', 240), body: t('body', APPEARANCE_MAX) || t('appearance', APPEARANCE_MAX),
-            outfit: t('outfit', APPEARANCE_MAX), unknownAs: t('unknownAs', 80), knownBy: { [str(s.knownBy, 40) || PLAYER]: 'remembered' }, deep: history ? { history } : {}, invented: cleanList(s.invented, 12), facts: Array.isArray(s.facts) ? s.facts : [], ok: true, from: 'play', schedule: [], disposition: {} }));
+            outfit: t('outfit', APPEARANCE_MAX), unknownAs: t('unknownAs', 80), rel: { [str(s.knownBy, 40) || PLAYER]: { state: 'named', at: index, by: 'remembered' } }, deep: history ? { history } : {}, invented: cleanList(s.invented, 12), facts: Array.isArray(s.facts) ? s.facts : [], ok: true, from: 'play', schedule: [], disposition: {} }));
         return;
     }
     if (s.type === 'npc_decline') return;
@@ -305,19 +325,26 @@ function applyStamp(state, s, index, elapsed = null) {
     if (s.type === 'npc_memory') {
         const note = str(s.note, 240);
         if (!note) return;
+        relUp(n, PLAYER, 'met', index, 'memory');
         n.memory.push(note);
         if (n.memory.length > MEMORY_CAP) n.memory.splice(0, n.memory.length - MEMORY_CAP);
         return;
     }
     if (s.type === 'npc_disposition') {
         const who = typeof s.who === 'string' && s.who ? s.who : PLAYER;
+        relUp(n, who, 'met', index, 'disposition');
         const cur = n.disposition[who]?.value ?? 'unknown';
         const value = clampDisposition(cur, s.value, !!s.dramatic);
         if (!value) return;
         n.disposition[who] = { value, reason: str(s.reason, 240) ?? '' };
         return;
     }
-    if (s.type === 'npc_name') { n.knownBy[str(s.who, 40) || PLAYER] = s.source === 'bracket' ? 'name bracket' : 'name flag'; return; }
+    if (s.type === 'npc_name') { relUp(n, str(s.who, 40) || PLAYER, 'named', index, s.source === 'bracket' ? 'name bracket' : 'name flag'); return; }
+    if (s.type === 'npc_rel') { // the player's edit: the only way back
+        const who = str(s.who, 40) || PLAYER;
+        if (REL_STATES.includes(s.state)) n.rel[who] = { state: s.state, at: index, by: 'player edit' };
+        return;
+    }
     if (s.type === 'npc_found') {
         const place = str(s.place, 200);
         if (!place) return;
@@ -326,7 +353,7 @@ function applyStamp(state, s, index, elapsed = null) {
         n.found[where] = { place, at: index };
         return;
     }
-    if (s.type === 'npc_follow') { n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
+    if (s.type === 'npc_follow') { relUp(n, str(s.who, 40) || PLAYER, 'met', index, 'follow'); n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
     if (s.type === 'npc_stay') {
         n.following = null;
         const place = str(s.place, 200);
@@ -360,6 +387,8 @@ export function framesOf(chat, index, cast = [], clock = null) {
         let el = null;
         if (clock) { try { el = clock(i)?.elapsed; } catch { el = null; } }
         for (const s of stampsOn(chat[i])) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
+        const flagged = flagsOn(chat[i]).map(normName);
+        if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag');
         if (Number.isFinite(el)) for (const n of state.values()) if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
         frames.push(snapshot(state));
     }
@@ -530,7 +559,7 @@ function publicNpc(n) {
     if (!disposition[PLAYER]) disposition[PLAYER] = { value: 'unknown', reason: '' };
     return {
         id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
-        unknownAs: n.unknownAs ?? '', knownBy: { ...(n.knownBy ?? {}) }, invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
+        unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
         schedule: n.schedule.map(e => ({ ...e })),
@@ -714,7 +743,7 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
     let asked = [];
     try { asked = askedLoreNames(chat, before, i => env.playerAt(i)); } catch { asked = []; }
     const tiers = npcTiers(present, focus, { chat, index: before, said: ui >= 0 ? chat[ui]?.mes ?? '' : '', asked });
-    const slices = npcSlices(present, focus, { tiers });
+    const slices = npcSlices(present, focus, { tiers, pc: env?.pc || 'the player' });
     const listed = present.map(p => ({ id: p.id, name: p.name, depth: focus?.id === p.id && focus.depth !== 'present' ? focus.depth : 'present',
         memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [],
         tier: tiers[p.id].tier, why: tiers[p.id].why, topical: tiers[p.id].topical ? tiers[p.id].topicalWhy : '',
@@ -824,18 +853,13 @@ const LOOK_BRACKET_RE = /\[\s*look\b/i;
 
 /**
  * Whether actor `who` (the player unless given) knows NPC n's name after message `index`, and why. Per actor, never per
- * party. Known when: a stamp says so (remembered through [remember], or an npc_name stamp from the narrator's
- * [ws_flag: name | Name]); the narrator flagged them with [ws_flag: npc | Name] (they were engaging with the player);
- * or the card has no unknownAs (nothing else to call them). Never inferred from chat text.
+ * party. Known when their relationship record (rel) says 'named' (remembered through [remember], an npc_name stamp from
+ * [ws_flag: name | Name], [name] or /ws-name, or the player's /ws-know edit), or the card has no unknownAs (nothing
+ * else to call them). Never inferred from chat text.
  */
 export function nameKnown(n, chat = [], index = -1, who = PLAYER) {
-    const stamped = n?.knownBy?.[who];
-    if (stamped) return { known: true, reason: `known: ${stamped}` };
-    if (who === PLAYER) {
-        for (let i = 0; i <= Math.min(index, (chat?.length ?? 0) - 1); i++) {
-            if (flagsOn(chat[i]).some(f => normName(f) === normName(n.name) || normName(f) === n.id)) return { known: true, reason: 'known: flagged' };
-        }
-    }
+    const r = relOf(n, who);
+    if (r.state === 'named') return { known: true, reason: `known: ${r.by}` };
     if (!n?.unknownAs) return { known: true, reason: 'known: no unknownAs on the card' };
     return { known: false, reason: `not known: shown as "${n.unknownAs}"` };
 }
@@ -885,7 +909,18 @@ export function npcTiers(present, focus, { chat = [], index = -1, said = '', ask
  * activity. Engaged people add body, outfit, manner, speech, disposition and their last few memories; topical adds history.
  * The focus slice keeps facts, the full memory and (when deep) secrets and relationships.
  */
-export function npcSlices(present, focus = {}, { tiers = null } = {}) {
+const shownName = p => (p.known?.known === false && p.unknownAs ? p.unknownAs : p.name);
+/** 'Met Joe but doesn't know him by name.': what this person knows of the player character. */
+export function relLine(p, pc = 'the player') {
+    const st = relOf(p).state;
+    if (st === 'named') return `Knows ${pc} by name.`;
+    if (st === 'met') return `Met ${pc} but doesn't know ${pc} by name.`;
+    return `Has not met ${pc} before.`;
+}
+/** Above the memories when the name is unknown to them: memories use real names, but they must not say one they don't know. */
+const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [`(Their memories use real names for clarity; ${shownName(p)} does not know the name ${pc} and must not say it.)`]);
+
+export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player' } = {}) {
     const list = present ?? [];
     if (!list.length) return { npcs_present: '', npc_focus: '' };
     const tierOf = p => tiers?.[p.id] ?? { tier: focus?.id === p.id ? 'engaged' : 'present' };
@@ -903,7 +938,8 @@ export function npcSlices(present, focus = {}, { tiers = null } = {}) {
             if (p.voice) bits.push(`Speech: ${p.voice}`);
             const d = dispositionLine(p).trim();
             if (d) bits.push(d);
-            if (p.memory?.length && focus?.id !== p.id) bits.push(`Remembers: ${p.memory.slice(-3).join('; ')}.`);
+            bits.push(relLine(p, pc));
+            if (p.memory?.length && focus?.id !== p.id) bits.push(...nameGuard(p, pc), `Remembers: ${p.memory.slice(-3).join('; ')}.`);
         }
         if (t.topical) bits.push(`History: ${p.deep.history}`);
         return bits.join(' ').replace(/\.\./g, '.');
@@ -911,9 +947,9 @@ export function npcSlices(present, focus = {}, { tiers = null } = {}) {
     const who = focus?.id ? list.find(p => p.id === focus.id) : null;
     let npc_focus = '';
     if (who && focus.depth && focus.depth !== 'present') {
-        const bits = [`${who.known?.known === false && who.unknownAs ? who.unknownAs : who.name}, in focus.`];
+        const bits = [`${shownName(who)}, in focus.`, relLine(who, pc)];
         if (who.facts?.length) bits.push(`Known facts: ${who.facts.join('; ')}`);
-        if (who.memory?.length) bits.push(`Memory: ${who.memory.map(m => `- ${m}`).join('\n')}`);
+        if (who.memory?.length) bits.push(...nameGuard(who, pc), `Memory: ${who.memory.map(m => `- ${m}`).join('\n')}`);
         if (focus.depth === 'deep' && who.deep) {
             if (who.deep.secrets?.length) bits.push(`Secrets: ${who.deep.secrets.join('; ')}`);
             if (who.deep.relationships && Object.keys(who.deep.relationships).length) bits.push(`Relationships: ${Object.entries(who.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
@@ -1113,6 +1149,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_staying') return `${who} is staying`;
     if (s.type === 'npc_create') return `${who} remembered`;
     if (s.type === 'npc_name') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} learned ${who}'s name`;
+    if (s.type === 'npc_rel') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} set ${who} to ${REL_TEXT[s.state] ?? s.state}`;
     if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
     if (s.type === 'npc_seek') return `Looking for ${who}`;

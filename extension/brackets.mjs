@@ -55,6 +55,7 @@ export const SLASH_ONLY = [
     ['/ws-exits', 'show the exits from here'], ['/ws-known', 'list the places this chat knows'],
     ['/ws-reveal all|region|subregion|<id>|off', 'mark places as visited so you can travel there'],
     ['/ws-removeexit <exit>', 'remove an exit from this room'], ['/ws-map', 'open the map window'],
+    ['/ws-know <name> | unmet|met|named', 'set how well you and a saved person know each other (the only way back)'],
     ['/ws-save-world <name>', "save this chat's world as a new world"], ['/ws-on, /ws-off', 'turn WorldScrawl on or off in this chat'],
 ];
 export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}\nSlash commands only:\n${SLASH_ONLY.map(([c, h]) => `- ${c}: ${h}`).join('\n')}`;
