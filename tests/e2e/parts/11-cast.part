@@ -37,6 +37,10 @@
     // In play: a new fact in the chat, its stamp links back to the message, and Update shows the diff.
     await queue([{ content: 'stay' }, { content: 'She glares at a rat. [ws_npc: fact | hesk | hates rats]' }]);
     await send('I point at the rat by the hearth.', 2);
+    await settle(800);
+    await page.locator('.worldscrawl_npcpending', { hasText: 'hates rats' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(800); // lasting fact: approve first
+    const ratPend = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.text === 'hates rats').map(s => ({ pending: !!s.pending, off: !!s.off })));
+    check('Approve on a lasting fact clears its waiting state', ratPend.length === 1 && !ratPend[0].pending, JSON.stringify(ratPend));
     await cw.waitForTimeout(1200);
     await cw.evaluate(() => wsCast.selectId('hesk', 'play'));
     await cw.waitForTimeout(200);
@@ -67,7 +71,7 @@
     await cw.evaluate(() => wsCast.setView('narrator'));
     await cw.waitForTimeout(200);
     const narrV = await cw.evaluate(() => ({ slices: document.querySelectorAll('.cast-view .cast-slice').length, opts: document.querySelectorAll('.cast-narrsel option').length, txt: document.querySelector('.cast-view')?.innerText ?? '' }));
-    check('What the narrator was told shows both slices for the latest reply', narrV.slices === 2 && narrV.opts > 0 && /npcs_present/.test(narrV.txt), JSON.stringify(narrV).slice(0, 400));
+    check('What the narrator was told shows the comings and both slices for the latest reply', narrV.slices === 3 && narrV.opts > 0 && /npcs_present/.test(narrV.txt), JSON.stringify(narrV).slice(0, 400));
     await cw.evaluate(() => wsCast.setView('unsaved'));
     await cw.waitForTimeout(200);
     const unsTxt = await cw.locator('.cast-view').innerText().catch(() => '');
