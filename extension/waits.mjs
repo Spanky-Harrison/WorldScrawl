@@ -219,6 +219,21 @@ function rememberProposalEl(got) {
     return box;
 }
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
+/** A lasting character change the model asked for: nothing changes until Approve (Edit, then Approve, changes the words). */
+function pendingNpcCard(msg, s, who) {
+    const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_npcpending');
+    const t = document.createElement('div'); t.textContent = `Lasting change for ${who}: ${s.text}`; d.append(t);
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = s.text ?? ''; inp.className = 'text_pole';
+    inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
+    inp.addEventListener('click', e => e.stopPropagation());
+    const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); };
+    d.append(fieldsOf(inp), rowOf(
+        cardButton('Approve', () => { s.text = inp.value.trim() || s.text; delete s.pending; done(); }, `Add this to ${who} for good (with the words in the box)`, true),
+        cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
+    return d;
+}
+
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
@@ -337,6 +352,7 @@ export function renderPatchCards() {
         for (const s of npcStamps) {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
             const who = npcNames.get(s.id) || s.name || s.id;
+            if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; } // a lasting change waits for Approve
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';
             if (s.type === 'npc_create' && !s.off && (s.looks || s.body || s.outfit || s.history || s.invented?.length)) {

@@ -4,7 +4,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -89,7 +89,10 @@ function chatRelocate(chat) {
     return out;
 }
 function npcClock(chat, i) {
-    const elapsed = clockAt(Math.max(0, i), chat);
+    return clockOf(clockAt(Math.max(0, i), chat));
+}
+/** The game clock at `elapsed` seconds: {day, hour, minute, minutes, elapsed}. */
+function clockOf(elapsed) {
     const t = worldTimes.get(activeWorld || defaultWorldId);
     if (!calendarLib || !t) return { day: 0, hour: 8, minute: 0, minutes: 8 * 60, elapsed };
     try {
@@ -110,6 +113,7 @@ function npcEnv(chat, loc) {
         playerAt: i => { const raw = rawAt(i); const r = resolveSchedulePlace(raw, { exists, relocate }); return r.ok ? r.address : raw; },
         actorAt: (i, id) => positionOf(chat, Math.min(Math.max(i, 0), end), id)?.address || '',
         clock: i => npcClock(chat, Math.min(Math.max(i, 0), end)),
+        timeAt: clockOf,
         index: pack ? {
             rooms: addresses, subs: pack.subs ?? new Set(), regions: pack.regions ?? new Set(),
             stubs: new Map((pack.elsewhere ?? []).map(s => [s.id, s])),
@@ -520,7 +524,7 @@ function toolNpcStamp(args = {}) {
     const action = String(args.action ?? '').toLowerCase();
     const id = String(args.id ?? '').trim();
     if (!id) return null;
-    if (action === 'fact') return args.text ? { type: 'npc_fact', id, field: 'fact', text: String(args.text) } : null;
+    if (action === 'fact') { const lasts = lastsMinutes(args.lasts); return args.text ? { type: 'npc_fact', id, field: 'fact', text: String(args.text), ...(lasts ? { lasts } : {}) } : null; }
     if (action === 'memory') return args.text ? { type: 'npc_memory', id, note: String(args.text) } : null;
     if (action === 'disposition') return { type: 'npc_disposition', id, who: PLAYER, value: args.value, reason: String(args.reason ?? args.text ?? '') };
     if (action === 'leave') return { type: 'npc_leave', id };

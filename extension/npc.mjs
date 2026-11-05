@@ -230,7 +230,7 @@ function blankFrom(rec) {
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
-        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [], found: {},
+        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [], found: {}, temps: [],
     };
 }
 
@@ -238,7 +238,7 @@ function snapshot(state) {
     const out = new Map();
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
-        fromCast: new Set(n.fromCast), knownBy: { ...n.knownBy }, invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(),
+        fromCast: new Set(n.fromCast), knownBy: { ...n.knownBy }, invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
         following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
         found: Object.fromEntries(Object.entries(n.found ?? {}).map(([k, v]) => [k, { ...v }])),
     });
@@ -255,8 +255,26 @@ function setDeep(deep, field, text) {
     }
 }
 
-function applyStamp(state, s, index) {
-    if (!s || s.off === true || typeof s.type !== 'string') return;
+const LASTS_RE = /^(?:for\s+)?(\d+(?:\.\d+)?)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)$/i;
+/** A `lasts` value in game minutes: a number, or text like '2 hours', '30 min', '1 day'. null when lasting (or unreadable). */
+export function lastsMinutes(v) {
+    if (Number.isFinite(v)) return v > 0 ? Math.round(v) : null;
+    const m = LASTS_RE.exec(String(v ?? '').trim());
+    if (!m) return null;
+    const k = m[2][0].toLowerCase();
+    const n = Math.round(Number(m[1]) * (k === 'd' ? 1440 : k === 'h' ? 60 : 1));
+    return n > 0 ? n : null;
+}
+/** A temporary change is over once `lasts` game minutes have passed since the message that made it. */
+const tempOver = (t, elapsed) => Number.isFinite(t.start) && Number.isFinite(elapsed) && elapsed >= t.start + t.lasts * 60;
+/** '2h', '30m', '1d4h': a lasts value for labels. */
+export function lastsText(min) {
+    const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+    return `${d ? `${d}d` : ''}${h ? `${h}h` : ''}${m ? `${m}m` : ''}` || '0m';
+}
+
+function applyStamp(state, s, index, elapsed = null) {
+    if (!s || s.off === true || s.pending === true || typeof s.type !== 'string') return;
     const id = s.id;
     if (s.type === 'npc_create') {
         if (!id || !NPC_ID.test(id) || state.has(id)) return;
@@ -276,6 +294,8 @@ function applyStamp(state, s, index) {
         const field = String(s.field ?? 'fact');
         const text = str(s.text, field === 'history' || field === 'deep.history' ? HISTORY_MAX : /appearance/.test(field) ? APPEARANCE_MAX : 400);
         if (!text) return;
+        const lasts = lastsMinutes(s.lasts);
+        if (lasts) { n.temps.push({ text, at: index, lasts, start: elapsed }); return; }
         if (CARD_FIELDS[field]) n[CARD_FIELDS[field]] = text;
         else if (field === 'history') n.deep.history = text;
         else if (field.startsWith('deep.')) setDeep(n.deep, field, text);
@@ -331,13 +351,16 @@ export function stampsOn(msg, swipe = null) {
 }
 
 /** State after each message through `index`. Cast entries that did not validate are left out. */
-export function framesOf(chat, index, cast = []) {
+export function framesOf(chat, index, cast = [], clock = null) {
     const end = Math.max(-1, Math.min(index ?? -1, (chat?.length ?? 0) - 1));
     const state = new Map();
     for (const rec of cast ?? []) if (rec?.ok && rec.id && !state.has(rec.id)) state.set(rec.id, blankFrom(rec));
     const frames = [];
     for (let i = 0; i <= end; i++) {
-        for (const s of stampsOn(chat[i])) applyStamp(state, s, i);
+        let el = null;
+        if (clock) { try { el = clock(i)?.elapsed; } catch { el = null; } }
+        for (const s of stampsOn(chat[i])) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
+        if (Number.isFinite(el)) for (const n of state.values()) if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
         frames.push(snapshot(state));
     }
     return frames;
@@ -437,7 +460,7 @@ function stayCovers(npc, scene, clock) {
 export function presentAt(chat, index, cast, env) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length) return [];
-    const frames = framesOf(chat, end, cast);
+    const frames = framesOf(chat, end, cast, env?.clock);
     if (!frames.length) return [];
     const scene = sceneStart(end, i => env.playerAt(Math.min(i, end)));
     const here = env.playerAt(end);
@@ -480,7 +503,7 @@ export function presentAt(chat, index, cast, env) {
 export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {}) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length) return [];
-    const frames = framesOf(chat, end, cast);
+    const frames = framesOf(chat, end, cast, env?.clock);
     if (!frames.length) return [];
     const here = env.playerAt(end);
     const clock = env.clock(end);
@@ -508,7 +531,7 @@ function publicNpc(n) {
     return {
         id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
         unknownAs: n.unknownAs ?? '', knownBy: { ...(n.knownBy ?? {}) }, invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
-        facts: n.facts.slice(), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
+        facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
         schedule: n.schedule.map(e => ({ ...e })),
     };
@@ -524,13 +547,27 @@ export function npcAt(chat, index, cast, id) {
 }
 
 /**
+ * When a field change ends, for the inspector: {lasting: true}, or {lasts, until: {day, hour, minute} | null, over}.
+ * Worked out from the game clock at the stamp's message (nothing stored): `env.clock(i)` and `env.timeAt(seconds)`.
+ */
+export function expiryOf(s, i, end, env) {
+    const lasts = lastsMinutes(s?.lasts);
+    if (!lasts) return { lasting: true };
+    let start = null, now = null, until = null;
+    try { start = env.clock(i)?.elapsed; now = env.clock(end)?.elapsed; } catch { /* no clock */ }
+    if (!Number.isFinite(start)) return { lasts, until: null, over: false };
+    try { until = env.timeAt?.(start + lasts * 60) ?? null; } catch { until = null; }
+    return { lasts, until, over: Number.isFinite(now) && now >= start + lasts * 60 };
+}
+
+/**
  * Where everyone stands at the end of the chat, for the map's cast browser: the folded NPC, where they are and why,
  * whether they are in the player's scene, and every stamp about them (with its message index). `cast` is the cast list.
  */
 export function npcPlayState(chat, cast, env) {
     const end = (chat?.length ?? 0) - 1;
     if (end < 0) return [];
-    const frames = framesOf(chat, end, cast);
+    const frames = framesOf(chat, end, cast, env?.clock);
     const last = frames[end];
     if (!last) return [];
     let present = new Set();
@@ -545,7 +582,7 @@ export function npcPlayState(chat, cast, env) {
         if (Array.isArray(list)) for (const s of list) {
             if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
             if (!stamps.has(s.id)) stamps.set(s.id, []);
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id) });
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...(s.type === 'npc_fact' ? { expiry: expiryOf(s, i, end, env) } : {}) });
         }
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -632,7 +669,7 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
 export function whoAt(chat, index, cast, env, place) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length || !place) return [];
-    const frames = framesOf(chat, end, cast);
+    const frames = framesOf(chat, end, cast, env?.clock);
     const last = frames[end];
     if (!last) return [];
     let present = new Set();
@@ -928,6 +965,14 @@ export function npcForName(npcs, name) {
 }
 
 /** Names the narrator flagged on message m (the shown swipe). */
+/** The saved person a tag or tool call means: its id when that id is saved, else a saved person by that name; null when neither. */
+export function npcTarget(npcs, idOrName) {
+    const key = String(idOrName ?? '').trim();
+    if (!key) return null;
+    const list = [...(npcs ?? [])];
+    if (list.some(n => n.id === key)) return key;
+    return npcForName(list, key.replace(/_/g, ' '))?.id ?? null;
+}
 export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
 
 /**
@@ -972,7 +1017,11 @@ export function parseNpcTag(body) {
     const type = TAG_KIND[kind];
     const id = p[1] ?? '';
     if (!type || !NPC_ID.test(id)) return null;
-    if (type === 'npc_fact') { const text = p.slice(2).join(' | ').trim(); return text ? { type, id, field: 'fact', text } : null; }
+    if (type === 'npc_fact') {
+        const rest = p.slice(2), lasts = rest.length > 1 ? lastsMinutes(rest.at(-1)) : null;
+        const text = (lasts ? rest.slice(0, -1) : rest).join(' | ').trim();
+        return text ? { type, id, field: 'fact', text, ...(lasts ? { lasts } : {}) } : null;
+    }
     if (type === 'npc_memory') { const note = p.slice(2).join(' | ').trim(); return note ? { type, id, note } : null; }
     if (type === 'npc_disposition') {
         const value = matchEnum(p[2], DISPOSITIONS);
@@ -1024,7 +1073,7 @@ export function readRememberAnswer(ans) {
 export function stampSummary(s, name = '') {
     const who = name || s?.id || 'Someone';
     if (!s) return who;
-    if (s.type === 'npc_fact') return `${who}: ${s.text}`;
+    if (s.type === 'npc_fact') return `${who}: ${s.text}${lastsMinutes(s.lasts) ? ` (for ${lastsText(lastsMinutes(s.lasts))})` : ''}`;
     if (s.type === 'npc_memory') return `${who}: remembered — ${s.note}`;
     if (s.type === 'npc_disposition') return `${who}: ${s.value}${s.reason ? ` (${s.reason})` : ''}`;
     if (s.type === 'npc_follow') return `${who} comes along`;

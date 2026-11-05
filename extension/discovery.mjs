@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { chatChanges, chatElapsed } from './clock.mjs';
 import { baseReply, duplicatePlace, nearbyRooms, noteCall } from './dig.mjs';
@@ -115,6 +115,7 @@ function registerTools() {
                 text: { type: 'string', description: 'The fact; the memory note (short, from their point of view: something they would still remember tomorrow); or what detail is needed.' },
                 value: { type: 'string', enum: ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'], description: 'For disposition: their attitude toward the player now: hostile, unfriendly, indifferent, friendly, or helpful.' },
                 reason: { type: 'string', description: 'For disposition: a few words on why their attitude toward the player changed.' },
+                lasts: { type: 'string', description: 'For fact: how long it lasts in game time (e.g. "2 hours", "3 days") when it is temporary. Leave out for a lasting fact.' },
             },
             required: ['action', 'id'],
         },
@@ -408,8 +409,13 @@ export async function onReplyForFlags(id) {
             try { c.updateMessageBlock?.(id, msg); } catch {}
         }
         const clock = npcClock(c.chat, id);
-        for (const s of stamped) {
+        const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+        for (const s0 of stamped) {
+            const t = npcTarget(folded, s0.id);
+            if (!t) { noteCall(id, { kind: `${s0.type}`, status: 'failed', reason: `no saved person has the id "${s0.id}"` }); continue; }
+            const s = t === s0.id ? s0 : { ...s0, id: t };
             let stamp = s;
+            if (s.type === 'npc_fact' && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true }; // a lasting change waits for Approve
             if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
             else if (s.type === 'npc_stay' && !s.place) {
                 const place = positionOf(c.chat, id, PLAYER)?.address || '';
