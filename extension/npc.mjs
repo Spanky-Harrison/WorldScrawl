@@ -319,7 +319,7 @@ function applyStamp(state, s, index, elapsed = null) {
         if (CARD_FIELDS[field]) n[CARD_FIELDS[field]] = text;
         else if (field === 'history') n.deep.history = text;
         else if (field.startsWith('deep.')) setDeep(n.deep, field, text);
-        else n.facts.push(text);
+        else if (!n.facts.includes(text)) n.facts.push(text); // a cast fact restamped in chat stays single
         return;
     }
     if (s.type === 'npc_memory') {

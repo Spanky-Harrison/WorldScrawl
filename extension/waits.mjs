@@ -227,7 +227,7 @@ function pendingNpcCard(msg, s, who) {
     inp.type = 'text'; inp.value = s.text ?? ''; inp.className = 'text_pole';
     inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
     inp.addEventListener('click', e => e.stopPropagation());
-    const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); };
+    const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState(); }; // the map's cast panel follows the decision
     d.append(fieldsOf(inp), rowOf(
         cardButton('Approve', () => { s.text = inp.value.trim() || s.text; delete s.pending; done(); }, `Add this to ${who} for good (with the words in the box)`, true),
         cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
