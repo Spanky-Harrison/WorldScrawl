@@ -230,28 +230,36 @@ The **Cast** button turns the side panel into the cast browser: search by name, 
 Clicking a room on the map filters by it; a place in a record jumps to it on the map. People markers on the rooms
 show where everyone is now (with a chat open) or every scheduled place (without one); the legend's checkbox hides them.
 
-Each person has a summary, an **Under the hood** tab when a chat is open, and two edit modes. Under the hood shows,
-at the current game time, where they are and why (which schedule entry applies, or that they are following someone or
-were told to stay), today's seeded sighting roll against the chance (and the by-name roll if someone asked for them),
-whether the record is a stub or full, their disposition with its reason, their memory, any "no" to remembering them
-said in this scene, and their changes in this chat, each linked to its message, with **Update <name>** (a diff
-against the cast file) or **Export to cast** for someone met only in this chat. Selecting someone outlines their
-current place and schedule stops on the map. With a place selected, **Who's here** lists who is there now and who
-should be but is not, with the reason (another schedule entry, a no-show roll today, following someone).
+The open person uses the same tabs as a place. **Resolved** is the effective card: each row says where it came from
+(`cast file`, `message #N`, `effect: …`, `pending rebuild`, or `stale`). Personality comes from the folded card when
+a chat is open. Looks, Body and Outfit are the narrator text once a rebuild has landed; while a rebuild is pending
+the row says so, and an old preview is marked stale. When an effect changed them, Base looks, Base body and Base
+outfit are their own rows. The live schedule stays under that card (← now, card versus this chat, follow, stay and
+found). **State** is where they are and why (rolls, following, staying, found, relationship, memories, scene) plus
+the old "In this chat" block. **Raw** is the cast file, or the played record when there is no file. **Warnings**
+lists loader problems. **Changes** lists stamps, each linked to its message.
+
+Selecting someone outlines their current place and schedule stops on the map. With a place selected, **Who's here**
+lists who is there now and who should be but is not, with the reason (another schedule entry, a no-show roll today,
+following someone).
 
 Two read-only views are recomputed from the chat: **What the narrator was told** (the exact `{{npcs_present}}` and
 `{{npc_focus}}` text for the latest reply, or one you pick, with who was listed, at which detail level, and which
 memories went in) and **Not saved yet** (names the story repeats that nobody has saved, with their reply count
 against the Remember card threshold of 3, and any "no" for the scene).
 
-**Edit: Base (cast file)** is the form (name, id, line, manner, voice, deep tiers, facts, starting disposition and memory, a
-schedule whose places come from the map picker, with times and importance, and a sighting place, hour and chance),
-and the raw JSON as an advanced view. New, Duplicate and Delete (with a confirm) are on the summary. The form checks as
-you type and Save stays off until it is clean. Save shows the changes first; Confirm writes them through
-`POST /cast/save`, and the world reloads at once. **Edit: In this chat** edits the person as this chat has them
-(line, manner, voice, deep tiers, facts, memory, disposition). Its diff is the list of "Character changed here"
-stamps it will add to the latest message; SillyTavern checks the chat, message and swipe are still the ones the map
-saw before adding them. Removing a fact or memory cannot be stamped; turn its stamp off in the chat instead.
+**Edit** sits in the header, like Edit place. It is disabled with no chat. It opens one form in the pane (what used to
+be Edit: In this chat). The appearance fields start from the base, the file plus lasting changes, and the narrator's
+current text is shown beside them, read-only. Submit diffs the form against that opening seed and stamps only what
+changed, on the latest message, so a personality edit does not copy a temporary transformation into a fact or
+overwrite an effect that arrived while the form was open. Schedule changes in that form are stamped too, and stay in
+this chat. Removing a fact or memory cannot be stamped; turn its stamp off in the chat instead.
+
+**Save as new NPC**, **Update <name>** (only when lasting play differs from the file) and **New person** write a cast
+file. Each opens an authoring form seeded from the base plus lasting chat changes, not from the resolved card, so a
+temporary transformation is not baked into the file. Confirm shows exactly what will be written. Create does not
+stamp the chat. **Delete** removes the file only; the confirm says chats keep their stamps. **Make this permanent**
+(on State and Changes) still writes a found room into the base schedule.
 
 The Cast summary's Schedule is the live one for this chat: the card's entries with this chat's edits folded in, found rooms in place of a where-label ("found here this chat"), and any follow/stay on top. Rows from this chat are marked, the entry in force is marked "← now", and it redraws whenever the chat's stamps change. NPC checks (found, follow/stay, near, sightings, people here) all read the chat's live map, so a room discovered in play counts. "Make this permanent" refuses a room that only exists in this chat; save the room to the world first (Save world in the settings, or `/ws-save-world`).
 

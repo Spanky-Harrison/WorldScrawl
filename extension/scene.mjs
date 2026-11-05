@@ -3,8 +3,8 @@ import { messageActivity } from './activity.mjs';
 import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once } from './notices.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild } from './npc.mjs';
+import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -445,7 +445,7 @@ async function exportNpc(id, { update = false } = {}) {
     const chat = ctx().chat ?? [];
     const pack = castPack();
     const npc = npcAt(chat, chat.length - 1, pack?.npcs ?? [], id);
-    const record = npc ? exportRecord(npc) : null;
+    const record = npc ? authorRecord(npc) : null;
     if (!record) { toastr.warning('WorldScrawl: that person is not in this chat.'); return; }
     const r = await api('/cast/export', { method: 'POST', body: JSON.stringify({ npc: record, ...(update ? { update: true } : {}) }) });
     if (!r.ok) { const msg = typeof r.body?.detail === 'string' ? r.body.detail : 'Could not export.'; toastr.warning(msg); return { ok: false, error: msg }; }
@@ -463,7 +463,7 @@ function mapNpcs(chat, here) {
         return npcPlayState(chat ?? [], pack.npcs ?? [], npcEnv(chat ?? [], here)).map(n => {
             const castNpc = (pack.npcs ?? []).find(x => x.ok && x.id === n.id) ?? null;
             const { record, ...rest } = n;
-            return { ...rest, record, inCast: !!castNpc, diff: castNpc ? recordDiff(castNpc, n) : null };
+            return { ...rest, record, inCast: !!castNpc, diff: castNpc ? fileDiff(castNpc, n) : null };
         });
     } catch (e) { console.warn('[WorldScrawl] npc state for the map failed', e); return []; }
 }
@@ -506,7 +506,7 @@ function mapInspect(chat, here) {
     } catch (e) { console.warn('[WorldScrawl] npc inspector failed', e); return null; }
 }
 /** "In this chat" edits from the map: stamps on the latest message, only if the chat, message and swipe are still the ones the map saw. */
-const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition', 'npc_appearance']);
+const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition', 'npc_appearance', 'npc_schedule']);
 async function npcChatEdit(d) {
     const c = ctx(), chat = c.chat ?? [];
     if (!d.chatId || d.chatId !== (c.chatId ?? c.getCurrentChatId?.())) return { ok: false, error: 'That chat is not open in SillyTavern any more.' };

@@ -3,7 +3,7 @@ import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, noticeRow, lockRow, markPending, resolvedText } from './notices.mjs';
 import { render as P } from './shared.mjs';
 import { normName } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, npcAt, recordDiff, foundEditOk, stampSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
@@ -430,7 +430,7 @@ export function renderPatchCards() {
                     nrow.append(cardButton(`Update ${who}`, () => {
                         d.querySelector('.worldscrawl_castdiff')?.remove();
                         const now = npcAt(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? [], s.id);
-                        const diff = recordDiff(castNpc, now);
+                        const diff = fileDiff(castNpc, now);
                         const box = document.createElement('div');
                         box.className = 'worldscrawl_castdiff';
                         box.style.cssText = 'margin-top:4px;';

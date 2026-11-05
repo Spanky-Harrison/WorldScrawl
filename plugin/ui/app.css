@@ -88,6 +88,7 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 .side table.resolved td { vertical-align: top; padding: 2px 6px 2px 0; overflow-wrap: break-word; word-break: normal; }
 .side table.resolved .src { color: var(--SmartThemeEmColor); font-style: italic; white-space: nowrap; }
 .side table.resolved .src.own { font-style: normal; }
+.side table.resolved .src.stale, .side table.resolved .src.pending { color: #e8a33d; font-style: normal; }
 .side table.resolved tr { border-bottom: 1px solid var(--SmartThemeBorderColor); }
 .side pre.raw { margin: 0; padding: 6px; font-size: .82em; white-space: pre-wrap; word-break: break-word; background: var(--SmartThemeChatTintColor); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; user-select: text; }
 .side ul.warnings li { color: var(--SmartThemeQuoteColor); margin-bottom: 4px; }
@@ -233,7 +234,9 @@ body.casting .side { width: 380px; }
 .castpanel .cast-badge.broken { border-color: #d05050; color: #e07070; }
 .castpanel .cast-badge.play { border-color: #50a0d0; }
 .castpanel .cast-badge.here { border-color: var(--SmartThemeQuoteColor); color: var(--SmartThemeQuoteColor); }
-.castpanel .cast-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; align-items: center; }
+.castpanel .cast-acts, .castpanel .cast-fileacts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; align-items: center; }
+.castpanel .cf-effective { border-left: 2px solid var(--SmartThemeBorderColor); padding: 2px 0 4px 8px; margin: 2px 0 4px; }
+.castpanel .cast-pending { color: #e8a33d; }
 .castpanel .cast-placelink.broken { color: #e07070; text-decoration: line-through; }
 .castpanel ul.cast-stamps li.off { opacity: .55; }
 .castpanel .cast-diff { margin-top: 6px; padding: 6px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; }

@@ -141,6 +141,27 @@ export function exportRecord(npc) {
     return out;
 }
 
+/**
+ * What may be written to a cast file: the base appearance (file plus lasting facts and lasting effects)
+ * and lasting facts only. Temporary appearance, temporary facts, and runtime (following, holds, rolls) stay out.
+ */
+export function authorRecord(npc) {
+    if (!npc?.id) return null;
+    const base = isObj(npc.base) ? npc.base : null;
+    const facts = Array.isArray(npc.facts) ? npc.facts.slice() : npc.facts;
+    if (Array.isArray(facts)) {
+        for (const t of Array.isArray(npc.temps) ? npc.temps : []) {
+            const text = typeof t === 'string' ? t : (t?.text ?? '');
+            const i = facts.lastIndexOf(text);
+            if (text && i >= 0) facts.splice(i, 1);
+        }
+    }
+    const looks = base ? (base.looks ?? '') : (npc.looks ?? '');
+    const body = base ? (base.body ?? '') : (npc.body ?? '');
+    const outfit = base ? (base.outfit ?? '') : (npc.outfit ?? '');
+    return exportRecord({ ...npc, looks, body, outfit, facts });
+}
+
 // ---- Place lore (docs/lore.md). A place has a sensory description (fed on moves and looks) and lore: background
 // knowledge, fed only when the narrator asks with [ws_flag: lore | Place] (or the ws_flag tool's "lore" action) or the
 // player writes [lore]. The narrator always sees a one-line index of the lore on file. Cast NPCs are written as
