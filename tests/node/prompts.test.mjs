@@ -286,12 +286,14 @@ const P = id => all.find(p => p.id === id);
 test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, keep the locked formats', () => {
     for (const id of ['narration.npc_tags', 'narration.npc_tools', 'narration.npc_tool']) {
         const t = P(id).text;
-        for (const w of ['fact', 'memory', 'disposition', 'remember tomorrow', 'lied to', 'threatened', 'helped', 'insulted', 'promise', 'point of view', 'one ', 'hostile, unfriendly, indifferent, friendly or helpful', 'reason']) assert.ok(t.includes(w), `${id}: ${w}`);
+        for (const w of ['fact', 'memory', 'disposition', 'appearance', 'remember tomorrow', 'lied to', 'threatened', 'helped', 'insulted', 'promise', 'point of view', 'one ', 'hostile, unfriendly, indifferent, friendly or helpful', 'reason']) assert.ok(t.includes(w), `${id}: ${w}`);
     }
     assert.equal(P('narration.npc_tags').locked, 'The game reads these [ws_npc: …] tags.');
     assert.equal(P('narration.npc_tools').locked, 'The game reads the ws_npc tool.');
     const tags = P('narration.npc_tags').text;
     assert.match(tags, /\[ws_npc: memory \| their-id \|/); assert.match(tags, /\[ws_npc: disposition \| their-id \| value \| short reason\]/);
+    assert.match(tags, /\[ws_npc: appearance \| their-id \|/);
+    assert.match(P('change.style').text, /people-here/);
     for (const [, body] of tags.matchAll(/\[ws_npc:\s*([^\]]+)\]/g)) if (!/their-id/.test(body)) assert.ok(parseNpcTag(body), `example parses: ${body}`);
     assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(P('narration.npc_tools').text));
 });
