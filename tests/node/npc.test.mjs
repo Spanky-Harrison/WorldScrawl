@@ -466,7 +466,7 @@ test('tiers: present people get summary lines; a look, focus, following or a fla
     assert.equal(npcTiers(present, none, { asked: ['Old Tam'] }).tam.topical, false, 'no history on the card, nothing to add');
 });
 
-test('name knowledge: per actor, from stamps and flags only, never from chat text', () => {
+test('name knowledge: per actor, from stamps only, never from chat text', () => {
     const chat = [user('Her name is Hesk, says the drunk.')];
     const [h] = presentAt(chat, 0, [rec()], env);
     assert.deepEqual(h.known, { known: false, reason: 'not known: shown as "the landlady"' });
@@ -474,8 +474,10 @@ test('name knowledge: per actor, from stamps and flags only, never from chat tex
     assert.match(s, /^the landlady \[hesk\] \(the player does not know this person's name yet; it is Hesk\..*\[ws_flag: name \| Hesk\]\)/);
     assert.equal(nameKnown(tam, [], 0).reason, 'known: no unknownAs on the card');
     const flaggedChat = [bot('Hesk glares.', { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Hesk'] }] })];
-    assert.deepEqual(nameKnown(rec(), flaggedChat, 0), { known: true, reason: 'known: flagged' });
-    assert.equal(nameKnown(rec(), flaggedChat, 0, 'tam').known, false, 'a flag is the player\'s, not everyone\'s');
+    const flagged = framesOf(flaggedChat, 0, [rec()])[0].get('hesk');
+    assert.equal(nameKnown(flagged, flaggedChat, 0).known, false, 'an npc flag means met, not named (#95 name tools name them)');
+    assert.equal(flagged.rel.player.state, 'met');
+    assert.equal(nameKnown(flagged, flaggedChat, 0, 'tam').known, false, 'a flag is the player\'s, not everyone\'s');
     const named = [bot('"I\'m Hesk," she says.', { [NPC_KEY]: [{ type: 'npc_name', id: 'hesk', who: 'player', source: 'flag', swipe: 0 }] })];
     const folded = framesOf(named, 0, [rec()])[0].get('hesk');
     assert.deepEqual(nameKnown(folded, named, 0), { known: true, reason: 'known: name flag' });

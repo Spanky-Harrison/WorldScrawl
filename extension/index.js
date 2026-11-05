@@ -28,7 +28,7 @@ import { mapState, openMapChannel, openMapWindow } from './mapwindow.mjs';
 import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
 import { changeEditUrl, mapCtx } from './patches.mjs';
-import { applyFacts, applyFound, learnNameOn, offerRemember, prepareNpcs } from './scene.mjs';
+import { applyFacts, applyFound, learnNameOn, offerRemember, prepareNpcs, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
 export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiveWorld, worldName, chatWorld, worldSeed, chatChanges, firstSentence } from './clock.mjs';
@@ -558,6 +558,23 @@ function registerSlashCommands() {
         }),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person to remember, e.g. Maren', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
         helpString: 'WorldScrawl: remember a person (no name: the person the narrator flagged most recently) from the story (an Approve / Adjust / Discard card). A no lasts until the scene changes.',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'ws-know',
+        callback: whenOn(async (_a, arg) => {
+            const chat = ctx().chat ?? [];
+            let id = chat.length - 1;
+            while (id > 0 && !chat[id]?.is_user) id--;
+            const msg = chat[id];
+            if (!msg?.is_user) { toastr.info('WorldScrawl: send a message first.'); return ''; }
+            const r = await setRelOn(msg, String(arg ?? ''));
+            if (!r.ok) { await addNotice({ kind: 'text', text: r.reason }); return ''; }
+            toastr.info(`WorldScrawl: ${r.name}: ${r.state}.`);
+            renderPatchCards();
+            return '';
+        }),
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'who and how well, e.g. Hesk | met', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: set how well you and a saved person know each other: unmet, met or named. The only way to move it back.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-name',

@@ -186,8 +186,15 @@ export function playSummary(play, placeName = a => a) {
     if (play.present) rows.push(['Scene', 'in your scene now']);
     const d = play.disposition?.player;
     rows.push(['Toward you', d ? `${d.value}${d.reason ? ` (${d.reason})` : ''}` : 'unknown']);
+    rows.push(['Knows you', relText(play.rel?.player)]);
     if (play.memory?.length) rows.push(['Remembers', play.memory.slice(-3).join('; ')]);
     return rows;
+}
+const REL_SHOWN = { unmet: "hasn't met you", met: "met you, doesn't know your name", named: 'knows your name' };
+/** "met you, doesn't know your name (message #4, memory)": the relationship state and the stamp that set it. */
+export function relText(r) {
+    if (!r?.state) return REL_SHOWN.unmet;
+    return `${REL_SHOWN[r.state] ?? r.state}${r.at != null ? ` (message #${r.at}${r.by ? `, ${r.by}` : ''})` : ''}`;
 }
 /** The in-play changes list: [{msg, type, text, off}], oldest first. */
 export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({ msg: x.msg, type: x.type, text: `${x.summary}${x.pending ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`, off: !!x.off }));
@@ -298,6 +305,7 @@ export function whyRows(play, placeName = a => a) {
         rows.push(['Sighting', g.active ? `${placeName(g.resolved)} around ${g.hour}:00, peak ${Math.round(g.chance * 100)}%. Today (day ${g.day}): chance now ${g.now}, roll ${g.roll}${g.seekRoll != null ? `, by-name roll ${g.seekRoll}` : ''} → ${g.wouldShow ? 'shows' : 'no-show'}${g.stamped ? ' (appearance stamped)' : ''}` : `${g.place}: ${g.note}`]);
     }
     rows.push(['Toward the player', `${w.disposition?.value ?? 'unknown'}${w.disposition?.reason ? ` (${w.disposition.reason})` : ''}`]);
+    rows.push(['Knows the player', relText(play.rel?.player)]);
     rows.push(['Memory', w.memory?.length ? w.memory.join('; ') : '(none)']);
     if (w.declined) rows.push(['Scene', 'a "no" to remembering them was said in this scene']);
     return rows;
