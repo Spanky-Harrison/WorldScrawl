@@ -4,7 +4,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -503,7 +503,7 @@ function mapInspect(chat, here) {
     } catch (e) { console.warn('[WorldScrawl] npc inspector failed', e); return null; }
 }
 /** "In this chat" edits from the map: stamps on the latest message, only if the chat, message and swipe are still the ones the map saw. */
-const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition']);
+const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition', 'npc_appearance']);
 async function npcChatEdit(d) {
     const c = ctx(), chat = c.chat ?? [];
     if (!d.chatId || d.chatId !== (c.chatId ?? c.getCurrentChatId?.())) return { ok: false, error: 'That chat is not open in SillyTavern any more.' };
@@ -528,7 +528,17 @@ function npcDetail(id) {
     const bits = [`Personality: ${npc.line}`];
     if (npc.manner) bits.push(`Manner: ${npc.manner}`);
     if (npc.voice) bits.push(`Speech: ${npc.voice}`);
-    if (npc.looks) bits.push(`Looks: ${npc.looks}`);
+    if (npc.base && (npc.base.looks || npc.base.body || npc.base.outfit)) {
+        bits.push(`Base Looks: ${npc.base.looks || '—'}`);
+        if (npc.base.body) bits.push(`Base Body: ${npc.base.body}`);
+        if (npc.base.outfit) bits.push(`Base Wearing: ${npc.base.outfit}`);
+    }
+    if (npc.effects?.length) bits.push(`Active effects: ${npc.effects.map(e => {
+        const lasts = e.lasts ? ` for ${e.lasts}m` : ' (lasting)';
+        const by = e.by === 'player' ? ', player edit' : '';
+        return `${e.intent}${lasts}${by}`;
+    }).join('; ')}`);
+    if (npc.looks) bits.push(`Looks now (${npc.appearanceHow || 'base'}): ${npc.looks}`);
     if (npc.body) bits.push(`Body: ${npc.body}`);
     if (npc.outfit) bits.push(`Wearing: ${npc.outfit}`);
     if (npc.memory?.length) bits.push(`Memory: ${npc.memory.join('; ')}`);
@@ -549,6 +559,14 @@ function toolNpcStamp(args = {}) {
     if (action === 'follow') return { type: 'npc_follow', id, who: PLAYER };
     if (action === 'stay') return { type: 'npc_stay', id };
     if (action === 'seek') return { type: 'npc_seek', id, day: npcClock(ctx().chat ?? [], (ctx().chat ?? []).length - 1).day };
+    if (action === 'appearance') {
+        const intent = String(args.intent ?? args.text ?? '').trim();
+        if (!intent) return null;
+        const lasts = lastsMinutes(args.lasts);
+        const stamp = { type: 'npc_appearance', id, intent, ...(args.fields != null && args.fields !== '' ? { fields: args.fields } : {}), ...(lasts ? { lasts } : {}) };
+        for (const f of ['looks', 'body', 'outfit']) if (typeof args[f] === 'string' && args[f].trim()) stamp[f] = String(args[f]).trim();
+        return stamp;
+    }
     return null;
 }
 

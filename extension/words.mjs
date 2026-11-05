@@ -32,7 +32,7 @@ export function parseWaitTag(body) {
 
 // ---- Lenient tag reading: the model's obvious short forms become the documented tags before any tag is read.
 export const FLAG_ACTIONS = ['change', 'discover', 'wait', 'sleep', 'npc', 'name', 'lore', 'found'];
-export const NPC_ACTIONS = ['fact', 'memory', 'disposition', 'leave', 'staying', 'follow', 'stay', 'seek'];
+export const NPC_ACTIONS = ['fact', 'memory', 'disposition', 'leave', 'staying', 'follow', 'stay', 'seek', 'appearance'];
 const ANY_WS_TAG = /\[\s*ws[_ ]([a-z]+)\s*(?:[:|]\s*([^\]]*?))?\s*\]/gi;
 const headAct = (rest, acts) => String(rest ?? '').replace(/^\s*([a-z]+)\s*(?:[:|]\s*|$)/i, (m, k) => (acts.includes(k.toLowerCase()) ? `${k.toLowerCase()}${m.trim().length > k.length || /\S/.test(rest.slice(m.length)) ? ' | ' : ''}` : m));
 /**
