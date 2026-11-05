@@ -190,7 +190,16 @@ export function playSummary(play, placeName = a => a) {
     return rows;
 }
 /** The in-play changes list: [{msg, type, text, off}], oldest first. */
-export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({ msg: x.msg, type: x.type, text: x.summary, off: !!x.off }));
+export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({ msg: x.msg, type: x.type, text: `${x.summary}${x.pending ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`, off: !!x.off }));
+const pad2 = n => String(n).padStart(2, '0');
+/** ' (lasting)', ' (until day 3 14:00)', ' (ended day 3 14:00)', ' (for 2h)': when a field change ends. */
+export function expiryText(e) {
+    if (!e) return '';
+    if (e.lasting) return ' (lasting)';
+    const u = e.until;
+    if (!u) return ` (for ${e.lasts}m)`;
+    return ` (${e.over ? 'ended' : 'until'} day ${u.day} ${pad2(u.hour)}:${pad2(u.minute)})`;
+}
 
 // ---- Diffs on submit, and "In this chat" edits as stamps.
 const show = v => (v === undefined || v === null || v === '' ? '' : typeof v === 'string' ? v : JSON.stringify(v));

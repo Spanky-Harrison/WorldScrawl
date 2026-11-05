@@ -22,9 +22,9 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | patches.mjs | Map patches (lasting changes) and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `FLAG_TAG` |
 | carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagCardView` |
 | discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration | `onReplyForFlags`, `flagMessage`, `registerTools` |
-| waits.mjs | Waits: model and player waits, Keep/Discard, patch cards | `planWait`, `proposeWait`, `renderPatchCards` |
+| waits.mjs | Waits: model and player waits, Approve/Discard, patch cards, lasting NPC changes waiting for Approve | `planWait`, `proposeWait`, `renderPatchCards` |
 | settings.mjs | The settings panel | `addSettingsPanel` |
-| npc.mjs | NPC play: stamps, presence, schedules, flags and tags, lore, context slices, `judgeFound` / `foundEditOk` (browser only; the parts the server uses too are in plugin/shared/npc.mjs) | `framesOf`, `npcSlices`, `presentAt`, `takeNpcTags`, `recordDiff` |
+| npc.mjs | NPC play: stamps, presence, schedules, flags and tags, lore, context slices, `judgeFound` / `foundEditOk` (browser only; the parts the server uses too are in plugin/shared/npc.mjs) | `framesOf` (temporary `lasts` fields expire in game time), `lastsMinutes`, `expiryOf`, `npcTarget`, `npcSlices`, `presentAt`, `takeNpcTags`, `recordDiff` |
 | actors.mjs | Per-actor positions and the party (browser only; the server never needs them) | `positionOf`, `playerAddress`, `positionsAt` |
 | shared.mjs | Loads plugin/shared/ once at startup from `<server>/shared/` (follows the Map server URL setting; a change reloads the page). If it fails, `sharedError` names the URL and startup shows it. Re-exports the prompt helpers (`render`, `setPrompts`, `hasPrompts`) | `calendar`, `patches`, `doorbar`, `weather`, `prompts`, `sharedError`, `sharedUrl` |
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
