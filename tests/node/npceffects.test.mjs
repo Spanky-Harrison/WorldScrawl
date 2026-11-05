@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     APPEARANCE_FIELDS, effectFields, effectSetKey, resolveAppearance, rebuildInputs,
-    alreadyShown, alreadyEffect, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
+    alreadyShown, alreadyEffect, planAppearanceRebuild, acceptAppearanceRebuild,
+    readAppearanceAnswer, sameAppearanceBase, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
     stampSummary, comingsAndGoings, npcAt, expiryOf,
 } from '../../extension/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
@@ -210,4 +211,77 @@ test('npcAt / expiryOf: appearance exposed with how and expiry', () => {
     const s = { type: 'npc_appearance', id: 'maren', intent: 'blonde', lasts: 60 };
     assert.equal(expiryOf(s, 0, 0, envClock).over, false);
     assert.equal(expiryOf(s, 0, 1, envClock).over, true);
+});
+
+
+test('plan/acceptAppearanceRebuild: needs model, covers fields, stale base/key, failed answer', () => {
+    const base = { looks: 'copper braids', body: 'sturdy', outfit: 'wool' };
+    const e = { intent: 'magically young', fields: ['body'] };
+    const npc = { id: 'hesk', name: 'Hesk', base, effects: [e], caches: {} };
+    const plan = planAppearanceRebuild(npc);
+    assert.ok(plan);
+    assert.equal(plan.key, 'magically young|body');
+    assert.deepEqual(plan.fields, ['body']);
+    assert.equal(plan.inputs.intents[0].intent, 'magically young');
+    assert.equal(planAppearanceRebuild({ ...npc, effects: [{ ...e, text: { body: 'young' } }] }), null);
+
+    const ok = acceptAppearanceRebuild(plan, { body: 'a young sturdy woman' }, npc);
+    assert.equal(ok.stamp?.type, 'npc_appearance_cache');
+    assert.equal(ok.stamp.body, 'a young sturdy woman');
+    assert.equal(ok.stamp.key, plan.key);
+
+    assert.deepEqual(acceptAppearanceRebuild(plan, { body: 'x' }, { ...npc, base: { ...base, looks: 'changed' } }), { stale: true });
+    assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'only looks' }, npc), { failed: true });
+    assert.deepEqual(acceptAppearanceRebuild(plan, null, npc), { failed: true });
+    assert.equal(readAppearanceAnswer({ body: '  young  ', looks: '' }).body, 'young');
+    assert.equal(sameAppearanceBase(base, { looks: 'copper braids', body: 'sturdy', outfit: 'wool' }), true);
+});
+
+test('full path: appearance tag → mocked rewrite → cache + Looks → expiry restores base', () => {
+    // Tag (no rewritten body text) → needsModel → accept mocked rewrite → Looks change → +1h restores base.
+    const tag = parseNpcTag('appearance | hesk | magically young | body | 1 hour');
+    assert.deepEqual(tag, { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body', lasts: 60 });
+
+    const chat = [
+        bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, tag]),
+    ];
+    const before = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(before.appearanceHow, 'pending');
+    assert.equal(before.body, 'sturdy'); // still base until cache
+    const plan = planAppearanceRebuild(before);
+    assert.ok(plan);
+    assert.deepEqual(plan.fields, ['body']);
+
+    const accepted = acceptAppearanceRebuild(plan, { body: 'a magically young, sturdy woman' }, before);
+    assert.ok(accepted.stamp);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...accepted.stamp });
+
+    const after = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(after.body, 'a magically young, sturdy woman');
+    assert.ok(['reuse', 'model'].includes(after.appearanceHow) || after.caches[plan.key], after.appearanceHow);
+    assert.equal(after.looks, 'copper braids');
+    assert.equal(after.base.body, 'sturdy');
+
+    // Advance game time past 1 hour: effect expires, base restored (no peel to a wrong layer).
+    chat.push(bot());
+    const expired = framesOf(chat, 1, [], clock).at(-1).get('hesk');
+    assert.equal(expired.body, 'sturdy');
+    assert.equal(expired.looks, 'copper braids');
+    assert.equal(expired.effects.length, 0);
+    assert.equal(expired.appearanceHow, 'base');
+});
+
+test('full path via takeNpcTags: strip tag, stamp, rebuild, Looks change', () => {
+    const reply = 'Hesk looks years younger. [ws_npc: appearance | hesk | magically young | body | 1 hour]';
+    const { stamps, text } = takeNpcTags(reply);
+    assert.equal(stamps.length, 1);
+    assert.equal(stamps[0].type, 'npc_appearance');
+    assert.ok(!/ws_npc/.test(text));
+
+    const chat = [bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, stamps[0]])];
+    const n = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    const plan = planAppearanceRebuild(n);
+    const { stamp } = acceptAppearanceRebuild(plan, { body: 'young Hesk' }, n);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').body, 'young Hesk');
 });
