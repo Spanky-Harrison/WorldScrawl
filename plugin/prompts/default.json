@@ -82,6 +82,7 @@
     "how_to_flag": "how the narrator should flag a new door: the tools version or the [ws_flag] tag version (the Narration pieces)",
     "kind": "what kind of place it is: \"region\", \"area\" or \"room\"",
     "label": "the name of a place the player already knows about",
+    "lines": "saved people who came or went since the last reply, one per line with the game time, e.g. [14:20] Hesk arrives.",
     "mentions": "other world text that names a changed place (from the Map changes piece), or empty",
     "name": "the name of the place (new or being changed)",
     "near": "the places near the new room",
@@ -1573,6 +1574,17 @@
           "name": "error",
           "generated": true
         }
+      ]
+    },
+    {
+      "id": "narration.npc_comings",
+      "title": "Narration: who came and went",
+      "description": "Alongside, inside {{npcs_present}}, when the player stayed put and time passed: saved people who arrived or left since the last reply, with the game time.",
+      "group": "narration",
+      "locked": "The game fills the lines from the schedules. People already in the scene never come or go here.",
+      "text": "Since your last reply:\n{{lines}}\nWork these in where the time fits.",
+      "placeholders": [
+        { "name": "lines" }
       ]
     },
     {

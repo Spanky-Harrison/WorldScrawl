@@ -4,7 +4,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -222,6 +222,8 @@ function npcPromptBits(loc) {
         const present = presentAt(chat, chat.length - 1, pack.npcs, env);
         const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
         const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
+        const comings = comingsAndGoings(chat, chat.length - 1, pack.npcs, env);
+        if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
         if (!present.length && !absent.length) return {};
         if (absent.some(l => /, somewhere off the map/.test(l))) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
