@@ -4,7 +4,7 @@
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses) }
 import { permanentProblem, liveSchedule } from './castdata.mjs';
-import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule } from './castdata.mjs';
+import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, formFromPlay, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 
 export function castPanel(doc, io) {
@@ -127,10 +127,12 @@ export function castPanel(doc, io) {
         if (tab === 'chatedit') return startEdit(r, null, 'chat');
         if (tab === 'summary') {
             const rec = r.rec?.ok ? r.rec : r.play ?? r.rec ?? {};
+            const app = cardAppearance(r.rec, r.play);
             const pairs = [['Id', r.id || '(none)'], ...(rec.unknownAs ? [['Known as', rec.unknownAs]] : []), ['Personality', rec.line || ''], ...(rec.manner ? [['Manner', rec.manner]] : []), ...(rec.voice ? [['Speech', rec.voice]] : []),
-                ...[['Looks', rec.looks], ['Body', rec.body], ['Outfit', rec.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
+                ...[['Looks', app.looks], ['Body', app.body], ['Outfit', app.outfit], ['History', rec.deep?.history]].filter(([, v]) => v),
                 ['Starts', r.rec?.disposition?.player ? `${r.rec.disposition.player.value}${r.rec.disposition.player.reason ? ` (${r.rec.disposition.player.reason})` : ''}` : 'unknown']];
             pane.append(kv(pairs));
+            if (app.changed) pane.append($('p', { class: 'muted cast-appearnote' }, 'Looks, Body and Outfit above are this chat. The cast file is unchanged (Edit: Base).'));
             // Live: the card's schedule with this chat's changes folded in; the entry in force is marked.
             const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
                 ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
