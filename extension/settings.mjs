@@ -38,6 +38,9 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Approve map changes without asking (skip the Approve / Discard card)</label>
       <label class="checkbox_label" title="Off: a room is only discovered when a door that isn't on the map is actually opened or entered. On: rooms the narration mentions (a hallway lined with guest rooms) may be added too."><input id="worldscrawl_proactive_discovery" type="checkbox"> Proactive room discovery (add rooms the narration mentions)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
+      <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes (adds how to report them to the prompt)</label>
+      <label class="checkbox_label"><input id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes</label>
+      <small>Tools for map changes, waits, and people. Movement stays on the setting below.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the Approve / Adjust / Discard card)</label>
       <div>Movement</div>
@@ -87,6 +90,12 @@ function addSettingsPanel() {
     const flagTags = document.getElementById('worldscrawl_flag_tags');
     flagTags.checked = !!settings().flagTags;
     flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });
+    const flagNpcs = document.getElementById('worldscrawl_flag_npcs');
+    flagNpcs.checked = settings().flagNpcs !== false;
+    flagNpcs.addEventListener('change', () => { settings().flagNpcs = flagNpcs.checked; applyTools(); applyFacts(); ctx().saveSettingsDebounced(); });
+    const reporterTools = document.getElementById('worldscrawl_reporter_tools');
+    reporterTools.checked = !!settings().reporterTools;
+    reporterTools.addEventListener('change', () => { settings().reporterTools = reporterTools.checked; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });
     document.querySelectorAll('input[name="worldscrawl_mode"]').forEach(r => {
         r.checked = r.value === settings().moveMode;
         r.addEventListener('change', () => { if (!r.checked) return; settings().moveMode = r.value; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });

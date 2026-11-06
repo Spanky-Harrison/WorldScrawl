@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, alreadyEffect, npcAt, claimWarnings } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { chatChanges, chatElapsed } from './clock.mjs';
 import { baseReply, duplicatePlace, nearbyRooms, noteCall } from './dig.mjs';
@@ -18,9 +18,22 @@ import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, 
 import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, judgeFoundNow, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
-function registerTools() {
+/** Movement tools follow moveMode. Reporter tools (flag, wait, and npc when that checkbox is on) are separate and default off. */
+export function toolsToRegister(s = {}, on = true) {
+    if (!on) return [];
+    const names = [];
+    if (s.moveMode === 'tools') names.push('ws_look', 'ws_move');
+    if (s.reporterTools) {
+        names.push('ws_flag', 'ws_wait');
+        if (s.flagNpcs !== false) names.push('ws_npc');
+    }
+    return names;
+}
+
+function registerTools(want) {
     const { registerFunctionTool } = ctx();
-    registerFunctionTool({
+    const use = name => !want || want.has(name);
+    if (use('ws_look')) registerFunctionTool({
         name: 'ws_look',
         displayName: 'WorldScrawl: Look',
         description: 'Get the characters\' current location in the world map: its name, description and the exits leading out of it. Use this before describing where the characters are or where they can go.',
@@ -28,7 +41,7 @@ function registerTools() {
         action: lookAction,
         formatMessage: () => 'Looking around...',
     });
-    registerFunctionTool({
+    if (use('ws_move')) registerFunctionTool({
         name: 'ws_move',
         displayName: 'WorldScrawl: Move',
         description: 'Move the characters through one of the current location\'s exits when the characters travel there. Returns the new location. If the direction is not valid, returns an error with the valid directions.',
@@ -41,7 +54,7 @@ function registerTools() {
         action: moveAction,
         formatMessage: ({ direction } = {}) => `Moving ${direction ?? ''}...`,
     });
-    registerFunctionTool({
+    if (use('ws_flag')) registerFunctionTool({
         name: 'ws_flag',
         displayName: 'WorldScrawl: Flag a map change',
         description: flagToolText(),
@@ -83,7 +96,7 @@ function registerTools() {
             pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
         formatMessage: ({ action } = {}) => action === 'wait' || action === 'sleep' ? 'Passing time...' : 'Noting a map change...',
     });
-    registerFunctionTool({
+    if (use('ws_wait')) registerFunctionTool({
         name: 'ws_wait',
         displayName: 'WorldScrawl: Wait or sleep',
         description: P('narration.wait_tool'),
@@ -103,7 +116,7 @@ function registerTools() {
         },
         formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
     });
-    registerFunctionTool({
+    if (use('ws_npc')) registerFunctionTool({
         name: 'ws_npc',
         displayName: 'WorldScrawl: A person here',
         description: P('narration.npc_tool'),
@@ -116,7 +129,7 @@ function registerTools() {
                 value: { type: 'string', enum: ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'], description: 'For disposition: their attitude toward the player now: hostile, unfriendly, indifferent, friendly, or helpful.' },
                 reason: { type: 'string', description: 'For disposition: a few words on why their attitude toward the player changed.' },
                 lasts: { type: 'string', description: 'For fact or appearance: how long it lasts in game time (e.g. "2 hours", "3 days") when it is temporary. Leave out for a lasting change.' },
-                intent: { type: 'string', description: 'For appearance: what changed (e.g. "magically young", "blonde hair", "polymorphed into a gnoll").' },
+                intent: { type: 'string', description: 'For appearance: what actually changed in Looks, Body or Outfit (e.g. "magically young", "soaked from the rain"). Not "looks" or "appeared", and not because they entered or were looked at.' },
                 fields: { type: 'string', description: 'For appearance: which of looks, body, outfit changed (comma-separated). Omit or "all" when a full rewrite.' },
                 looks: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Looks.' },
                 body: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Body.' },
@@ -429,11 +442,20 @@ export async function onReplyForFlags(id) {
         for (const s0 of stamped) {
             const t = npcTarget(folded, s0.id);
             if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`); continue; }
-            const s = t === s0.id ? s0 : { ...s0, id: t };
+            let s = t === s0.id ? s0 : { ...s0, id: t };
             const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
             // Skip re-firing facts/appearance the narrator already knows (look/examine churn).
             if (s.type === 'npc_fact' && alreadyShown(cur, s.text)) { noteCall(id, { kind: 'npc_fact', status: 'skipped', reason: 'already known' }); continue; }
-            if (s.type === 'npc_appearance' && alreadyEffect(cur, s.intent, s.fields)) { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
+            if (s.type === 'npc_appearance') {
+                const decision = judgeAppearance(cur, s);
+                if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
+                if (decision === 'reject') {
+                    noteNpcWarning(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`);
+                    continue;
+                }
+                const intent = appearanceIntent(s);
+                if (intent && intent !== s.intent) s = { ...s, intent };
+            }
             let stamp = s;
             if ((s.type === 'npc_fact' || s.type === 'npc_appearance') && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true }; // lasting waits for Approve
             if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };

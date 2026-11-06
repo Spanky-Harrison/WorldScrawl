@@ -2,10 +2,10 @@
 import { render as P, hasPrompts } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, placeStamp } from './actors.mjs';
 import { chatChanges, chatWorld, clockAt, rememberWorlds, worldSeed } from './clock.mjs';
-import { registerTools } from './discovery.mjs';
+import { registerTools, toolsToRegister } from './discovery.mjs';
 import { api, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
-import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld, toolsOn } from './index.js';
+import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld } from './index.js';
 import { displayName, keyFor, optionLines, partyText } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
 import { flagHint, mapCtx, patchSig, waitHint } from './patches.mjs';
@@ -106,17 +106,22 @@ function describe(loc) {
 
 function applyTools() {
     const c = ctx();
-    if (!toolsOn() || !isOn()) { TOOL_NAMES.forEach(n => { try { c.unregisterFunctionTool(n); } catch {} }); return; }
-    if (!hasPrompts()) { ensurePrompts().then(applyTools).catch(e => console.warn('[WorldScrawl]', e.message)); return; } // ws_wait's description is a prompt
-    registerTools();
+    const want = new Set(toolsToRegister(settings(), isOn()));
+    for (const n of TOOL_NAMES) if (!want.has(n)) { try { c.unregisterFunctionTool(n); } catch { /* not registered */ } }
+    if (!want.size) return;
+    // ws_flag, ws_wait and ws_npc take their descriptions from prompts. Look and move do not.
+    const needsPrompts = ['ws_flag', 'ws_wait', 'ws_npc'].some(n => want.has(n));
+    if (needsPrompts && !hasPrompts()) { ensurePrompts().then(applyTools).catch(e => console.warn('[WorldScrawl]', e.message)); return; }
+    registerTools(want);
 }
 
-/** Short system note at depth 1 so the model actually uses the tools (they are ignored without it on many models). */
+/** Movement nudge only when the model moves the party. Flag/wait tag hints only when reporter tools are off. */
 function applyNudge() {
-    const text = toolsOn() && isOn() ? String(settings().nudge ?? '').trim() : '';
+    const s = settings();
+    const text = s.moveMode === 'tools' && isOn() ? String(s.nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     if (!hasPrompts()) { ensurePrompts().catch(e => console.warn('[WorldScrawl]', e.message)); return; }
-    ctx().setExtensionPrompt(FLAGHINT_KEY, !toolsOn() && isOn() && settings().flagTags ? `${flagHint()}\n${waitHint()}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    ctx().setExtensionPrompt(FLAGHINT_KEY, !s.reporterTools && isOn() && s.flagTags ? `${flagHint()}\n${waitHint()}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
 export { aftermathNote, applyNudge, applyTools, chatKey, describe, expiryNarrated, postExpiredNotice };
