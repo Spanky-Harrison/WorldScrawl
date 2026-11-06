@@ -6,6 +6,7 @@ import { syncSwipeExtra } from './discovery.mjs';
 import { api } from './doors.mjs';
 import { exitsCache, renderAllExits } from './footer.mjs';
 import { MAP_URL, PATCH_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion } from './index.js';
+import { rememberToggle } from './expiry.mjs';
 import { applyFacts } from './scene.mjs';
 import { cardButton, renderPatchCards } from './waits.mjs';
 
@@ -183,7 +184,8 @@ export async function changeDependents(mi, pid) {
 }
 /** Turn a kept change off or on again (retroactively). It stays stored on its message; turned off, the replay skips it.
  *  Turning off with dependents and no `choice` returns {ok:false, confirm:{hard, overlaps}}: ask, then call again with
- *  choice 'all' (also turn those off), 'one' (just this one) or 'cancel'. Posts a hidden note the model doesn't see. */
+ *  choice 'all' (also turn those off), 'one' (just this one) or 'cancel'. The on/off state the last story reply saw
+ *  is stored on the patch. No chat row is added. */
 export async function toggleChange(mi, pid, { choice } = {}) {
     const c = ctx(), chat = c.chat ?? [], find = (i, id) => patchesOn(chat[i]).find(x => x.id === id);
     const p = find(mi, pid);
@@ -200,22 +202,22 @@ export async function toggleChange(mi, pid, { choice } = {}) {
             others = [...deps.hard, ...deps.overlaps].filter(d => d.msg != null && find(d.msg, d.id) && !find(d.msg, d.id).off);
         }
     }
-    for (const [i, id] of [[mi, pid], ...others.map(d => [d.msg, d.id])]) {
+    const touched = [[mi, pid], ...others.map(d => [d.msg, d.id])];
+    for (const [i, id] of touched) {
         const q = find(i, id);
+        if (!q) continue;
+        rememberToggle(chat, q, i, id, q.off === true);
         if (turningOn) delete q.off; else q.off = true;
         syncSwipeExtra(chat[i]);
     }
     const also = [...new Set(others.map(d => d.msg))].filter(i => i !== mi);
-    const text = `Map edit: turned ${turningOn ? 'on' : 'off'} the change from #${mi}${also.length ? ` (and the changes from ${also.map(i => `#${i}`).join(', ')})` : ''}`;
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text,
-        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[mi, pid], ...others.map(d => [d.msg, d.id])], worldscrawl_notice_on: turningOn } };
-    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    await c.saveChat?.();
     exitsCache.clear();
     await applyFacts();
     renderAllExits();
     renderPatchCards();
     broadcastMapState();
-    return { ok: true, off: !turningOn, msgs: [mi, ...also], text };
+    return { ok: true, off: !turningOn, msgs: [mi, ...also] };
 }
 globalThis.worldscrawlToggleChange = toggleChange;
 /** The small confirm before turning off a change others may need. Resolves 'all', 'one' or 'cancel'. */
