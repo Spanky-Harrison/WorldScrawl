@@ -3,7 +3,7 @@ import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, noticeRow, lockRow, markPending, resolvedText } from './notices.mjs';
 import { render as P } from './shared.mjs';
 import { normName } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, stampSummary } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
@@ -269,9 +269,11 @@ export function renderPatchCards() {
         const remember = msg.extra?.[REMEMBER_KEY], rememberCard = remember && remember.status === 'review' && (remember.swipe ?? 0) === swipeOf(msg);
         const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_seek', 'npc_decline'].includes(s.type));
         const foundNotes = (msg.extra?.[FOUND_KEY] ?? []).filter(x => x && (x.swipe ?? 0) === swipeOf(msg));
+        const npcWarns = (msg.extra?.[NPC_WARN_KEY] ?? []).filter(w => w && (w.swipe ?? 0) === swipeOf(msg));
+        const placeWarn = f && (f.swipe ?? 0) === swipeOf(msg) && f.personWarning ? f.personWarning : '';
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending) continue;
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -360,6 +362,9 @@ export function renderPatchCards() {
             card.append(d);
         }
         for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
+        const warnLine = text => { const d = line(`⚠ ${text}`); d.className = 'worldscrawl_npcwarn'; return d; };
+        if (placeWarn) card.append(warnLine(placeWarn));
+        for (const w of npcWarns) card.append(warnLine(w.text));
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
         for (const job of appearJobs(msg)) {

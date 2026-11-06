@@ -951,23 +951,51 @@ export const OP_DOCS = {
 };
 /** The op list for the change call's prompt, one line per op in OPS (in that order). */
 export const opDocs = () => OPS.filter(o => OP_DOCS[o]).map(o => OP_DOCS[o]).join('\n');
+// Card-field writes a place answer must not apply. A later schedule knock-on is an npc_schedule stamp
+// from its own caller, not one of these, so this list does not close that door.
+const PERSON_CARD_OPS = new Set(['update_npc', 'set_npc', 'update_person', 'set_person', 'npc_fact', 'npc_appearance', 'npc_memory', 'npc_disposition', 'set_personality', 'set_appearance']);
+/**
+ * Structured person payloads on a place answer (a people/npcs array, or a card-field op).
+ * Place text is not scanned for names. npc_schedule is not a card-field op and is left for the place preview.
+ */
+export function personClaimsOf(ans) {
+    if (!isObj(ans)) return [];
+    const claims = [];
+    for (const key of ['people', 'npcs', 'persons', 'person']) {
+        const v = ans[key];
+        if (Array.isArray(v)) claims.push(...v.filter(isObj));
+        else if (isObj(v)) claims.push(v);
+    }
+    if (Array.isArray(ans.ops)) for (const o of ans.ops) if (isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? ''))) claims.push(o);
+    return claims;
+}
+/** Warning when a place answer claimed a person-card write. Names come from the claim's id or name, not from place text. */
+export function personClaimWarning(claims) {
+    const who = [...new Set((claims ?? []).map(c => (typeof c?.name === 'string' && c.name.trim()) || (typeof c?.id === 'string' && c.id.trim()) || '').filter(Boolean))];
+    const names = who.length ? ` (${who.join(', ')})` : '';
+    return `Warning: a place change does not update a person's card${names}. That update was not written.`;
+}
 /**
  * The model's answer to the change call, normalized: {ops} to preview, {nothing: true}, or {cant: "why"} when the story
  * changed the map in a way no op can express (shown to the player plainly instead of forcing a wrong edit). Ops made by
  * the story get story: true on create_place (engine-made id, "expandable" respected) and lose any id the model wrote.
+ * Person-card claims are removed from the ops and returned as personClaims. They are not applied.
  */
 export function readChangeAnswer(ans) {
     if (!isObj(ans)) return null;
     const cant = str(ans.cant ?? ans.cannot ?? ans.cant_express);
     if (cant) return { cant: cant.slice(0, 300) };
-    if (!Array.isArray(ans.ops)) return null;
-    if (!ans.ops.length) return { nothing: true };
-    const ops = ans.ops.map(o => {
+    const claims = personClaimsOf(ans);
+    const withClaims = r => (claims.length ? { ...r, personClaims: claims } : r);
+    if (!Array.isArray(ans.ops)) return claims.length ? withClaims({ nothing: true }) : null;
+    const placeOps = ans.ops.filter(o => !(isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? ''))));
+    if (!placeOps.length) return withClaims({ nothing: true });
+    const ops = placeOps.map(o => {
         if (!isObj(o)) return o;
         if (o.op === 'create_place') { const { id, ...rest } = o; return { ...rest, story: true }; }
         return o;
     });
-    return { ops };
+    return withClaims({ ops });
 }
 
 /** A kept change's one-line text for the Changes tab: " · note: summary", with repeats dropped (a note that is just one of

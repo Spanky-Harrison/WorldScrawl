@@ -26,6 +26,61 @@ const LADDER = DISPOSITIONS;
 export const CARD_FIELDS = { line: 'line', 'personality.summary': 'line', 'personality.manner': 'manner', 'personality.speech': 'voice', manner: 'manner', voice: 'voice',
     'appearance.summary': 'looks', 'appearance.body': 'body', 'appearance.outfit': 'outfit', appearance: 'body', unknownAs: 'unknownAs' };
 
+export const NPC_WARN_KEY = 'worldscrawl_npcwarn';
+/**
+ * Whether a narrator stamp is visible on the folded person.
+ * 'waiting' is a lasting change still on its Approve notice. 'missed' is a claim that is not on the card.
+ * Appearance counts as landed once the effect is on the person (a pending rebuild is still that effect).
+ */
+export function claimResult(npc, stamp) {
+    if (!stamp || typeof stamp !== 'object') return 'missed';
+    if (stamp.pending === true) return 'waiting';
+    if (!npc) return 'missed';
+    if (stamp.type === 'npc_fact') {
+        const field = String(stamp.field ?? 'fact');
+        const text = String(stamp.text ?? '').trim();
+        if (!text) return 'missed';
+        if (CARD_FIELDS[field]) return String(npc[CARD_FIELDS[field]] ?? '').trim() === text ? 'landed' : 'missed';
+        if (field === 'history' || field === 'deep.history') return String(npc.deep?.history ?? '').trim() === text ? 'landed' : 'missed';
+        if (field === 'deep.secrets') return (npc.deep?.secrets ?? []).some(x => String(x).trim() === text) ? 'landed' : 'missed';
+        if (field.startsWith('deep.relationships.')) {
+            const who = field.slice('deep.relationships.'.length);
+            return String(npc.deep?.relationships?.[who] ?? '').trim() === text ? 'landed' : 'missed';
+        }
+        const facts = [...(npc.facts ?? []), ...(npc.temps ?? []).map(t => t?.text ?? t)];
+        return facts.some(f => String(f).trim() === text) ? 'landed' : 'missed';
+    }
+    if (stamp.type === 'npc_memory') {
+        const note = String(stamp.note ?? '').trim();
+        return note && (npc.memory ?? []).some(m => String(m).trim() === note) ? 'landed' : 'missed';
+    }
+    if (stamp.type === 'npc_disposition') {
+        const who = stamp.who || 'player';
+        return npc.disposition?.[who]?.value === stamp.value ? 'landed' : 'missed';
+    }
+    if (stamp.type === 'npc_appearance') {
+        const intent = String(stamp.intent ?? '').trim().toLowerCase();
+        if (!intent) return 'missed';
+        return (npc.effects ?? []).some(e => String(e.intent ?? '').trim().toLowerCase() === intent) ? 'landed' : 'missed';
+    }
+    return 'landed';
+}
+/** The warning line when a claimed person update is not on the card. */
+export function claimMissText(stamp, who = '') {
+    const name = who || stamp?.id || 'someone';
+    return `Warning: a person update for ${name} did not land on the card.`;
+}
+/** Warning lines for stamps that were applied and are not waiting, but are not on `npc`. */
+export function claimWarnings(npc, stamps) {
+    const who = npc?.name || '';
+    const out = [];
+    for (const s of stamps ?? []) {
+        if (claimResult(npc, s) !== 'missed') continue;
+        out.push(claimMissText(s, who || s?.id || ''));
+    }
+    return out;
+}
+
 const DAY_MINUTES = 1440;
 
 const cleanList = (v, cap) => (Array.isArray(v) ? v.map(x => (typeof x === 'string' ? x.trim().slice(0, 200) : '')).filter(Boolean).slice(0, cap) : []);

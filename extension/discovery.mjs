@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, alreadyEffect, npcAt } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, alreadyEffect, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { chatChanges, chatElapsed } from './clock.mjs';
 import { baseReply, duplicatePlace, nearbyRooms, noteCall } from './dig.mjs';
@@ -280,6 +280,7 @@ function syncSwipeExtra(msg) {
     si.extra = si.extra ?? {};
     if (msg.extra[PATCH_KEY]) si.extra[PATCH_KEY] = msg.extra[PATCH_KEY]; else delete si.extra[PATCH_KEY];
     if (msg.extra[NPC_KEY]) si.extra[NPC_KEY] = msg.extra[NPC_KEY]; else delete si.extra[NPC_KEY];
+    if (msg.extra[NPC_WARN_KEY]) si.extra[NPC_WARN_KEY] = msg.extra[NPC_WARN_KEY]; else delete si.extra[NPC_WARN_KEY];
     if (msg.extra[FOUND_KEY]) si.extra[FOUND_KEY] = msg.extra[FOUND_KEY]; else delete si.extra[FOUND_KEY];
     if (msg.extra[REMEMBER_KEY]) si.extra[REMEMBER_KEY] = msg.extra[REMEMBER_KEY]; else delete si.extra[REMEMBER_KEY];
     if (msg.extra[DECIDED_KEY]) si.extra[DECIDED_KEY] = msg.extra[DECIDED_KEY]; else delete si.extra[DECIDED_KEY];
@@ -416,9 +417,18 @@ export async function onReplyForFlags(id) {
         const clock = npcClock(c.chat, id);
         const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
         const appearIds = [];
+        const applied = [];
+        const noteNpcWarning = text => {
+            msg.extra = msg.extra ?? {};
+            const swipe = swipeOf(msg);
+            const list = Array.isArray(msg.extra[NPC_WARN_KEY]) ? msg.extra[NPC_WARN_KEY] : [];
+            if (list.some(w => w?.text === text && (w?.swipe ?? 0) === swipe)) return;
+            msg.extra[NPC_WARN_KEY] = [...list, { swipe, text }];
+            noteCall(id, { kind: 'warning', status: 'failed', reason: text });
+        };
         for (const s0 of stamped) {
             const t = npcTarget(folded, s0.id);
-            if (!t) { noteCall(id, { kind: `${s0.type}`, status: 'failed', reason: `no saved person has the id "${s0.id}"` }); continue; }
+            if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`); continue; }
             const s = t === s0.id ? s0 : { ...s0, id: t };
             const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
             // Skip re-firing facts/appearance the narrator already knows (look/examine churn).
@@ -432,8 +442,16 @@ export async function onReplyForFlags(id) {
                 if (place) stamp = { ...s, place };
             }
             addNpcStamp(msg, stamp);
-            // Temps apply at once: rebuild Looks now. Lasting waits for Approve.
+            applied.push(stamp);
+            // Temps apply at once: rebuild Looks now. Lasting appearance waits for Approve, then the same rebuild.
             if (s.type === 'npc_appearance' && stamp.pending !== true) appearIds.push(t);
+        }
+        const seen = new Set();
+        for (const s of applied) {
+            if (s.pending === true || seen.has(s.id)) continue;
+            seen.add(s.id);
+            const live = npcAt(c.chat, id, castPack()?.npcs ?? [], s.id);
+            for (const w of claimWarnings(live, applied.filter(x => x.id === s.id && x.pending !== true))) noteNpcWarning(w);
         }
         syncSwipeExtra(msg);
         await c.saveChat?.();
@@ -449,7 +467,7 @@ export async function onReplyForFlags(id) {
     }
     markUnreadTags();
     maybeSuggest(id);
-        if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length || (msg.extra?.[FOUND_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }
+        if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length || (msg.extra?.[FOUND_KEY] ?? []).length || (msg.extra?.[NPC_WARN_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }
 }
 const BADTAG_KEY = 'worldscrawl_badtags';
 export const BADTAG_TITLE = "WorldScrawl couldn't read this tag";
