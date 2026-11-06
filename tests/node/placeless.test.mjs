@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveNear } from '../../plugin/shared/npc.mjs';
+import { resolveNear, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, FOUND_KEY, absentAt, foundEditOk, framesOf, judgeFound, nameKnown, nameStampFor, nearPhrase, offMapReport, offmapAbsentLine, presentAt, scheduleAt, withinNear } from '../../extension/npc.mjs';
+import { NPC_KEY, FOUND_KEY, absentAt, comingsAndGoings, foundEditOk, framesOf, judgeFound, nameKnown, nameStampFor, nearPhrase, npcWhy, offMapReport, offmapAbsentLine, presentAt, scheduleAt, whoAt, withinNear } from '../../extension/npc.mjs';
+import { liveSchedule } from '../../plugin/ui/castdata.mjs';
 import { loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { load_world } from '../../plugin/world.mjs';
 import { permanentSchedule } from '../../plugin/ui/castdata.mjs';
@@ -200,6 +201,84 @@ test('[name] records the same per-actor name stamp as the narrator flag, and the
     const flag = rejected.find(e => e.kind === 'flag' && e.label === '[found]');
     assert.equal(flag.status, 'rejected');
     assert.match(flag.text, /not within/);
+});
+
+test('a display-name rewrite does not take her off a stop that is still on the map', () => {
+    const YARD = 'riverton:drowned_rat/yard';
+    const liveRooms = new Set([BAR, UP, SQUARE, YARD]);
+    const onMap = a => liveRooms.has(a);
+    const nearIndex = { rooms: liveRooms, subs: new Set([RAT]), regions: new Set(['riverton']), stubs, nameOf: a => names[a] ?? a, exists: onMap, relocate: {} };
+    const card = validateRecord({
+        id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', line: 'The landlady.',
+        schedule: [
+            { place: BAR, activity: 'pouring drinks', from: '16:00', to: '02:00', importance: 'high' },
+            { activity: 'asleep', where: 'her own room', near: RAT },
+        ],
+    }, { file: 'hesk.json', places: liveRooms, nearIndex });
+    assert.equal(card.ok, true, card.problems.join('; '));
+    const indexFor = (exists, relocate) => ({ ...nearIndex, exists, relocate });
+    const envAt = (relocate, exists = onMap, here = BAR, hour = 18) => ({
+        exists, relocate, names: () => 'Uncommon Room (The Uncommon Room)', index: indexFor(exists, relocate),
+        playerAt: () => here, clock: () => ({ day: 1, hour, minute: 0, minutes: hour * 60, elapsed: hour * 3600 }),
+    });
+    const chat = [msg('A spell renames the taproom.')];
+    const cast = [card];
+    // The room is still at its address. A leftover redirect must not skip the bar shift.
+    const leftover = { [BAR]: YARD };
+    const pouring = scheduleAt(card, { minutes: 18 * 60 }, envAt(leftover));
+    assert.equal(pouring.address, BAR);
+    assert.equal(pouring.how, 'here');
+    assert.equal(pouring.activity, 'pouring drinks');
+    assert.equal(pouring.offmap, undefined);
+    assert.deepEqual(resolveSchedulePlace(BAR, { exists: onMap, relocate: leftover }), { ok: true, address: BAR, how: 'here' });
+    const present = presentAt(chat, 0, cast, envAt(leftover));
+    assert.deepEqual(present.map(p => [p.id, p.activity]), [['hesk', 'pouring drinks']]);
+    assert.equal(whoAt(chat, 0, cast, envAt(leftover), BAR).find(x => x.id === 'hesk').here, true);
+    const why = npcWhy(framesOf(chat, 0, cast)[0].get('hesk'), 0, envAt(leftover));
+    const rows = liveSchedule(card, { record: card, why });
+    assert.equal(rows.find(r => r.activity === 'pouring drinks').current, true);
+    assert.equal(rows.find(r => r.activity === 'asleep').current, false);
+    // Toggle the leftover off. She stays; the match never used the display name.
+    assert.equal(scheduleAt(card, { minutes: 18 * 60 }, envAt({})).address, BAR);
+    assert.deepEqual(presentAt(chat, 0, cast, envAt({})).map(p => p.id), ['hesk']);
+    // Morning: the subregion near is not the room, so she is asleep off the map, not pouring because the player is here.
+    const morning = scheduleAt(card, { minutes: 8 * 60 }, envAt(leftover, onMap, BAR, 8));
+    assert.equal(morning.offmap, true);
+    assert.equal(morning.address, null);
+    assert.equal(morning.activity, 'asleep');
+    assert.equal(morning.near.scope, 'subregion');
+    assert.equal(morning.near.address, RAT);
+    assert.notEqual(morning.near.address, BAR);
+    assert.deepEqual(presentAt(chat, 0, cast, envAt(leftover, onMap, BAR, 8)), []);
+    assert.equal(whoAt(chat, 0, cast, envAt(leftover, onMap, BAR, 8), BAR).find(x => x.id === 'hesk').here, false);
+    // An empty near stays "nowhere named", not a room.
+    const loose = validateRecord({ id: 'ann', name: 'Ann', line: 'A clerk.', schedule: [{ activity: 'wandering', where: 'about' }] }, { file: 'ann.json', places: liveRooms, nearIndex });
+    const wander = scheduleAt(loose, { minutes: 12 * 60 }, envAt({}, onMap, BAR, 12));
+    assert.equal(wander.offmap, true);
+    assert.equal(wander.near.kind, 'none');
+    assert.deepEqual(presentAt(chat, 0, [loose], envAt({}, onMap, BAR, 12)), []);
+    // A real merge: the old room is gone, so the stop follows relocate. It does not stay on the missing address.
+    const merged = scheduleAt(card, { minutes: 18 * 60 }, envAt({ [BAR]: YARD }, a => a === YARD, YARD));
+    assert.equal(merged.how, 'merged');
+    assert.equal(merged.address, YARD);
+    assert.equal(merged.activity, 'pouring drinks');
+    assert.deepEqual(presentAt(chat, 0, cast, envAt({ [BAR]: YARD }, a => a === YARD, YARD)).map(p => p.activity), ['pouring drinks']);
+    assert.deepEqual(presentAt(chat, 0, cast, envAt({ [BAR]: YARD }, a => a === YARD, BAR)), []);
+    // A real delete whose redirect is also gone falls through to sleep. Not the upstairs neighbor, not a world start.
+    const burned = scheduleAt(card, { minutes: 18 * 60 }, envAt({ [BAR]: 'riverton:nowhere' }, a => a === UP));
+    assert.equal(burned.offmap, true);
+    assert.equal(burned.activity, 'asleep');
+    assert.equal(burned.address, null);
+    const expired = resolveSchedulePlace(BAR, { exists: a => a === UP, relocate: { [BAR]: 'riverton:nowhere' } });
+    assert.deepEqual({ ok: expired.ok, how: expired.how }, { ok: false, how: 'expired' });
+    assert.equal('address' in expired, false);
+    // Follow only while the source is gone, and stop at the first room that exists.
+    assert.deepEqual(resolveSchedulePlace(BAR, { exists: a => a === YARD || a === UP, relocate: { [BAR]: YARD, [YARD]: UP } }), { ok: true, address: YARD, how: 'merged' });
+    // Arrivals still notice the 16:00 stop when the bar address is a leftover redirect.
+    const wait = [{ mes: 'The rain keeps on.', is_user: false }, msg('I wait until evening.')];
+    const clocks = [{ day: 1, hour: 15, minute: 30, minutes: 15 * 60 + 30, elapsed: 15 * 3600 + 1800 }, { day: 1, hour: 16, minute: 30, minutes: 16 * 60 + 30, elapsed: 16 * 3600 + 1800 }];
+    const arrive = { ...envAt(leftover), playerAt: () => BAR, clock: i => clocks[i] };
+    assert.deepEqual(comingsAndGoings(wait, 1, cast, arrive), ['[16:00] the landlady arrives.']);
 });
 
 test('found: a dynamically discovered room inside the near subregion counts as within it', () => {
