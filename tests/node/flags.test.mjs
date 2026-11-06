@@ -431,4 +431,51 @@ test('flag gates block tracker proposals and still allow a pasted tag; a swipe d
         Object.assign(s, saved);
     }
 });
+
+test('npcEnv exists means the live map: a leftover relocate does not hide a room that is still there', async () => {
+    const { npcEnv } = await import('../../extension/scene.mjs');
+    const { rememberWorlds } = await import('../../extension/clock.mjs');
+    const { validateRecord } = await import('../../plugin/npc.mjs');
+    const { scheduleAt } = await import('../../extension/npc.mjs');
+    const BAR = 'riverton:drowned_rat/common_room';
+    const UP = 'riverton:drowned_rat/upstairs';
+    const YARD = 'riverton:drowned_rat/yard';
+    const RAT = 'riverton:drowned_rat';
+    const card = validateRecord({
+        id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', line: 'The landlady.',
+        schedule: [
+            { place: BAR, activity: 'pouring drinks', from: '16:00', to: '02:00', importance: 'high' },
+            { activity: 'asleep', where: 'her own room', near: RAT },
+        ],
+    }, { file: 'hesk.json', places: new Set([BAR, UP, YARD]) });
+    const PATCH = 'worldscrawl_patches';
+    const stamp = (relocate, off = false) => [{ mes: 'The room changes.', is_user: false, extra: { [PATCH]: [{ type: 'patch', swipe: 0, off, relocate }] } }];
+    const world = places => rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [card], places: [...places], subs: [RAT], regions: ['riverton'], elsewhere: [] }] });
+    const evening = { minutes: 18 * 60 };
+    world([BAR, UP, YARD]);
+    const on = npcEnv(stamp({ [BAR]: YARD }), { address: BAR, name: 'Uncommon Room', display_name: 'Uncommon Room (The Uncommon Room)' });
+    assert.equal(on.exists(BAR), true);
+    assert.equal(on.exists(RAT), false);
+    assert.equal(on.playerAt(0), BAR);
+    const pouring = scheduleAt(card, evening, on);
+    assert.equal(pouring.address, BAR);
+    assert.equal(pouring.how, 'here');
+    assert.equal(pouring.activity, 'pouring drinks');
+    const off = npcEnv(stamp({ [BAR]: YARD }, true), { address: BAR });
+    assert.deepEqual(off.relocate, {});
+    assert.equal(scheduleAt(card, evening, off).address, BAR);
+    world([YARD]);
+    const merged = npcEnv(stamp({ [BAR]: YARD }), { address: BAR });
+    assert.equal(merged.exists(BAR), false);
+    assert.equal(scheduleAt(card, evening, merged).address, YARD);
+    assert.equal(scheduleAt(card, evening, merged).how, 'merged');
+    world([UP]);
+    const burned = npcEnv(stamp({ [BAR]: 'riverton:nowhere' }), { address: BAR });
+    const asleep = scheduleAt(card, evening, burned);
+    assert.equal(asleep.offmap, true);
+    assert.equal(asleep.address, null);
+    assert.equal(asleep.near?.address, RAT);
+    assert.equal(asleep.near?.scope, 'subregion');
+    assert.equal(burned.playerAt(0), BAR);
+});
 }
