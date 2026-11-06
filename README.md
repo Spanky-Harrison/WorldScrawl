@@ -230,12 +230,12 @@ The **Cast** button turns the side panel into the cast browser: search by name, 
 Clicking a room on the map filters by it; a place in a record jumps to it on the map. People markers on the rooms
 show where everyone is now (with a chat open) or every scheduled place (without one); the legend's checkbox hides them.
 
-The open person uses the same tabs as a place. **Resolved** is the effective card: each row says where it came from
-(`cast file`, `message #N`, `effect: …`, `pending rebuild`, or `stale`). Personality comes from the folded card when
-a chat is open. Looks, Body and Outfit are the narrator text once a rebuild has landed; while a rebuild is pending
-the row says so, and an old preview is marked stale. When an effect changed them, Base looks, Base body and Base
-outfit are their own rows. The live schedule stays under that card (← now, card versus this chat, follow, stay and
-found). **State** is where they are and why (rolls, following, staying, found, relationship, memories, scene) plus
+The open person uses the same tabs as a place. **Resolved** is the live card only: each row says where that
+live value came from (`cast file`, `message #N`, `effect: …`, or `pending rebuild`). Personality comes from the
+folded card when a chat is open. Looks, Body and Outfit are the current appearance; while a rebuild is pending
+the row says so. The file's original text stays on **Raw**, not as a second Resolved row. Facts from this chat
+show on Resolved with the message that stamped them. The live schedule stays under that card (← now, card versus
+this chat, follow, stay and found). **State** is where they are and why (rolls, following, staying, found, relationship, memories, scene) plus
 the old "In this chat" block. **Raw** is the cast file, or the played record when there is no file. **Warnings**
 lists loader problems. **Changes** lists stamps, each linked to its message.
 

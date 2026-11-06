@@ -237,61 +237,28 @@ function narrExtras(play, field) {
     }
     return out;
 }
-function baseExtras(play, field) {
-    const active = activeEffectKeys(play);
-    const out = factLabels(play, APP_FACT[field]);
-    for (const s of onStamps(play)) {
-        if (s.type === 'npc_appearance' && s.lasting && (s.fields ?? APP).includes(field) && !active.has(effectKeyOf(s))) {
-            out.push(`message #${s.msg}`);
-            if (s.intent) out.push(`effect: ${s.intent}`);
-        }
-    }
-    return out;
-}
 function appearanceRows(rec, play) {
     const file = { looks: rec?.looks ?? '', body: rec?.body ?? '', outfit: rec?.outfit ?? '' };
-    const base = play?.base ?? file;
     if (play?.appearanceHow === 'pending') {
         const rows = APP.map(k => ({ key: APP_NAME[k], value: 'pending rebuild', source: 'pending rebuild', pending: true, landed: false }));
-        const seen = new Set();
-        const addStale = (k, value) => {
-            const id = `${k}:${value}`;
-            if (!value || seen.has(id)) return;
-            seen.add(id);
-            rows.push({ key: `${APP_NAME[k]} preview`, value, source: 'stale', stale: true, landed: false });
-        };
-        const cur = play.appearanceKey ?? '';
-        for (const [key, entry] of Object.entries(play.caches ?? {})) {
-            if (!entry || typeof entry !== 'object' || key === cur) continue;
-            for (const k of APP) addStale(k, entry[k]);
-        }
-        for (const k of APP) if ((play[k] ?? '') !== (base[k] ?? '')) addStale(k, play[k]);
-        const touched = new Set((play.effects ?? []).flatMap(e => (e.fields?.length ? e.fields : APP)));
-        if (touched.has('body') || touched.has('outfit')) touched.add('looks');
         const pendingFx = (play.effects ?? []).map(e => (e.intent ? `effect: ${e.intent}` : '')).filter(Boolean);
-        for (const row of rows) if (row.pending && pendingFx.length) row.source = ['pending rebuild', ...pendingFx].join(', ');
-        for (const k of APP) if (touched.has(k)) {
-            const baseV = base[k] ?? '';
-            rows.push({ key: `Base ${k}`, value: baseV || '(none)', source: fieldSource(play, rec, baseV, file[k], baseExtras(play, k)), landed: false });
-        }
+        for (const row of rows) if (pendingFx.length) row.source = ['pending rebuild', ...pendingFx].join(', ');
         return rows;
     }
     const eff = play ? { looks: play.looks ?? '', body: play.body ?? '', outfit: play.outfit ?? '' } : file;
     const rows = [];
-    const effects = play?.effects ?? [];
     for (const k of APP) {
-        if (!(eff[k] || base[k] || file[k])) continue;
+        if (!(eff[k] || file[k])) continue;
         rows.push({ key: APP_NAME[k], value: eff[k], source: fieldSource(play, rec, eff[k], file[k], play ? narrExtras(play, k) : []), landed: !!play });
-        if (effects.length && (eff[k] ?? '') !== (base[k] ?? '')) rows.push({ key: `Base ${k}`, value: base[k] || '(none)', source: fieldSource(play, rec, base[k], file[k], baseExtras(play, k)), landed: false });
     }
     return rows;
 }
 const dispText = d => (!d?.value || d.value === 'unknown' ? 'unknown' : `${d.value}${d.reason ? ` (${d.reason})` : ''}`);
 /**
  * Resolved rows for one person: {key, value, source, landed?, pending?, stale?}.
- * Personality comes from the folded card when a chat is open. Looks/Body/Outfit are the narrator text once a
- * rebuild has landed. While a rebuild is pending the row says so — cast-file prose is not labeled as narrator text.
- * An old cache, or a partial preview, is marked stale. Base looks/body/outfit are their own rows when an effect changed them.
+ * Personality comes from the folded card when a chat is open. Looks/Body/Outfit are the live appearance.
+ * While a rebuild is pending the row says so — cast-file prose is not labeled as narrator text.
+ * Source labels describe that live row. The file's original text stays on Raw.
  */
 export function resolvedCard(rec, play) {
     const file = rec && (rec.ok || rec.file || rec.raw) ? rec : null;
@@ -309,6 +276,13 @@ export function resolvedCard(rec, play) {
     rows.push(...appearanceRows(file, play));
     const history = play ? (play.deep?.history ?? '') : (file?.deep?.history ?? '');
     text('history', 'History', history, file?.deep?.history ?? '', TEXT_FACT.history);
+    const facts = play ? [...(play.facts ?? [])] : [...(file?.facts ?? [])];
+    if (facts.length) {
+        const fileFacts = (file?.facts ?? []).join('; ');
+        const now = facts.join('; ');
+        const labels = play ? onStamps(play).filter(s => s.type === 'npc_fact' && (s.field || 'fact') === 'fact').map(s => `message #${s.msg}`) : [];
+        rows.push({ key: 'Facts', value: now, source: fieldSource(play, file, now, fileFacts, labels) });
+    }
     const d = play?.disposition?.player ?? file?.disposition?.player;
     const dFile = dispText(file?.disposition?.player);
     const dNow = dispText(d);

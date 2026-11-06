@@ -211,6 +211,8 @@ async function analyzeFlag(id) {
         for (let tries = 0; tries < 2; tries++) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
             const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
+            if (ans?.personClaims?.length && pl.personClaimWarning) f.personWarning = pl.personClaimWarning(ans.personClaims);
+            else if (ans) delete f.personWarning;
             if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
             if (ans?.nothing) { f.status = 'nothing'; return; }
             ops = ans?.ops ?? null;
