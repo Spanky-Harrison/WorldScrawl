@@ -1,7 +1,7 @@
 // Shared by the server plugin and the extension (served at /api/plugins/worldscrawl/shared/npc.mjs). Pure: no DOM, Node or fetch.
 // NPC records, stamps and context slices. The server stores nothing during play: a cast file is the
 // template, and every change is a stamp on the message (extra.worldscrawl_npc), per swipe.
-// Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
+// A schedule address matches a room still on the live map. A relocate map is followed only when that address is gone. A bad entry is marked, never thrown.
 import { slug } from './ids.mjs';
 
 export const MEMORY_CAP = 8;
@@ -54,14 +54,22 @@ export function str(v, max) {
     return t;
 }
 
-/** Follow a relocate map. Expired (removed, and the target is gone) is not a crash. Missing means it was never here. */
+/**
+ * Where a schedule address is on the live map. `exists` means that address is a room there.
+ * A room that is still on the map matches (`here`), even if a patch also lists it in `relocate`
+ * (a rename can leave a leftover redirect). Display names are not consulted.
+ * Relocate is followed only when the address is gone: a real move, merge, or delete. The walk
+ * stops at the first room that exists (`merged`). If the chain runs out, the stop is `expired`.
+ * If it was never on the map and nothing redirects it, `missing`. Neighbor, subregion entrance,
+ * and world-start fallbacks are not used: a stop that is truly gone does not land somewhere else.
+ */
 export function resolveSchedulePlace(place, { exists, relocate = {} } = {}) {
-    const live = a => typeof a === 'string' && a && exists?.(a) && !Object.prototype.hasOwnProperty.call(relocate, a);
-    if (live(place)) return { ok: true, address: place, how: 'here' };
+    const onMap = a => typeof a === 'string' && !!a && !!exists?.(a);
+    if (onMap(place)) return { ok: true, address: place, how: 'here' };
     let a = place;
     const seen = new Set();
-    while (typeof a === 'string' && relocate[a] && !seen.has(a) && seen.size < 32) { seen.add(a); a = relocate[a]; }
-    if (live(a)) return { ok: true, address: a, how: 'merged' };
+    while (typeof a === 'string' && a && !onMap(a) && relocate[a] && !seen.has(a) && seen.size < 32) { seen.add(a); a = relocate[a]; }
+    if (onMap(a) && a !== place) return { ok: true, address: a, how: 'merged' };
     if (seen.size || (typeof place === 'string' && Object.prototype.hasOwnProperty.call(relocate, place))) return { ok: false, how: 'expired', from: place };
     return { ok: false, how: 'missing', from: place };
 }

@@ -74,8 +74,10 @@ function baseCastPack() {
     const id = activeWorld || defaultWorldId;
     return (id && worldCasts.get(id)) || (defaultWorldId && worldCasts.get(defaultWorldId)) || null;
 }
-// The one live-map lookup for every NPC-side check (found, follow/stay, near, sightings, people here): the world's
-// places plus the rooms this chat's map changes made, minus removed/moved ones. Refreshed from the server whenever
+// The live map for every NPC-side check (found, follow/stay, near, sightings, people here, schedules):
+// the world's places plus rooms this chat's map changes made. The server's effective map already drops
+// removed and moved rooms, so exists is "on that map", not "on the map and absent from relocate".
+// resolveSchedulePlace follows a relocate key only when the address is missing here. Refreshed whenever
 // the chat's active patches change (refreshLivePlaces); until then, and with no patches, the world's own places.
 let livePlaces = null; // { key, pack }
 const liveKey = () => `${activeWorld || defaultWorldId}\u0000${patchSig()}`;
@@ -118,7 +120,7 @@ function npcEnv(chat, loc) {
     const relocate = chatRelocate(chat);
     const addresses = pack?.places ?? new Set();
     const end = Math.max(0, (chat?.length ?? 1) - 1);
-    const exists = a => !!a && addresses.has(a) && !Object.prototype.hasOwnProperty.call(relocate, a);
+    const exists = a => !!a && addresses.has(a);
     const rawAt = i => (i >= end && loc?.address ? loc.address : (positionOf(chat, Math.min(Math.max(i, 0), end), PLAYER)?.address || loc?.address || ''));
     return {
         exists, relocate,
