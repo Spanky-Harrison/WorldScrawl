@@ -446,7 +446,7 @@ async function runTracker(id) {
         if (!loc?.name && !loc?.address) { noteCall(id, { kind: 'tracker', status: 'skipped', reason: 'place unavailable' }); return; }
         const weather = placeWeatherNow(loc)?.line ?? '';
         const people = listedPeople(chat, id, loc);
-        const scrap = trackerScrap({ placeName: loc?.name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people) });
+        const scrap = trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people) });
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id });
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg) return;

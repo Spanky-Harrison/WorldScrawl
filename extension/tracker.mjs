@@ -1,5 +1,5 @@
 // After-reply bookkeeper. Hit 1 (the verb check) and hit 2 (the narrator) do not report state.
-// This pass reads only the latest exchange plus a short list of what is already on the card.
+// This pass is one question. It reads the latest exchange plus the live fields it may change, not earlier chat.
 import { render as P } from './shared.mjs';
 import { FOUND_KEY, NPC_KEY, NPC_WARN_KEY } from './npc.mjs';
 
@@ -34,24 +34,47 @@ export function playerLineBefore(chat, id) {
     return String(playerBefore(chat, id)?.mes ?? '');
 }
 
-/** One line per person: id plus the appearance fields (and known facts) already on the card. */
+const bare = v => String(v ?? '').trim().replace(/\.+$/, '');
+const textOf = v => bare(v) || '(none)';
+const listOf = v => {
+    const items = (Array.isArray(v) ? v : []).map(bare).filter(Boolean);
+    return items.length ? items.join('; ') : '(none)';
+};
+/** The place line: the room name and the display name. "Uncommon Room" plus "Uncommon Room (The Uncommon Room)" reads as the display name. */
+function placeTitle(placeName, displayName) {
+    const name = String(placeName ?? '').trim();
+    const display = String(displayName ?? '').trim();
+    if (display && name && display !== name) return display.startsWith(name) ? display : `${name} (${display})`;
+    return display || name || 'here';
+}
+/** One line per person: every field the tracker may write for someone who is here. */
 export function trackerPeopleLines(people) {
     const lines = (people ?? []).map(p => {
         if (!p?.id && !p?.name) return '';
-        const bits = [`${p.name || p.id} [${p.id || p.name}]`];
-        if (p.looks) bits.push(`Looks: ${p.looks}`);
-        if (p.body) bits.push(`Body: ${p.body}`);
-        if (p.outfit) bits.push(`Outfit: ${p.outfit}`);
-        if (p.stance) bits.push(`Stance toward the player: ${p.stance}`);
-        if (p.facts?.length) bits.push(`Known facts: ${p.facts.join('; ')}`);
-        return bits.join('. ');
+        const stance = bare(p.stance);
+        const reason = bare(p.stanceReason);
+        const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
+        return [
+            `${p.name || p.id} [${p.id || p.name}]`,
+            `Looks: ${textOf(p.looks)}`,
+            `Body: ${textOf(p.body)}`,
+            `Outfit: ${textOf(p.outfit)}`,
+            `Known facts: ${listOf(p.facts)}`,
+            `Memories: ${listOf(p.memory ?? p.memories)}`,
+            `Stance toward the player: ${stanceLine}`,
+        ].join('. ');
     }).filter(Boolean);
     return lines.join('\n') || '(none)';
 }
-/** The scrap the tracker is allowed to see. Weather is listed so a foggy sky is not mistaken for a new fact about the room. */
-export function trackerScrap({ placeName = '', placeDescription = '', weather = '', peopleLines = '(none)' } = {}) {
+/**
+ * The scrap for the one after-reply question. The full place name, display name, and description,
+ * the known weather, and each person here. No earlier chat. Weather is listed so a foggy sky is not
+ * mistaken for a new fact about the room.
+ */
+export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', weather = '', peopleLines = '(none)' } = {}) {
     return [
-        `This place: ${placeName || 'here'}${placeDescription ? ` — ${clip(placeDescription, 240)}` : ''}`,
+        `This place: ${placeTitle(placeName, displayName)}`,
+        `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
         `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
         `People here:\n${peopleLines || '(none)'}`,
     ].join('\n');

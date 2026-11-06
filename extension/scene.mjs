@@ -42,16 +42,20 @@ export function loreBits(loc) {
         lore_fed: fed.length ? P('narration.lore_block', { lore: fed.map(c => `- ${c.name}: ${c.text}`).join('\n') }) : '',
     };
 }
-/** People here, with the appearance fields already on the card, for the after-reply tracker. Not the narrator prompt. */
+/** People here, with every field the after-reply tracker may change. Not the narrator prompt. */
 export function listedPeople(chat, id, loc) {
     const pack = castPack();
     if (!pack?.npcs?.length || !chat?.length) return [];
     try {
         const env = npcEnv(chat, loc);
-        return presentAt(chat, id, pack.npcs, env).map(p => ({
-            id: p.id, name: p.name, looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
-            facts: (p.facts ?? []).slice(0, 6), stance: p.disposition?.[PLAYER]?.value || '',
-        }));
+        return presentAt(chat, id, pack.npcs, env).map(p => {
+            const stance = p.disposition?.[PLAYER];
+            return {
+                id: p.id, name: p.name, looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
+                facts: [...(p.facts ?? [])], memory: [...(p.memory ?? [])],
+                stance: stance?.value || '', stanceReason: stance?.reason || '',
+            };
+        });
     } catch (e) { console.warn('[WorldScrawl] tracker people', e.message); return []; }
 }
 /** Stamp a lore request for `place` (a name, or ''/"here" for all) on msg. Returns the matched chain entries. */
