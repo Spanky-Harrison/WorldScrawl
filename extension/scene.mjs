@@ -91,8 +91,19 @@ export async function refreshLivePlaces() {
         const key = liveKey();
         if (!patchSig()) { livePlaces = null; return; }
         if (livePlaces?.key === key) return;
-        const w = await api(`/cast/places?world=${encodeURIComponent(activeWorld || defaultWorldId)}`, { method: 'POST', body: JSON.stringify(mapCtx()) });
-        livePlaces = { key, pack: { ...base, places: new Set(w.places ?? []), subs: new Set(w.subs ?? []), regions: new Set(w.regions ?? []), elsewhere: w.elsewhere ?? base.elsewhere, names: w.place_names ?? base.names, labels: { ...base.labels, ...(w.place_labels ?? {}) } } };
+        // api() returns {ok, status, body}. The place list is body.places. Reading the wrapper
+        // itself yields an empty set and every schedule stop looks gone while a patch is on.
+        const r = await api(`/cast/places?world=${encodeURIComponent(activeWorld || defaultWorldId)}`, { method: 'POST', body: JSON.stringify(mapCtx()) });
+        const w = r?.ok ? r.body : null;
+        const places = Array.isArray(w?.places) ? w.places : null;
+        if (!places) {
+            // A failed or shapeless answer is not an empty map. Leave the last good pack; a new
+            // signature simply falls back to the world's own places until a refresh succeeds.
+            console.warn('[WorldScrawl] live places', r?.ok ? 'the server answer had no place list' : `the server answered ${r?.status ?? 'no status'}`);
+            return;
+        }
+        const labels = w.place_labels && typeof w.place_labels === 'object' && !Array.isArray(w.place_labels) ? w.place_labels : {};
+        livePlaces = { key, pack: { ...base, places: new Set(places), subs: new Set(Array.isArray(w.subs) ? w.subs : []), regions: new Set(Array.isArray(w.regions) ? w.regions : []), elsewhere: Array.isArray(w.elsewhere) ? w.elsewhere : base.elsewhere, names: Array.isArray(w.place_names) ? w.place_names : base.names, labels: { ...base.labels, ...labels } } };
     } catch (e) { console.warn('[WorldScrawl] live places', e.message); }
 }
 function castPack() {
