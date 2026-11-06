@@ -265,4 +265,109 @@ test('the map the last narrator reply saw: later Turn off reverted, its room and
     assert.equal(v.index, 2); assert.equal(v.address, 'inn/guest_room_1');
     assert.equal(v.changes.length, 1); assert.equal(v.changes[0].off, false);
 });
+
+const LANE = 'riverton:streets/market_lane';
+const stallPatch = (over = {}) => ({
+    type: 'patch', id: 'stall', swipe: 0, ...over,
+    ops: [{ op: 'create_place', area: 'riverton:streets', id: 'stall', name: 'Pop-up Stall', description: 'Canvas and crates.',
+        exits: [{ direction: 'stall', to: SQUARE, return_direction: 'square' }, { direction: 'lane', to: LANE, return_direction: 'stall' }] }],
+});
+function useMap() {
+    const map = client(RIVERTON);
+    const prev = globalThis.fetch;
+    const prevChannel = globalThis.BroadcastChannel;
+    const prevDoc = globalThis.document;
+    globalThis.BroadcastChannel = undefined; // no map window: broadcastMapState returns without a timer
+    globalThis.document = { querySelector: () => null, querySelectorAll: () => [], createElement: () => ({ style: {}, append() {}, appendChild() {} }), body: {}, documentElement: {} };
+    globalThis.fetch = async (url, opts = {}) => {
+        const u = new URL(String(url), 'http://local');
+        const route = u.pathname.replace(/^\/api\/plugins\/worldscrawl/, '') + u.search;
+        const json = opts.body ? JSON.parse(opts.body) : undefined;
+        const r = map.request(opts.method || 'GET', route, { json });
+        return { ok: r.status_code < 400, status: r.status_code, headers: { get: k => r.headers.get(k) }, json: async () => r.json() };
+    };
+    const c = globalThis.SillyTavern.getContext();
+    const added = [];
+    c.addOneMessage = m => added.push(m);
+    c.saveChat = async () => {};
+    return { c, added, restore: () => { globalThis.fetch = prev; globalThis.BroadcastChannel = prevChannel; globalThis.document = prevDoc; } };
+}
+
+test('turning a change on or off adds no chat row; aftermath still describes the story reply’s map', async () => {
+    const { aftermathNote } = await import('../../extension/expiry.mjs');
+    const { c, added, restore } = useMap();
+    try {
+        const chat = [
+            { is_user: true, mes: 'A stall goes up.', extra: { worldscrawl_patches: [stallPatch()] } },
+            { mes: 'You are in the square. A stall stands across the way.', extra: { worldscrawl_location: SQUARE } },
+        ];
+        c.chat = chat;
+        const off = await ext.toggleChange(0, 'stall');
+        const p = chat[0].extra.worldscrawl_patches[0];
+        assert.equal(off.ok, true);
+        assert.equal(off.off, true);
+        assert.equal(chat.length, 2);
+        assert.equal(added.length, 0);
+        assert.equal(chat.some(m => /turned (on|off) the change/.test(String(m.mes ?? ''))), false);
+        assert.equal(p.off, true);
+        assert.deepEqual(p.narrated, { at: 1, off: false });
+        assert.equal(ext.narratedView(chat).changes[0].off, false);
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /turned off or undone/);
+
+        const on = await ext.toggleChange(0, 'stall');
+        assert.equal(on.off, false);
+        assert.equal(chat.length, 2);
+        assert.equal(added.length, 0);
+        assert.equal(p.off, undefined);
+        assert.deepEqual(p.narrated, { at: 1, off: false });
+        assert.equal(ext.narratedView(chat).changes[0].off, false);
+        assert.equal(await aftermathNote(chat, { address: SQUARE }), '');
+
+        chat.push({ mes: 'The stall is still there.', extra: { worldscrawl_location: SQUARE } });
+        await ext.toggleChange(0, 'stall');
+        assert.equal(chat.length, 3);
+        assert.equal(added.length, 0);
+        assert.equal(p.off, true);
+        assert.deepEqual(p.narrated, { at: 2, off: false });
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /turned off or undone/);
+
+        const bare = [{ is_user: true, mes: 'only me', extra: { worldscrawl_patches: [stallPatch({ id: 'solo' })] } }];
+        c.chat = bare;
+        await ext.toggleChange(0, 'solo');
+        assert.equal(bare.length, 1);
+        assert.equal(added.length, 0);
+        assert.equal(bare[0].extra.worldscrawl_patches[0].off, true);
+        assert.equal(bare[0].extra.worldscrawl_patches[0].narrated, undefined);
+    } finally { restore(); }
+});
+
+test('an old toggle notice still reverts the view; deleting it does not change the patch', async () => {
+    const { c, added, restore } = useMap();
+    try {
+        const p = { type: 'patch', id: 'p1', swipe: 0, off: true, ops: [{ op: 'set_name', loc: SQUARE, text: 'Fair Square' }] };
+        const notice = { is_system: true, mes: 'Map edit: turned off the change from #0', extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[0, 'p1']], worldscrawl_notice_on: false } };
+        const chat = [
+            { is_user: true, mes: 'rename', extra: { worldscrawl_patches: [p] } },
+            { mes: 'The square has a new name.', extra: { worldscrawl_location: SQUARE } },
+            notice,
+        ];
+        assert.equal(ext.narratedView(chat).changes[0].off, false);
+        chat.pop();
+        assert.equal(p.off, true);
+        assert.equal(ext.narratedView(chat).changes[0].off, true, 'without the notice or a narrated bit, the view follows the patch');
+        chat.push(notice);
+        c.chat = chat;
+        const n = chat.length;
+        const r = await ext.toggleChange(0, 'p1');
+        assert.equal(r.ok, true);
+        assert.equal(r.off, false);
+        assert.equal(chat.length, n);
+        assert.equal(added.length, 0);
+        assert.equal(p.off, undefined);
+        assert.deepEqual(p.narrated, { at: 1, off: false });
+        chat.pop();
+        assert.equal(p.off, undefined);
+        assert.equal(ext.narratedView(chat).changes[0].off, false);
+    } finally { restore(); }
+});
 }
