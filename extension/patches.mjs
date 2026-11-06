@@ -214,7 +214,7 @@ export async function toggleChange(mi, pid, { choice } = {}) {
     await c.saveChat?.();
     exitsCache.clear();
     await applyFacts();
-    renderAllExits();
+    await renderAllExits();
     renderPatchCards();
     broadcastMapState();
     return { ok: true, off: !turningOn, msgs: [mi, ...also] };
