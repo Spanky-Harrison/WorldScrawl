@@ -98,6 +98,64 @@ export function alreadyShown(npc, text) {
     return false;
 }
 
+/**
+ * Empty, or only "looks" / "appeared" (any case, light punctuation, a short filler in front).
+ * A longer note ("soaked from the rain", "walks in soaked") is a real intent.
+ */
+const JUNK_APPEARANCE = /^(?:(?:a|an|the|her|his|their|its|she|he|they|just|now|only)\s+)*(?:looks?|looking|appear(?:ed|s|ing)?|appearance)$/;
+export function junkAppearanceIntent(intent) {
+    const t = String(intent ?? '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/^['"`(\[]+/, '').replace(/['"`)\].!,;:]+$/, '').trim();
+    return !t || JUNK_APPEARANCE.test(t);
+}
+
+const fieldText = (stamp, f) => {
+    const direct = stamp?.[f];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const nested = stamp?.text?.[f];
+    return typeof nested === 'string' && nested.trim() ? nested.trim() : '';
+};
+
+/** True when the stamp carries Looks, Body or Outfit text that is not what is already listed. */
+export function appearanceFieldsChanged(npc, stamp) {
+    for (const f of APPEARANCE_FIELDS) {
+        const next = fieldText(stamp, f);
+        if (next && next !== String(npc?.[f] ?? '').trim()) return true;
+    }
+    return false;
+}
+
+/**
+ * No-op appearance: the intent says nothing (empty, "looks", "appeared") and no field text changed.
+ * A real field change, or any other intent, is not a no-op — including a change that happens on arrival.
+ */
+export function noopAppearance(npc, stamp) {
+    if (!stamp || (stamp.type && stamp.type !== 'npc_appearance')) return false;
+    if (!junkAppearanceIntent(stamp.intent)) return false;
+    return !appearanceFieldsChanged(npc, stamp);
+}
+
+/**
+ * What to do with an appearance stamp. 'skip' keeps the already-active guard (quiet).
+ * 'reject' is a no-op: do not stamp it and do not rebuild. 'apply' is a real change.
+ */
+export function judgeAppearance(npc, stamp) {
+    if (!stamp || stamp.type !== 'npc_appearance') return 'apply';
+    if (alreadyEffect(npc, stamp.intent, stamp.fields)) return 'skip';
+    if (noopAppearance(npc, stamp)) return 'reject';
+    return 'apply';
+}
+
+/** Intent to store. An empty intent with new field text uses that text so the effect is kept. */
+export function appearanceIntent(stamp) {
+    const intent = String(stamp?.intent ?? '').trim();
+    if (intent) return intent.slice(0, 240);
+    for (const f of APPEARANCE_FIELDS) {
+        const next = fieldText(stamp, f);
+        if (next) return next.slice(0, 240);
+    }
+    return '';
+}
+
 /** True when an equivalent appearance effect (same intent + same fields) is already active. */
 export function alreadyEffect(npc, intent, fields) {
     const intentKey = String(intent ?? '').trim().toLowerCase();

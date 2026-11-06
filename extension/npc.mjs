@@ -3,8 +3,8 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
-import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild } from './npceffects.mjs';
-export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild };
+import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild } from './npceffects.mjs';
+export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 
@@ -1281,9 +1281,9 @@ export function parseNpcTag(body) {
     if (type === 'npc_follow') return { type, id, who: NPC_ID.test(p[2] ?? '') ? p[2] : PLAYER };
     if (type === 'npc_seek') return { type, id };
     if (type === 'npc_appearance') {
-        // appearance|id|intent|fields?|lasts?  — fields omit/"all" → all three; lasts omit → lasting
+        // appearance|id|intent|fields?|lasts?  — fields omit/"all" → all three; lasts omit → lasting.
+        // An empty intent still parses: the reply handler rejects it when nothing changed, instead of dropping it.
         const intent = (p[2] ?? '').trim();
-        if (!intent) return null;
         const rest = p.slice(3);
         let lasts = null, fields = null;
         if (rest.length) {
