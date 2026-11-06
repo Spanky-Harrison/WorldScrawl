@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     APPEARANCE_FIELDS, effectFields, effectSetKey, resolveAppearance, rebuildInputs,
-    alreadyShown, alreadyEffect, planAppearanceRebuild, acceptAppearanceRebuild,
+    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild,
     readAppearanceAnswer, sameAppearanceBase, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
     stampSummary, comingsAndGoings, npcAt, expiryOf,
 } from '../../extension/npc.mjs';
@@ -115,6 +115,23 @@ test('alreadyShown / alreadyEffect: Known, Looks, active intent, temps', () => {
     assert.equal(alreadyEffect(npc, 'tall', 'body'), false);
 });
 
+test('no-op appearance is rejected; a real change still applies; an already-active effect still skips', () => {
+    const hesk = { id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'sturdy', outfit: 'wool dress', effects: [] };
+    for (const intent of ['', 'looks', 'Looks.', 'APPEARED', 'she appeared', 'her looks']) {
+        assert.equal(junkAppearanceIntent(intent), true, intent);
+        assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent }), 'reject', intent);
+    }
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'appeared', fields: 'outfit' }), 'reject');
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'looks', outfit: 'wool dress' }), 'reject');
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'looks', outfit: 'a soaked cloak' }), 'apply');
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: '', outfit: 'a soaked cloak' }), 'apply');
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'soaked from the rain', fields: 'outfit' }), 'apply');
+    assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'walks in soaked', fields: 'outfit' }), 'apply');
+    const active = { ...hesk, effects: [{ intent: 'blonde hair', fields: ['looks'] }] };
+    assert.equal(judgeAppearance(active, { type: 'npc_appearance', id: 'hesk', intent: 'blonde hair', fields: 'looks' }), 'skip');
+    assert.equal(judgeAppearance(active, { type: 'npc_appearance', id: 'hesk', intent: 'soaked from the rain', fields: 'outfit' }), 'apply');
+});
+
 test('parseNpcTag / takeNpcTags: appearance with fields and lasts', () => {
     assert.deepEqual(parseNpcTag('appearance | maren | blonde hair | looks | 2 hours'), {
         type: 'npc_appearance', id: 'maren', intent: 'blonde hair', fields: 'looks', lasts: 120,
@@ -122,6 +139,7 @@ test('parseNpcTag / takeNpcTags: appearance with fields and lasts', () => {
     assert.deepEqual(parseNpcTag('appearance | maren | polymorphed into a gnoll'), {
         type: 'npc_appearance', id: 'maren', intent: 'polymorphed into a gnoll',
     });
+    assert.deepEqual(parseNpcTag('appearance | hesk'), { type: 'npc_appearance', id: 'hesk', intent: '' });
     const { stamps, text } = takeNpcTags('Poof. [ws_npc: appearance | maren | tall | body | 1 hour]');
     assert.equal(stamps.length, 1);
     assert.equal(stamps[0].intent, 'tall');
