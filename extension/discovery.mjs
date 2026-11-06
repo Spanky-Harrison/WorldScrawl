@@ -6,27 +6,24 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { chatChanges, chatElapsed } from './clock.mjs';
-import { baseReply, duplicatePlace, nearbyRooms, noteCall } from './dig.mjs';
+import { chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
+import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
 import { exitsCache, locationAt, renderAllExits } from './footer.mjs';
-import { FLAG_KEY, PATCH_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
+import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, judgeFoundNow, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
-/** Movement tools follow moveMode. Reporter tools (flag, wait, and npc when that checkbox is on) are separate and default off. */
+/** Movement tools follow moveMode. ws_flag, ws_wait, and ws_npc are not narrator tools; the after-reply tracker reports changes. */
 export function toolsToRegister(s = {}, on = true) {
     if (!on) return [];
     const names = [];
     if (s.moveMode === 'tools') names.push('ws_look', 'ws_move');
-    if (s.reporterTools) {
-        names.push('ws_flag', 'ws_wait');
-        if (s.flagNpcs !== false) names.push('ws_npc');
-    }
     return names;
 }
 
@@ -275,7 +272,7 @@ async function keepFlag(id, { quiet = false } = {}) {
     }
     if (!markDecided(msg, noticeIdOf(f, 'flag'), form ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: clip((f.proposal.summary ?? []).join('; '), 160) })) return; // already decided
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
-        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg) };
+        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg), ...(f.source ? { source: f.source } : {}) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
     syncSwipeExtra(msg);
     f.status = 'kept'; f.patch = p.id;
@@ -319,7 +316,161 @@ async function discardFlag(id) {
     renderPatchCards();
 }
 
-/** A reply arrived: a [ws_flag: ...] tag in it (non-tools mode) or a ws_flag tool call flags it. */
+/** The same wait rules a tag uses: short and explicit waits are ignored; otherwise a card, or a stamp when auto-keep is on. */
+async function applyProposedWait(id, w, source = '') {
+    const c = ctx(), msg = c.chat?.[id];
+    if (!msg || !w) return;
+    const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
+    if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `${what}${w.reason ? `; why: ${w.reason}` : ''}` }); return; }
+    if (what === 'keep') {
+        noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` });
+        stampWait(msg, w);
+        if (source) { msg.extra[WAIT_KEY].source = source; msg.extra[WAIT_KEY].swipe = swipeOf(msg); }
+        await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState();
+    } else {
+        noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `proposed; why: ${w.reason || '(no reason given)'}` });
+        proposeWait(msg, w);
+        if (source && msg.extra?.[WAITCARD_KEY]) msg.extra[WAITCARD_KEY].source = source;
+        await c.saveChat?.(); renderPatchCards();
+    }
+}
+/** Today's person apply: no-op appearance (empty, "looks", "appeared") warns and does not stamp or rebuild. */
+async function applyPersonStamps(id, stamped) {
+    const c = ctx(), msg = c.chat?.[id];
+    if (!msg || !stamped?.length) return;
+    const clock = npcClock(c.chat, id);
+    const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+    const appearIds = [];
+    const applied = [];
+    const noteNpcWarning = (text, source = '') => {
+        msg.extra = msg.extra ?? {};
+        const swipe = swipeOf(msg);
+        const list = Array.isArray(msg.extra[NPC_WARN_KEY]) ? msg.extra[NPC_WARN_KEY] : [];
+        if (list.some(w => w?.text === text && (w?.swipe ?? 0) === swipe && (w?.source ?? '') === source)) return;
+        msg.extra[NPC_WARN_KEY] = [...list, { swipe, text, ...(source ? { source } : {}) }];
+        noteCall(id, { kind: 'warning', status: 'failed', reason: text });
+    };
+    for (const s0 of stamped) {
+        const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
+        const t = npcTarget(folded, s0.id);
+        if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }
+        let s = t === s0.id ? s0 : { ...s0, id: t };
+        const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
+        if (s.type === 'npc_fact' && alreadyShown(cur, s.text)) { noteCall(id, { kind: 'npc_fact', status: 'skipped', reason: 'already known' }); continue; }
+        if (s.type === 'npc_appearance') {
+            const decision = judgeAppearance(cur, s);
+            if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
+            if (decision === 'reject') {
+                noteNpcWarning(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom);
+                continue;
+            }
+            const intent = appearanceIntent(s);
+            if (intent && intent !== s.intent) s = { ...s, intent };
+        }
+        let stamp = s;
+        if ((s.type === 'npc_fact' || s.type === 'npc_appearance') && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
+        if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
+        else if (s.type === 'npc_stay' && !s.place) {
+            const place = positionOf(c.chat, id, PLAYER)?.address || '';
+            if (place) stamp = { ...s, place };
+        }
+        addNpcStamp(msg, stamp);
+        applied.push(stamp);
+        if (s.type === 'npc_appearance' && stamp.pending !== true) appearIds.push(t);
+    }
+    const seen = new Set();
+    for (const s of applied) {
+        if (s.pending === true || seen.has(s.id)) continue;
+        seen.add(s.id);
+        const live = npcAt(c.chat, id, castPack()?.npcs ?? [], s.id);
+        for (const w of claimWarnings(live, applied.filter(x => x.id === s.id && x.pending !== true))) noteNpcWarning(w, s.source === TRACKER_SOURCE ? TRACKER_SOURCE : '');
+    }
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
+    if (appearIds.length) await ensureAppearanceRebuilds(id, { ids: [...new Set(appearIds)] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+}
+function trackerPayloads(people) {
+    const stamps = [], found = [], names = [];
+    for (const p of people ?? []) {
+        if (p.action === 'found') { found.push(p.name || p.id); continue; }
+        if (p.action === 'name') { names.push(p.name || p.id); continue; }
+        const stamp = toolNpcStamp({ ...p, id: p.id || p.name });
+        if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
+    }
+    return { stamps, found, names };
+}
+async function applyLearnedNames(id, learned, source) {
+    const c = ctx(), msg = c.chat?.[id];
+    if (!msg || !learned?.length) return;
+    const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+    msg.extra = msg.extra ?? {};
+    for (const nm of new Set(learned)) {
+        const n = npcForName(folded, nm);
+        if (n) addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source });
+    }
+    await c.saveChat?.();
+}
+/** Feed a tracker answer into the place rewrite and the person apply. No third apply path. */
+export async function applyTrackerResult(id, parsed) {
+    const c = ctx(), msg = c.chat?.[id];
+    if (!msg) return;
+    const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
+    const { stamps, found, names } = trackerPayloads(gated.people);
+    if (stamps.length) await applyPersonStamps(id, stamps);
+    if (names.length) await applyLearnedNames(id, names, TRACKER_SOURCE);
+    if (found.length) await applyFound(msg, found, TRACKER_SOURCE);
+    const existing = msg.extra?.[FLAG_KEY];
+    const taggedPlace = existing && (existing.swipe ?? 0) === swipeOf(msg) && existing.source !== TRACKER_SOURCE;
+    if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE });
+    if (gated.wait) {
+        const args = gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
+        const w = await planWait(args, gated.wait.sleep, gated.wait.reason);
+        if (w.error) noteCall(id, { kind: 'tracker wait', status: 'failed', reason: w.error });
+        else await applyProposedWait(id, w, TRACKER_SOURCE);
+    }
+    syncSwipeExtra(msg);
+    renderPatchCards();
+}
+/** Hit 3. A small question, not the narrator, and not the narrator's chat. Story is already on screen. */
+async function runTracker(id) {
+    if (!isOn()) return;
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id];
+    if (!shouldTrackReply(msg, chat, id)) return;
+    const genNo = bumpTracker(msg);
+    const swipe = swipeOf(msg);
+    try {
+        await ensurePrompts();
+        let loc = null;
+        try { loc = await currentLocation(); } catch { loc = null; }
+        // Without the place and the cards, a look or an entrance is too easy to mistake for a change.
+        if (!loc?.name && !loc?.address) { noteCall(id, { kind: 'tracker', status: 'skipped', reason: 'place unavailable' }); return; }
+        const weather = placeWeatherNow(loc)?.line ?? '';
+        const people = listedPeople(chat, id, loc);
+        const scrap = trackerScrap({ placeName: loc?.name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people) });
+        const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
+        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id });
+        if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg) return;
+        const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
+        const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
+        noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
+        await applyTrackerResult(id, parsed);
+    } catch (e) {
+        console.warn('[WorldScrawl] tracker', e?.message || e);
+        noteCall(id, { kind: 'tracker', status: 'failed', reason: e?.message || String(e) });
+    }
+}
+/** A swipe drops the tracker stamps of the story just left, then reads the swipe now showing. */
+export async function onStorySwipe(id) {
+    if (!isOn()) return;
+    const msg = ctx().chat?.[Number(id)];
+    if (!msg || msg.is_user || msg.is_system) return;
+    dropTrackerMarks(msg);
+    bumpTracker(msg);
+    syncSwipeExtra(msg);
+    await runTracker(Number(id));
+}
+
+/** A reply arrived: a pasted [ws_flag: ...] tag is still read. The narrator is not told to write one. */
 export async function onReplyForFlags(id) {
     if (!isOn()) return;
     const c = ctx(), msg = c.chat?.[id];
@@ -406,13 +557,7 @@ export async function onReplyForFlags(id) {
         if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep, tg.reason); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
         await c.saveChat?.();
     }
-    if (pendingWait) {
-        const w = pendingWait; pendingWait = null;
-        const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
-        if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `${what}${w.reason ? `; why: ${w.reason}` : ''}` }); }
-        else if (what === 'keep') { noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` }); stampWait(msg, w); await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); }
-        else { noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `proposed; why: ${w.reason || '(no reason given)'}` }); proposeWait(msg, w); await c.saveChat?.(); renderPatchCards(); }
-    }
+    if (pendingWait) { const w = pendingWait; pendingWait = null; await applyProposedWait(id, w); }
     if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); noteCall(id, { kind: `ws_flag ${flag.kind ?? ''}`.trim(), status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
     const taken = takeNpcTags(msg.mes ?? '');
@@ -421,64 +566,12 @@ export async function onReplyForFlags(id) {
     for (const s of fromTool) emitted.push(`${s.type} (tool)`);
     for (const s of taken.stamps) emitted.push(`${s.type} tag`);
     noteCall(id, narratorNote(emitted));
-    if (taken.text !== (msg.mes ?? '') || stamped.length) {
-        if (taken.text !== (msg.mes ?? '')) {
-            msg.mes = taken.text;
-            if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
-            try { c.updateMessageBlock?.(id, msg); } catch {}
-        }
-        const clock = npcClock(c.chat, id);
-        const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-        const appearIds = [];
-        const applied = [];
-        const noteNpcWarning = text => {
-            msg.extra = msg.extra ?? {};
-            const swipe = swipeOf(msg);
-            const list = Array.isArray(msg.extra[NPC_WARN_KEY]) ? msg.extra[NPC_WARN_KEY] : [];
-            if (list.some(w => w?.text === text && (w?.swipe ?? 0) === swipe)) return;
-            msg.extra[NPC_WARN_KEY] = [...list, { swipe, text }];
-            noteCall(id, { kind: 'warning', status: 'failed', reason: text });
-        };
-        for (const s0 of stamped) {
-            const t = npcTarget(folded, s0.id);
-            if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`); continue; }
-            let s = t === s0.id ? s0 : { ...s0, id: t };
-            const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
-            // Skip re-firing facts/appearance the narrator already knows (look/examine churn).
-            if (s.type === 'npc_fact' && alreadyShown(cur, s.text)) { noteCall(id, { kind: 'npc_fact', status: 'skipped', reason: 'already known' }); continue; }
-            if (s.type === 'npc_appearance') {
-                const decision = judgeAppearance(cur, s);
-                if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
-                if (decision === 'reject') {
-                    noteNpcWarning(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`);
-                    continue;
-                }
-                const intent = appearanceIntent(s);
-                if (intent && intent !== s.intent) s = { ...s, intent };
-            }
-            let stamp = s;
-            if ((s.type === 'npc_fact' || s.type === 'npc_appearance') && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true }; // lasting waits for Approve
-            if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
-            else if (s.type === 'npc_stay' && !s.place) {
-                const place = positionOf(c.chat, id, PLAYER)?.address || '';
-                if (place) stamp = { ...s, place };
-            }
-            addNpcStamp(msg, stamp);
-            applied.push(stamp);
-            // Temps apply at once: rebuild Looks now. Lasting appearance waits for Approve, then the same rebuild.
-            if (s.type === 'npc_appearance' && stamp.pending !== true) appearIds.push(t);
-        }
-        const seen = new Set();
-        for (const s of applied) {
-            if (s.pending === true || seen.has(s.id)) continue;
-            seen.add(s.id);
-            const live = npcAt(c.chat, id, castPack()?.npcs ?? [], s.id);
-            for (const w of claimWarnings(live, applied.filter(x => x.id === s.id && x.pending !== true))) noteNpcWarning(w);
-        }
-        syncSwipeExtra(msg);
-        await c.saveChat?.();
-        if (appearIds.length) await ensureAppearanceRebuilds(id, { ids: [...new Set(appearIds)] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+    if (taken.text !== (msg.mes ?? '')) {
+        msg.mes = taken.text;
+        if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
+        try { c.updateMessageBlock?.(id, msg); } catch {}
     }
+    if (stamped.length) await applyPersonStamps(id, stamped);
     const bad = unreadTags(msg.mes ?? '');
     msg.extra = msg.extra ?? {};
     const keepBad = (msg.extra[BADTAG_KEY] ?? []).filter(b => (b?.swipe ?? 0) !== swipeOf(msg));
@@ -488,6 +581,7 @@ export async function onReplyForFlags(id) {
         await c.saveChat?.();
     }
     markUnreadTags();
+    await runTracker(id);
     maybeSuggest(id);
         if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length || (msg.extra?.[FOUND_KEY] ?? []).length || (msg.extra?.[NPC_WARN_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }
 }

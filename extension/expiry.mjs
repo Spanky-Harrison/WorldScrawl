@@ -8,7 +8,7 @@ import { fetchLocationCached } from './footer.mjs';
 import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld } from './index.js';
 import { displayName, keyFor, optionLines, partyText } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
-import { flagHint, mapCtx, patchSig, waitHint } from './patches.mjs';
+import { mapCtx, patchSig } from './patches.mjs';
 
 const expiryNarrated = new Set();
 const chatKey = () => { try { return String(ctx().getCurrentChatId?.() ?? ''); } catch { return ''; } };
@@ -115,13 +115,13 @@ function applyTools() {
     registerTools(want);
 }
 
-/** Movement nudge only when the model moves the party. Flag/wait tag hints only when reporter tools are off. */
+/** Movement nudge only when the model moves the party. The story prompt does not carry flag or wait instructions. */
 function applyNudge() {
     const s = settings();
     const text = s.moveMode === 'tools' && isOn() ? String(s.nudge ?? '').trim() : '';
     ctx().setExtensionPrompt(NUDGE_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     if (!hasPrompts()) { ensurePrompts().catch(e => console.warn('[WorldScrawl]', e.message)); return; }
-    ctx().setExtensionPrompt(FLAGHINT_KEY, !s.reporterTools && isOn() && s.flagTags ? `${flagHint()}\n${waitHint()}` : '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
+    ctx().setExtensionPrompt(FLAGHINT_KEY, '', 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
 }
 
 export { aftermathNote, applyNudge, applyTools, chatKey, describe, expiryNarrated, postExpiredNotice };

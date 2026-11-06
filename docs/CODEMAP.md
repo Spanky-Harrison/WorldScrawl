@@ -16,12 +16,13 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | dig.mjs | Digging up new places (prompt, answer reading, duplicate merge) | `digPrompt`, `readDigAnswer`, `mergeDuplicates` |
 | looking.mjs | Look targets, door look, windows | `lookOptions`, `lookTargetPrompt`, `closedDoorPrompt` |
 | brackets.mjs | Player brackets (`[look]`, `[move]`…) and help text | `parseBracket`, `bracketIntent`, `helpText` |
-| scene.mjs | Scene/NPC tokens fed to the narrator, lore, the found notice and its Edit (`applyFound`, `judgeFoundNow`), live places from `POST /cast/places`, appearance rebuild side-call | `renderTokens`, `applyFound`, `refreshLivePlaces`, `ensureAppearanceRebuilds`, `retryAppearance` |
+| scene.mjs | Scene/NPC tokens fed to the narrator, lore, the found notice and its Edit (`applyFound`, `judgeFoundNow`), live places from `POST /cast/places`, appearance rebuild side-call, the people list the tracker reads (`listedPeople`) | `renderTokens`, `applyFound`, `refreshLivePlaces`, `ensureAppearanceRebuilds`, `retryAppearance`, `listedPeople` |
 | footer.mjs | Exits text and the footer shown under replies | `exitsText`, `namedNpcsAt` |
 | mapwindow.mjs | Opening the map window, theme vars, map state | `openMapWindow`, `mapState` |
 | patches.mjs | Map patches (lasting changes) and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `FLAG_TAG` |
 | carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagCardView` |
-| discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration | `onReplyForFlags`, `flagMessage`, `registerTools` |
+| discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration, feeding tracker results into the place rewrite and person apply | `onReplyForFlags`, `flagMessage`, `registerTools`, `applyTrackerResult`, `onStorySwipe` |
+| tracker.mjs | After-reply tracker: the question, the answer reader, flag gates, and dropping a swipe's tracker stamps. No DOM or fetch | `shouldTrackReply`, `readTrackerAnswer`, `gateTracker`, `trackerPrompt`, `dropTrackerMarks` |
 | waits.mjs | Waits: model and player waits, Approve/Discard, patch cards, lasting NPC changes waiting for Approve, appearance-rebuild Retry | `planWait`, `proposeWait`, `renderPatchCards` |
 | settings.mjs | The settings panel | `addSettingsPanel` |
 | npc.mjs | NPC play: stamps, presence, schedules, flags and tags, lore, context slices, `judgeFound` / `foundEditOk` (browser only; the parts the server uses too are in plugin/shared/npc.mjs) | `framesOf` (temporary `lasts` fields and appearance effects expire in game time), `lastsMinutes`, `expiryOf`, `npcTarget`, `npcSlices`, `presentAt`, `comingsAndGoings` (arrivals, departures, and appearance-effect expiry lines), `relOf` / `relLine`, `takeNpcTags`, `recordDiff`, appearance stamps (`npc_appearance` / `npc_appearance_cache`) |

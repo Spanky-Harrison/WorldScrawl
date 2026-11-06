@@ -255,13 +255,11 @@ export function lookText(who, here, look) {
     return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
 }
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
-/** The narration line for a door that is not on the map yet: open it (and flag a discovery) only if it fits the room. */
-export const newDoorLine = (who, place, tools) => P('narration.new_door', { party: who, place, how_to_flag: P(tools ? 'narration.new_door_tools' : 'narration.new_door_tags') });
+/** The narration line for a door that is not on the map yet: open it only if it fits the room. The story does not say how to flag it. */
+export const newDoorLine = (who, place) => P('narration.new_door', { party: who, place });
 export function factsText(loc, move, toolsOn, extra = {}) {
-    // The third argument still means "tools" for older callers. Movement rules and reporter wording can split.
+    // The third argument still means "movement tools" for older callers. The story prompt does not tell the narrator how to report changes.
     const moveTools = extra.moveTools != null ? !!extra.moveTools : !!toolsOn;
-    const reportTools = extra.reportTools != null ? !!extra.reportTools : !!toolsOn;
-    const reportNpcs = extra.reportNpcs !== false;
     const who = partyText();
     const lines = [
         P('narration.header'),
@@ -273,7 +271,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         ...glimpseLines(loc, extra.open),
         extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
         extra.weather ? `${extra.weather} Let the weather and temperature show in the narration where it fits; do not change them.` : '',
-        (extra.npcs_present || extra.npc_focus) ? P('narration.npcs', { npcs_present: extra.npcs_present || '(none)', npc_focus: extra.npc_focus || '', how_to_report: reportNpcs ? P(reportTools ? 'narration.npc_tools' : 'narration.npc_tags') : '' }) : '',
+        (extra.npcs_present || extra.npc_focus) ? P('narration.npcs', { npcs_present: extra.npcs_present || '(none)', npc_focus: extra.npc_focus || '' }) : '',
     ];
     const arr = move && move.to === loc.address ? arrival(loc, move) : null;
     const arrivalText = arr ? ` ${who} ${arr.text}.` : '', where = arr?.where ?? move?.to_name, place = displayName(loc);
@@ -283,7 +281,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (extra.digFailed && !extra.dig) lines.push(P('narration.dig_failed', { party: who, place })); // a failure outranks any other note on the turn
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
     else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
-    else if (extra.newDoor) lines.push(newDoorLine(who, place, reportTools));
+    else if (extra.newDoor) lines.push(newDoorLine(who, place));
     else if (extra.door) lines.push(P('narration.door', { party: who, verb: ({ open_door: 'opens', close_door: 'closes', bar_door: 'bars', unbar_door: 'unbars' })[extra.door.type] ?? 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
