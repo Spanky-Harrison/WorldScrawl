@@ -73,4 +73,6 @@ export const cases = ({ ext, patches, placeform }) => ({
     ...Object.fromEntries(looks.map((l, i) => [`narration.look.${i}`, ext.lookText('You', 'Hall', l)])),
     ...Object.fromEntries(facts.map(([m, t, x], i) => [`narration.facts.${i}`, ext.factsText(loc, m, t, x)])),
     ...Object.fromEntries([false, true].map(t => [`narration.lore_index.${t ? 'tools' : 'tags'}`, ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Inn', text: 'Run by {{npc:hesk}}.' }, { level: 'region', name: 'Riverton', text: 'A river town.' }] }, t).lore_index])),
+    'npc.tracker.system': ext.trackerSys(),
+    'npc.tracker': ext.trackerPrompt({ scrap: 'This place: Hall — A long hall.\nWeather (known; not a reason to rewrite this place): Fog outside.\nPeople here:\nHesk [hesk]. Looks: copper braids.', player: 'I look around.', story: 'You look around. Hesk stands at the bar.' }),
 });
