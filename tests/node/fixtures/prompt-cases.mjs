@@ -74,5 +74,13 @@ export const cases = ({ ext, patches, placeform }) => ({
     ...Object.fromEntries(facts.map(([m, t, x], i) => [`narration.facts.${i}`, ext.factsText(loc, m, t, x)])),
     ...Object.fromEntries([false, true].map(t => [`narration.lore_index.${t ? 'tools' : 'tags'}`, ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Inn', text: 'Run by {{npc:hesk}}.' }, { level: 'region', name: 'Riverton', text: 'A river town.' }] }, t).lore_index])),
     'npc.tracker.system': ext.trackerSys(),
-    'npc.tracker': ext.trackerPrompt({ scrap: 'This place: Hall — A long hall.\nWeather (known; not a reason to rewrite this place): Fog outside.\nPeople here:\nHesk [hesk]. Looks: copper braids.', player: 'I look around.', story: 'You look around. Hesk stands at the bar.' }),
+    'npc.tracker': ext.trackerPrompt({
+        scrap: ext.trackerScrap({
+            placeName: 'Uncommon Room', displayName: 'Uncommon Room (The Uncommon Room)',
+            placeDescription: 'A long hall with a copper bar.',
+            weather: 'Fog outside.',
+            peopleLines: ext.trackerPeopleLines([{ id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'Tall, raw-boned.', outfit: "Widow's black.", facts: ['keeps the keys'], memory: ['Joe lied about the coin.'], stance: 'indifferent', stanceReason: 'Strangers are customers until they make trouble.' }]),
+        }),
+        player: 'I look around.', story: 'You look around. Hesk stands at the bar.',
+    }),
 });
