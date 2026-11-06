@@ -7,7 +7,7 @@ How WorldScrawl is supposed to work. Process rules are in [CONTRIBUTING.md](CONT
 - Complexity goes in the engine. The world JSON stays simple for the people writing it.
 
 ## Who changes state
-- Narrative state changes (new NPCs, discoveries, map or character updates) come only from the **player** (brackets and `/ws-` commands) or the **model** (`ws_flag`-style tool calls and tags). They never come from engine text matching.
+- Narrative state changes (new NPCs, discoveries, map or character updates) come only from the **player** (brackets, `/ws-` commands, and a tag pasted into the text) or the **after-reply tracker** (a separate question that reads the latest exchange). The narrator does not report them. They never come from engine text matching.
 - Keyword matching is fine for serving read-only context such as lore.
 - Brackets hold only the verb, inside normal prose ("I [look] out the window"). The verb is certain; the target is found from the words after it, matched locally first, with a small model call for the target only if needed.
 

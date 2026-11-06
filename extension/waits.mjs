@@ -104,7 +104,10 @@ async function keepWaitNow(c, msg, p, nid, amount) {
     if (w !== p) w = { ...w, reason: p.reason || '' };
     if (!markDecided(msg, nid, w === p ? 'approve' : 'adjust', { swipe: swipeOf(msg), text: `${w.label} passed${p.reason ? ` (${p.reason})` : ''}` })) return 'already decided';
     noteCall(c.chat.indexOf(msg), { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept by the player; why: ${p.reason || '(no reason given)'}` });
-    stampWait(msg, w); delete msg.extra[WAITCARD_KEY];
+    stampWait(msg, w);
+    if (p.source) msg.extra[WAIT_KEY].source = p.source;
+    if (p.swipe != null) msg.extra[WAIT_KEY].swipe = p.swipe;
+    delete msg.extra[WAITCARD_KEY];
     renderPatchCards();
     await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     return '';

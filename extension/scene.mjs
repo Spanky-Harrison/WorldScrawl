@@ -12,7 +12,7 @@ import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
 import { aftermathNote, chatKey, relocationNote } from './expiry.mjs';
-import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, settings, toolsOn } from './index.js';
+import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, toolsOn } from './index.js';
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
 import { renderPatchCards, waitFacts } from './waits.mjs';
@@ -32,15 +32,27 @@ export function fedLore(loc, extra = []) {
     const chat = ctx().chat ?? [];
     try { return activeLore(chat, chat.length - 1, loreChain(loc), lorePlayerAt(chat, loc), extra); } catch (e) { console.warn('[WorldScrawl] lore', e.message); return []; }
 }
-/** The lore index line and the fed-lore block for factsText. */
-export function loreBits(loc, reportTools) {
+/** The lore index line and the fed-lore block for factsText. The index names what is on file; it does not tell the narrator to tag a request. */
+export function loreBits(loc) {
     const chain = loreChain(loc);
     if (!chain.length) return {};
     const fed = fedLore(loc);
     return {
-        lore_index: P('narration.lore_index', { lore_places: chain.map(c => c.name).join(', '), how: P(reportTools ? 'narration.lore_how_tools' : 'narration.lore_how_tags') }),
+        lore_index: P('narration.lore_index', { lore_places: chain.map(c => c.name).join(', ') }),
         lore_fed: fed.length ? P('narration.lore_block', { lore: fed.map(c => `- ${c.name}: ${c.text}`).join('\n') }) : '',
     };
+}
+/** People here, with the appearance fields already on the card, for the after-reply tracker. Not the narrator prompt. */
+export function listedPeople(chat, id, loc) {
+    const pack = castPack();
+    if (!pack?.npcs?.length || !chat?.length) return [];
+    try {
+        const env = npcEnv(chat, loc);
+        return presentAt(chat, id, pack.npcs, env).map(p => ({
+            id: p.id, name: p.name, looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
+            facts: (p.facts ?? []).slice(0, 6), stance: p.disposition?.[PLAYER]?.value || '',
+        }));
+    } catch (e) { console.warn('[WorldScrawl] tracker people', e.message); return []; }
 }
 /** Stamp a lore request for `place` (a name, or ''/"here" for all) on msg. Returns the matched chain entries. */
 function requestLore(msg, loc, place, source) {
@@ -589,8 +601,7 @@ async function applyFacts() {
         await loadCalendar();
         const d = gameDate();
         const moveTools = toolsOn();
-        const reportTools = !!settings().reporterTools;
-        text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, reportTools, reportNpcs: settings().flagNpcs !== false, ...loreBits(loc, reportTools), ...npcPromptBits(loc) });
+        text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) });
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
@@ -671,6 +682,7 @@ async function rebuildOneAppearance(msgId, npc) {
     }
     const live = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
     const result = acceptAppearanceRebuild(plan, answer, live);
+    if (result.stamp && (msg.extra?.[NPC_KEY] ?? []).some(s => s?.type === 'npc_appearance' && s.id === plan.id && s.source === 'tracker' && (s.swipe ?? 0) === swipeOf(msg))) result.stamp = { ...result.stamp, source: 'tracker' };
     if (result.stale) {
         noteCall(msgId, { kind: 'appearance rebuild', status: 'skipped', reason: 'base or effect-set changed (stale swipe)' });
         clearAppearJob(msg, plan.id, plan.key);

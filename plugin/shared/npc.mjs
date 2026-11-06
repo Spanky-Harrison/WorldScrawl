@@ -89,7 +89,7 @@ export function resolveNear(near, index = null) {
 
 /** How the narrator is told to refer to p: the name, or unknownAs with the real name for consistency only. */
 export function label(p) {
-    if (p.known?.known === false && p.unknownAs) return `${p.unknownAs} [${p.id}] (the player does not know this person's name yet; it is ${p.name}. Do not have the player's character use it until it is learned; when someone says it to them, end your reply with [ws_flag: name | ${p.name}])`;
+    if (p.known?.known === false && p.unknownAs) return `${p.unknownAs} [${p.id}] (the player does not know this person's name yet; it is ${p.name}. Do not have the player's character use it until it is learned.)`;
     return `${p.name} (${p.id})`;
 }
 

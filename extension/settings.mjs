@@ -37,10 +37,12 @@ function addSettingsPanel() {
       <div>Map changes</div>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Approve map changes without asking (skip the Approve / Discard card)</label>
       <label class="checkbox_label" title="Off: a room is only discovered when a door that isn't on the map is actually opened or entered. On: rooms the narration mentions (a hallway lined with guest rooms) may be added too."><input id="worldscrawl_proactive_discovery" type="checkbox"> Proactive room discovery (add rooms the narration mentions)</label>
-      <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes (adds one short line to the prompt)</label>
-      <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes (adds how to report them to the prompt)</label>
+      <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes</label>
+      <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
+      <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes</label>
+      <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes</label>
-      <small>Tools for map changes, waits, and people. Movement stays on the setting below.</small>
+      <small>Unused this pass. Story tools are not registered from this checkbox, and the after-reply tracker does not read it.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the Approve / Adjust / Discard card)</label>
       <div>Movement</div>
