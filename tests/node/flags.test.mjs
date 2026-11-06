@@ -215,36 +215,40 @@ test('an existing model-moves save keeps reporter tools; a typed save and an exp
     assert.equal(ext.settings().reporterTools, false);
 });
 
-test('typed movement with reporter tools registers flag, wait, and npc, not look or move', () => {
-    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: true }), ['ws_flag', 'ws_wait', 'ws_npc']);
-    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: false }), ['ws_flag', 'ws_wait']);
+test('story tools are not registered; movement tools still follow the movement radio', () => {
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: true }), []);
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: false }), []);
     assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: false }), ['ws_look', 'ws_move']);
-    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: true, flagNpcs: true }), ['ws_look', 'ws_move', 'ws_flag', 'ws_wait', 'ws_npc']);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: true, flagNpcs: true }), ['ws_look', 'ws_move']);
     ctx().extensionSettings.worldscrawl = { moveMode: 'typed', reporterTools: true, flagNpcs: true, flagTags: true };
-    assert.deepEqual(registered(), ['ws_flag', 'ws_wait', 'ws_npc']);
+    assert.deepEqual(registered(), []);
     ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: true, flagNpcs: false };
-    assert.deepEqual(registered(), ['ws_look', 'ws_move', 'ws_flag', 'ws_wait']);
+    assert.deepEqual(registered(), ['ws_look', 'ws_move']);
     ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: false, flagNpcs: true };
     assert.deepEqual(registered(), ['ws_look', 'ws_move']);
 });
 
-test('NPC flag off drops the how-to and keeps the people list; movement rules stay with the movement radio', () => {
+test('the story prompt keeps the people list and does not say how to report', () => {
+    const story = text => { assert.doesNotMatch(text, /ws_npc|ws_flag|ws_wait|end your reply with|call ws_/); };
     const off = ext.factsText(loc, null, false, { ...people, reportNpcs: false, reportTools: true, moveTools: false });
     assert.match(off, /People here/);
     assert.match(off, /Hesk \[hesk\]/);
-    assert.doesNotMatch(off, /ws_npc/);
-    assert.doesNotMatch(off, /walk in soaked/);
+    story(off);
     assert.match(off, /You only narrate/);
     const tags = ext.factsText(loc, null, false, { ...people, reportNpcs: true, reportTools: false, moveTools: false });
-    assert.match(tags, /\[ws_npc: appearance/);
-    assert.match(tags, /walk in soaked/);
-    assert.doesNotMatch(tags, /call ws_npc with action/);
+    story(tags);
+    assert.match(tags, /You only narrate/);
     const report = ext.factsText(loc, null, false, { ...people, reportNpcs: true, reportTools: true, moveTools: false });
-    assert.match(report, /call ws_npc with action/);
+    story(report);
     assert.match(report, /You only narrate/);
     const moving = ext.factsText(loc, null, true, { reportTools: false, moveTools: true });
     assert.match(moving, /Do not invent locations or exits that are not listed\./);
     assert.doesNotMatch(moving, /You only narrate/);
+    story(moving);
+    const lore = ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Drowned Rat', text: 'Old.' }] }, true);
+    assert.match(lore.lore_index, /Lore on file: The Drowned Rat\./);
+    assert.doesNotMatch(lore.lore_index, /ws_flag/);
+    assert.doesNotMatch(ext.newDoorLine('You', 'Hall', true), /ws_flag|ws_npc|ws_wait/);
 });
 
 test('a no-op appearance is warned and not rebuilt; a soaked arrival and a pasted tag still apply', async () => {
@@ -302,6 +306,129 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
         const s = ext.settings();
         Object.assign(s, saved);
         pendingNpc.splice(0, pendingNpc.length);
+    }
+});
+
+test('the tracker reads one exchange into place, people, and wait, and skips what is not a story reply', () => {
+    const parsed = ext.readTrackerAnswer('{"place":{"changed":true,"kind":"change","note":"the roof fell in"},"people":[{"id":"hesk","action":"appearance","intent":"soaked from the rain","fields":"outfit"},{"id":"hesk","action":"disposition","value":"friendly","reason":"they paid"}],"wait":{"duration":"45m","reason":"drying off"}}');
+    assert.equal(parsed.place.note, 'the roof fell in');
+    assert.equal(parsed.people.length, 2);
+    assert.equal(parsed.wait.duration, '45m');
+    const list = ext.readTrackerAnswer({ changes: [{ type: 'place', note: 'the hearth collapsed' }, { type: 'person', id: 'hesk', action: 'fact', text: 'owes a favor' }, { type: 'wait', duration: '1h', reason: 'a long meal' }] });
+    assert.equal(list.place.note, 'the hearth collapsed');
+    assert.equal(list.people[0].text, 'owes a favor');
+    assert.equal(list.wait.reason, 'a long meal');
+    assert.equal(ext.readTrackerAnswer({ place: { changed: false, note: 'fog' }, people: [{ id: 'hesk', action: 'appearance', intent: 'looks' }], wait: {} }).place, null);
+    const gated = ext.gateTracker(parsed, { places: false, people: false });
+    assert.equal(gated.place, null);
+    assert.deepEqual(gated.people, []);
+    assert.equal(gated.wait.duration, '45m');
+    const reply = { is_user: false, mes: 'You look around.' };
+    assert.equal(ext.shouldTrackReply(reply, [{ is_user: true, mes: '...' }], 1), true);
+    assert.equal(ext.shouldTrackReply(reply, [{ is_user: true, mes: '*You go out.*', extra: { worldscrawl_engine: true } }], 1), true);
+    assert.equal(ext.shouldTrackReply(reply, [{ is_user: true, mes: '/ws-help' }], 1), false);
+    assert.equal(ext.shouldTrackReply({ is_user: false, is_system: true, mes: 'edit' }, [], 0), false);
+    assert.equal(ext.shouldTrackReply({ is_user: false, mes: '   ' }, [], 0), false);
+    const prompt = ext.trackerPrompt({ scrap: 'This place: Hall\nWeather (known; not a reason to rewrite this place): Fog.\nPeople here:\nHesk [hesk]. Looks: copper braids.', player: 'I look around.', story: 'You look around.' });
+    assert.match(prompt, /Fog/);
+    assert.match(prompt, /does not rewrite the room/);
+    assert.doesNotMatch(prompt, /yesterday|the whole chat/);
+});
+
+test('tracker payloads use the person apply, including the no-op appearance reject, and can update a person and a place together', async () => {
+    saved = saveSettings();
+    try {
+        rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [hesk] }] });
+        const c = ctx();
+        c.chatMetadata = { worldscrawl_enabled: true };
+        c.saveChat = async () => {};
+        c.updateMessageBlock = () => {};
+        let rebuilds = 0;
+        c.generateRaw = async () => { rebuilds++; return '{}'; };
+        const s = ext.settings();
+        s.flagNpcs = true;
+        s.flagTags = true;
+        s.autoKeepWaits = false;
+        const apply = async (answer) => {
+            rebuilds = 0;
+            const msg = { mes: 'Hesk is here.', is_user: false, swipe_id: 0, extra: {} };
+            c.chat = [msg];
+            await ext.applyTrackerResult(0, ext.readTrackerAnswer(answer));
+            return msg;
+        };
+        const looks = await apply({ people: [{ id: 'hesk', action: 'appearance', intent: 'looks' }] });
+        assert.equal(looks.extra?.worldscrawl_npc, undefined);
+        assert.match(JSON.stringify(looks.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
+        assert.equal(looks.extra.worldscrawl_npcwarn[0].source, 'tracker');
+        assert.equal(rebuilds, 0);
+        const both = await apply({
+            place: { changed: true, kind: 'change', note: 'the hearth collapsed' },
+            people: [{ id: 'hesk', action: 'appearance', intent: 'soaked from the rain', fields: 'outfit' }, { id: 'hesk', action: 'disposition', value: 'friendly', reason: 'a kind word' }],
+            wait: { duration: '45m', reason: 'drying off' },
+        });
+        const appearance = (both.extra.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
+        const stance = (both.extra.worldscrawl_npc ?? []).find(x => x.type === 'npc_disposition');
+        assert.equal(appearance?.intent, 'soaked from the rain');
+        assert.equal(appearance?.source, 'tracker');
+        assert.equal(stance?.value, 'friendly');
+        assert.equal(both.extra.worldscrawl_flag?.note, 'the hearth collapsed');
+        assert.equal(both.extra.worldscrawl_flag?.source, 'tracker');
+        assert.equal(both.extra.worldscrawl_waitcard?.source, 'tracker');
+        assert.match(both.extra.worldscrawl_waitcard?.label ?? '', /45m/);
+        assert.equal(rebuilds, 0, 'supplied outfit text does not ask for a rebuild');
+    } finally {
+        const s = ext.settings();
+        Object.assign(s, saved);
+    }
+});
+
+test('flag gates block tracker proposals and still allow a pasted tag; a swipe drops tracker stamps', async () => {
+    saved = saveSettings();
+    try {
+        rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [hesk] }] });
+        const c = ctx();
+        c.chatMetadata = { worldscrawl_enabled: true };
+        c.saveChat = async () => {};
+        c.updateMessageBlock = () => {};
+        c.generateRaw = async () => '{}';
+        document.querySelectorAll = () => [];
+        const s = ext.settings();
+        s.flagNpcs = false;
+        s.flagTags = false;
+        const gated = { mes: 'Hesk walks in soaked.', is_user: false, swipe_id: 0, extra: {} };
+        c.chat = [gated];
+        await ext.applyTrackerResult(0, ext.readTrackerAnswer({ place: { changed: true, note: 'the roof fell in' }, people: [{ id: 'hesk', action: 'appearance', intent: 'soaked from the rain', fields: 'outfit' }] }));
+        assert.equal(gated.extra.worldscrawl_npc, undefined);
+        assert.equal(gated.extra.worldscrawl_flag, undefined);
+        const pasted = { mes: 'Soaked. [ws_npc: appearance | hesk | soaked from the rain | outfit] [ws_flag: place | the roof fell in]', is_user: false, swipe_id: 0, extra: {} };
+        c.chat = [pasted];
+        await ext.onReplyForFlags(0);
+        assert.equal((pasted.extra.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance')?.intent, 'soaked from the rain');
+        assert.equal(pasted.extra.worldscrawl_flag?.source, 'tag');
+        assert.match(pasted.extra.worldscrawl_flag?.note ?? '', /roof fell in/);
+        const swipe = {
+            mes: 'A different telling.', is_user: false, swipe_id: 1,
+            swipe_info: [{ extra: { worldscrawl_npc: [{ type: 'npc_appearance', id: 'hesk', intent: 'soaked', source: 'tracker', swipe: 0 }] } }, { extra: {} }],
+            extra: {
+                worldscrawl_npc: [
+                    { type: 'npc_appearance', id: 'hesk', intent: 'soaked', source: 'tracker', swipe: 0 },
+                    { type: 'npc_fact', id: 'hesk', text: 'pasted fact', source: 'tag', swipe: 1 },
+                ],
+                worldscrawl_flag: { source: 'tracker', note: 'roof', swipe: 0 },
+                worldscrawl_waitcard: { source: 'tracker', label: 'waited 45m', swipe: 0, seconds: 2700 },
+            },
+        };
+        c.chat = [swipe];
+        await ext.onStorySwipe(0);
+        const left = swipe.extra.worldscrawl_npc ?? [];
+        assert.equal(left.some(x => x.source === 'tracker'), false);
+        assert.equal(left.find(x => x.type === 'npc_fact')?.text, 'pasted fact');
+        assert.equal(swipe.extra.worldscrawl_flag, undefined);
+        assert.equal(swipe.extra.worldscrawl_waitcard, undefined);
+        assert.equal(swipe.swipe_info[0].extra.worldscrawl_npc, undefined);
+    } finally {
+        const s = ext.settings();
+        Object.assign(s, saved);
     }
 });
 }

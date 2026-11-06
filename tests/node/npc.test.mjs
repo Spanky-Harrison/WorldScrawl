@@ -471,7 +471,8 @@ test('name knowledge: per actor, from stamps only, never from chat text', () => 
     const [h] = presentAt(chat, 0, [rec()], env);
     assert.deepEqual(h.known, { known: false, reason: 'not known: shown as "the landlady"' });
     const s = npcSlices([h], {}).npcs_present;
-    assert.match(s, /^the landlady \[hesk\] \(the player does not know this person's name yet; it is Hesk\..*\[ws_flag: name \| Hesk\]\)/);
+    assert.match(s, /^the landlady \[hesk\] \(the player does not know this person's name yet; it is Hesk\. Do not have the player's character use it until it is learned\.\)/);
+    assert.doesNotMatch(s, /ws_flag/);
     assert.equal(nameKnown(tam, [], 0).reason, 'known: no unknownAs on the card');
     const flaggedChat = [bot('Hesk glares.', { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Hesk'] }] })];
     const flagged = framesOf(flaggedChat, 0, [rec()])[0].get('hesk');
