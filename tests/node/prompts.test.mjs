@@ -313,6 +313,12 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
     assert.match(tags, /A place changing is not a reason to report a person update/);
     assert.match(tools, /A place changing is not a reason to call this/);
     assert.match(tool, /Do not call this because a place changed/);
+    for (const t of [tags, tools, tool]) {
+        assert.match(t, /only when Looks, Body or Outfit actually changed/);
+        assert.match(t, /entered, was described, or was looked at/);
+        assert.match(t, /intent like "looks" or "appeared"/);
+        assert.match(t, /walk in soaked/);
+    }
     for (const [, body] of tags.matchAll(/\[ws_npc:\s*([^\]]+)\]/g)) if (!/their-id/.test(body)) assert.ok(parseNpcTag(body), `example parses: ${body}`);
     assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(tools));
     // Rebuild side-call prompts exist and stay locked to JSON fields.

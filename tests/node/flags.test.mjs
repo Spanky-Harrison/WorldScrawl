@@ -161,3 +161,147 @@ test('unreadable [ws_...] tags stay in the text and become an activity warning',
     assert.equal(e.text, 'unreadable tag: [ws_bogus | x]');
 });
 }
+
+// Reporter tools are separate from movement. NPC flagging can be off without dropping the people list or a real tag.
+{
+const fs = await import('node:fs');
+const { validateRecord } = await import('../../plugin/npc.mjs');
+const { rememberWorlds } = await import('../../extension/clock.mjs');
+const { applyTools } = await import('../../extension/expiry.mjs');
+const { toolsToRegister } = await import('../../extension/discovery.mjs');
+const { pendingNpc, toolNpcStamp } = await import('../../extension/scene.mjs');
+const ext = await import('../../extension/index.js');
+const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
+ext.setPrompts(def);
+const src = extSource();
+const hesk = validateRecord({
+    id: 'hesk', name: 'Hesk', personality: { summary: 'The landlady.' },
+    appearance: { summary: 'copper braids', body: 'sturdy', outfit: 'wool dress' },
+}, { file: 'hesk.json' });
+const loc = { address: 'r', name: 'Common Room', description: 'Smoky.', exits: [], views: [] };
+const people = { npcs_present: 'Hesk [hesk]: landlady. Looks: copper braids.', npc_focus: '' };
+const ctx = () => SillyTavern.getContext();
+const saveSettings = () => { const s = ext.settings(); return { moveMode: s.moveMode, reporterTools: s.reporterTools, flagNpcs: s.flagNpcs, flagTags: s.flagTags }; };
+let saved;
+const registered = () => {
+    const names = [];
+    const c = ctx();
+    c.registerFunctionTool = t => names.push(t.name);
+    c.unregisterFunctionTool = () => {};
+    c.chatMetadata = { ...(c.chatMetadata ?? {}), worldscrawl_enabled: true };
+    applyTools();
+    return names;
+};
+
+test('reporter tools are a checkbox, not a movement radio', () => {
+    assert.match(src, /id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes/);
+    assert.match(src, /id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes/);
+    assert.match(src, /reporterTools: false/);
+    assert.match(src, /flagNpcs: true/);
+    assert.doesNotMatch(src, /name="worldscrawl_mode" value="reporter/);
+});
+
+test('an existing model-moves save keeps reporter tools; a typed save and an explicit off do not', () => {
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', flagTags: true };
+    const migrated = ext.settings();
+    assert.equal(migrated.reporterTools, true);
+    assert.equal(migrated.flagNpcs, true);
+    assert.equal(migrated.moveMode, 'tools');
+    ctx().extensionSettings.worldscrawl = { moveMode: 'typed' };
+    const typed = ext.settings();
+    assert.equal(typed.reporterTools, false);
+    assert.equal(typed.flagNpcs, true);
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: false };
+    assert.equal(ext.settings().reporterTools, false);
+});
+
+test('typed movement with reporter tools registers flag, wait, and npc, not look or move', () => {
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: true }), ['ws_flag', 'ws_wait', 'ws_npc']);
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: false }), ['ws_flag', 'ws_wait']);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: false }), ['ws_look', 'ws_move']);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: true, flagNpcs: true }), ['ws_look', 'ws_move', 'ws_flag', 'ws_wait', 'ws_npc']);
+    ctx().extensionSettings.worldscrawl = { moveMode: 'typed', reporterTools: true, flagNpcs: true, flagTags: true };
+    assert.deepEqual(registered(), ['ws_flag', 'ws_wait', 'ws_npc']);
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: true, flagNpcs: false };
+    assert.deepEqual(registered(), ['ws_look', 'ws_move', 'ws_flag', 'ws_wait']);
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: false, flagNpcs: true };
+    assert.deepEqual(registered(), ['ws_look', 'ws_move']);
+});
+
+test('NPC flag off drops the how-to and keeps the people list; movement rules stay with the movement radio', () => {
+    const off = ext.factsText(loc, null, false, { ...people, reportNpcs: false, reportTools: true, moveTools: false });
+    assert.match(off, /People here/);
+    assert.match(off, /Hesk \[hesk\]/);
+    assert.doesNotMatch(off, /ws_npc/);
+    assert.doesNotMatch(off, /walk in soaked/);
+    assert.match(off, /You only narrate/);
+    const tags = ext.factsText(loc, null, false, { ...people, reportNpcs: true, reportTools: false, moveTools: false });
+    assert.match(tags, /\[ws_npc: appearance/);
+    assert.match(tags, /walk in soaked/);
+    assert.doesNotMatch(tags, /call ws_npc with action/);
+    const report = ext.factsText(loc, null, false, { ...people, reportNpcs: true, reportTools: true, moveTools: false });
+    assert.match(report, /call ws_npc with action/);
+    assert.match(report, /You only narrate/);
+    const moving = ext.factsText(loc, null, true, { reportTools: false, moveTools: true });
+    assert.match(moving, /Do not invent locations or exits that are not listed\./);
+    assert.doesNotMatch(moving, /You only narrate/);
+});
+
+test('a no-op appearance is warned and not rebuilt; a soaked arrival and a pasted tag still apply', async () => {
+    saved = saveSettings();
+    try {
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [hesk] }] });
+    const c = ctx();
+    c.chatMetadata = { worldscrawl_enabled: true };
+    c.saveChat = async () => {};
+    c.updateMessageBlock = () => {};
+    document.querySelectorAll = () => [];
+    let rebuilds = 0;
+    c.generateRaw = async () => { rebuilds++; return '{}'; };
+    const s = ext.settings();
+    s.flagNpcs = false;
+    s.reporterTools = true;
+    s.moveMode = 'typed';
+    const reply = async (mes, toolStamps = []) => {
+        rebuilds = 0;
+        pendingNpc.splice(0, pendingNpc.length, ...toolStamps);
+        const msg = { mes, is_user: false, swipe_id: 0, extra: {} };
+        c.chat = [msg];
+        await ext.onReplyForFlags(0);
+        return msg;
+    };
+    const looks = await reply('Hesk is at the bar. [ws_npc: appearance | hesk | looks | 1 hour]');
+    assert.equal((looks.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
+    assert.equal(looks.extra?.worldscrawl_appearance, undefined);
+    assert.equal(rebuilds, 0);
+    assert.match(JSON.stringify(looks.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
+    const appeared = await reply('She is here. [ws_npc: appearance | hesk | appeared]');
+    assert.equal((appeared.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
+    assert.match(JSON.stringify(appeared.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
+    const empty = await reply('[ws_npc: appearance | hesk]');
+    assert.equal((empty.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
+    assert.match(JSON.stringify(empty.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
+    const tool = toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'looks' });
+    const fromTool = await reply('Hesk steps in.', [tool]);
+    assert.equal((fromTool.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
+    assert.equal(rebuilds, 0);
+    const soaked = await reply('Hesk walks in soaked. [ws_npc: appearance | hesk | soaked from the rain | outfit]');
+    const stamp = (soaked.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
+    assert.equal(stamp?.intent, 'soaked from the rain');
+    assert.equal(stamp?.id, 'hesk');
+    assert.equal(soaked.extra?.worldscrawl_appearance, undefined);
+    const changed = await reply('Noted.', [toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'looks', outfit: 'a soaked cloak', lasts: '1 hour' })]);
+    const real = (changed.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
+    const { npcAt } = await import('../../extension/npc.mjs');
+    const live = npcAt(c.chat, 0, [hesk], 'hesk');
+    assert.equal(real?.outfit, 'a soaked cloak');
+    assert.equal(real?.intent, 'looks');
+    assert.equal(live?.outfit, 'a soaked cloak');
+    assert.equal(rebuilds, 0, 'supplied field text is applied by the engine');
+    } finally {
+        const s = ext.settings();
+        Object.assign(s, saved);
+        pendingNpc.splice(0, pendingNpc.length);
+    }
+});
+}
