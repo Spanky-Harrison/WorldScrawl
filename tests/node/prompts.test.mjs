@@ -68,7 +68,9 @@ test('old-name search: region/subregion notes and other world text naming a chan
 });
 
 test('patch prompt: people and creatures in a description are part of the room', () => {
-    assert.match(sys, /People and creatures mentioned in a room's description or notes are part of the room/);
+    assert.match(sys, /Unnamed scenery people and creatures in a room's description or notes are part of the room/);
+    assert.match(sys, /This call writes places only/);
+    assert.doesNotMatch(sys, /the narrator uses ws_npc/);
     assert.match(sys, /hurt, killed, transformed, left, moved in/);
 });
 }
@@ -306,7 +308,11 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
     assert.match(tool, /Intent, fields and lasts are enough/);
     assert.match(tags, /\[ws_npc: memory \| their-id \|/); assert.match(tags, /\[ws_npc: disposition \| their-id \| value \| short reason\]/);
     assert.match(tags, /\[ws_npc: appearance \| their-id \|/);
-    assert.match(P('change.style').text, /people-here/);
+    assert.match(P('change.style').text, /writes places only/);
+    assert.doesNotMatch(P('change.style').text, /people-here/);
+    assert.match(tags, /A place changing is not a reason to report a person update/);
+    assert.match(tools, /A place changing is not a reason to call this/);
+    assert.match(tool, /Do not call this because a place changed/);
     for (const [, body] of tags.matchAll(/\[ws_npc:\s*([^\]]+)\]/g)) if (!/their-id/.test(body)) assert.ok(parseNpcTag(body), `example parses: ${body}`);
     assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(tools));
     // Rebuild side-call prompts exist and stay locked to JSON fields.
@@ -327,6 +333,9 @@ test('memory and disposition stamps show in the activity log with their text', (
     const txt = JSON.stringify(messageActivity(msg, 3));
     assert.match(txt, /npc_memory/); assert.match(txt, /Joe lied to me/);
     assert.match(txt, /npc_disposition/); assert.match(txt, /hesk: unfriendly toward player — caught lying/);
+    const warned = JSON.stringify(messageActivity({ mes: 'x', extra: { worldscrawl_npcwarn: [{ swipe: 0, text: 'Warning: a person update for Hesk did not land on the card.' }] } }, 4));
+    assert.match(warned, /"kind":"warning"/);
+    assert.match(warned, /did not land on the card/);
 });
 }
 

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exportRecord, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, nameKnown, narratorView, npcForName, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore, renderNpcTokens } from '../../extension/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, nameKnown, narratorView, npcForName, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore, renderNpcTokens } from '../../extension/npc.mjs';
 import { castNameWarnings, loadCast, writeCastNpc, saveCastNpc, tidyRecord } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath, makeWorld } from './helpers.mjs';
 import { chatStamps, formFromPlay, formFromRecord, recordFromForm, liveSchedule, permanentProblem, CHAT_ONLY_ROOM } from '../../plugin/ui/castdata.mjs';
@@ -728,5 +728,18 @@ test("level '' requests keep the exact-room rule", () => {
     addLoreRequest(chat[1], { place: 'Drowned Rat', level: '', address: RAT, source: 'bracket' });
     assert.deepEqual(activeLore(chat, 1, ratChain, playerAt).map(c => c.level), ['subregion']);
     assert.deepEqual(activeLore(chat, 2, ratChain, playerAt), []);
+});
+test('a claimed person field that is not on the card is a warning', () => {
+    const npc = { id: 'hesk', name: 'Hesk', line: 'stern', facts: ['hates rats'], temps: [{ text: 'soaked' }], memory: ['owes a favor'], disposition: { player: { value: 'indifferent', reason: '' } }, effects: [], deep: { history: 'She runs the inn.' } };
+    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'hates rats' }), 'landed');
+    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'soaked' }), 'landed');
+    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'personality.summary', text: 'kinder' }), 'missed');
+    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'a new scar', pending: true }), 'waiting');
+    assert.equal(claimResult(npc, { type: 'npc_appearance', intent: 'magically young' }), 'missed');
+    assert.equal(claimResult({ ...npc, effects: [{ intent: 'magically young' }] }, { type: 'npc_appearance', intent: 'Magically Young' }), 'landed');
+    assert.equal(claimResult(npc, { type: 'npc_disposition', who: 'player', value: 'helpful' }), 'missed');
+    assert.equal(claimResult(npc, { type: 'npc_memory', note: 'owes a favor' }), 'landed');
+    const warns = claimWarnings(npc, [{ type: 'npc_fact', field: 'personality.summary', text: 'kinder' }, { type: 'npc_fact', field: 'fact', text: 'hates rats' }]);
+    assert.deepEqual(warns, ['Warning: a person update for Hesk did not land on the card.']);
 });
 }

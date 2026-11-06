@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { OPS, OP_DOCS, opDocs, readChangeAnswer, applyPatch } from '../../plugin/shared/patches.mjs';
+import { OPS, OP_DOCS, opDocs, readChangeAnswer, personClaimWarning, applyPatch } from '../../plugin/shared/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
 const src = extSource();
@@ -34,6 +34,42 @@ test('change answer: ops, nothing, or cant; model-written create_place ids are d
 
 const hub = (names, dirs) => readChangeAnswer({ ops: names.map((n, i) => ({ op: 'create_place', name: n, description: `The ${n.toLowerCase()}, made by magic.`,
     exits: [{ to: TAVERN, direction: 'hub', return_direction: dirs[i], door: true }] })) }).ops;
+
+test('a place answer that also claims a Hesk card update does not write that card', () => {
+    const ans = readChangeAnswer({
+        ops: [
+            { op: 'set_description', loc: TAVERN, text: 'The common room is ash.' },
+            { op: 'update_npc', id: 'hesk', field: 'personality.summary', text: 'broken by the fire' },
+        ],
+        people: [{ id: 'hesk', name: 'Hesk', personality: { summary: 'soot-stained and shaken' }, appearance: { summary: 'ash in her braids' } }],
+    });
+    assert.equal(ans.ops.length, 1);
+    assert.equal(ans.ops[0].op, 'set_description');
+    assert.equal(ans.ops[0].text, 'The common room is ash.');
+    assert.equal(ans.personClaims.length, 2);
+    const warn = personClaimWarning(ans.personClaims);
+    assert.match(warn, /Warning:/);
+    assert.match(warn, /Hesk/);
+    assert.match(warn, /not written/);
+    const named = readChangeAnswer({ ops: [{ op: 'set_description', loc: TAVERN, text: 'Hesk sweeps ash from the boards.' }] });
+    assert.equal(named.personClaims, undefined);
+    assert.equal(named.ops[0].text, 'Hesk sweeps ash from the boards.');
+    const only = readChangeAnswer({ people: [{ id: 'hesk', name: 'Hesk', personality: { summary: 'shaken' } }] });
+    assert.equal(only.nothing, true);
+    assert.equal(only.personClaims.length, 1);
+    const sched = readChangeAnswer({ ops: [
+        { op: 'set_description', loc: TAVERN, text: 'Ash.' },
+        { op: 'npc_schedule', id: 'hesk', schedule: [{ place: 'riverton:streets/square', activity: 'moved' }] },
+    ] });
+    assert.equal(sched.personClaims, undefined);
+    assert.equal(sched.ops.some(o => o.op === 'npc_schedule'), true);
+    const preview = c.post('/patch/preview', { json: { patch: { ops: ans.ops } } }).json();
+    assert.equal(preview.after[TAVERN].description, 'The common room is ash.');
+    assert.equal(JSON.stringify(preview.ops).includes('hesk'), false);
+    const hesk = c.get('/cast').json().npcs.find(n => n.id === 'hesk');
+    assert.match(hesk.line, /landlady/);
+    assert.doesNotMatch(hesk.looks, /ash in her braids/);
+});
 
 test('three new rooms off a hub in one change: engine ids, one linked door pair each', () => {
     const ops = hub(['Crystal Room', 'Ember Room', 'Tide Room'], ['crystal arch', 'ember arch', 'tide arch']);
