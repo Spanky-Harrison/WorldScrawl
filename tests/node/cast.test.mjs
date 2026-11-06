@@ -265,14 +265,16 @@ test('person pane: pending is not narrator text, and a temporary transformation 
         assert.equal(row.value, 'pending rebuild', key);
         assert.match(row.source, /pending rebuild/);
         assert.doesNotMatch(row.source, /cast file/);
+        assert.equal(pendingRows.filter(r => r.key === key).length, 1, key);
     }
-    assert.ok(pendingRows.some(r => r.key === 'Base body' && r.source === 'cast file'));
+    assert.equal(pendingRows.some(r => /^Base /.test(r.key) || /preview$/.test(r.key)), false);
     const hand = resolvedCard(hesk, {
         ...pending, appearanceKey: 'young|body+outfit',
         caches: { 'old|looks': { looks: 'a previous preview' } },
     });
-    assert.equal(hand.find(r => r.key === 'Looks preview').value, 'a previous preview');
-    assert.equal(hand.find(r => r.key === 'Looks preview').source, 'stale');
+    assert.equal(hand.find(r => r.key === 'Looks preview'), undefined);
+    assert.equal(hand.filter(r => r.key === 'Looks').length, 1);
+    assert.equal(hand.find(r => r.key === 'Looks').value, 'pending rebuild');
 
     const plan = planAppearanceRebuild(pending);
     const rewrite = { looks: 'a young woman with copper braids', body: 'Years younger.', outfit: 'A bright dress.' };
@@ -283,7 +285,10 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     assert.equal(landed.find(r => r.key === 'Looks').value, rewrite.looks);
     assert.match(landed.find(r => r.key === 'Body').source, /effect: magically young/);
     assert.match(landed.find(r => r.key === 'Body').source, /message #0/);
-    assert.equal(landed.find(r => r.key === 'Base body').value.startsWith('A tall'), true);
+    assert.equal(landed.filter(r => r.key === 'Looks').length, 1);
+    assert.equal(landed.filter(r => r.key === 'Body').length, 1);
+    assert.equal(landed.filter(r => r.key === 'Outfit').length, 1);
+    assert.equal(landed.some(r => /^Base /.test(r.key)), false);
     assert.equal(authoringChanges(hesk, play).length, 0);
     assert.equal(fileDiff(hesk, play).changed, false);
     const seed = editSeed(play, hesk);
@@ -304,6 +309,10 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     assert.match(wrote[0].to, /hates rats/);
     assert.doesNotMatch(wrote[0].to, /soaked to the skin/);
     assert.doesNotMatch(JSON.stringify(wrote), /bright dress|Years younger|young woman/);
+    const factRow = resolvedCard(hesk, both).find(r => r.key === 'Facts');
+    assert.match(factRow.value, /hates rats/);
+    assert.match(factRow.value, /soaked to the skin/);
+    assert.match(factRow.source, /message #0/);
 
     const two = resolvedCard({ ...hesk, line: 'old' }, { line: 'new', stamps: [{ type: 'npc_fact', field: 'personality.summary', msg: 2 }, { type: 'npc_fact', field: 'personality.summary', msg: 5 }] });
     assert.equal(two.find(r => r.key === 'Personality').source, 'message #2, message #5');
