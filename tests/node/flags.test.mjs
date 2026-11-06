@@ -478,4 +478,65 @@ test('npcEnv exists means the live map: a leftover relocate does not hide a room
     assert.equal(asleep.near?.scope, 'subregion');
     assert.equal(burned.playerAt(0), BAR);
 });
+
+test('the tracker scrap is one pass over the live place and every field a person may change', async () => {
+    const description = `${'The taproom is long and smoky. '.repeat(12)}The sign is new.`;
+    assert.ok(description.length > 240);
+    const weather = 'cold fog '.repeat(40);
+    const people = ext.trackerPeopleLines([{
+        id: 'hesk', name: 'Hesk', looks: 'copper braids.', body: 'Tall.', outfit: '',
+        facts: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'],
+        memory: ['Joe lied about the coin.'],
+        stance: 'indifferent', stanceReason: 'Strangers are customers.',
+    }]);
+    const scrap = ext.trackerScrap({
+        placeName: 'Uncommon Room', displayName: 'Uncommon Room (The Uncommon Room)',
+        placeDescription: description, weather, peopleLines: people,
+    });
+    assert.match(scrap, /^This place: Uncommon Room \(The Uncommon Room\)/);
+    assert.match(scrap, new RegExp(`Description: ${description.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.doesNotMatch(scrap.split('\nWeather')[0], /…/);
+    const weatherLine = scrap.split('\n').find(l => l.startsWith('Weather'));
+    assert.match(weatherLine, /Weather \(known; not a reason to rewrite this place\): cold fog/);
+    assert.match(weatherLine, /…$/);
+    assert.ok(weatherLine.length < weather.length, 'weather is still clipped');
+    assert.match(people, /Looks: copper braids/);
+    assert.match(people, /Body: Tall\./);
+    assert.match(people, /Outfit: \(none\)/);
+    assert.match(people, /Known facts: one; two; three; four; five; six; seven/);
+    assert.match(people, /Memories: Joe lied about the coin/);
+    assert.match(people, /Stance toward the player: indifferent \(Strangers are customers\)/);
+    assert.match(ext.trackerScrap({ placeName: 'Hall' }), /This place: Hall\nDescription: \(none\)/);
+    assert.match(ext.trackerScrap({ placeName: 'Taproom', displayName: 'The Uncommon Room' }), /This place: Taproom \(The Uncommon Room\)/);
+    const prompt = ext.trackerPrompt({ scrap, player: 'I look around.', story: 'You look around.' });
+    assert.match(prompt, /does not rewrite the room/);
+    assert.match(prompt, /memory already listed/);
+    assert.match(prompt, /stance and reason listed above/);
+    assert.match(prompt, /walk in soaked/);
+    assert.match(prompt, /time actually passed/);
+    assert.match(prompt, /"looks" or "appeared"/);
+    assert.doesNotMatch(prompt, /yesterday|the whole chat|end your reply with|\[ws_npc/);
+    const discovery = fs.readFileSync(new URL('../../extension/discovery.mjs', import.meta.url), 'utf8');
+    assert.equal(discovery.split("gen('tracker'").length - 1, 1);
+    const { listedPeople } = await import('../../extension/scene.mjs');
+    const { rememberWorlds } = await import('../../extension/clock.mjs');
+    const { validateRecord } = await import('../../plugin/npc.mjs');
+    const BAR = 'riverton:drowned_rat/common_room';
+    const card = validateRecord({
+        id: 'hesk', name: 'Hesk', line: 'The landlady.',
+        appearance: { summary: 'copper braids', body: 'Tall.', outfit: 'An apron.' },
+        facts: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'],
+        memory: ['Joe lied about the coin.'],
+        disposition: { player: { value: 'friendly', reason: 'they paid' } },
+        schedule: [{ place: BAR, activity: 'pouring drinks' }],
+    }, { file: 'hesk.json', places: new Set([BAR]) });
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [card], places: [BAR], subs: [], regions: ['riverton'], elsewhere: [] }] });
+    const listed = listedPeople([{ mes: 'hello', is_user: true }], 0, { address: BAR, name: 'Uncommon Room', display_name: 'Uncommon Room (The Uncommon Room)' });
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].facts.length, 7);
+    assert.deepEqual(listed[0].memory, ['Joe lied about the coin.']);
+    assert.equal(listed[0].stance, 'friendly');
+    assert.equal(listed[0].stanceReason, 'they paid');
+    assert.equal(listed[0].looks, 'copper braids');
+});
 }
