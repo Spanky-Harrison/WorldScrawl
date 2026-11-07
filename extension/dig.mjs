@@ -29,12 +29,15 @@ function noteCall(at, note) {
 }
 const markLast = (at, kind, status, reason) => { try { const chat = ctx().chat ?? []; markCall(chat[Number.isInteger(at) && at >= 0 ? at : chat.length - 1], kind, status, reason); } catch { /* ignore */ } };
 /** One model side call, noted: ok with a short answer, or failed (error or empty answer). retry merges with the last note of that kind. */
-async function gen(kind, args, { at, retry = false } = {}) {
+async function gen(kind, args, { at, retry = false, note = true } = {}) {
     try {
         const raw = await ctx().generateRaw(args);
-        noteCall(at, String(raw ?? '').trim() ? { kind, status: 'ok', answer: raw, retry } : { kind, status: 'failed', reason: 'empty answer', retry });
+        if (note) noteCall(at, String(raw ?? '').trim() ? { kind, status: 'ok', answer: raw, retry } : { kind, status: 'failed', reason: 'empty answer', retry });
         return raw;
-    } catch (e) { noteCall(at, { kind, status: 'failed', reason: e?.message ?? String(e), retry }); throw e; }
+    } catch (e) {
+        if (note) noteCall(at, { kind, status: 'failed', reason: e?.message ?? String(e), retry });
+        throw e;
+    }
 }
 /** Ask one pick-one question; one retry if the answer matches nothing. */
 async function askValid(label, prompt, validate, systemPrompt = pickSys()) {

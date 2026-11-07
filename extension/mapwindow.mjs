@@ -8,7 +8,7 @@ import { api, currentLocation, doorOverrides, doorStates, ensurePrompts, getStor
 import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
 import { discoveredPlaces, lastUserIndex, revealedDoors, stoodInAddresses } from './movement.mjs';
 import { changeEditMismatch, changeEditSession, liveEdit, mapCtx, opsHash, restampChange, swipeOf, toggleChange } from './patches.mjs';
-import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit } from './scene.mjs';
+import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit, retryAppearance } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
 
 const THEME_VARS = ['--SmartThemeBodyColor', '--SmartThemeEmColor', '--SmartThemeUnderlineColor', '--SmartThemeQuoteColor', '--SmartThemeBlurTintColor',
@@ -91,6 +91,13 @@ function openMapChannel() {
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) exportNpc(String(d.id ?? ''), { update: d.update === true })
                 .then(r => ch.postMessage({ type: 'npc_export_result', req: d.req, ...(r ?? { ok: false, error: 'not in this chat' }) }))
                 .catch(e => ch.postMessage({ type: 'npc_export_result', req: d.req, ok: false, error: e.message }));
+        }
+        if (ev.data?.type === 'appearance_retry') {
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) {
+                const msg = Number.isInteger(d.msg) && d.msg >= 0 ? d.msg : (c.chat?.length ?? 1) - 1;
+                retryAppearance(msg, String(d.id ?? ''), String(d.key ?? '')).catch(e => console.warn('[WorldScrawl] appearance retry', e));
+            }
         }
         if (ev.data?.type === 'npc_chat_edit') {
             const d = ev.data;

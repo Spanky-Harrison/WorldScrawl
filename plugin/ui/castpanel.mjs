@@ -147,11 +147,25 @@ export function castPanel(doc, io) {
         if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
         return places.length ? [$('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places)] : [];
     }
+    function appearanceRetry(play) {
+        if (!play || play.appearanceHow !== 'pending') return null;
+        const job = play.appearanceJob;
+        const working = job?.status === 'working';
+        const why = job?.reason ? $('div', { class: 'cast-pending' }, job.reason) : null;
+        let btn;
+        btn = $('button', { type: 'button', class: 'crumb cast-retry', ...(working ? { disabled: '' } : {}), onclick: () => {
+            if (btn.disabled) return;
+            btn.disabled = true;
+            const at = io.chatAt?.();
+            io.retryAppearance?.({ id: play.id, msg: job?.msg ?? at?.msg, key: job?.key || '' });
+        } }, working ? 'Rewriting…' : 'Retry rewrite');
+        return $('div', { class: 'cast-appearretry' }, why, btn);
+    }
     function drawResolved(r, pane) {
         const app = cardAppearance(r.rec, r.play);
         const landedLooks = ['Looks', app.looks];
         const card = resolvedCard(r.rec, r.play).map(row => row.key === 'Looks' && row.landed ? { ...row, value: landedLooks[1] } : row);
-        pane.append(sourcedTable(card), ...scheduleBlock(r));
+        pane.append(sourcedTable(card), appearanceRetry(r.play), ...scheduleBlock(r));
     }
     function paintEffective(box, play, rec) {
         if (!play) { box.hidden = true; box.replaceChildren(); return; }
@@ -162,6 +176,7 @@ export function castPanel(doc, io) {
         const stale = pending && ['looks', 'body', 'outfit'].some(k => (play[k] ?? '') !== (play.base?.[k] ?? ''));
         box.replaceChildren($('b', {}, 'Narrator now (read-only)'), line('Looks', app.looks), line('Body', app.body), line('Outfit', app.outfit),
             pending ? $('div', { class: 'cast-pending' }, 'pending rebuild — not narrator text yet') : null,
+            appearanceRetry(play),
             stale ? $('div', { class: 'muted' }, 'An older preview is stale.') : null);
     }
     function permanentBox(r) {

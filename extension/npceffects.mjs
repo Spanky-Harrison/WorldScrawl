@@ -217,6 +217,52 @@ export function acceptAppearanceRebuild(plan, answer, currentNpc) {
     // Must cover every field the plan asked for.
     for (const f of plan.fields) if (!got[f]) return { failed: true };
     const stamp = { type: 'npc_appearance_cache', id: plan.id, key: plan.key, how: 'model' };
+    const before = {};
+    for (const f of plan.fields) before[f] = String(currentNpc?.[f] ?? '');
+    stamp.before = before;
     for (const f of APPEARANCE_FIELDS) if (got[f]) stamp[f] = got[f];
     return { stamp };
+}
+
+/** First JSON object in a model answer. `truncated` when a `{` never closes. */
+function readFirstJsonObject(text) {
+    const t = String(text ?? '').replace(/```(?:json)?/gi, '');
+    let sawOpen = false;
+    for (let i = t.indexOf('{'); i >= 0; i = t.indexOf('{', i + 1)) {
+        sawOpen = true;
+        let depth = 0, inStr = false, esc = false, closed = false;
+        for (let j = i; j < t.length; j++) {
+            const ch = t[j];
+            if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+            if (ch === '"') inStr = true;
+            else if (ch === '{') depth++;
+            else if (ch === '}' && --depth === 0) { closed = true; try { return { value: JSON.parse(t.slice(i, j + 1)), truncated: false }; } catch { break; } }
+        }
+        if (!closed) return { value: null, truncated: true };
+    }
+    return { value: null, truncated: false, sawOpen };
+}
+
+const REFUSAL_RE = /^(?:i\s+(?:can(?:not|'t)|won(?:not|'t)|am unable|must refuse)|sorry\b|as an ai\b)/i;
+
+/**
+ * What a rebuild reply is, before any stamp is written.
+ * kind: empty | refusal | truncated | malformed | partial | ok.
+ * partial carries the parsed fields but must not be cached.
+ */
+export function classifyAppearanceReply(raw, fields = []) {
+    const text = String(raw ?? '').trim();
+    if (!text) return { kind: 'empty', answer: null, reason: 'empty answer' };
+    const obj = readFirstJsonObject(text);
+    if (obj.truncated) return { kind: 'truncated', answer: null, reason: 'the answer was cut off before the JSON closed' };
+    if (!obj.value || typeof obj.value !== 'object' || Array.isArray(obj.value)) {
+        if (REFUSAL_RE.test(text)) return { kind: 'refusal', answer: null, reason: 'the model refused' };
+        return { kind: 'malformed', answer: null, reason: 'the answer was not JSON' };
+    }
+    const got = readAppearanceAnswer(obj.value);
+    if (!got) return { kind: 'malformed', answer: null, reason: 'the JSON had no appearance text' };
+    const need = (fields ?? []).filter(f => APPEARANCE_FIELDS.includes(f));
+    const missing = need.filter(f => !got[f]);
+    if (missing.length) return { kind: 'partial', answer: got, missing, reason: `missing ${missing.join(', ')}` };
+    return { kind: 'ok', answer: got, reason: '' };
 }
