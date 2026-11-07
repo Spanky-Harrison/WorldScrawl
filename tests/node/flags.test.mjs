@@ -637,6 +637,12 @@ test('a failed Looks summary keeps the body rewrite, and an expired layer does n
     assert.equal(msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.looks), false);
     const job = scene.appearJobs(msg).find(j => j.part === 'looks');
     assert.equal(job?.kind, 'refusal');
+    const appearanceStamps = () => msg.extra[NPC_KEY].filter(s => s.type === 'npc_appearance').length;
+    const before = appearanceStamps();
+    c.generateRaw = async () => '{"looks":"a harnessed centaur"}';
+    await scene.retryAppearance(0, 'hesk', job.key);
+    assert.equal(appearanceStamps(), before, 'a retry does not stamp the effect again');
+    assert.equal(npcAt(c.chat, 0, [], 'hesk').body, 'a centaur barrel');
 });
 
 test('engine-resolved body text asks only for a Looks summary, and Retry does not rewrite the body', async () => {
