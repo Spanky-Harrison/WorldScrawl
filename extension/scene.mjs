@@ -752,22 +752,21 @@ async function rebuildOneAppearance(msgId, npc, { timeout = APPEARANCE_TIMEOUT_M
                 return false;
             }
             const prompt = appearanceRebuildPrompt(npc.name || plan.id, plan.inputs);
-            const call = gen('appearance rebuild', {
-                prompt,
-                systemPrompt: P('npc.appearance_rebuild_system', { reply: baseReply('json') }),
-                responseLength: 500,
-            }, { at: msgId, retry: attempt > 0, note: false }).then(raw => ({ raw }), error => ({ error }));
-            let timer;
-            const raced = await Promise.race([
-                call,
-                new Promise(resolve => { timer = setTimeout(() => resolve({ timeout: true }), timeout); }),
-            ]);
-            clearTimeout(timer);
+            let raw;
+            try {
+                raw = await gen('appearance rebuild', {
+                    prompt,
+                    systemPrompt: P('npc.appearance_rebuild_system', { reply: baseReply('json') }),
+                    responseLength: 500,
+                }, { at: msgId, retry: attempt > 0, note: false, timeout });
+            } catch (e) {
+                if (!still()) return false;
+                if (e?.code === 'timeout') { last = { kind: 'timeout', reason: 'the rewrite did not answer in time' }; continue; }
+                last = { kind: 'application', reason: e?.message || String(e) }; continue;
+            }
             if (!still()) return false;
-            if (raced.timeout) { last = { kind: 'timeout', reason: 'the rewrite did not answer in time' }; continue; }
-            if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
-            const classified = classifyAppearanceReply(raced.raw, plan.fields);
-            if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
+            const classified = classifyAppearanceReply(raw, plan.fields);
+            if (classified.kind !== 'ok') { last = { ...classified, sample: String(raw ?? '').slice(0, 80) }; continue; }
             const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             const result = acceptAppearanceRebuild(plan, classified.answer, live);
             if (!still()) return false;
@@ -863,22 +862,21 @@ async function ensureLooksSummary(msgId, npc, { timeout = APPEARANCE_TIMEOUT_MS 
         let last = { kind: 'malformed', reason: 'no answer' };
         for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
             if (!still()) return false;
-            const call = gen('looks summary', {
-                prompt: looksSummaryPrompt(npc.name || plan.id, plan.body, plan.outfit),
-                systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
-                responseLength: 120,
-            }, { at: msgId, retry: attempt > 0, note: false }).then(raw => ({ raw }), error => ({ error }));
-            let timer;
-            const raced = await Promise.race([
-                call,
-                new Promise(resolve => { timer = setTimeout(() => resolve({ timeout: true }), timeout); }),
-            ]);
-            clearTimeout(timer);
+            let raw;
+            try {
+                raw = await gen('looks summary', {
+                    prompt: looksSummaryPrompt(npc.name || plan.id, plan.body, plan.outfit),
+                    systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
+                    responseLength: 120,
+                }, { at: msgId, retry: attempt > 0, note: false, timeout });
+            } catch (e) {
+                if (!still()) return false;
+                if (e?.code === 'timeout') { last = { kind: 'timeout', reason: 'the summary did not answer in time' }; continue; }
+                last = { kind: 'application', reason: e?.message || String(e) }; continue;
+            }
             if (!still()) return false;
-            if (raced.timeout) { last = { kind: 'timeout', reason: 'the summary did not answer in time' }; continue; }
-            if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
-            const classified = classifyAppearanceReply(raced.raw, ['looks']);
-            if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
+            const classified = classifyAppearanceReply(raw, ['looks']);
+            if (classified.kind !== 'ok') { last = { ...classified, sample: String(raw ?? '').slice(0, 80) }; continue; }
             const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             const result = acceptLooksSummary(plan, classified.answer, live);
             if (!still()) return false;

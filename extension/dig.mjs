@@ -1,5 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { addCallNote, markCall } from './calllog.mjs';
+import { ownedCall } from './ownedcall.mjs';
 import { render as P } from './shared.mjs';
 import { loadPatchLib, parseJsonAnswer } from './carriers.mjs';
 import { chatElapsed } from './clock.mjs';
@@ -29,15 +30,22 @@ function noteCall(at, note) {
 }
 const markLast = (at, kind, status, reason) => { try { const chat = ctx().chat ?? []; markCall(chat[Number.isInteger(at) && at >= 0 ? at : chat.length - 1], kind, status, reason); } catch { /* ignore */ } };
 /** One model side call, noted: ok with a short answer, or failed (error or empty answer). retry merges with the last note of that kind. */
-async function gen(kind, args, { at, retry = false, note = true } = {}) {
-    try {
-        const raw = await ctx().generateRaw(args);
-        if (note) noteCall(at, String(raw ?? '').trim() ? { kind, status: 'ok', answer: raw, retry } : { kind, status: 'failed', reason: 'empty answer', retry });
-        return raw;
-    } catch (e) {
-        if (note) noteCall(at, { kind, status: 'failed', reason: e?.message ?? String(e), retry });
-        throw e;
+export const SIDE_CALL_TIMEOUT_MS = 60000;
+async function gen(kind, args, { at, retry = false, note = true, timeout = SIDE_CALL_TIMEOUT_MS } = {}) {
+    const raced = await ownedCall(ctx().generateRaw(args), timeout);
+    if (raced.timeout) {
+        const err = new Error('the request did not answer in time');
+        err.code = 'timeout';
+        if (note) noteCall(at, { kind, status: 'failed', reason: err.message, retry });
+        throw err;
     }
+    if (raced.error) {
+        if (note) noteCall(at, { kind, status: 'failed', reason: raced.error?.message ?? String(raced.error), retry });
+        throw raced.error;
+    }
+    const raw = raced.raw;
+    if (note) noteCall(at, String(raw ?? '').trim() ? { kind, status: 'ok', answer: raw, retry } : { kind, status: 'failed', reason: 'empty answer', retry });
+    return raw;
 }
 /** Ask one pick-one question; one retry if the answer matches nothing. */
 async function askValid(label, prompt, validate, systemPrompt = pickSys()) {
