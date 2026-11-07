@@ -157,72 +157,65 @@ test('parseNpcTag / takeNpcTags: appearance with fields and lasts', () => {
     assert.ok(!/ws_npc/.test(text));
 });
 
-test('stampSummary: appearance shows intent, fields, lasts, player', () => {
-    assert.match(stampSummary({ type: 'npc_appearance', id: 'maren', intent: 'blonde', fields: 'looks', lasts: 60 }, 'Maren'), /Maren: appearance — blonde \[looks\] \(for 1h\)/);
-    assert.match(stampSummary({ type: 'npc_appearance', id: 'maren', intent: 'gnoll', by: 'player' }, 'Maren'), /appearance — gnoll \(player\)/);
-    assert.match(stampSummary({ type: 'npc_appearance_cache', how: 'engine' }, 'Maren'), /appearance rebuild \(engine\)/);
+test('stampSummary: appearance shows intent and lasts, and a cache is not a row', () => {
+    assert.match(stampSummary({ type: 'npc_appearance', id: 'maren', intent: 'blonde', fields: 'body', lasts: 60 }, 'Maren'), /Maren: appearance — blonde \(for 1h\)/);
+    assert.match(stampSummary({ type: 'npc_appearance', id: 'maren', intent: 'gnoll' }, 'Maren'), /appearance — gnoll/);
+    assert.equal(stampSummary({ type: 'npc_appearance_cache', how: 'engine' }, 'Maren'), '');
 });
 
-test('framesOf: temp appearance applies and expires; lasting pending waits then folds into base', () => {
+function committedAppearance({ id, intent, fields = 'body', layer = {}, lasts = null, start = 0 }) {
+    const owner = `o_${id}_${intent}`;
+    return {
+        type: 'npc_appearance', id, intent, owner, swipe: 0, start, lasts,
+        identity: { owner, message: 'm', swipe: 0, npc: id, domain: 'appearance', chat: 'c' },
+        decisionRev: 1, off: false, contentId: `c_${id}_${intent}`,
+        committed: { kind: 'appearance', intent, fields, layer }, candidate: null,
+    };
+}
+
+test('framesOf: a temporary body applies and expires back to the pinned baseline', () => {
     const chat = [
-        bot([MAREN, { type: 'npc_appearance', id: 'maren', intent: 'blonde hair', fields: 'looks', lasts: 120, looks: 'blonde braids' }]),
-        bot(),
-        bot(),
-        bot(),
+        bot([MAREN, committedAppearance({ id: 'maren', intent: 'taller', fields: 'body', layer: { body: 'a taller frame' }, lasts: 120 })]),
+        bot(), bot(), bot(),
     ];
     const f0 = framesOf(chat, 0, [], clock).at(-1).get('maren');
-    assert.equal(f0.looks, 'dark braids', 'a looks-only effect does not replace the summary');
-    assert.equal(f0.base.looks, 'dark braids');
-    assert.equal(f0.effects.length, 1);
-    assert.ok(['engine', 'reuse'].includes(f0.appearanceHow), f0.appearanceHow);
-    assert.equal(framesOf(chat, 1, [], clock).at(-1).get('maren').effects.length, 1);
-    assert.equal(framesOf(chat, 2, [], clock).at(-1).get('maren').effects.length, 0, 'over after two game hours');
+    assert.equal(f0.body, 'a taller frame');
+    assert.equal(f0.pinned.body, 'stocky');
+    assert.equal(f0.looks, '', 'the body changed, so the old summary is not current');
+    assert.equal(framesOf(chat, 2, [], clock).at(-1).get('maren').body, 'stocky', 'over after two game hours');
     assert.equal(framesOf(chat, 2, [], clock).at(-1).get('maren').looks, 'dark braids');
-
-    const lasting = [
-        bot([MAREN, { type: 'npc_appearance', id: 'maren', intent: 'scar on cheek', fields: 'looks', looks: 'dark braids, scar on cheek', pending: true }]),
-        bot(),
-    ];
-    assert.equal(framesOf(lasting, 1, [], clock).at(-1).get('maren').looks, 'dark braids', 'pending lasting not applied');
-    delete lasting[0].extra[NPC_KEY][1].pending;
-    const after = framesOf(lasting, 1, [], clock).at(-1).get('maren');
-    assert.equal(after.looks, 'dark braids', 'looks text is not an authoritative rewrite');
-    assert.equal(after.base.looks, 'dark braids');
-    assert.equal(after.effects.length, 0);
+    const waiting = [bot([MAREN, { ...committedAppearance({ id: 'maren', intent: 'scar' }), committed: null, candidate: { phase: 'working' } }])];
+    assert.equal(framesOf(waiting, 0, [], clock).at(-1).get('maren').body, 'stocky', 'an unapproved owner is not in the replay');
 });
 
-test('framesOf: stacked non-overlap temps; earlier expiry leaves the later one on the original base', () => {
-    // Blonde 1h then tall 2h — after blonde expires, tall still on dark-braids base (not peeled to a blonde layer).
+test('framesOf: stacked temps; earlier expiry leaves the later body on the pinned baseline', () => {
     const chat = [
         bot([MAREN,
-            { type: 'npc_appearance', id: 'maren', intent: 'blonde', fields: 'looks', lasts: 60, looks: 'blonde braids' },
-            { type: 'npc_appearance', id: 'maren', intent: 'tall', fields: 'body', lasts: 120, body: 'towering' },
+            committedAppearance({ id: 'maren', intent: 'outfit', fields: 'outfit', layer: { outfit: 'a bright dress' }, lasts: 60 }),
+            committedAppearance({ id: 'maren', intent: 'tall', fields: 'body', layer: { body: 'towering' }, lasts: 120 }),
         ]),
-        bot(), // +1h: blonde gone, tall remains
-        bot(), // +2h: tall gone
+        bot(), bot(),
     ];
     const mid = framesOf(chat, 1, [], clock).at(-1).get('maren');
-    assert.equal(mid.looks, '', 'the tall body is still on, so the old summary is not current');
-    assert.equal(mid.looksHow, 'pending');
     assert.equal(mid.body, 'towering');
-    assert.equal(mid.effects.map(e => e.intent).join(','), 'tall');
+    assert.equal(mid.outfit, 'leather apron');
+    assert.equal(mid.looksHow, 'pending');
     const end = framesOf(chat, 2, [], clock).at(-1).get('maren');
-    assert.equal(end.looks, 'dark braids');
     assert.equal(end.body, 'stocky');
-    assert.equal(end.effects.length, 0);
+    assert.equal(end.looks, 'dark braids');
 });
 
-test('framesOf: CARD_FIELDS appearance write updates base so resolve does not wipe it', () => {
+test('framesOf: a Looks fact does not author the summary', () => {
     const chat = [bot([MAREN, { type: 'npc_fact', id: 'maren', field: 'appearance.summary', text: 'silver hair' }])];
     const n = framesOf(chat, 0, []).at(-1).get('maren');
-    assert.equal(n.looks, 'silver hair');
-    assert.equal(n.base.looks, 'silver hair');
+    assert.equal(n.looks, 'dark braids');
+    assert.equal(n.base.looks, 'dark braids');
 });
 
 test('comings: expired appearance while still in scene goes on the comings line', () => {
     // Hesk always here. Stamp a 30m blonde at first reply; second reply is +1h later so it expired.
     const chat = [
-        bot([{ type: 'npc_appearance', id: 'hesk', intent: 'blonde hair', fields: 'looks', lasts: 30, looks: 'blonde braids' }]),
+        bot([committedAppearance({ id: 'hesk', intent: 'blonde hair', fields: 'body', layer: { body: 'blonde braids' }, lasts: 30, start: 86400 + 16 * 3600 })]),
         user('I wait an hour.'),
         bot(),
     ];
@@ -231,13 +224,12 @@ test('comings: expired appearance while still in scene goes on the comings line'
     assert.ok(lines.some(l => /Hesk's blonde hair fades \(expired/.test(l)), lines);
 });
 
-test('npcAt / expiryOf: appearance exposed with how and expiry', () => {
-    const chat = [bot([MAREN, { type: 'npc_appearance', id: 'maren', intent: 'blonde', fields: 'looks', lasts: 60, looks: 'blonde' }]), bot()];
-    const n = npcAt(chat, 0, [], 'maren');
-    assert.ok(['engine', 'reuse'].includes(n.appearanceHow), n.appearanceHow);
-    assert.equal(n.effects[0].intent, 'blonde');
-    assert.equal(n.base.looks, 'dark braids');
-    const s = { type: 'npc_appearance', id: 'maren', intent: 'blonde', lasts: 60 };
+test('npcAt / expiryOf: a committed body is live, and stored start expires', () => {
+    const chat = [bot([MAREN, committedAppearance({ id: 'maren', intent: 'blonde', fields: 'body', layer: { body: 'taller' }, lasts: 60 })]), bot()];
+    const n = npcAt(chat, 0, [], 'maren', clock);
+    assert.equal(n.body, 'taller');
+    assert.equal(n.pinned.body, 'stocky');
+    const s = { type: 'npc_appearance', id: 'maren', intent: 'blonde', lasts: 60, start: 0 };
     assert.equal(expiryOf(s, 0, 0, envClock).over, false);
     assert.equal(expiryOf(s, 0, 1, envClock).over, true);
 });
@@ -256,9 +248,10 @@ test('plan/acceptAppearanceRebuild: needs model, covers fields, stale base/key, 
 
     assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'only looks' }, npc), { failed: true });
     const ok = acceptAppearanceRebuild(plan, { looks: 'young copper braids', body: 'a young sturdy woman' }, npc);
-    assert.equal(ok.stamp?.type, 'npc_appearance_cache');
-    assert.equal(ok.stamp.body, 'a young sturdy woman');
-    assert.equal(ok.stamp.key, plan.key);
+    assert.equal(ok.record?.kind, 'fields');
+    assert.equal(ok.record.body, 'a young sturdy woman');
+    assert.equal(ok.record.key, plan.key);
+    assert.equal(ok.stamp, undefined);
 
     assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'x', body: 'x' }, { ...npc, base: { ...base, looks: 'changed' } }), { stale: true });
     assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'only looks' }, npc), { failed: true });
@@ -269,44 +262,25 @@ test('plan/acceptAppearanceRebuild: needs model, covers fields, stale base/key, 
 
 test('full path: appearance tag → mocked rewrite → cache + Looks → expiry restores base', () => {
     // Tag (no rewritten body text) → needsModel → accept mocked rewrite → Looks change → +1h restores base.
-    const tag = parseNpcTag('appearance | hesk | magically young | body | 1 hour');
-    assert.deepEqual(tag, { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body', lasts: 60 });
-
+    const tag = committedAppearance({ id: 'hesk', intent: 'magically young', fields: 'body', layer: {}, lasts: 60 });
     const chat = [
         bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, tag]),
     ];
     const before = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(before.appearanceHow, 'pending');
-    assert.equal(before.body, 'sturdy'); // still base until cache
-    const plan = planAppearanceRebuild(before);
-    assert.ok(plan);
-    assert.deepEqual(plan.fields, ['body']);
-
-    const accepted = acceptAppearanceRebuild(plan, { looks: 'young, copper braids', body: 'a magically young, sturdy woman' }, before);
-    assert.ok(accepted.stamp);
-    assert.equal(accepted.stamp.looks, undefined, 'the field rewrite does not store Looks');
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...accepted.stamp });
-
+    assert.equal(before.body, '');
+    chat[0].extra.worldscrawl_compose = { swipe: 0, records: [{ kind: 'fields', key: before.appearanceKey, inputsKey: before.appearanceKey, npc: 'hesk', body: 'a magically young, sturdy woman', outfit: 'wool' }] };
     const after = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(after.body, 'a magically young, sturdy woman');
     assert.equal(after.looks, '');
     assert.equal(after.looksHow, 'pending');
-    assert.equal(after.base.body, 'sturdy');
-    const summary = acceptLooksSummary(planLooksSummary(after), { looks: 'young, copper braids' }, after);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
-    const summed = framesOf(chat, 0, [], clock).at(-1).get('hesk');
-    assert.equal(summed.looks, 'young, copper braids');
-    // The public npc (what scene.mjs plans from) carries the cache, so no second rebuild is asked for.
-    chat.push(bot());
-    assert.equal(planAppearanceRebuild(npcAt(chat, 0, [], 'hesk')), null);
-    chat.pop();
-
-    // Advance game time past 1 hour: effect expires, base restored (no peel to a wrong layer).
+    assert.equal(after.pinned.body, 'sturdy');
+    chat[0].extra.worldscrawl_compose.records.push({ kind: 'looks', key: after.looksKey, inputsKey: after.looksKey, npc: 'hesk', body: after.body, outfit: after.outfit, looks: 'young, copper braids' });
+    assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').looks, 'young, copper braids');
     chat.push(bot());
     const expired = framesOf(chat, 1, [], clock).at(-1).get('hesk');
     assert.equal(expired.body, 'sturdy');
     assert.equal(expired.looks, 'copper braids');
-    assert.equal(expired.effects.length, 0);
     assert.equal(expired.appearanceHow, 'base');
 });
 
@@ -317,38 +291,30 @@ test('full path via takeNpcTags: strip tag, stamp, rebuild, Looks change', () =>
     assert.equal(stamps[0].type, 'npc_appearance');
     assert.ok(!/ws_npc/.test(text));
 
-    const chat = [bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, stamps[0]])];
-    const n = framesOf(chat, 0, [], clock).at(-1).get('hesk');
-    const plan = planAppearanceRebuild(n);
-    const { stamp } = acceptAppearanceRebuild(plan, { looks: 'young Hesk, copper braids', body: 'young Hesk' }, n);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    const owned = committedAppearance({ id: 'hesk', intent: stamps[0].intent, fields: 'body', layer: { body: 'young Hesk' }, lasts: 60 });
+    const chat = [bot([{ type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, owned])];
     const got = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(got.body, 'young Hesk');
     assert.equal(got.looks, '');
-    const summary = acceptLooksSummary(planLooksSummary(got), { looks: 'young Hesk, copper braids' }, got);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
+    chat[0].extra.worldscrawl_compose = { swipe: 0, records: [{ kind: 'looks', key: got.looksKey, inputsKey: got.looksKey, npc: 'hesk', body: got.body, outfit: got.outfit, looks: 'young Hesk, copper braids' }] };
     assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').looks, 'young Hesk, copper braids');
 });
 
-test('layered body effects: the combined cache does not survive after one layer expires', () => {
-    const gnoll = { type: 'npc_appearance', id: 'hesk', intent: 'gnoll', fields: 'body', lasts: 120, swipe: 0 };
-    const centaur = { type: 'npc_appearance', id: 'hesk', intent: 'centaur', fields: 'body', lasts: 60, swipe: 0 };
+test('layered body effects: the combined text is not reused after one layer expires', () => {
+    const gnoll = committedAppearance({ id: 'hesk', intent: 'gnoll', fields: 'body', layer: {}, lasts: 120 });
+    const centaur = committedAppearance({ id: 'hesk', intent: 'centaur', fields: 'body', layer: {}, lasts: 60 });
     const chat = [bot([
         { type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
         gnoll, centaur,
     ])];
     const both = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(both.appearanceHow, 'pending');
-    assert.deepEqual(planAppearanceRebuild(both).fields, ['body']);
-    const plan = planAppearanceRebuild(both);
-    const { stamp } = acceptAppearanceRebuild(plan, { body: 'a gnoll-centaur frame' }, both);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
-    const cached = framesOf(chat, 0, [], clock).at(-1).get('hesk');
-    assert.equal(cached.body, 'a gnoll-centaur frame');
+    chat[0].extra.worldscrawl_compose = { swipe: 0, records: [{ kind: 'fields', key: both.appearanceKey, inputsKey: both.appearanceKey, npc: 'hesk', body: 'a gnoll-centaur frame', outfit: 'wool' }] };
+    assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').body, 'a gnoll-centaur frame');
     chat.push(bot());
     const left = framesOf(chat, 1, [], clock).at(-1).get('hesk');
-    assert.equal(left.effects.map(e => e.intent).join(','), 'gnoll');
-    assert.equal(left.body, 'sturdy', 'the combined text is not reused for the remaining layer');
+    assert.equal(left.liveOps.map(o => o.intent).join(','), 'gnoll');
+    assert.equal(left.body, '', 'the combined text is not reused for the remaining layer');
     assert.equal(left.appearanceHow, 'pending');
 });
 

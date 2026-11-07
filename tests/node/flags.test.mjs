@@ -293,15 +293,16 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
     const stamp = (soaked.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
     assert.equal(stamp?.intent, 'soaked from the rain');
     assert.equal(stamp?.id, 'hesk');
-    assert.equal(soaked.extra?.worldscrawl_appearance, undefined);
+    assert.equal(stamp?.committed, null);
+    assert.equal(soaked.extra?.worldscrawl_appearance?.jobs?.[0]?.status, 'failed');
     const changed = await reply('Noted.', [toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'looks', outfit: 'a soaked cloak', lasts: '1 hour' })]);
     const real = (changed.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
     const { npcAt } = await import('../../extension/npc.mjs');
     const live = npcAt(c.chat, 0, [hesk], 'hesk');
-    assert.equal(real?.outfit, 'a soaked cloak');
-    assert.equal(real?.intent, 'looks');
-    assert.equal(live?.outfit, 'a soaked cloak');
-    assert.equal(rebuilds, 2, 'the outfit text is applied by the engine; only the Looks summary is asked');
+    assert.equal(real?.candidate?.layer?.outfit, 'a soaked cloak');
+    assert.equal(real?.committed, null, 'a temporary appearance waits for approval');
+    assert.notEqual(live?.outfit, 'a soaked cloak');
+    assert.equal(rebuilds, 0, 'explicit outfit text does not ask for a field rewrite before approval');
     } finally {
         const s = ext.settings();
         Object.assign(s, saved);
@@ -379,7 +380,8 @@ test('tracker payloads use the person apply, including the no-op appearance reje
         assert.equal(both.extra.worldscrawl_flag?.source, 'tracker');
         assert.equal(both.extra.worldscrawl_waitcard?.source, 'tracker');
         assert.match(both.extra.worldscrawl_waitcard?.label ?? '', /45m/);
-        assert.equal(rebuilds, 0, 'supplied outfit text does not ask for a rebuild');
+        assert.equal(appearance?.committed, null, 'a bad preview is not approved');
+        assert.equal(rebuilds, 2, 'an intent with no layer text asks for a preview and does not keep a partial answer');
     } finally {
         const s = ext.settings();
         Object.assign(s, saved);
@@ -569,7 +571,7 @@ test('appearance rebuild settles complete, bad, and late answers without a parti
     const good = '{"looks":"young braids","body":"years younger","outfit":"a bright dress"}';
     const stamp = () => ({ mes: 'The beam hits Hesk.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
         { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
-        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'magically young', owner: 'oy', start: 0, lasts: null, contentId: 'cy', candidate: null, identity: { owner: 'oy', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'magically young', fields: 'body,outfit', layer: {} } },
     ] } });
     const run = async (reply, { timeout = 200 } = {}) => {
         let calls = 0;
@@ -583,14 +585,16 @@ test('appearance rebuild settles complete, bad, and late answers without a parti
     assert.equal(landed.calls, 2, 'body and outfit, then a separate Looks summary');
     assert.equal(landed.play.appearanceHow === 'pending', false);
     assert.equal(landed.play.body, 'years younger');
-    assert.equal(landed.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.outfit === 'a bright dress'), true);
+    assert.equal((landed.msg.extra.worldscrawl_compose?.records ?? []).some(r => r.outfit === 'a bright dress'), true);
+    assert.equal(landed.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false);
     assert.equal(landed.msg.extra.worldscrawl_appearance, undefined);
     for (const [reply, kind] of [['{"body":"younger"}', 'partial'], ['', 'empty'], ['I cannot rewrite that.', 'refusal'], ['{"looks": "cut', 'truncated']]) {
         const bad = await run(reply);
         assert.equal(bad.calls, 2, kind);
         assert.equal(bad.play.appearanceHow, 'pending', kind);
         assert.equal(bad.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false, kind);
-        assert.equal(bad.play.body, 'sturdy', kind);
+        assert.equal((bad.msg.extra.worldscrawl_compose?.records ?? []).some(r => r.body), false, kind);
+        assert.equal(bad.play.body, '', kind);
         const job = scene.appearJobs(bad.msg).find(j => j.id === 'hesk');
         assert.equal(job?.status, 'failed', kind);
         assert.equal(job?.kind, kind, kind);
@@ -602,7 +606,7 @@ test('appearance rebuild settles complete, bad, and late answers without a parti
     await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 30 });
     late();
     await new Promise(r => setTimeout(r, 20));
-    assert.equal(hung.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false);
+    assert.equal((hung.extra.worldscrawl_compose?.records ?? []).some(r => r.body === 'years younger'), false);
     assert.equal(scene.appearJobs(hung).find(j => j.id === 'hesk')?.kind, 'timeout');
     let calls = 0;
     c.generateRaw = async () => { calls++; return good; };
@@ -629,7 +633,7 @@ test('a failed Looks summary keeps the body rewrite, and an expired layer does n
     c.generateRaw = async () => { n++; return n === 1 ? '{"body":"a centaur barrel","outfit":"a harness"}' : 'I cannot rewrite that.'; };
     const msg = { mes: 'The spell lands.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
         { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
-        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'centaur', fields: 'body,outfit' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'centaur', owner: 'oc', start: 0, lasts: null, contentId: 'cc', candidate: null, identity: { owner: 'oc', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'centaur', fields: 'body,outfit', layer: {} } },
     ] } };
     c.chat = [msg];
     await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 200 });
@@ -638,7 +642,8 @@ test('a failed Looks summary keeps the body rewrite, and an expired layer does n
     assert.equal(play.outfit, 'a harness');
     assert.equal(play.looks, '');
     assert.equal(play.looksHow, 'pending');
-    assert.equal(msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.looks), false);
+    assert.equal(msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false);
+    assert.equal((msg.extra.worldscrawl_compose?.records ?? []).some(r => r.kind === 'looks'), false);
     const job = scene.appearJobs(msg).find(j => j.part === 'looks');
     assert.equal(job?.kind, 'refusal');
     const appearanceStamps = () => msg.extra[NPC_KEY].filter(s => s.type === 'npc_appearance').length;
@@ -665,7 +670,7 @@ test('engine-resolved body text asks only for a Looks summary, and Retry does no
     const prompts = [];
     const msg = { mes: 'Hesk is taller.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
         { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
-        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'taller', fields: 'body', body: 'a towering woman' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'taller', owner: 'ot', start: 0, lasts: null, contentId: 'ct', candidate: null, identity: { owner: 'ot', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'taller', fields: 'body', layer: { body: 'a towering woman' } } },
     ] } };
     c.chat = [msg];
     c.generateRaw = async (args) => { prompts.push(args.prompt); return 'I cannot rewrite that.'; };
@@ -703,8 +708,8 @@ test('expiry of one layered body keeps that layer text and asks only for Looks',
     const chat = [
         { mes: 'Both forms.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
             { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
-            { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'gnoll', fields: 'body', lasts: 120, body: 'a gnoll frame' },
-            { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'centaur', fields: 'body', lasts: 60, body: 'a centaur barrel' },
+            { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'gnoll', owner: 'og', start: 0, lasts: 120, contentId: 'cg', candidate: null, identity: { owner: 'og', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'gnoll', fields: 'body', layer: { body: 'a gnoll frame' } } },
+            { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'centaur', owner: 'oce', start: 0, lasts: 60, contentId: 'cce', candidate: null, identity: { owner: 'oce', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'centaur', fields: 'body', layer: { body: 'a centaur barrel' } } },
         ] } },
         { mes: 'An hour later.', is_user: false, swipe_id: 0, extra: { worldscrawl_wait: { seconds: 3600 } } },
     ];
@@ -732,7 +737,7 @@ test('a stale Looks answer is dropped, and undo reuses the cached summary', asyn
     document.querySelectorAll = () => [];
     const msg = { mes: 'She grows.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
         { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
-        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'taller', fields: 'body', body: 'a towering woman' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'taller', owner: 'ot2', start: 0, lasts: null, contentId: 'ct2', candidate: null, identity: { owner: 'ot2', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'taller', fields: 'body', layer: { body: 'a towering woman' } } },
     ] } };
     c.chat = [msg];
     let release;
@@ -741,11 +746,11 @@ test('a stale Looks answer is dropped, and undo reuses the cached summary', asyn
     });
     const pending = scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 500 });
     await started;
-    msg.extra[NPC_KEY][1].body = 'a different frame';
+    msg.extra[NPC_KEY][1].committed.layer.body = 'a different frame';
     release();
     await pending;
-    assert.equal(msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.looks === 'a stale line'), false);
-    msg.extra[NPC_KEY][1].body = 'a towering woman';
+    assert.equal((msg.extra.worldscrawl_compose?.records ?? []).some(r => r.looks === 'a stale line' && r.body === 'a different frame'), false);
+    msg.extra[NPC_KEY][1].committed.layer.body = 'a towering woman';
     let calls = 0;
     c.generateRaw = async () => { calls++; return '{"looks":"tall copper braids"}'; };
     await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 200 });
@@ -763,7 +768,7 @@ test('a stale Looks answer is dropped, and undo reuses the cached summary', asyn
     assert.equal(npcAt(c.chat, 0, [], 'hesk').body, 'a towering woman');
 });
 
-test('a player body edit asks for a Looks summary and does not rewrite the body', async () => {
+test('a player body edit proposes a baseline replacement and does not rewrite the body before approval', async () => {
     const scene = await import('../../extension/scene.mjs');
     const { npcAt, NPC_KEY } = await import('../../extension/npc.mjs');
     const ext = await import('../../extension/index.js');
@@ -780,12 +785,11 @@ test('a player body edit asks for a Looks summary and does not rewrite the body'
     c.chat = [msg];
     const prompts = [];
     c.generateRaw = async (args) => { prompts.push(args.prompt); return '{"looks":"broader, copper braids"}'; };
-    const res = await scene.npcChatEdit({ chatId: 'c1', msg: 0, swipe: 0, id: 'hesk', stamps: [{ type: 'npc_fact', field: 'appearance.body', text: 'broader shoulders' }] });
+    const res = await scene.npcChatEdit({ chatId: 'c1', msg: 0, swipe: 0, id: 'hesk', stamps: [{ type: 'npc_baseline', field: 'body', text: 'broader shoulders' }] });
     assert.equal(res.ok, true);
-    assert.equal(prompts.length, 1);
-    assert.match(prompts[0], /Write one short Looks line/);
-    assert.match(prompts[0], /broader shoulders/);
-    const play = npcAt(c.chat, 0, [], 'hesk');
-    assert.equal(play.body, 'broader shoulders');
-    assert.equal(play.looks, 'broader, copper braids');
+    const proposal = (c.chat[0].extra[NPC_KEY] ?? []).find(s => s.type === 'npc_baseline');
+    assert.equal(proposal?.committed, null);
+    assert.equal(proposal?.candidate?.text, 'broader shoulders');
+    assert.equal(prompts.length, 0, 'an explicit baseline replacement does not ask the model to rewrite the body');
+    assert.equal(npcAt(c.chat, 0, [], 'hesk').body, 'sturdy');
 });

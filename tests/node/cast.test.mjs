@@ -210,45 +210,21 @@ test('card appearance: the Summary reads this chat, not the cast file, after a r
     assert.equal(file.changed, false);
     assert.deepEqual(cardAppearance(hesk, { looks: hesk.looks, body: hesk.body, outfit: hesk.outfit, appearanceHow: 'base' }).changed, false);
 
-    // Young-for-an-hour on body and outfit: no rewritten text on the tag, so the card stays on the file until the cache lands.
-    const tag = { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit', lasts: 60 };
-    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, ...tag }] } }];
-    const pending = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
-    assert.equal(pending.appearanceHow, 'pending');
-    const before = cardAppearance(hesk, pending);
-    assert.equal(before.changed, false);
-    assert.equal(before.looks, hesk.looks);
-    assert.equal(before.outfit, hesk.outfit);
-
-    const plan = planAppearanceRebuild(pending);
-    assert.ok(plan);
-    assert.deepEqual(plan.fields, ['body', 'outfit']);
-    const rewrite = {
-        looks: 'a young woman with copper braids, in a bright dress',
-        body: 'Years younger: the same raw-boned frame, but the grey is gone.',
-        outfit: 'A bright linen dress instead of widow\'s black.',
-    };
-    const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
-    assert.equal(stamp.type, 'npc_appearance_cache');
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
-    const fieldsLanded = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
-    const summary = acceptLooksSummary(planLooksSummary(fieldsLanded), { looks: rewrite.looks }, fieldsLanded);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
-
+    const owner = { type: 'npc_appearance', id: 'hesk', owner: 'o1', swipe: 0, start: 0, lasts: 60, contentId: 'c1', candidate: null, identity: { owner: 'o1', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'magically young', fields: 'body,outfit', layer: { body: 'Years younger: the same raw-boned frame, but the grey is gone.', outfit: 'A bright linen dress instead of widow\'s black.' } } };
+    const rewrite = { looks: 'a young woman with copper braids, in a bright dress', body: owner.committed.layer.body, outfit: owner.committed.layer.outfit };
+    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, swipe_id: 0, extra: { [NPC_KEY]: [owner] } }];
+    const landed = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
+    assert.equal(landed.body, rewrite.body);
+    assert.equal(landed.looksHow, 'pending');
+    const looksKey = landed.looksKey;
+    chat[0].extra.worldscrawl_compose = { swipe: 0, records: [{ kind: 'looks', key: looksKey, inputsKey: looksKey, npc: 'hesk', body: landed.body, outfit: landed.outfit, looks: rewrite.looks }] };
     const play = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
     const card = cardAppearance(hesk, play);
-    assert.equal(play.appearanceHow, 'reuse');
     assert.equal(card.looks, rewrite.looks);
     assert.equal(card.body, rewrite.body);
     assert.equal(card.outfit, rewrite.outfit);
     assert.equal(card.changed, true);
-    assert.notEqual(card.looks, hesk.looks);
-    assert.notEqual(card.body, hesk.body);
-    assert.notEqual(card.outfit, hesk.outfit);
-    // Edit: In this chat reads the same effective text (the folded record), not the file.
-    assert.equal(formFromRecord(play.record).looks, rewrite.looks);
-    assert.equal(formFromRecord(play.record).body, rewrite.body);
-    assert.equal(formFromRecord(play.record).outfit, rewrite.outfit);
+    assert.equal(play.lasting.body, hesk.body, 'a temporary owner is not the lasting result');
 });
 
 test('person pane: pending is not narrator text, and a temporary transformation is not written to the file', () => {
@@ -258,8 +234,8 @@ test('person pane: pending is not narrator text, and a temporary transformation 
 
     const cast = client(RIVERTON).get('/cast').json().npcs;
     const hesk = cast.find(n => n.id === 'hesk');
-    const tag = { type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit', lasts: 60 };
-    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, ...tag }] } }];
+    const tag = { type: 'npc_appearance', id: 'hesk', owner: 'o1', swipe: 0, start: 0, lasts: 60, contentId: 'c1', candidate: null, identity: { owner: 'o1', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'magically young', fields: 'body,outfit', layer: {} } };
+    const chat = [{ mes: 'The beam hits Hesk.', is_user: false, swipe_id: 0, extra: { [NPC_KEY]: [{ swipe: 0, ...tag }] } }];
     const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => BAR, clock: () => ({ day: 1, hour: 18, minute: 0, minutes: 1080, elapsed: 0 }) };
     const pending = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
     const pendingRows = resolvedCard(hesk, pending);
@@ -279,15 +255,12 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     assert.equal(hand.filter(r => r.key === 'Looks').length, 1);
     assert.equal(hand.find(r => r.key === 'Looks').value, 'pending rebuild');
 
-    const plan = planAppearanceRebuild(pending);
     const rewrite = { looks: 'a young woman with copper braids', body: 'Years younger.', outfit: 'A bright dress.' };
-    const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    chat[0].extra.worldscrawl_npc[0].committed.layer = { body: rewrite.body, outfit: rewrite.outfit };
     const fieldsOnly = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
     assert.equal(resolvedCard(hesk, fieldsOnly).find(r => r.key === 'Looks').value, 'pending summary');
     assert.equal(resolvedCard(hesk, fieldsOnly).find(r => r.key === 'Body').value, rewrite.body);
-    const summary = acceptLooksSummary(planLooksSummary(fieldsOnly), { looks: rewrite.looks }, fieldsOnly);
-    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
+    chat[0].extra.worldscrawl_compose = { swipe: 0, records: [{ kind: 'looks', key: fieldsOnly.looksKey, inputsKey: fieldsOnly.looksKey, npc: 'hesk', body: fieldsOnly.body, outfit: fieldsOnly.outfit, looks: rewrite.looks }] };
     const play = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
     const landed = resolvedCard(hesk, play);
     assert.equal(landed.find(r => r.key === 'Looks').value, rewrite.looks);
@@ -308,7 +281,7 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     edited.line = 'kinder tonight';
     assert.deepEqual(chatStamps(seed, edited).stamps.map(s => s.field ?? s.type), ['personality.summary']);
     const againstLive = chatStamps(play, edited);
-    assert.ok(againstLive.stamps.some(s => s.field === 'appearance.summary'), 'diffing the live card would stamp the transformation');
+    assert.ok(againstLive.cannot.some(s => /Looks/.test(s)), 'Looks is derived and is not stamped from the form');
 
     const withFact = [{ mes: 'x', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'hates rats' }, { swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'soaked to the skin', lasts: 30 }, { swipe: 0, ...tag }] } }];
     const both = npcPlayState(withFact, cast, env).find(n => n.id === 'hesk');
