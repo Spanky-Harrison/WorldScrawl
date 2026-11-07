@@ -148,7 +148,7 @@ export function castPanel(doc, io) {
         return places.length ? [$('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places)] : [];
     }
     function appearanceRetry(play) {
-        if (!play || play.appearanceHow !== 'pending') return null;
+        if (!play || (play.appearanceHow !== 'pending' && play.looksHow !== 'pending' && play.looksHow !== 'failed')) return null;
         const job = play.appearanceJob;
         const working = job?.status === 'working';
         const why = job?.reason ? $('div', { class: 'cast-pending' }, job.reason) : null;
@@ -172,7 +172,8 @@ export function castPanel(doc, io) {
         box.hidden = false;
         const app = cardAppearance(rec, play);
         const pending = play.appearanceHow === 'pending';
-        const line = (label, text) => $('div', {}, $('b', {}, label), ' ', pending ? 'pending rebuild' : (text || '—'));
+        const summaryPending = !pending && (play.looksHow === 'pending' || play.looksHow === 'failed');
+        const line = (label, text) => $('div', {}, $('b', {}, label), ' ', pending ? 'pending rebuild' : (label === 'Looks' && summaryPending ? 'pending summary' : (text || '—')));
         const stale = pending && ['looks', 'body', 'outfit'].some(k => (play[k] ?? '') !== (play.base?.[k] ?? ''));
         box.replaceChildren($('b', {}, 'Narrator now (read-only)'), line('Looks', app.looks), line('Body', app.body), line('Outfit', app.outfit),
             pending ? $('div', { class: 'cast-pending' }, 'pending rebuild — not narrator text yet') : null,

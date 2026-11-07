@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
@@ -367,6 +367,14 @@ async function applyPersonStamps(id, stamped) {
             }
             const intent = appearanceIntent(s);
             if (intent && intent !== s.intent) s = { ...s, intent };
+            if (s.source === 'tracker') {
+                const named = s.fields != null && String(s.fields).trim() !== '';
+                let fields = named ? effectFields(s.fields) : ['body', 'outfit'].filter(f => typeof s[f] === 'string' && s[f].trim());
+                fields = fields.filter(f => f !== 'looks');
+                if (!fields.length) { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'tracker does not set looks' }); continue; }
+                const { looks, ...rest } = s;
+                s = { ...rest, fields: fields.join(',') };
+            }
         }
         let stamp = s;
         if ((s.type === 'npc_fact' || s.type === 'npc_appearance') && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
@@ -470,6 +478,7 @@ export async function onStorySwipe(id) {
     invalidateAppearance(msg);
     syncSwipeExtra(msg);
     await runTracker(Number(id));
+    await ensureAppearanceRebuilds(Number(id)).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
 }
 
 /** A reply arrived: a pasted [ws_flag: ...] tag is still read. The narrator is not told to write one. */

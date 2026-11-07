@@ -246,9 +246,15 @@ function appearanceRows(rec, play) {
         for (const row of rows) if (pendingFx.length) row.source = [`pending rebuild${why}`, ...pendingFx].join(', ');
         return rows;
     }
+    const summaryPending = play && play.appearanceHow !== 'pending' && (play.looksHow === 'pending' || play.looksHow === 'failed');
     const eff = play ? { looks: play.looks ?? '', body: play.body ?? '', outfit: play.outfit ?? '' } : file;
     const rows = [];
     for (const k of APP) {
+        if (k === 'looks' && summaryPending) {
+            const why = play.appearanceJob?.part === 'looks' && play.appearanceJob?.reason ? ` — ${play.appearanceJob.reason}` : '';
+            rows.push({ key: 'Looks', value: 'pending summary', source: `pending summary${why}`, pending: true, landed: false });
+            continue;
+        }
         if (!(eff[k] || file[k])) continue;
         rows.push({ key: APP_NAME[k], value: eff[k], source: fieldSource(play, rec, eff[k], file[k], play ? narrExtras(play, k) : []), landed: !!play });
     }

@@ -4,7 +4,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -120,6 +120,10 @@ function chatRelocate(chat) {
 }
 function npcClock(chat, i) {
     return clockOf(clockAt(Math.max(0, i), chat));
+}
+/** Folded person at this message, with the same clock the card uses, so an expired layer is already gone. */
+function appearanceNpc(chat, msgId, cast, id) {
+    return npcAt(chat, msgId, cast, id, i => npcClock(chat, i));
 }
 /** The game clock at `elapsed` seconds: {day, hour, minute, minutes, elapsed}. */
 function clockOf(elapsed) {
@@ -549,7 +553,8 @@ async function npcChatEdit(d) {
     for (const s of stamps) addNpcStamp(msg, s);
     syncSwipeExtra(msg);
     await c.saveChat?.();
-    const appearIds = [...new Set(stamps.filter(s => s.type === 'npc_appearance').map(s => s.id))];
+    const bodyFact = new Set(['appearance.body', 'appearance.outfit', 'body', 'outfit', 'appearance']);
+    const appearIds = [...new Set(stamps.filter(s => s.type === 'npc_appearance' || (s.type === 'npc_fact' && bodyFact.has(String(s.field ?? '')))).map(s => s.id))];
     if (appearIds.length) await ensureAppearanceRebuilds(i, { ids: appearIds }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
     renderPatchCards();
     broadcastMapState();
@@ -633,6 +638,10 @@ async function applyFacts() {
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
 }
 
+
+function looksSummaryPrompt(name, body, outfit) {
+    return P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') });
+}
 
 /** Format rebuildInputs for the appearance-rebuild prompt. */
 function appearanceRebuildPrompt(name, inputs) {
@@ -736,7 +745,7 @@ async function rebuildOneAppearance(msgId, npc, { timeout = APPEARANCE_TIMEOUT_M
         let last = { kind: 'malformed', reason: 'no answer' };
         for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
             if (!still()) return false;
-            const liveNow = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const liveNow = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             if (!planAppearanceRebuild(liveNow) || planAppearanceRebuild(liveNow).key !== plan.key) {
                 if (still()) { clearAppearJob(msg, plan.id, plan.key); syncSwipeExtra(msg); await c.saveChat?.(); renderPatchCards(); }
                 noteCall(msgId, { kind: 'appearance rebuild', status: 'skipped', reason: 'stale: base or effect-set changed' });
@@ -759,7 +768,7 @@ async function rebuildOneAppearance(msgId, npc, { timeout = APPEARANCE_TIMEOUT_M
             if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
             const classified = classifyAppearanceReply(raced.raw, plan.fields);
             if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
-            const live = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             const result = acceptAppearanceRebuild(plan, classified.answer, live);
             if (!still()) return false;
             if (result.stale) {
@@ -800,7 +809,7 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     const pack = castPack()?.npcs ?? [];
     let targets;
     if (ids?.length) {
-        targets = ids.map(id => npcAt(chat, msgId, pack, id)).filter(Boolean);
+        targets = ids.map(id => appearanceNpc(chat, msgId, pack, id)).filter(Boolean);
     } else {
         const loc = await currentLocation().catch(() => null);
         const env = loc ? npcEnv(chat, loc) : null;
@@ -811,12 +820,97 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     }
     abandonStuckAppearance(msg);
     for (const npc of targets) {
-        if (!planAppearanceRebuild(npc)) continue;
-        // Skip if a failed job for this key is waiting on Retry (caller must clear it).
-        const failed = appearJobs(msg).find(j => j.id === npc.id && j.status === 'failed');
-        if (failed && failed.key === planAppearanceRebuild(npc)?.key) continue;
-        await rebuildOneAppearance(msgId, npc, { timeout });
+        // Body/Outfit model rewrite and the Looks summary are separate. A resolved pair
+        // (effect text, a player edit, a cache, or a layer that expired) still asks for Looks.
+        const plan = planAppearanceRebuild(npc);
+        if (plan) {
+            const failed = appearJobs(msg).find(j => j.id === npc.id && j.status === 'failed' && j.key === plan.key);
+            if (!failed) await rebuildOneAppearance(msgId, npc, { timeout });
+        }
+        const live = appearanceNpc(chat, msgId, pack, npc.id);
+        if (live) await ensureLooksSummary(msgId, live, { timeout });
     }
+}
+
+/** One small call: Looks from the Body and Outfit already resolved. A failure leaves those fields in place. */
+async function ensureLooksSummary(msgId, npc, { timeout = APPEARANCE_TIMEOUT_MS } = {}) {
+    const plan = planLooksSummary(npc);
+    if (!plan) return false;
+    const c = ctx(), chat = c.chat ?? [], msg = chat[msgId];
+    if (!msg) return false;
+    const failed = appearJobs(msg).find(j => j.id === plan.id && j.status === 'failed' && j.key === plan.key);
+    if (failed) return false;
+    const fk = flightKey(msgId, plan.id, plan.key);
+    if (appearFlights.has(fk)) return false;
+    const swipe = swipeOf(msg);
+    const epoch = epochOf(msg);
+    const token = newToken();
+    appearFlights.set(fk, token);
+    const still = () => appearFlights.get(fk) === token && epochOf(msg) === epoch && swipeOf(msg) === swipe;
+    setAppearJob(msg, { id: plan.id, key: plan.key, status: 'working', name: npc.name || plan.id, token, kind: 'working', reason: '', part: 'looks' });
+    syncSwipeExtra(msg);
+    renderPatchCards();
+    const fail = async (kind, reason, sample = '') => {
+        if (!still()) return false;
+        noteCall(msgId, { kind: 'looks summary', status: 'failed', reason: `${kind}: ${reason}`, ...(sample ? { answer: sample } : {}) });
+        setAppearJob(msg, { id: plan.id, key: plan.key, status: 'failed', name: npc.name || plan.id, token, kind, reason, part: 'looks' });
+        syncSwipeExtra(msg); await c.saveChat?.(); renderPatchCards(); broadcastMapState();
+        return false;
+    };
+    let follow = false;
+    try {
+        await ensurePrompts();
+        let last = { kind: 'malformed', reason: 'no answer' };
+        for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
+            if (!still()) return false;
+            const call = gen('looks summary', {
+                prompt: looksSummaryPrompt(npc.name || plan.id, plan.body, plan.outfit),
+                systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
+                responseLength: 120,
+            }, { at: msgId, retry: attempt > 0, note: false }).then(raw => ({ raw }), error => ({ error }));
+            let timer;
+            const raced = await Promise.race([
+                call,
+                new Promise(resolve => { timer = setTimeout(() => resolve({ timeout: true }), timeout); }),
+            ]);
+            clearTimeout(timer);
+            if (!still()) return false;
+            if (raced.timeout) { last = { kind: 'timeout', reason: 'the summary did not answer in time' }; continue; }
+            if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
+            const classified = classifyAppearanceReply(raced.raw, ['looks']);
+            if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
+            const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const result = acceptLooksSummary(plan, classified.answer, live);
+            if (!still()) return false;
+            if (result.stale) {
+                clearAppearJob(msg, plan.id, plan.key);
+                noteCall(msgId, { kind: 'looks summary', status: 'skipped', reason: 'stale: body or outfit changed' });
+                syncSwipeExtra(msg); await c.saveChat?.(); renderPatchCards();
+                follow = true;
+                break;
+            }
+            if (result.failed || !result.stamp) { last = { kind: 'validation', reason: 'the answer had no looks line' }; continue; }
+            addNpcStamp(msg, result.stamp);
+            clearAppearJob(msg, plan.id, plan.key);
+            noteCall(msgId, { kind: 'looks summary', status: 'ok', answer: plan.key });
+            syncSwipeExtra(msg);
+            await c.saveChat?.();
+            await applyFacts();
+            renderPatchCards();
+            broadcastMapState();
+            return true;
+        }
+        if (!follow) return fail(last.kind || 'malformed', last.reason || 'the summary was not usable', last.sample || '');
+    } catch (e) {
+        return fail('application', e?.message || String(e));
+    } finally {
+        if (appearFlights.get(fk) === token) appearFlights.delete(fk);
+    }
+    if (!follow) return false;
+    const again = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
+    const next = again && planLooksSummary(again);
+    if (next && next.key !== plan.key) return ensureLooksSummary(msgId, again, { timeout });
+    return false;
 }
 
 function retryAppearance(msgId, npcId, key) {
