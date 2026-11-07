@@ -372,7 +372,7 @@ export async function recompose(chat, { npc, swipe, baseline, name, elapsed, tim
         if (explicit && !known) writeCompose(msg, swipe ?? 0, { npc, kind: 'fields', key, inputsKey: key, body: explicit.body, outfit: explicit.outfit });
         const body = known?.body ?? explicit?.body ?? baseline.body ?? '';
         const outfit = known?.outfit ?? explicit?.outfit ?? baseline.outfit ?? '';
-        if (!(body === (baseline.body ?? '') && outfit === (baseline.outfit ?? ''))) await ensureLooks(chat, msg, swipe ?? 0, npc, name, body, outfit, timeout);
+        if (!(body === (baseline.body ?? '') && outfit === (baseline.outfit ?? ''))) await ensureLooks(chat, msg, swipe ?? 0, npc, name, body, outfit, timeout, baseline, elapsed);
         return { ok: true, key, called: false };
     }
     const asked = await askFields(name, baseline, ops, timeout);
@@ -382,15 +382,18 @@ export async function recompose(chat, { npc, swipe, baseline, name, elapsed, tim
     }
     writeCompose(msg, swipe ?? 0, { npc, kind: 'fields', key, inputsKey: key, body: asked.body, outfit: asked.outfit });
     clearJob(msg, swipe ?? 0, npc, key, 'fields');
-    await ensureLooks(chat, msg, swipe ?? 0, npc, name, asked.body, asked.outfit, timeout);
+    await ensureLooks(chat, msg, swipe ?? 0, npc, name, asked.body, asked.outfit, timeout, baseline, elapsed);
     return { ok: true, key, called: true };
 }
 
-async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout) {
+async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout, baseline, elapsed) {
     const key = looksInputKey(body, outfit);
     const hit = findCompose(composeRecords(chat, swipe), key);
     if (hit && hit.body === body && hit.outfit === outfit && hit.looks) return;
     const asked = await askLooks(name, body, outfit, timeout);
+    const ops = liveOps(personOps(chat, npc, swipe), elapsed);
+    const now = explicitResult(baseline, ops) || findCompose(composeRecords(chat, swipe), fieldKeyOf(baseline, ops));
+    if (!now || now.body !== body || now.outfit !== outfit) return;
     if (!asked.ok) {
         setJob(msg, swipe, { npc, key, part: 'looks', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'no looks line' });
         return;
