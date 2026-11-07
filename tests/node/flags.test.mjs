@@ -566,7 +566,7 @@ test('appearance rebuild settles complete, bad, and late answers without a parti
         return { calls, msg, play: npcAt(c.chat, 0, [], 'hesk') };
     };
     const landed = await run(good);
-    assert.equal(landed.calls, 1);
+    assert.equal(landed.calls, 2, 'body and outfit, then a separate Looks summary');
     assert.equal(landed.play.appearanceHow === 'pending', false);
     assert.equal(landed.play.body, 'years younger');
     assert.equal(landed.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.outfit === 'a bright dress'), true);
@@ -598,5 +598,33 @@ test('appearance rebuild settles complete, bad, and late answers without a parti
     const second = await scene.retryAppearance(0, 'hesk', 'magically young|body+outfit');
     await first;
     assert.equal(second.error, 'Already retrying.');
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
+});
+
+test('a failed Looks summary keeps the body rewrite, and an expired layer does not keep the combined text', async () => {
+    const scene = await import('../../extension/scene.mjs');
+    const { npcAt, NPC_KEY } = await import('../../extension/npc.mjs');
+    const ext = await import('../../extension/index.js');
+    const fs = await import('node:fs');
+    ext.setPrompts(JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8')));
+    const c = SillyTavern.getContext();
+    c.chatMetadata = { worldscrawl_enabled: true };
+    c.saveChat = async () => {};
+    document.querySelectorAll = () => [];
+    let n = 0;
+    c.generateRaw = async () => { n++; return n === 1 ? '{"body":"a centaur barrel","outfit":"a harness"}' : 'I cannot rewrite that.'; };
+    const msg = { mes: 'The spell lands.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
+        { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'centaur', fields: 'body,outfit' },
+    ] } };
+    c.chat = [msg];
+    await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 200 });
+    const play = npcAt(c.chat, 0, [], 'hesk');
+    assert.equal(play.body, 'a centaur barrel');
+    assert.equal(play.outfit, 'a harness');
+    assert.equal(play.looks, '');
+    assert.equal(play.looksHow, 'pending');
+    assert.equal(msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.looks), false);
+    const job = scene.appearJobs(msg).find(j => j.part === 'looks');
+    assert.equal(job?.kind, 'refusal');
 });
