@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NPC_KEY, acceptAppearanceRebuild, fileDiff, npcPlayState, planAppearanceRebuild } from '../../extension/npc.mjs';
+import { NPC_KEY, acceptAppearanceRebuild, acceptLooksSummary, fileDiff, npcPlayState, planAppearanceRebuild, planLooksSummary } from '../../extension/npc.mjs';
 import { deleteCastNpc, loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { cardAppearance, castRows, filterRows, formFromRecord, formProblems, markersAt, markersByPlace, recordFromForm, slugFor, stampRows, playSummary, within } from '../../plugin/ui/castdata.mjs';
 import { client, copytree, RIVERTON, tmpPath } from './helpers.mjs';
@@ -222,7 +222,7 @@ test('card appearance: the Summary reads this chat, not the cast file, after a r
 
     const plan = planAppearanceRebuild(pending);
     assert.ok(plan);
-    assert.deepEqual(plan.fields, ['looks', 'body', 'outfit']);
+    assert.deepEqual(plan.fields, ['body', 'outfit']);
     const rewrite = {
         looks: 'a young woman with copper braids, in a bright dress',
         body: 'Years younger: the same raw-boned frame, but the grey is gone.',
@@ -231,6 +231,9 @@ test('card appearance: the Summary reads this chat, not the cast file, after a r
     const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
     assert.equal(stamp.type, 'npc_appearance_cache');
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    const fieldsLanded = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
+    const summary = acceptLooksSummary(planLooksSummary(fieldsLanded), { looks: rewrite.looks }, fieldsLanded);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
 
     const play = npcPlayState(chat, cast, {}).find(n => n.id === 'hesk');
     const card = cardAppearance(hesk, play);
@@ -280,6 +283,11 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     const rewrite = { looks: 'a young woman with copper braids', body: 'Years younger.', outfit: 'A bright dress.' };
     const { stamp } = acceptAppearanceRebuild(plan, rewrite, pending);
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    const fieldsOnly = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
+    assert.equal(resolvedCard(hesk, fieldsOnly).find(r => r.key === 'Looks').value, 'pending summary');
+    assert.equal(resolvedCard(hesk, fieldsOnly).find(r => r.key === 'Body').value, rewrite.body);
+    const summary = acceptLooksSummary(planLooksSummary(fieldsOnly), { looks: rewrite.looks }, fieldsOnly);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
     const play = npcPlayState(chat, cast, env).find(n => n.id === 'hesk');
     const landed = resolvedCard(hesk, play);
     assert.equal(landed.find(r => r.key === 'Looks').value, rewrite.looks);

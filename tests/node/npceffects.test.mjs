@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     APPEARANCE_FIELDS, effectFields, effectSetKey, resolveAppearance, rebuildInputs,
-    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply,
+    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, looksInputKey, planLooksSummary, acceptLooksSummary,
     readAppearanceAnswer, sameAppearanceBase, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
     stampSummary, comingsAndGoings, npcAt, expiryOf,
 } from '../../extension/npc.mjs';
@@ -59,14 +59,20 @@ test('resolveAppearance: no effects → base; reuse cache; non-overlap engine; o
     const tall = { intent: 'tall', fields: ['body'], text: { body: 'towering' } };
     const eng = resolveAppearance(base, [blonde, tall], {});
     assert.equal(eng.how, 'engine');
-    assert.equal(eng.looks, 'blonde braids');
+    assert.equal(eng.looks, '', 'body changed, so the old summary is not current');
+    assert.equal(eng.looksHow, 'pending');
     assert.equal(eng.body, 'towering');
     assert.equal(eng.outfit, 'wool');
 
     const key = effectSetKey([blonde, tall]);
-    const reuse = resolveAppearance(base, [blonde, tall], { [key]: { looks: 'cached L', body: 'cached B', outfit: 'cached O' } });
+    const lk = looksInputKey('cached B', 'cached O');
+    const reuse = resolveAppearance(base, [blonde, tall], {
+        [key]: { body: 'cached B', outfit: 'cached O' },
+        [lk]: { looks: 'cached L', body: 'cached B', outfit: 'cached O' },
+    });
     assert.equal(reuse.how, 'reuse');
     assert.equal(reuse.looks, 'cached L');
+    assert.equal(reuse.looksHow, 'reuse');
 
     const gnoll = { intent: 'gnoll', fields: ['looks', 'body'] };
     const hybrid = { intent: 'half-horse', fields: ['body', 'outfit'] };
@@ -78,10 +84,14 @@ test('resolveAppearance: no effects → base; reuse cache; non-overlap engine; o
 
 test('resolveAppearance: missing rewritten text on a field → pending for that field', () => {
     const base = { looks: 'a', body: 'b', outfit: 'c' };
-    const e = { intent: 'blonde', fields: ['looks'] }; // no text
+    const e = { intent: 'blonde', fields: ['looks'] }; // looks is not a body/outfit rewrite
     const r = resolveAppearance(base, [e], {});
-    assert.equal(r.how, 'pending');
-    assert.deepEqual(r.modelFields, ['looks']);
+    assert.equal(r.needsModel, false);
+    assert.equal(r.looks, 'a');
+    const body = { intent: 'burned', fields: ['body'] };
+    const missing = resolveAppearance(base, [body], {});
+    assert.equal(missing.how, 'pending');
+    assert.deepEqual(missing.modelFields, ['body']);
 });
 
 test('rebuildInputs: base fields + still-active intents in start order; never prior combined text', () => {
@@ -161,7 +171,7 @@ test('framesOf: temp appearance applies and expires; lasting pending waits then 
         bot(),
     ];
     const f0 = framesOf(chat, 0, [], clock).at(-1).get('maren');
-    assert.equal(f0.looks, 'blonde braids');
+    assert.equal(f0.looks, 'dark braids', 'a looks-only effect does not replace the summary');
     assert.equal(f0.base.looks, 'dark braids');
     assert.equal(f0.effects.length, 1);
     assert.ok(['engine', 'reuse'].includes(f0.appearanceHow), f0.appearanceHow);
@@ -176,8 +186,8 @@ test('framesOf: temp appearance applies and expires; lasting pending waits then 
     assert.equal(framesOf(lasting, 1, [], clock).at(-1).get('maren').looks, 'dark braids', 'pending lasting not applied');
     delete lasting[0].extra[NPC_KEY][1].pending;
     const after = framesOf(lasting, 1, [], clock).at(-1).get('maren');
-    assert.equal(after.looks, 'dark braids, scar on cheek');
-    assert.equal(after.base.looks, 'dark braids, scar on cheek', 'lasting folded into chat-stamp base');
+    assert.equal(after.looks, 'dark braids', 'looks text is not an authoritative rewrite');
+    assert.equal(after.base.looks, 'dark braids');
     assert.equal(after.effects.length, 0);
 });
 
@@ -192,7 +202,8 @@ test('framesOf: stacked non-overlap temps; earlier expiry leaves the later one o
         bot(), // +2h: tall gone
     ];
     const mid = framesOf(chat, 1, [], clock).at(-1).get('maren');
-    assert.equal(mid.looks, 'dark braids', 'blonde expired; base looks restored');
+    assert.equal(mid.looks, '', 'the tall body is still on, so the old summary is not current');
+    assert.equal(mid.looksHow, 'pending');
     assert.equal(mid.body, 'towering');
     assert.equal(mid.effects.map(e => e.intent).join(','), 'tall');
     const end = framesOf(chat, 2, [], clock).at(-1).get('maren');
@@ -239,11 +250,11 @@ test('plan/acceptAppearanceRebuild: needs model, covers fields, stale base/key, 
     const plan = planAppearanceRebuild(npc);
     assert.ok(plan);
     assert.equal(plan.key, 'magically young|body');
-    assert.deepEqual(plan.fields, ['looks', 'body']); // Looks summarizes Body: rewritten with it
+    assert.deepEqual(plan.fields, ['body']);
     assert.equal(plan.inputs.intents[0].intent, 'magically young');
     assert.equal(planAppearanceRebuild({ ...npc, effects: [{ ...e, text: { body: 'young' } }] }), null);
 
-    assert.deepEqual(acceptAppearanceRebuild(plan, { body: 'no looks' }, npc), { failed: true });
+    assert.deepEqual(acceptAppearanceRebuild(plan, { looks: 'only looks' }, npc), { failed: true });
     const ok = acceptAppearanceRebuild(plan, { looks: 'young copper braids', body: 'a young sturdy woman' }, npc);
     assert.equal(ok.stamp?.type, 'npc_appearance_cache');
     assert.equal(ok.stamp.body, 'a young sturdy woman');
@@ -269,17 +280,22 @@ test('full path: appearance tag → mocked rewrite → cache + Looks → expiry 
     assert.equal(before.body, 'sturdy'); // still base until cache
     const plan = planAppearanceRebuild(before);
     assert.ok(plan);
-    assert.deepEqual(plan.fields, ['looks', 'body']);
+    assert.deepEqual(plan.fields, ['body']);
 
     const accepted = acceptAppearanceRebuild(plan, { looks: 'young, copper braids', body: 'a magically young, sturdy woman' }, before);
     assert.ok(accepted.stamp);
+    assert.equal(accepted.stamp.looks, undefined, 'the field rewrite does not store Looks');
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...accepted.stamp });
 
     const after = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(after.body, 'a magically young, sturdy woman');
-    assert.ok(['reuse', 'model'].includes(after.appearanceHow) || after.caches[plan.key], after.appearanceHow);
-    assert.equal(after.looks, 'young, copper braids');
+    assert.equal(after.looks, '');
+    assert.equal(after.looksHow, 'pending');
     assert.equal(after.base.body, 'sturdy');
+    const summary = acceptLooksSummary(planLooksSummary(after), { looks: 'young, copper braids' }, after);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
+    const summed = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(summed.looks, 'young, copper braids');
     // The public npc (what scene.mjs plans from) carries the cache, so no second rebuild is asked for.
     chat.push(bot());
     assert.equal(planAppearanceRebuild(npcAt(chat, 0, [], 'hesk')), null);
@@ -308,7 +324,32 @@ test('full path via takeNpcTags: strip tag, stamp, rebuild, Looks change', () =>
     chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
     const got = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(got.body, 'young Hesk');
-    assert.equal(got.looks, 'young Hesk, copper braids');
+    assert.equal(got.looks, '');
+    const summary = acceptLooksSummary(planLooksSummary(got), { looks: 'young Hesk, copper braids' }, got);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...summary.stamp });
+    assert.equal(framesOf(chat, 0, [], clock).at(-1).get('hesk').looks, 'young Hesk, copper braids');
+});
+
+test('layered body effects: the combined cache does not survive after one layer expires', () => {
+    const gnoll = { type: 'npc_appearance', id: 'hesk', intent: 'gnoll', fields: 'body', lasts: 120, swipe: 0 };
+    const centaur = { type: 'npc_appearance', id: 'hesk', intent: 'centaur', fields: 'body', lasts: 60, swipe: 0 };
+    const chat = [bot([
+        { type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'x', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
+        gnoll, centaur,
+    ])];
+    const both = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(both.appearanceHow, 'pending');
+    assert.deepEqual(planAppearanceRebuild(both).fields, ['body']);
+    const plan = planAppearanceRebuild(both);
+    const { stamp } = acceptAppearanceRebuild(plan, { body: 'a gnoll-centaur frame' }, both);
+    chat[0].extra[NPC_KEY].push({ swipe: 0, ...stamp });
+    const cached = framesOf(chat, 0, [], clock).at(-1).get('hesk');
+    assert.equal(cached.body, 'a gnoll-centaur frame');
+    chat.push(bot());
+    const left = framesOf(chat, 1, [], clock).at(-1).get('hesk');
+    assert.equal(left.effects.map(e => e.intent).join(','), 'gnoll');
+    assert.equal(left.body, 'sturdy', 'the combined text is not reused for the remaining layer');
+    assert.equal(left.appearanceHow, 'pending');
 });
 
 test('classifyAppearanceReply: empty, refusal, truncated, partial and complete', () => {
