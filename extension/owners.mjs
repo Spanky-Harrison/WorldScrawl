@@ -91,7 +91,7 @@ function jobBlock(msg, swipe) {
 function setJob(msg, swipe, job) {
     msg.extra = msg.extra ?? {};
     const jobs = jobBlock(msg, swipe).filter(j => !(j.npc === job.npc && j.key === job.key && j.part === job.part));
-    jobs.push(job);
+    jobs.push({ id: job.npc, ...job });
     msg.extra.worldscrawl_appearance = { swipe, jobs };
 }
 function clearJob(msg, swipe, npc, key, part) {
