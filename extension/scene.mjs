@@ -121,6 +121,10 @@ function chatRelocate(chat) {
 function npcClock(chat, i) {
     return clockOf(clockAt(Math.max(0, i), chat));
 }
+/** Folded person at this message, with the same clock the card uses, so an expired layer is already gone. */
+function appearanceNpc(chat, msgId, cast, id) {
+    return npcAt(chat, msgId, cast, id, i => npcClock(chat, i));
+}
 /** The game clock at `elapsed` seconds: {day, hour, minute, minutes, elapsed}. */
 function clockOf(elapsed) {
     const t = worldTimes.get(activeWorld || defaultWorldId);
@@ -741,7 +745,7 @@ async function rebuildOneAppearance(msgId, npc, { timeout = APPEARANCE_TIMEOUT_M
         let last = { kind: 'malformed', reason: 'no answer' };
         for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
             if (!still()) return false;
-            const liveNow = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const liveNow = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             if (!planAppearanceRebuild(liveNow) || planAppearanceRebuild(liveNow).key !== plan.key) {
                 if (still()) { clearAppearJob(msg, plan.id, plan.key); syncSwipeExtra(msg); await c.saveChat?.(); renderPatchCards(); }
                 noteCall(msgId, { kind: 'appearance rebuild', status: 'skipped', reason: 'stale: base or effect-set changed' });
@@ -764,7 +768,7 @@ async function rebuildOneAppearance(msgId, npc, { timeout = APPEARANCE_TIMEOUT_M
             if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
             const classified = classifyAppearanceReply(raced.raw, plan.fields);
             if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
-            const live = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             const result = acceptAppearanceRebuild(plan, classified.answer, live);
             if (!still()) return false;
             if (result.stale) {
@@ -805,7 +809,7 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     const pack = castPack()?.npcs ?? [];
     let targets;
     if (ids?.length) {
-        targets = ids.map(id => npcAt(chat, msgId, pack, id)).filter(Boolean);
+        targets = ids.map(id => appearanceNpc(chat, msgId, pack, id)).filter(Boolean);
     } else {
         const loc = await currentLocation().catch(() => null);
         const env = loc ? npcEnv(chat, loc) : null;
@@ -823,7 +827,7 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
             const failed = appearJobs(msg).find(j => j.id === npc.id && j.status === 'failed' && j.key === plan.key);
             if (!failed) await rebuildOneAppearance(msgId, npc, { timeout });
         }
-        const live = npcAt(chat, msgId, pack, npc.id);
+        const live = appearanceNpc(chat, msgId, pack, npc.id);
         if (live) await ensureLooksSummary(msgId, live, { timeout });
     }
 }
@@ -875,7 +879,7 @@ async function ensureLooksSummary(msgId, npc, { timeout = APPEARANCE_TIMEOUT_MS 
             if (raced.error) { last = { kind: 'application', reason: raced.error?.message || String(raced.error) }; continue; }
             const classified = classifyAppearanceReply(raced.raw, ['looks']);
             if (classified.kind !== 'ok') { last = { ...classified, sample: String(raced.raw ?? '').slice(0, 80) }; continue; }
-            const live = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+            const live = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
             const result = acceptLooksSummary(plan, classified.answer, live);
             if (!still()) return false;
             if (result.stale) {
@@ -903,7 +907,7 @@ async function ensureLooksSummary(msgId, npc, { timeout = APPEARANCE_TIMEOUT_MS 
         if (appearFlights.get(fk) === token) appearFlights.delete(fk);
     }
     if (!follow) return false;
-    const again = npcAt(chat, msgId, castPack()?.npcs ?? [], plan.id);
+    const again = appearanceNpc(chat, msgId, castPack()?.npcs ?? [], plan.id);
     const next = again && planLooksSummary(again);
     if (next && next.key !== plan.key) return ensureLooksSummary(msgId, again, { timeout });
     return false;

@@ -726,8 +726,8 @@ function publicNpc(n) {
 }
 
 /** The latest folded NPC, for export and the character bar. */
-export function npcAt(chat, index, cast, id) {
-    const frames = framesOf(chat, index, cast);
+export function npcAt(chat, index, cast, id, clock = null) {
+    const frames = framesOf(chat, index, cast, clock);
     const end = frames.length - 1;
     if (end < 0) return null;
     const n = frames[end].get(id);
