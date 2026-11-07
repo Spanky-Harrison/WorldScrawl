@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     APPEARANCE_FIELDS, effectFields, effectSetKey, resolveAppearance, rebuildInputs,
-    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild,
+    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply,
     readAppearanceAnswer, sameAppearanceBase, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
     stampSummary, comingsAndGoings, npcAt, expiryOf,
 } from '../../extension/npc.mjs';
@@ -309,4 +309,18 @@ test('full path via takeNpcTags: strip tag, stamp, rebuild, Looks change', () =>
     const got = framesOf(chat, 0, [], clock).at(-1).get('hesk');
     assert.equal(got.body, 'young Hesk');
     assert.equal(got.looks, 'young Hesk, copper braids');
+});
+
+test('classifyAppearanceReply: empty, refusal, truncated, partial and complete', () => {
+    const fields = ['looks', 'body', 'outfit'];
+    assert.equal(classifyAppearanceReply('', fields).kind, 'empty');
+    assert.equal(classifyAppearanceReply('   ', fields).kind, 'empty');
+    assert.equal(classifyAppearanceReply('I cannot rewrite that.', fields).kind, 'refusal');
+    assert.equal(classifyAppearanceReply('{"looks": "a young', fields).kind, 'truncated');
+    assert.equal(classifyAppearanceReply('nope', fields).kind, 'malformed');
+    assert.equal(classifyAppearanceReply('{"body":"younger"}', fields).kind, 'partial');
+    assert.equal(classifyAppearanceReply('{"looks":"","body":"young","outfit":"dress"}', fields).kind, 'partial');
+    const ok = classifyAppearanceReply('{"looks":"young braids","body":"years younger","outfit":"a bright dress"}', fields);
+    assert.equal(ok.kind, 'ok');
+    assert.equal(ok.answer.outfit, 'a bright dress');
 });
