@@ -14,8 +14,8 @@ const { openMapChannel } = await import('../../extension/mapwindow.mjs');
 const { invalidateAppearance } = await import('../../extension/scene.mjs');
 const { readChangeAnswer } = await import('../../plugin/shared/patches.mjs');
 const { castPanel } = await import('../../plugin/ui/castpanel.mjs');
-const { loadCalendar } = await import('../../extension/clock.mjs');
-const { rememberWorlds } = await import('../../extension/clock.mjs');
+const { loadCalendar, rememberWorlds } = await import('../../extension/clock.mjs');
+const { syncSwipeExtra } = await import('../../extension/discovery.mjs');
 
 const HESK = { ok: true, id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool', file: 'hesk.json' };
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
@@ -716,4 +716,194 @@ test('off then on reuses the stored combination, and a failed lasting export sta
     const blocked = await scene.exportNpc('hesk');
     assert.equal(blocked.ok, false);
     assert.equal(calls, 0);
+});
+
+test('a later message on its own swipe keeps an earlier message\'s owners and result', async () => {
+    const { c, prompts } = boot();
+    const a = commit(appearance({ intent: 'gnoll', fields: 'body', layer: {}, owner: 'sw0' }));
+    const b = commit(appearance({ intent: 'scarred', fields: 'body', layer: {}, owner: 'sw1' }));
+    const early = msg([a, b]);
+    early.swipe_id = 0;
+    early.swipe_info = [{ extra: {} }, { extra: {} }];
+    c.chat = [early];
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return /Looks line/.test(String(args.prompt)) ? '{"looks":"a stored gnoll"}' : '{"body":"a stored frame","outfit":"wool"}'; };
+    await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 80 });
+    assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 })).body, 'a stored frame');
+    syncSwipeExtra(early);
+    c.chat.push({ mes: 'Another swipe of a later reply.', is_user: false, swipe_id: 1, swipe_info: [{ extra: {} }, { extra: {} }], extra: {} });
+    const kept = npcAt(c.chat, 1, [HESK], 'hesk', () => ({ elapsed: 0 }));
+    assert.equal(kept.body, 'a stored frame');
+    assert.equal(kept.liveOps.some(o => o.owner === 'sw0'), true);
+    early.swipe_id = 1;
+    const hidden = npcAt(c.chat, 1, [HESK], 'hesk', () => ({ elapsed: 0 }));
+    assert.equal(hidden.body, 'sturdy');
+    assert.equal(hidden.liveOps.some(o => o.owner === 'sw0'), false);
+    const saved = JSON.parse(JSON.stringify(c.chat));
+    saved[0].swipe_id = 0;
+    saved[0].extra = JSON.parse(JSON.stringify(saved[0].swipe_info[0].extra));
+    const back = npcAt(saved, 1, [HESK], 'hesk', () => ({ elapsed: 0 }));
+    assert.equal(back.body, 'a stored frame');
+    assert.equal(back.liveOps.map(o => o.owner).sort().join(), 'sw0,sw1');
+});
+
+test('the map channel saves, mirrors the swipe, and both surfaces redraw', async () => {
+    const { c, prompts } = boot();
+    const o = appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'gsave' });
+    const host = msg([o]);
+    host.swipe_info = [{ extra: {} }];
+    c.chat = [host];
+    let saves = 0;
+    c.saveChat = async () => { saves++; };
+    await scene.fillCandidate(c.chat, o.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    Chan.all = [];
+    globalThis.BroadcastChannel = Chan;
+    openMapChannel();
+    const gui = new Chan('worldscrawl');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '', backgroundColor: '' });
+    const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => '', clock: () => ({ elapsed: 0, day: 1, hour: 8, minute: 0, minutes: 480 }) };
+    const panel = castPanel(doc, {
+        load: async () => ({ npcs: [HESK] }),
+        outline: async () => null,
+        play: () => npcPlayState(c.chat, [HESK], env),
+        decideNpc: spec => gui.postMessage({ type: 'npc_decide', chatId: 'c1', req: 11, ...spec }),
+        chatAt: () => ({ msg: 0, swipe: 0 }),
+        placeName: a => a,
+    });
+    await panel.refresh();
+    panel.selectId('hesk', 'changes');
+    const approve = panel.el.querySelectorAll('button').find(b => b.textContent === 'Approve');
+    assert.ok(approve, panel.el.textContent);
+    assert.match(panel.el.textContent, /a towering woman/);
+    approve.click();
+    await flush();
+    assert.ok(saves >= 1);
+    assert.equal(o.committed?.layer?.body, 'a towering woman');
+    assert.equal(host.swipe_info[0].extra.worldscrawl_npc.some(s => s.committed?.layer?.body === 'a towering woman'), true);
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    const reloaded = JSON.parse(JSON.stringify(c.chat));
+    c.chat = reloaded;
+    renderPatchCards();
+    assert.ok(byText(doc, '.worldscrawl_card_btn', 'Turn off'));
+    panel.setPlay();
+    assert.equal(panel.el.querySelectorAll('button').some(b => b.textContent === 'Approve'), false);
+    assert.ok(panel.el.querySelectorAll('button').some(b => b.textContent === 'Turn off'));
+});
+
+test('inline Edit fills the layer text, and a failed or late edit leaves the committed owner', async () => {
+    const { c, prompts } = boot();
+    const o = commit(appearance({ intent: 'taller', fields: 'body', layer: { body: 'original edit' }, owner: 'ed1' }));
+    c.chat = [msg([o])];
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    const boxes = doc.querySelectorAll('input');
+    const layer = boxes.find(b => b.placeholder === 'Layer body');
+    assert.ok(layer);
+    assert.equal(layer.value, 'original edit');
+    layer.value = 'a cropped frame';
+    byText(doc, '.worldscrawl_card_btn', 'Save').click();
+    await flush();
+    assert.equal(o.committed.layer.body, 'original edit');
+    assert.equal(o.candidate.phase, 'review');
+    assert.equal(o.candidate.layer.body, 'a cropped frame');
+    assert.equal(o.candidate.lastingPreview.body, 'a cropped frame');
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    renderPatchCards();
+    assert.match(doc.textContent, /a cropped frame/);
+    assert.doesNotMatch(doc.querySelector('.worldscrawl_npcpending')?.textContent ?? '', /^Preparing/);
+
+    o.candidate = null;
+    o.decisionRev = 1;
+    prompts.length = 0;
+    c.generateRaw = async () => 'not json';
+    renderPatchCards();
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    doc.querySelectorAll('input').find(b => b.placeholder === 'Layer body').value = '';
+    byText(doc, '.worldscrawl_card_btn', 'Save').click();
+    await flush();
+    assert.equal(o.committed.layer.body, 'original edit');
+    assert.equal(o.candidate.phase, 'failed');
+
+    o.candidate = null;
+    o.decisionRev = 1;
+    let release;
+    c.generateRaw = () => new Promise(r => { release = r; });
+    renderPatchCards();
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    doc.querySelectorAll('input').find(b => b.placeholder === 'Layer body').value = '';
+    byText(doc, '.worldscrawl_card_btn', 'Save').click();
+    await flush();
+    const dropped = await scene.settleNpc(c.chat, o.identity, o.decisionRev, 'discard', {});
+    release('{"body":"late crop","outfit":"wool"}');
+    await flush();
+    assert.equal(dropped.ok, true);
+    assert.equal(o.committed.layer.body, 'original edit');
+    assert.equal(JSON.stringify(c.chat[0].extra.worldscrawl_compose ?? {}).includes('late crop'), false);
+});
+
+test('Check again uses the current clock, and Approve refuses a review whose inputs moved', async () => {
+    await loadCalendar();
+    const { c, prompts } = boot();
+    const temp = commit(appearance({ intent: 'sweaty', fields: 'outfit', layer: { outfit: 'a soaked cloak' }, lasts: 60, start: 0, owner: 'tmpc' }));
+    const proposal = appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'propc' });
+    c.chat = [msg([temp, proposal]), { mes: 'An hour later.', is_user: false, swipe_id: 0, extra: { worldscrawl_wait: { seconds: 3600 } } }];
+    const filled = await scene.fillCandidate(c.chat, proposal.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    assert.equal(proposal.candidate.livePreview.outfit, 'a soaked cloak');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    const before = prompts.filter(p => /Rewrite body/.test(p)).length;
+    byText(doc, '.worldscrawl_card_btn', 'Check again').click();
+    await flush();
+    assert.equal(proposal.candidate.livePreview.outfit, 'wool');
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, before);
+    const approved = await scene.settleNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token, elapsed: 3600 });
+    assert.equal(approved.ok, true, approved.error);
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, before);
+
+    const moved = appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'moved' });
+    c.chat = [msg([moved])];
+    await scene.fillCandidate(c.chat, moved.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    const underneath = commit(appearance({ intent: 'scar', fields: 'body', layer: { body: 'a scarred frame' }, owner: 'under' }));
+    c.chat[0].extra[NPC_KEY].push(underneath);
+    prompts.length = 0;
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return '{"body":"should not run","outfit":"wool"}'; };
+    const refused = await scene.settleNpc(c.chat, moved.identity, moved.decisionRev, 'approve', { token: moved.candidate.token, elapsed: 0 });
+    assert.equal(refused.stale, true);
+    assert.equal(refused.refill, true);
+    assert.equal(moved.committed, null);
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    const wrong = scene.decideNpc(c.chat, { ...moved.identity, domain: 'place' }, moved.decisionRev, 'approve', { token: 'nope', elapsed: 0 });
+    assert.equal(wrong.stale, true);
+});
+
+test('a turn refreshes pending appearance with and without a location, and skips a resolved person', async () => {
+    const { c, prompts } = boot();
+    const bran = { ok: true, id: 'bran', name: 'Bran', line: 'porter', looks: 'grey', body: 'lean', outfit: 'coat', file: 'bran.json' };
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [HESK, bran] }] });
+    const a = commit(appearance({ intent: 'gnoll', fields: 'body', layer: {}, owner: 'pa' }));
+    const b = commit(appearance({ intent: 'scarred', fields: 'body', layer: {}, owner: 'pb' }));
+    const user = { mes: 'I look around.', is_user: true, swipe_id: 0, extra: {} };
+    c.chat = [msg([a, b]), user];
+    c.generateRaw = async (args) => {
+        prompts.push(String(args.prompt));
+        return /Looks line/.test(String(args.prompt)) ? '{"looks":"a gnoll"}' : '{"body":"a pending frame","outfit":"wool"}';
+    };
+    globalThis.fetch = async () => { throw new Error('no server'); };
+    await scene.prepareNpcs(user);
+    assert.ok(prompts.some(p => /Hesk/.test(p) && /Rewrite body/.test(p)));
+    assert.equal(prompts.some(p => /Bran/.test(p)), false);
+    assert.equal(npcAt(c.chat, 1, [HESK, bran], 'hesk', () => ({ elapsed: 0 })).body, 'a pending frame');
+    const asked = prompts.length;
+    user.extra.worldscrawl_npc_ready = false;
+    c.chat[0].extra[NPC_KEY].push(commit(appearance({ intent: 'third', fields: 'body', layer: {}, owner: 'pc' })));
+    globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => '' }, json: async () => ({ address: 'riverton:drowned_rat/bar', name: 'Bar', display_name: 'Bar', description: '', exits: [] }) });
+    await scene.prepareNpcs(user);
+    assert.ok(prompts.length > asked);
+    assert.equal(prompts.some(p => /Bran/.test(p)), false);
 });
