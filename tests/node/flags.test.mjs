@@ -314,6 +314,10 @@ test('the tracker reads one exchange into place, people, and wait, and skips wha
     assert.equal(parsed.place.note, 'the roof fell in');
     assert.equal(parsed.people.length, 2);
     assert.equal(parsed.wait.duration, '45m');
+    const memory = ext.readTrackerAnswer('{"people":[{"id":"hesk","action":"memory","text":"Mara promised Hesk the cellar key."}]}');
+    assert.equal(memory.people[0].action, 'memory');
+    assert.equal(memory.people[0].text, 'Mara promised Hesk the cellar key.');
+    assert.equal(memory.place, null);
     const list = ext.readTrackerAnswer({ changes: [{ type: 'place', note: 'the hearth collapsed' }, { type: 'person', id: 'hesk', action: 'fact', text: 'owes a favor' }, { type: 'wait', duration: '1h', reason: 'a long meal' }] });
     assert.equal(list.place.note, 'the hearth collapsed');
     assert.equal(list.people[0].text, 'owes a favor');
