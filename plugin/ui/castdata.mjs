@@ -240,9 +240,10 @@ function narrExtras(play, field) {
 function appearanceRows(rec, play) {
     const file = { looks: rec?.looks ?? '', body: rec?.body ?? '', outfit: rec?.outfit ?? '' };
     if (play?.appearanceHow === 'pending') {
-        const rows = APP.map(k => ({ key: APP_NAME[k], value: 'pending rebuild', source: 'pending rebuild', pending: true, landed: false }));
+        const why = play.appearanceJob?.reason ? ` — ${play.appearanceJob.reason}` : '';
+        const rows = APP.map(k => ({ key: APP_NAME[k], value: 'pending rebuild', source: `pending rebuild${why}`, pending: true, landed: false }));
         const pendingFx = (play.effects ?? []).map(e => (e.intent ? `effect: ${e.intent}` : '')).filter(Boolean);
-        for (const row of rows) if (pendingFx.length) row.source = ['pending rebuild', ...pendingFx].join(', ');
+        for (const row of rows) if (pendingFx.length) row.source = [`pending rebuild${why}`, ...pendingFx].join(', ');
         return rows;
     }
     const eff = play ? { looks: play.looks ?? '', body: play.body ?? '', outfit: play.outfit ?? '' } : file;

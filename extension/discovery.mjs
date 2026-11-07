@@ -15,7 +15,7 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, invalidateAppearance, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
@@ -294,6 +294,7 @@ function syncSwipeExtra(msg) {
     if (msg.extra[FOUND_KEY]) si.extra[FOUND_KEY] = msg.extra[FOUND_KEY]; else delete si.extra[FOUND_KEY];
     if (msg.extra[REMEMBER_KEY]) si.extra[REMEMBER_KEY] = msg.extra[REMEMBER_KEY]; else delete si.extra[REMEMBER_KEY];
     if (msg.extra[DECIDED_KEY]) si.extra[DECIDED_KEY] = msg.extra[DECIDED_KEY]; else delete si.extra[DECIDED_KEY];
+    if (msg.extra[APPEAR_KEY]) si.extra[APPEAR_KEY] = msg.extra[APPEAR_KEY]; else delete si.extra[APPEAR_KEY];
 }
 async function undoFlag(id) {
     const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
@@ -466,6 +467,7 @@ export async function onStorySwipe(id) {
     if (!msg || msg.is_user || msg.is_system) return;
     dropTrackerMarks(msg);
     bumpTracker(msg);
+    invalidateAppearance(msg);
     syncSwipeExtra(msg);
     await runTracker(Number(id));
 }
