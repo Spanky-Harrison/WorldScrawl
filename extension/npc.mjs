@@ -282,7 +282,8 @@ export function clampDisposition(from, to, dramatic = false) {
 
 function blankFrom(rec) {
     const looks = rec.looks ?? '', body = rec.body ?? '', outfit = rec.outfit ?? '';
-    const base = rec.base ? { looks: rec.base.looks ?? looks, body: rec.base.body ?? body, outfit: rec.base.outfit ?? outfit } : { looks, body, outfit };
+    const base = rec.base ? { looks: rec.base.looks ?? looks, body: rec.base.body ?? body, outfit: rec.base.outfit ?? outfit, ...(rec.base.looksPair ? { looksPair: rec.base.looksPair } : {}) } : { looks, body, outfit };
+    if (!base.looksPair) base.looksPair = looksInputKey(base.body ?? '', base.outfit ?? '');
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
         looks, body, outfit, base, effects: [], caches: {}, appearanceHow: 'base', appearanceKey: '',
@@ -386,6 +387,8 @@ function applyStamp(state, s, index, elapsed = null) {
             if (APPEARANCE_FIELDS.includes(key)) {
                 n.base = n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' };
                 n.base[key] = text;
+                // A Looks edit is the summary of the body and outfit now. A body or outfit edit leaves the old pairing, so the summary is owed again.
+                if (key === 'looks') n.base.looksPair = looksInputKey(n.base.body ?? '', n.base.outfit ?? '');
             }
         }
         else if (field === 'history') n.deep.history = text;
@@ -532,7 +535,7 @@ export function framesOf(chat, index, cast = [], clock = null) {
                 // Fold only once Body, Outfit, and the Looks summary of that pair are all in.
                 // Folding early would bake an empty summary into the base and forget the debt.
                 if (!fold.needsModel && fold.looksHow !== 'pending') {
-                    n.base = { looks: fold.looks, body: fold.body, outfit: fold.outfit };
+                    n.base = { looks: fold.looks, body: fold.body, outfit: fold.outfit, looksPair: looksInputKey(fold.body ?? '', fold.outfit ?? '') };
                     n.effects = tempsE;
                 }
             }

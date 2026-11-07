@@ -39,12 +39,13 @@ export function looksInputKey(body, outfit) {
 }
 
 /** Attach a derived Looks line, or mark it pending. Never present an older summary as the current one. */
-function withDerivedLooks(body, outfit, baseLooks, baseBody, baseOutfit, caches, field) {
-    const changed = body !== (baseBody ?? '') || outfit !== (baseOutfit ?? '');
+function withDerivedLooks(body, outfit, baseLooks, baseBody, baseOutfit, looksPair, caches, field) {
     const looksKey = looksInputKey(body, outfit);
     const hit = caches[looksKey];
     const fresh = hit && hit.looks && hit.body === (body ?? '') && hit.outfit === (outfit ?? '');
-    if (!field.needsModel && !changed) {
+    // looksPair is the body+outfit the current base summary belongs to. A body or outfit edit leaves it behind.
+    const paired = looksPair || looksInputKey(baseBody, baseOutfit);
+    if (!field.needsModel && looksKey === paired) {
         return { ...field, looks: fresh ? hit.looks : (baseLooks ?? ''), body, outfit, looksHow: fresh ? 'reuse' : 'base', looksKey };
     }
     if (fresh && !field.needsModel) return { ...field, looks: hit.looks, body, outfit, looksHow: 'reuse', looksKey };
@@ -63,7 +64,7 @@ function withDerivedLooks(body, outfit, baseLooks, baseBody, baseOutfit, caches,
 export function resolveAppearance(base, effects, caches = {}) {
     const b = cloneApp(base);
     const active = (effects ?? []).filter(e => e && String(e.intent ?? '').trim());
-    const finish = (body, outfit, field) => withDerivedLooks(body, outfit, b.looks, b.body, b.outfit, caches, field);
+    const finish = (body, outfit, field) => withDerivedLooks(body, outfit, b.looks, b.body, b.outfit, base?.looksPair, caches, field);
     if (!active.length) return finish(b.body, b.outfit, { how: 'base', key: '', needsModel: false, modelFields: [] });
     const key = effectSetKey(active);
     const hit = caches[key];
