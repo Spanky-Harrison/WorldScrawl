@@ -203,8 +203,10 @@ export function castPanel(doc, io) {
             if (!x.identity || x.type === 'npc_appearance_cache') return [];
             const proposal = (x.type === 'npc_appearance' || x.type === 'npc_baseline') && x.candidate;
             const review = proposal && x.candidate === 'review';
+            const again = proposal && (x.candidate === 'failed' || x.candidate === 'working');
             return [' ',
                 (review || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
+                again ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'retry') }, 'Check again') : null,
                 (proposal || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'discard') }, 'Discard') : null,
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, x.off ? 'on' : 'off') }, x.off ? 'Turn on' : 'Turn off'),
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'undo') }, 'Undo')];

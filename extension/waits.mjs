@@ -265,6 +265,7 @@ function ownerCard(msg, s, who) {
     const phase = s.candidate?.phase || 'working';
     const title = document.createElement('div');
     title.textContent = phase === 'failed' ? `Appearance for ${who} did not resolve.` : phase === 'review' ? `Proposed appearance for ${who}` : `Preparing appearance for ${who}…`;
+    if (s.candidate?.clockError) { const err = document.createElement('div'); err.textContent = s.candidate.clockError; d.append(err); }
     d.append(title);
     if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
         const lb = s.candidate.lastingBefore || {};
@@ -282,8 +283,7 @@ function ownerCard(msg, s, who) {
     const chat = () => ctx().chat ?? [];
     const buttons = [];
     if (phase === 'review') buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
-        const now = chat();
-        const res = await settleNpc(now, ident, rev, 'approve', { token: s.candidate?.token, elapsed: npcClock(now, Math.max(0, now.length - 1)).elapsed });
+        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token });
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
         return res;
     }), 'Apply the reviewed body and outfit', true));

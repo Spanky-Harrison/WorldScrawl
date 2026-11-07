@@ -760,7 +760,11 @@ export function npcPlayState(chat, cast, env) {
                 extra.decisionRev = s.decisionRev ?? 1;
                 extra.candidate = s.candidate ? s.candidate.phase : '';
                 extra.candidateToken = s.candidate?.token || '';
-                if (s.candidate?.lastingPreview) extra.preview = `body ${s.candidate.lastingPreview.body || '—'}; wearing ${s.candidate.lastingPreview.outfit || '—'}`;
+                if (s.candidate?.livePreview) {
+                    const live = s.candidate.livePreview, lasting = s.candidate.lastingPreview;
+                    extra.preview = `live body ${live.body || '—'}; wearing ${live.outfit || '—'}`;
+                    if (lasting && s.candidate.liveKey !== s.candidate.lastingKey) extra.preview += `; lasting body ${lasting.body || '—'}; wearing ${lasting.outfit || '—'}`;
+                }
             }
             else if (s.type === 'npc_appearance_cache') continue;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';

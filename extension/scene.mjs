@@ -769,12 +769,12 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
         targets = [...(frame?.values() ?? [])].filter(n => n.appearanceHow === 'pending' || n.looksHow === 'pending');
     }
     abandonStuckAppearance(msg);
-    const swipe = swipeOf(msg);
     const elapsed = npcClock(chat, msgId).elapsed;
     for (const npc of targets) {
         const pin = npc.pinned || { body: npc.base?.body ?? '', outfit: npc.base?.outfit ?? '' };
         if (npc.appearanceHow === 'pending' || npc.looksHow === 'pending') {
-            await recompose(chat, { npc: npc.id, swipe, baseline: pin, name: npc.name, elapsed, timeout });
+            const wrote = await recompose(chat, { npc: npc.id, at: msgId, baseline: pin, name: npc.name, elapsed, timeout });
+            if (wrote?.msg) syncSwipeExtra(wrote.msg);
         }
     }
 }
@@ -783,15 +783,24 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
 /** Chat card and the map channel both call this. Appearance changes recompose afterwards. */
 async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
     const end = Math.max(0, (chat?.length ?? 1) - 1);
-    const elapsed = Number.isFinite(payload.elapsed) ? payload.elapsed : npcClock(chat, end).elapsed;
+    const elapsed = Number.isFinite(payload.elapsed) ? payload.elapsed : (calendarLib ? npcClock(chat, end).elapsed : NaN);
     const host = (chat ?? []).find(m => (m?.extra?.worldscrawl_npc ?? []).some(s => s && (s.owner === identity?.owner || s.identity?.owner === identity?.owner)));
+    const at = Math.max(0, (chat ?? []).indexOf(host));
+    if (action === 'retry' && identity?.owner) {
+        const filled = await fillCandidate(chat, identity, { baseline: npcAt(chat, end, castPack()?.npcs ?? [], identity.npc)?.pinned, name: identity.npc, elapsed: Number.isFinite(elapsed) ? elapsed : null });
+        try { if (host) syncSwipeExtra(host); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState(); } catch (e) { console.warn('[WorldScrawl] npc decision refresh', e?.message || e); }
+        return filled;
+    }
     const res = decideNpc(chat, identity, decisionRev, action, { ...payload, elapsed });
     const touch = action === 'undo' || action === 'off' || action === 'on' || action === 'approve';
     const appearance = identity?.domain === 'appearance' || identity?.domain === 'baseline' || identity?.npc;
-    if (res?.ok && touch && appearance && identity?.npc && !res.refill) {
+    if (res?.refill && identity?.owner && Number.isFinite(elapsed)) {
         const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
-        const swipe = host?.swipe_id ?? identity.swipe ?? 0;
-        await recompose(chat, { npc: identity.npc, swipe, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed });
+        await fillCandidate(chat, identity, { baseline: live?.pinned || { body: '', outfit: '' }, name: live?.name || identity.npc, elapsed });
+    } else if (res?.ok && touch && appearance && identity?.npc) {
+        const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
+        const wrote = await recompose(chat, { npc: identity.npc, at, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed });
+        if (wrote?.msg) syncSwipeExtra(wrote.msg);
     }
     try {
         if (host) syncSwipeExtra(host);

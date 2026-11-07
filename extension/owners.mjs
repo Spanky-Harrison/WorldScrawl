@@ -99,6 +99,16 @@ function clearJob(msg, swipe, npc, key, part) {
     if (jobs.length) msg.extra.worldscrawl_appearance = { swipe, jobs };
     else delete msg.extra.worldscrawl_appearance;
 }
+/** A failed job for these exact inputs, on the message swipe that still shows it. */
+function exhausted(chat, npc, key, part) {
+    for (const m of chat ?? []) {
+        const active = m?.swipe_id ?? 0;
+        const block = m?.extra?.worldscrawl_appearance;
+        if (!block || (block.swipe ?? 0) !== active) continue;
+        if ((block.jobs ?? []).some(j => (j.npc === npc || j.id === npc) && j.key === key && j.part === part && j.status === 'failed')) return true;
+    }
+    return false;
+}
 
 async function askFields(name, baseline, ops, timeout) {
     const intents = (ops ?? []).map((o, i) => {
@@ -269,7 +279,11 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
         if (c.token !== payload.token) return { ok: false, stale: true };
         if (epochOf(msg) !== c.epoch) return { ok: false, stale: true };
         const lasts = c.proposedLasts ?? null;
-        if (!Number.isFinite(payload.elapsed)) return { ok: false, stale: true, refill: true };
+        if (!Number.isFinite(payload.elapsed)) {
+            c.clockError = 'The game clock is not available, so this approval cannot check expiry. Approve again once the clock is loaded.';
+            return { ok: false, error: c.clockError };
+        }
+        delete c.clockError;
         if (lasts > 0 && Number.isFinite(stamp.start) && payload.elapsed >= stamp.start + lasts * 60) {
             return { ok: false, error: 'expired' };
         }
@@ -378,13 +392,13 @@ export function beginCandidate(stamp, msg) {
  * After the surviving set changes, store a compose record for an unknown combination.
  * Does not create an owner. A known key is left alone.
  */
-export async function recompose(chat, { npc, swipe, baseline, name, elapsed, timeout = FILL_TIMEOUT_MS } = {}) {
+export async function recompose(chat, { npc, at = null, baseline, name, elapsed, timeout = FILL_TIMEOUT_MS } = {}) {
     const ops = liveOps(personOps(chat, npc), elapsed);
     const key = fieldKeyOf(baseline, ops);
     const records = composeRecords(chat);
     const known = findCompose(records, key);
     const explicit = explicitResult(baseline, ops);
-    const msg = [...(chat ?? [])].reverse().find(m => swipe == null || (m?.swipe_id ?? 0) === swipe) ?? chat?.at?.(-1);
+    const msg = Number.isInteger(at) && chat?.[at] ? chat[at] : chat?.at?.(-1);
     if (!msg) return { ok: false, error: 'no message' };
     const hostSwipe = msg.swipe_id ?? 0;
     if (!ops.length || known?.inputsKey === key || explicit) {
@@ -392,23 +406,25 @@ export async function recompose(chat, { npc, swipe, baseline, name, elapsed, tim
         const body = known?.body ?? explicit?.body ?? baseline.body ?? '';
         const outfit = known?.outfit ?? explicit?.outfit ?? baseline.outfit ?? '';
         if (!(body === (baseline.body ?? '') && outfit === (baseline.outfit ?? ''))) await ensureLooks(chat, msg, hostSwipe, npc, name, body, outfit, timeout, baseline, elapsed);
-        return { ok: true, key, called: false };
+        return { ok: true, key, called: false, msg };
     }
+    if (exhausted(chat, npc, key, 'fields')) return { ok: false, key, error: 'failed', skipped: true, msg };
     const asked = await askFields(name, baseline, ops, timeout);
     if (!asked.ok) {
         setJob(msg, hostSwipe, { npc, key, part: 'fields', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
-        return { ok: false, key, error: asked.reason };
+        return { ok: false, key, error: asked.reason, msg };
     }
     writeCompose(msg, hostSwipe, { npc, kind: 'fields', key, inputsKey: key, body: asked.body, outfit: asked.outfit });
     clearJob(msg, hostSwipe, npc, key, 'fields');
     await ensureLooks(chat, msg, hostSwipe, npc, name, asked.body, asked.outfit, timeout, baseline, elapsed);
-    return { ok: true, key, called: true };
+    return { ok: true, key, called: true, msg };
 }
 
 async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout, baseline, elapsed) {
     const key = looksInputKey(body, outfit);
     const hit = findCompose(composeRecords(chat), key);
     if (hit && hit.body === body && hit.outfit === outfit && hit.looks) return;
+    if (exhausted(chat, npc, key, 'looks')) return;
     const asked = await askLooks(name, body, outfit, timeout);
     const ops = liveOps(personOps(chat, npc), elapsed);
     const now = explicitResult(baseline, ops) || findCompose(composeRecords(chat), fieldKeyOf(baseline, ops));
