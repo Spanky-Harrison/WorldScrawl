@@ -504,8 +504,9 @@ export function framesOf(chat, index, cast = [], clock = null) {
             const view = projectAppearance({ pinned, castLooks: n.castLooks ?? '', body: n.body, looks: n.looks }, owners, records, Number.isFinite(el) ? el : null);
             n.pinned = view.pinned;
             n.lasting = view.lasting;
-            n.lastingOps = owners.filter(s => s.committed && !(s.lasts > 0) && s.off !== true);
-            n.liveOps = owners.filter(s => s.committed && s.off !== true);
+            const alive = s => s.committed && s.off !== true && !(s.lasts > 0 && Number.isFinite(el) && Number.isFinite(s.start) && el >= s.start + s.lasts * 60);
+            n.lastingOps = owners.filter(s => alive(s) && !(s.lasts > 0));
+            n.liveOps = owners.filter(alive);
             n.base = { looks: n.castLooks ?? '', body: view.pinned.body, outfit: view.pinned.outfit };
             n.body = view.live.unresolved ? '' : view.live.body;
             n.outfit = view.live.unresolved ? '' : view.live.outfit;
