@@ -3,8 +3,8 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
-import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply } from './npceffects.mjs';
-export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply };
+import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
+export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 
@@ -529,7 +529,9 @@ export function framesOf(chat, index, cast = [], clock = null) {
             const tempsE = n.effects.filter(e => e.lasts);
             if (lasting.length) {
                 const fold = resolveAppearance(n.base, lasting, n.caches);
-                if (!fold.needsModel) {
+                // Fold only once Body, Outfit, and the Looks summary of that pair are all in.
+                // Folding early would bake an empty summary into the base and forget the debt.
+                if (!fold.needsModel && fold.looksHow !== 'pending') {
                     n.base = { looks: fold.looks, body: fold.body, outfit: fold.outfit };
                     n.effects = tempsE;
                 }
@@ -537,6 +539,7 @@ export function framesOf(chat, index, cast = [], clock = null) {
             const resolved = resolveAppearance(n.base, n.effects, n.caches);
             n.looks = resolved.looks; n.body = resolved.body; n.outfit = resolved.outfit;
             n.appearanceHow = resolved.how; n.appearanceKey = resolved.key;
+            n.looksHow = resolved.looksHow ?? 'base'; n.looksKey = resolved.looksKey ?? '';
         }
         frames.push(snapshot(state));
     }
@@ -711,6 +714,7 @@ function publicNpc(n) {
         effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
         caches: clone(n.caches ?? {}),
         appearanceHow: n.appearanceHow ?? 'base', appearanceKey: n.appearanceKey ?? '',
+        looksHow: n.looksHow ?? 'base', looksKey: n.looksKey ?? '',
         unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,

@@ -30,32 +30,55 @@ export function effectSetKey(effects) {
 
 const cloneApp = (a = {}) => ({ looks: a.looks ?? '', body: a.body ?? '', outfit: a.outfit ?? '' });
 
+/** Stable key for the Body and Outfit a Looks line was written from. */
+export function looksInputKey(body, outfit) {
+    const src = `${body ?? ''}\u0000${outfit ?? ''}`;
+    let h = 5381;
+    for (let i = 0; i < src.length; i++) h = Math.imul(h, 33) ^ src.charCodeAt(i);
+    return `looks:${(h >>> 0).toString(36)}`;
+}
+
+/** Attach a derived Looks line, or mark it pending. Never present an older summary as the current one. */
+function withDerivedLooks(body, outfit, baseLooks, baseBody, baseOutfit, caches, field) {
+    const changed = body !== (baseBody ?? '') || outfit !== (baseOutfit ?? '');
+    const looksKey = looksInputKey(body, outfit);
+    const hit = caches[looksKey];
+    const fresh = hit && hit.looks && hit.body === (body ?? '') && hit.outfit === (outfit ?? '');
+    if (!field.needsModel && !changed) {
+        return { ...field, looks: fresh ? hit.looks : (baseLooks ?? ''), body, outfit, looksHow: fresh ? 'reuse' : 'base', looksKey };
+    }
+    if (fresh && !field.needsModel) return { ...field, looks: hit.looks, body, outfit, looksHow: 'reuse', looksKey };
+    // Fields still in flight: the card masks every row, so the previous line can stay in the data.
+    if (field.needsModel) return { ...field, looks: baseLooks ?? '', body, outfit, looksHow: 'pending', looksKey };
+    return { ...field, looks: '', body, outfit, looksHow: 'pending', looksKey };
+}
+
 /**
  * Current appearance from base + active effects + caches.
- * effects: [{intent, fields, text?: {looks,body,outfit}}] in start order.
- * caches: { [key]: {looks,body,outfit, how?} }
- * Returns { looks, body, outfit, how, key, needsModel, modelFields }.
- * how: 'base' | 'engine' | 'model' | 'reuse' | 'pending'
+ * Body and Outfit are authoritative. Looks is a separate summary of those two,
+ * reused only when this exact Body and Outfit were summarized before.
+ * how: 'base' | 'engine' | 'model' | 'reuse' | 'pending' (the body/outfit rewrite).
+ * looksHow: 'base' | 'reuse' | 'pending'.
  */
 export function resolveAppearance(base, effects, caches = {}) {
     const b = cloneApp(base);
     const active = (effects ?? []).filter(e => e && String(e.intent ?? '').trim());
-    if (!active.length) return { ...b, how: 'base', key: '', needsModel: false, modelFields: [] };
+    const finish = (body, outfit, field) => withDerivedLooks(body, outfit, b.looks, b.body, b.outfit, caches, field);
+    if (!active.length) return finish(b.body, b.outfit, { how: 'base', key: '', needsModel: false, modelFields: [] });
     const key = effectSetKey(active);
     const hit = caches[key];
-    if (hit && (hit.looks != null || hit.body != null || hit.outfit != null)) {
-        return { looks: hit.looks ?? b.looks, body: hit.body ?? b.body, outfit: hit.outfit ?? b.outfit, how: 'reuse', key, needsModel: false, modelFields: [] };
+    if (hit && (hit.body != null || hit.outfit != null) && !String(hit.key ?? key).startsWith('looks:')) {
+        const body = hit.body != null && hit.body !== '' ? hit.body : b.body;
+        const outfit = hit.outfit != null && hit.outfit !== '' ? hit.outfit : b.outfit;
+        return finish(body, outfit, { how: 'reuse', key, needsModel: false, modelFields: [] });
     }
     const byField = { looks: [], body: [], outfit: [] };
-    for (const e of active) for (const f of effectFields(e.fields)) byField[f].push(e);
-    const overlapping = APPEARANCE_FIELDS.filter(f => byField[f].length > 1);
-    if (overlapping.length) {
-        return { ...b, how: 'pending', key, needsModel: true, modelFields: overlapping };
-    }
-    // Non-overlapping: take each field from its one effect (its solo cache, else its own text).
-    const out = cloneApp(b);
+    for (const e of active) for (const f of effectFields(e.fields)) if (f !== 'looks') byField[f].push(e);
+    const overlapping = ['body', 'outfit'].filter(f => byField[f].length > 1);
+    if (overlapping.length) return finish(b.body, b.outfit, { how: 'pending', key, needsModel: true, modelFields: overlapping });
+    const out = { body: b.body, outfit: b.outfit };
     const missing = [];
-    for (const f of APPEARANCE_FIELDS) {
+    for (const f of ['body', 'outfit']) {
         const list = byField[f];
         if (!list.length) continue;
         const e = list[0];
@@ -65,8 +88,8 @@ export function resolveAppearance(base, effects, caches = {}) {
         else if (e.text && e.text[f] != null && e.text[f] !== '') out[f] = e.text[f];
         else missing.push(f);
     }
-    if (missing.length) return { ...out, how: 'pending', key, needsModel: true, modelFields: missing };
-    return { ...out, how: 'engine', key, needsModel: false, modelFields: [] };
+    if (missing.length) return finish(out.body, out.outfit, { how: 'pending', key, needsModel: true, modelFields: missing });
+    return finish(out.body, out.outfit, { how: 'engine', key, needsModel: false, modelFields: [] });
 }
 
 /**
@@ -191,9 +214,9 @@ export function planAppearanceRebuild(npc) {
     const caches = npc.caches ?? {};
     const resolved = resolveAppearance(base, effects, caches);
     if (!resolved.needsModel) return null;
-    // Looks is the one-line summary of Body/Outfit: a rewrite of either also rewrites Looks so it never stays on the base.
-    const fields = resolved.modelFields.slice();
-    if (!fields.includes('looks') && fields.some(f => f === 'body' || f === 'outfit')) fields.unshift('looks');
+    // Looks is not rewritten here. A later call summarizes the resolved Body and Outfit.
+    const fields = resolved.modelFields.filter(f => f === 'body' || f === 'outfit');
+    if (!fields.length) return null;
     return {
         id: npc.id,
         key: resolved.key,
@@ -220,8 +243,31 @@ export function acceptAppearanceRebuild(plan, answer, currentNpc) {
     const before = {};
     for (const f of plan.fields) before[f] = String(currentNpc?.[f] ?? '');
     stamp.before = before;
-    for (const f of APPEARANCE_FIELDS) if (got[f]) stamp[f] = got[f];
+    for (const f of plan.fields) if (got[f]) stamp[f] = got[f];
     return { stamp };
+}
+
+/**
+ * A Looks summary is due when Body and Outfit are already resolved and this pair has no summary.
+ * Returns null when nothing to ask, else { id, key, body, outfit }.
+ */
+export function planLooksSummary(npc) {
+    if (!npc?.id) return null;
+    const base = npc.base ?? { looks: npc.looks ?? '', body: npc.body ?? '', outfit: npc.outfit ?? '' };
+    const resolved = resolveAppearance(base, npc.effects ?? [], npc.caches ?? {});
+    if (resolved.needsModel || resolved.looksHow !== 'pending') return null;
+    return { id: npc.id, key: resolved.looksKey, body: resolved.body ?? '', outfit: resolved.outfit ?? '' };
+}
+
+/** Accept a Looks answer only while Body and Outfit are still the pair it was asked about. */
+export function acceptLooksSummary(plan, answer, currentNpc) {
+    if (!plan?.key || !plan.id) return { failed: true };
+    const base = currentNpc?.base ?? { looks: '', body: '', outfit: '' };
+    const cur = resolveAppearance(base, currentNpc?.effects ?? [], currentNpc?.caches ?? {});
+    if (cur.looksKey !== plan.key || (cur.body ?? '') !== plan.body || (cur.outfit ?? '') !== plan.outfit) return { stale: true };
+    const got = readAppearanceAnswer(answer);
+    if (!got?.looks) return { failed: true };
+    return { stamp: { type: 'npc_appearance_cache', id: plan.id, key: plan.key, how: 'model', looks: got.looks, body: plan.body, outfit: plan.outfit } };
 }
 
 /** First JSON object in a model answer. `truncated` when a `{` never closes. */
