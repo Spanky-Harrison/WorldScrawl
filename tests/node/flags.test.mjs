@@ -540,3 +540,63 @@ test('the tracker scrap is one pass over the live place and every field a person
     assert.equal(listed[0].looks, 'copper braids');
 });
 }
+
+test('appearance rebuild settles complete, bad, and late answers without a partial cache', async () => {
+    const fs = await import('node:fs');
+    const ext = await import('../../extension/index.js');
+    ext.setPrompts(JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8')));
+    const scene = await import('../../extension/scene.mjs');
+    const { npcAt, NPC_KEY } = await import('../../extension/npc.mjs');
+    const c = SillyTavern.getContext();
+    c.chatMetadata = { worldscrawl_enabled: true };
+    c.saveChat = async () => {};
+    c.updateMessageBlock = () => {};
+    document.querySelectorAll = () => [];
+    const good = '{"looks":"young braids","body":"years younger","outfit":"a bright dress"}';
+    const stamp = () => ({ mes: 'The beam hits Hesk.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [NPC_KEY]: [
+        { swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' },
+        { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'magically young', fields: 'body,outfit' },
+    ] } });
+    const run = async (reply, { timeout = 200 } = {}) => {
+        let calls = 0;
+        c.generateRaw = async () => { calls++; return typeof reply === 'function' ? reply() : reply; };
+        const msg = stamp();
+        c.chat = [msg];
+        await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout });
+        return { calls, msg, play: npcAt(c.chat, 0, [], 'hesk') };
+    };
+    const landed = await run(good);
+    assert.equal(landed.calls, 1);
+    assert.equal(landed.play.appearanceHow === 'pending', false);
+    assert.equal(landed.play.body, 'years younger');
+    assert.equal(landed.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache' && s.outfit === 'a bright dress'), true);
+    assert.equal(landed.msg.extra.worldscrawl_appearance, undefined);
+    for (const [reply, kind] of [['{"body":"younger"}', 'partial'], ['', 'empty'], ['I cannot rewrite that.', 'refusal'], ['{"looks": "cut', 'truncated']]) {
+        const bad = await run(reply);
+        assert.equal(bad.calls, 2, kind);
+        assert.equal(bad.play.appearanceHow, 'pending', kind);
+        assert.equal(bad.msg.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false, kind);
+        assert.equal(bad.play.body, 'sturdy', kind);
+        const job = scene.appearJobs(bad.msg).find(j => j.id === 'hesk');
+        assert.equal(job?.status, 'failed', kind);
+        assert.equal(job?.kind, kind, kind);
+    }
+    let late = '';
+    c.generateRaw = () => new Promise(resolve => { late = () => resolve(good); });
+    const hung = stamp();
+    c.chat = [hung];
+    await scene.ensureAppearanceRebuilds(0, { ids: ['hesk'], timeout: 30 });
+    late();
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(hung.extra[NPC_KEY].some(s => s.type === 'npc_appearance_cache'), false);
+    assert.equal(scene.appearJobs(hung).find(j => j.id === 'hesk')?.kind, 'timeout');
+    let calls = 0;
+    c.generateRaw = async () => { calls++; return good; };
+    const dup = stamp();
+    c.chat = [dup];
+    const first = scene.retryAppearance(0, 'hesk', 'magically young|body+outfit');
+    const second = await scene.retryAppearance(0, 'hesk', 'magically young|body+outfit');
+    await first;
+    assert.equal(second.error, 'Already retrying.');
+    assert.equal(calls, 1);
+});
