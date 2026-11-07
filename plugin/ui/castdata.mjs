@@ -229,9 +229,8 @@ function narrExtras(play, field) {
             out.push(`message #${s.msg}`);
             if (s.intent) out.push(`effect: ${s.intent}`);
         }
-        if (s.type === 'npc_appearance_cache' && s.key && s.key === play?.appearanceKey && (play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model')) out.push(`message #${s.msg}`);
     }
-    // A body or outfit rewrite also rewrites Looks, so the effect belongs on that row once the cache has landed.
+    // A body or outfit rewrite also belongs on the Looks row once that replay has landed.
     if ((play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model') && (play?.[field] ?? '') !== (play?.base?.[field] ?? '')) {
         for (const e of play?.effects ?? []) if (e.intent) out.push(`effect: ${e.intent}`);
     }
@@ -329,8 +328,11 @@ export function relText(r) {
     if (!r?.state) return REL_SHOWN.unmet;
     return `${REL_SHOWN[r.state] ?? r.state}${r.at != null ? ` (message #${r.at}${r.by ? `, ${r.by}` : ''})` : ''}`;
 }
-/** The in-play changes list: [{msg, type, text, off}], oldest first. */
-export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({ msg: x.msg, type: x.type, text: `${x.summary}${x.pending ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`, off: !!x.off }));
+/** The in-play changes list, oldest first. Identity and the decision revision stay on the row so Changes can call the same dispatcher as the chat card. */
+export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({
+    msg: x.msg, type: x.type, text: `${x.summary}${x.pending ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`, off: !!x.off,
+    pending: !!x.pending, identity: x.identity || null, decisionRev: x.decisionRev ?? 1,
+}));
 const pad2 = n => String(n).padStart(2, '0');
 /** ' (lasting)', ' (until day 3 14:00)', ' (ended day 3 14:00)', ' (for 2h)': when a field change ends. */
 export function expiryText(e) {

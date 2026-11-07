@@ -212,27 +212,29 @@ export function projectAppearance(person, owners, records, elapsed) {
     };
 }
 
-/** A candidate standing in for its owner, or added, for a preview. Not a committed stamp. */
-export function previewOps(committedOps, candidate, ownerId, start) {
+/** A candidate standing in its owner's replay position. Not a committed stamp. */
+export function previewOps(ordered, candidate, ownerId, start, elapsed = null) {
     const lasts = candidate?.proposedLasts ?? null;
+    const committed = candidate?.kind === 'baseline'
+        ? { kind: 'baseline', field: candidate.field, text: candidate.text ?? '' }
+        : { kind: 'appearance', intent: candidate?.intent ?? '', fields: candidate?.fields ?? 'body,outfit', layer: candidate?.layer ?? {} };
     const ghost = {
+        type: candidate?.kind === 'baseline' ? 'npc_baseline' : 'npc_appearance',
         identity: { owner: ownerId },
         owner: ownerId,
-        committed: candidate?.kind === 'baseline'
-            ? { kind: 'baseline', field: candidate.field, text: candidate.text ?? '' }
-            : { kind: 'appearance', intent: candidate?.intent ?? '', fields: candidate?.fields ?? 'body,outfit', layer: candidate?.layer ?? {} },
+        committed,
         lasts,
         start,
         off: false,
-        contentId: contentIdOf(candidate?.kind === 'baseline'
-            ? { kind: 'baseline', field: candidate.field, text: candidate.text ?? '' }
-            : { kind: 'appearance', intent: candidate?.intent ?? '', fields: candidate?.fields ?? '', layer: candidate?.layer ?? {} }, start, lasts),
+        contentId: contentIdOf(committed, start, lasts),
     };
-    const without = committedOps.filter(o => (o.owner || o.identity?.owner) !== ownerId);
-    const lasting = without.filter(o => !(o.lasts > 0));
-    const temps = without.filter(o => o.lasts > 0);
-    const intoLasting = !(lasts > 0);
-    const lastingWith = intoLasting ? [...lasting, ghost] : lasting;
-    const liveWith = [...lastingWith, ...temps, ...(intoLasting ? [] : [ghost])];
-    return { lastingWith, liveWith, ghost };
+    const replaced = [];
+    let seen = false;
+    for (const s of ordered ?? []) {
+        if ((s?.owner || s?.identity?.owner) === ownerId) { replaced.push(ghost); seen = true; }
+        else replaced.push(s);
+    }
+    if (!seen) replaced.push(ghost);
+    const liveWith = liveOps(replaced, elapsed);
+    return { lastingWith: liveWith.filter(o => !(o.lasts > 0)), liveWith, ghost };
 }

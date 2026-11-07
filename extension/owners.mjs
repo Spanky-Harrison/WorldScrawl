@@ -176,8 +176,9 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     const epoch = stamp.candidate.epoch;
     const rev = stamp.decisionRev;
     const start = stamp.start;
-    const mine = personOps(chat, identity.npc, identity.swipe).filter(s => s.committed && s.owner !== stamp.owner);
-    const { lastingWith, liveWith } = previewOps(liveOps(mine, elapsed), stamp.candidate, stamp.owner, start);
+    const ordered = personOps(chat, identity.npc, identity.swipe);
+    const mine = ordered.filter(s => s.committed && s.owner !== stamp.owner);
+    const { lastingWith, liveWith } = previewOps(ordered, stamp.candidate, stamp.owner, start, elapsed);
     const base = baseline ?? { body: '', outfit: '' };
     const records = composeRecords(chat, identity.swipe);
     const lasting = textOf(base, lastingWith, records);
