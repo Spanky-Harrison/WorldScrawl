@@ -228,8 +228,8 @@ export function planAppearanceRebuild(npc) {
 }
 
 /**
- * Accept a rebuild answer against the live NPC. Returns a cache stamp, or
- * { stale: true } when the active set moved on, or { failed: true } when the answer is unusable.
+ * Accept a field answer for an internal compose record. Not a chat stamp.
+ * { stale } when the inputs moved, { failed } when unusable, else { record }.
  */
 export function acceptAppearanceRebuild(plan, answer, currentNpc) {
     if (!plan?.key || !plan.id) return { failed: true };
@@ -238,14 +238,8 @@ export function acceptAppearanceRebuild(plan, answer, currentNpc) {
     if (cur.key !== plan.key || !sameAppearanceBase(curBase, plan.base)) return { stale: true };
     const got = readAppearanceAnswer(answer);
     if (!got) return { failed: true };
-    // Must cover every field the plan asked for.
     for (const f of plan.fields) if (!got[f]) return { failed: true };
-    const stamp = { type: 'npc_appearance_cache', id: plan.id, key: plan.key, how: 'model' };
-    const before = {};
-    for (const f of plan.fields) before[f] = String(currentNpc?.[f] ?? '');
-    stamp.before = before;
-    for (const f of plan.fields) if (got[f]) stamp[f] = got[f];
-    return { stamp };
+    return { record: { kind: 'fields', key: plan.key, inputsKey: plan.key, npc: plan.id, body: got.body ?? '', outfit: got.outfit ?? '' } };
 }
 
 /**
@@ -268,7 +262,7 @@ export function acceptLooksSummary(plan, answer, currentNpc) {
     if (cur.looksKey !== plan.key || (cur.body ?? '') !== plan.body || (cur.outfit ?? '') !== plan.outfit) return { stale: true };
     const got = readAppearanceAnswer(answer);
     if (!got?.looks) return { failed: true };
-    return { stamp: { type: 'npc_appearance_cache', id: plan.id, key: plan.key, how: 'model', looks: got.looks, body: plan.body, outfit: plan.outfit } };
+    return { record: { kind: 'looks', key: plan.key, inputsKey: plan.key, npc: plan.id, looks: got.looks, body: plan.body, outfit: plan.outfit } };
 }
 
 /** First JSON object in a model answer. `truncated` when a `{` never closes. */

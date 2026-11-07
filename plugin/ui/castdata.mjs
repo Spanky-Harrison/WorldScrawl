@@ -229,9 +229,8 @@ function narrExtras(play, field) {
             out.push(`message #${s.msg}`);
             if (s.intent) out.push(`effect: ${s.intent}`);
         }
-        if (s.type === 'npc_appearance_cache' && s.key && s.key === play?.appearanceKey && (play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model')) out.push(`message #${s.msg}`);
     }
-    // A body or outfit rewrite also rewrites Looks, so the effect belongs on that row once the cache has landed.
+    // A body or outfit rewrite also belongs on the Looks row once that replay has landed.
     if ((play?.appearanceHow === 'reuse' || play?.appearanceHow === 'model') && (play?.[field] ?? '') !== (play?.base?.[field] ?? '')) {
         for (const e of play?.effects ?? []) if (e.intent) out.push(`effect: ${e.intent}`);
     }
@@ -329,8 +328,13 @@ export function relText(r) {
     if (!r?.state) return REL_SHOWN.unmet;
     return `${REL_SHOWN[r.state] ?? r.state}${r.at != null ? ` (message #${r.at}${r.by ? `, ${r.by}` : ''})` : ''}`;
 }
-/** The in-play changes list: [{msg, type, text, off}], oldest first. */
-export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({ msg: x.msg, type: x.type, text: `${x.summary}${x.pending ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`, off: !!x.off }));
+/** The in-play changes list, oldest first. Identity and the decision revision stay on the row so Changes can call the same dispatcher as the chat card. */
+export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({
+    msg: x.msg, type: x.type,
+    text: `${x.summary}${x.candidate ? ` (${x.candidate})` : ''}${x.preview ? `: ${x.preview}` : ''}${x.pending && !x.candidate ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`,
+    off: !!x.off, pending: !!x.pending, identity: x.identity || null, decisionRev: x.decisionRev ?? 1,
+    candidate: x.candidate || '', candidateToken: x.candidateToken || '',
+}));
 const pad2 = n => String(n).padStart(2, '0');
 /** ' (lasting)', ' (until day 3 14:00)', ' (ended day 3 14:00)', ' (for 2h)': when a field change ends. */
 export function expiryText(e) {
@@ -370,7 +374,11 @@ const scheduleJson = f => JSON.stringify(recordFromForm({ id: 'x', name: 'x', li
 export function chatStamps(playOrSeed, f) {
     const base = isForm(playOrSeed) ? playOrSeed : formFromPlay(playOrSeed);
     const stamps = [], cannot = [];
-    for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`); }
+    for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) {
+        if (k === 'looks') { cannot.push('edit Looks (it is derived from body and outfit)'); continue; }
+        if (k === 'body' || k === 'outfit') { if (s(f[k])) stamps.push({ type: 'npc_baseline', field: k, text: s(f[k]) }); else cannot.push(`clear ${field}`); continue; }
+        if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`);
+    }
     const added = (now, was) => now.map(s).filter(Boolean).filter(x => !was.map(s).includes(x));
     const removed = (now, was) => was.map(s).filter(Boolean).filter(x => !now.map(s).includes(x));
     for (const t of added(f.facts ?? [], base.facts)) stamps.push({ type: 'npc_fact', field: 'fact', text: t });

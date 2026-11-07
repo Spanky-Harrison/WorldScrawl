@@ -615,6 +615,7 @@ function createMapWindow(win) {
         chatAt: () => (state?.on ? { msg: state.last_msg, swipe: state.last_swipe ?? null } : null),
         chatEdit: async (id, stamps, at) => (state?.chatId && at ? askST('npc_chat_edit', { chatId: state.chatId, id, stamps, msg: at.msg, swipe: at.swipe }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
         retryAppearance: job => { if (state?.chatId && job) channel.postMessage({ type: 'appearance_retry', chatId: state.chatId, id: job.id, msg: job.msg, key: job.key || '' }); },
+        decideNpc: spec => { if (state?.chatId && spec?.identity) channel.postMessage({ type: 'npc_decide', chatId: state.chatId, ...spec }); },
         highlight: (addrs, now) => { castHl = { addrs, now }; paintHl(); },
     });
     let castHl = { addrs: [], now: null };
