@@ -329,6 +329,8 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
     assert.match(tracker, /place, people, and wait in the same answer/);
     assert.match(tracker, /Fog, rain, or cold outside does not rewrite the room/);
     assert.match(tracker, /walk in soaked/);
+    assert.match(tracker, /Do not set looks/);
+    assert.match(tracker, /the player does not have to say that it is temporary/);
     assert.match(tracker, /stance toward the player actually shifted/);
     assert.doesNotMatch(tracker, /end your reply with|\[ws_flag|\[ws_npc|\[ws_wait/);
     assert.ok(P('npc.tracker').locked);
