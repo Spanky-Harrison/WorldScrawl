@@ -4,6 +4,7 @@
 
 import { npc } from './shared.mjs';
 import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
+import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
@@ -58,10 +59,14 @@ export function claimResult(npc, stamp) {
         const who = stamp.who || 'player';
         return npc.disposition?.[who]?.value === stamp.value ? 'landed' : 'missed';
     }
-    if (stamp.type === 'npc_appearance') {
-        const intent = String(stamp.intent ?? '').trim().toLowerCase();
-        if (!intent) return 'missed';
-        return (npc.effects ?? []).some(e => String(e.intent ?? '').trim().toLowerCase() === intent) ? 'landed' : 'missed';
+    if (stamp.type === 'npc_appearance' || stamp.type === 'npc_baseline') {
+        if (stamp.candidate && !stamp.committed) return 'waiting';
+        if (!stamp.committed) return 'missed';
+        const lasting = !(stamp.lasts > 0);
+        const inLasting = (npc.lastingOps ?? []).some(o => o.owner === stamp.owner);
+        const inLive = (npc.liveOps ?? []).some(o => o.owner === stamp.owner);
+        if (lasting) return inLasting ? 'landed' : 'missed';
+        return inLive ? 'landed' : 'missed';
     }
     return 'landed';
 }
@@ -286,7 +291,7 @@ function blankFrom(rec) {
     if (!base.looksPair) base.looksPair = looksInputKey(base.body ?? '', base.outfit ?? '');
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
-        looks, body, outfit, base, effects: [], caches: {}, appearanceHow: 'base', appearanceKey: '',
+        looks, body, outfit, castLooks: looks, base, effects: [], caches: {}, appearanceHow: 'base', appearanceKey: '',
         unknownAs: rec.unknownAs ?? '', rel: clone(rec.rel ?? {}),
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
@@ -384,12 +389,7 @@ function applyStamp(state, s, index, elapsed = null) {
             const key = CARD_FIELDS[field];
             n[key] = text;
             // Appearance card fields update the base so resolveAppearance does not wipe them.
-            if (APPEARANCE_FIELDS.includes(key)) {
-                n.base = n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' };
-                n.base[key] = text;
-                // A Looks edit is the summary of the body and outfit now. A body or outfit edit leaves the old pairing, so the summary is owed again.
-                if (key === 'looks') n.base.looksPair = looksInputKey(n.base.body ?? '', n.base.outfit ?? '');
-            }
+            if (APPEARANCE_FIELDS.includes(key)) return;
         }
         else if (field === 'history') n.deep.history = text;
         else if (field.startsWith('deep.')) setDeep(n.deep, field, text);
@@ -463,41 +463,7 @@ function applyStamp(state, s, index, elapsed = null) {
         }).filter(Boolean);
         return;
     }
-    if (s.type === 'npc_appearance') {
-        const intent = str(s.intent, 240);
-        if (!intent) return;
-        const fields = effectFields(s.fields);
-        const lasts = lastsMinutes(s.lasts);
-        const text = {};
-        for (const f of APPEARANCE_FIELDS) {
-            if (typeof s[f] === 'string' && s[f].trim()) text[f] = str(s[f], f === 'looks' ? 240 : APPEARANCE_MAX);
-        }
-        if (isObj(s.text)) for (const f of APPEARANCE_FIELDS) {
-            if (typeof s.text[f] === 'string' && s.text[f].trim()) text[f] = str(s.text[f], f === 'looks' ? 240 : APPEARANCE_MAX);
-        }
-        n.effects = n.effects ?? [];
-        n.caches = n.caches ?? {};
-        n.effects = n.effects.filter(e => !(String(e.intent).toLowerCase() === intent.toLowerCase()
-            && effectFields(e.fields).slice().sort().join('+') === fields.slice().sort().join('+')));
-        n.effects.push({
-            intent, fields, lasts: lasts || null, start: Number.isFinite(elapsed) ? elapsed : 0, at: index,
-            by: s.by === 'player' ? 'player' : 'model',
-            text: Object.keys(text).length ? text : undefined,
-        });
-        if (Object.keys(text).length) n.caches[effectSetKey([{ intent, fields }])] = { ...text, how: s.by === 'player' ? 'player' : 'model' };
-        return;
-    }
-    if (s.type === 'npc_appearance_cache' && s.key) {
-        n.caches = n.caches ?? {};
-        const entry = { how: s.how === 'engine' || s.how === 'player' || s.how === 'reuse' ? s.how : 'model' };
-        for (const f of APPEARANCE_FIELDS) {
-            if (typeof s[f] === 'string') entry[f] = str(s[f], f === 'looks' ? 240 : APPEARANCE_MAX);
-        }
-        if (isObj(s.text)) for (const f of APPEARANCE_FIELDS) {
-            if (typeof s.text[f] === 'string') entry[f] = str(s.text[f], f === 'looks' ? 240 : APPEARANCE_MAX);
-        }
-        n.caches[String(s.key)] = entry;
-    }
+    if (s.type === 'npc_appearance' || s.type === 'npc_baseline' || s.type === 'npc_appearance_cache') return;
 }
 
 /** Stamps on one message that count (a turned-off stamp does not). `swipe` keeps each swipe's own list. */
@@ -524,25 +490,32 @@ export function framesOf(chat, index, cast = [], clock = null) {
             // Drop expired appearance effects (lasts in game minutes from start; start is elapsed seconds).
             n.effects = (n.effects ?? []).filter(e => !(e.lasts > 0 && Number.isFinite(e.start) && el >= e.start + e.lasts * 60));
         }
+        const swipe = chat[i]?.swipe_id ?? 0;
+        const records = composeRecords(chat, swipe);
+        const ownersOf = id => {
+            const out = [];
+            for (let k = 0; k <= i; k++) for (const s of stampsOn(chat[k])) if (s.id === id && isOwnerStamp(s)) out.push(s);
+            return out;
+        };
         for (const n of state.values()) {
-            n.base = n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' };
+            if (!readBaselineMap(chat)[n.id]) pinBaseline(chat, n.id, n.body ?? '', n.outfit ?? '');
+            const pinned = readBaselineMap(chat)[n.id] ?? { body: n.body ?? '', outfit: n.outfit ?? '' };
+            const owners = ownersOf(n.id);
+            const view = projectAppearance({ pinned, castLooks: n.castLooks ?? '', body: n.body, looks: n.looks }, owners, records, Number.isFinite(el) ? el : null);
+            n.pinned = view.pinned;
+            n.lasting = view.lasting;
+            n.lastingOps = owners.filter(s => s.committed && !(s.lasts > 0) && s.off !== true);
+            n.liveOps = owners.filter(s => s.committed && s.off !== true);
+            n.base = { looks: n.castLooks ?? '', body: view.pinned.body, outfit: view.pinned.outfit };
+            n.body = view.live.unresolved ? '' : view.live.body;
+            n.outfit = view.live.unresolved ? '' : view.live.outfit;
+            n.looks = view.live.looks;
+            n.appearanceHow = view.live.unresolved ? 'pending' : (view.live.how || 'base');
+            n.appearanceKey = view.live.key;
+            n.looksHow = view.live.looksHow;
+            n.looksKey = view.live.looksKey;
             n.caches = n.caches ?? {};
             n.effects = n.effects ?? [];
-            const lasting = n.effects.filter(e => !e.lasts);
-            const tempsE = n.effects.filter(e => e.lasts);
-            if (lasting.length) {
-                const fold = resolveAppearance(n.base, lasting, n.caches);
-                // Fold only once Body, Outfit, and the Looks summary of that pair are all in.
-                // Folding early would bake an empty summary into the base and forget the debt.
-                if (!fold.needsModel && fold.looksHow !== 'pending') {
-                    n.base = { looks: fold.looks, body: fold.body, outfit: fold.outfit, looksPair: looksInputKey(fold.body ?? '', fold.outfit ?? '') };
-                    n.effects = tempsE;
-                }
-            }
-            const resolved = resolveAppearance(n.base, n.effects, n.caches);
-            n.looks = resolved.looks; n.body = resolved.body; n.outfit = resolved.outfit;
-            n.appearanceHow = resolved.how; n.appearanceKey = resolved.key;
-            n.looksHow = resolved.looksHow ?? 'base'; n.looksKey = resolved.looksKey ?? '';
         }
         frames.push(snapshot(state));
     }
@@ -713,6 +686,8 @@ function publicNpc(n) {
     if (!disposition[PLAYER]) disposition[PLAYER] = { value: 'unknown', reason: '' };
     return {
         id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
+        pinned: n.pinned ? { ...n.pinned } : null,
+        lasting: n.lasting ? { ...n.lasting } : null,
         base: { ...(n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' }) },
         effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
         caches: clone(n.caches ?? {}),
@@ -739,10 +714,10 @@ export function npcAt(chat, index, cast, id, clock = null) {
  * Worked out from the game clock at the stamp's message (nothing stored): `env.clock(i)` and `env.timeAt(seconds)`.
  */
 export function expiryOf(s, i, end, env) {
-    const lasts = lastsMinutes(s?.lasts);
+    const lasts = Number.isFinite(s?.lasts) ? s.lasts : lastsMinutes(s?.lasts);
     if (!lasts) return { lasting: true };
-    let start = null, now = null, until = null;
-    try { start = env.clock(i)?.elapsed; now = env.clock(end)?.elapsed; } catch { /* no clock */ }
+    let start = Number.isFinite(s?.start) ? s.start : null, now = null, until = null;
+    try { if (!Number.isFinite(start)) start = env.clock(i)?.elapsed; now = env.clock(end)?.elapsed; } catch { /* no clock */ }
     if (!Number.isFinite(start)) return { lasts, until: null, over: false };
     try { until = env.timeAt?.(start + lasts * 60) ?? null; } catch { until = null; }
     return { lasts, until, over: Number.isFinite(now) && now >= start + lasts * 60 };
@@ -772,12 +747,19 @@ export function npcPlayState(chat, cast, env) {
             if (!stamps.has(s.id)) stamps.set(s.id, []);
             const extra = {};
             if (s.type === 'npc_fact') { extra.field = s.field ?? 'fact'; extra.text = typeof s.text === 'string' ? s.text : ''; }
-            else if (s.type === 'npc_appearance') { extra.intent = typeof s.intent === 'string' ? s.intent : ''; extra.fields = effectFields(s.fields); extra.lasting = !lastsMinutes(s.lasts); }
-            else if (s.type === 'npc_appearance_cache') extra.key = typeof s.key === 'string' ? s.key : '';
+            else if (s.type === 'npc_appearance' || s.type === 'npc_baseline') {
+                extra.intent = s.committed?.intent || s.candidate?.intent || s.intent || '';
+                extra.fields = effectFields(s.committed?.fields || s.candidate?.fields || s.fields);
+                extra.lasting = !(s.lasts > 0);
+                extra.identity = s.identity;
+                extra.decisionRev = s.decisionRev ?? 1;
+                extra.candidate = s.candidate ? s.candidate.phase : '';
+            }
+            else if (s.type === 'npc_appearance_cache') continue;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
             else if (s.type === 'npc_disposition') extra.value = s.value ?? '';
             else if (s.type === 'npc_schedule') extra.count = Array.isArray(s.schedule) ? s.schedule.length : 0;
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true, where: s.where, place: s.place, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' ? { expiry: expiryOf(s, i, end, env) } : {}) });
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}) });
         }
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -1356,12 +1338,13 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
     if (s.type === 'npc_seek') return `Looking for ${who}`;
-    if (s.type === 'npc_appearance') {
-        const lasts = lastsMinutes(s.lasts);
-        const fields = effectFields(s.fields).join('+');
-        return `${who}: appearance — ${s.intent}${fields !== 'looks+body+outfit' ? ` [${fields}]` : ''}${lasts ? ` (for ${lastsText(lasts)})` : ''}${s.by === 'player' ? ' (player)' : ''}`;
+    if (s.type === 'npc_appearance' || s.type === 'npc_baseline') {
+        if (s.candidate && !s.committed) return `${who}: appearance proposal`;
+        const intent = s.committed?.intent || s.committed?.text || s.intent || 'appearance';
+        const lasts = Number.isFinite(s.lasts) ? s.lasts : lastsMinutes(s.lasts);
+        return `${who}: appearance — ${intent}${lasts ? ` (for ${lastsText(lasts)})` : ''}`;
     }
-    if (s.type === 'npc_appearance_cache') return `${who}: appearance rebuild (${s.how || 'model'})`;
+    if (s.type === 'npc_appearance_cache') return '';
     if (s.type === 'npc_schedule') {
         const n = Array.isArray(s.schedule) ? s.schedule.length : 0;
         return `${who}: schedule (${n} ${n === 1 ? 'entry' : 'entries'})`;

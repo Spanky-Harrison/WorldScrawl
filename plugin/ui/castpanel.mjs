@@ -198,8 +198,14 @@ export function castPanel(doc, io) {
     function changesPane(r) {
         if (!r.play) return [$('p', { class: 'muted' }, 'Open a chat to see what changed.')];
         const st = stampRows(r.play);
+        const act = (x, action) => io.decideNpc?.({ identity: x.identity, decisionRev: x.decisionRev, action });
+        const controls = x => x.identity && x.type !== 'npc_appearance_cache' ? [' ',
+            x.type === 'npc_fact' && x.pending ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
+            x.type === 'npc_fact' && x.pending ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'discard') }, 'Discard') : null,
+            $('button', { type: 'button', class: 'crumb', onclick: () => act(x, x.off ? 'on' : 'off') }, x.off ? 'Turn on' : 'Turn off'),
+            $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'undo') }, 'Undo')] : [];
         return [st.length ? $('ul', { class: 'cast-stamps' }, ...st.map(x => $('li', { class: x.off ? 'off' : '', 'data-type': x.type },
-            $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '')))
+            $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '', ...controls(x))))
             : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'), permanentBox(r)].filter(Boolean);
     }
     function warnPane(r) {
@@ -209,7 +215,11 @@ export function castPanel(doc, io) {
         const hasFile = !!r.rec;
         const label = hasFile ? `cast/${r.rec.file ?? `${r.id}.json`}` : "Not in a cast file (this chat's played record).";
         const body = hasFile ? (r.rec.raw ?? r.rec) : (r.play?.record ?? {});
-        return [$('p', { class: 'muted' }, label), $('pre', { class: 'raw' }, JSON.stringify(body, null, 2))];
+        const pin = r.play?.pinned;
+        const fileBody = r.rec?.body ?? '';
+        const fileOutfit = r.rec?.outfit ?? '';
+        const differs = pin && (pin.body !== fileBody || pin.outfit !== fileOutfit);
+        return [$('p', { class: 'muted' }, label), differs ? $('p', { class: 'muted' }, `Replay baseline for this chat: body “${pin.body}”, outfit “${pin.outfit}”. The file above can change on export; this chat keeps replaying from the baseline.`) : null, $('pre', { class: 'raw' }, JSON.stringify(body, null, 2))].filter(Boolean);
     }
     function fileActs(r) {
         const live = liveChat() && !!r.play;

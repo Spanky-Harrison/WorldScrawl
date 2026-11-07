@@ -16,6 +16,8 @@ import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, invalidateAppearance, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { epochOf, fillCandidate, makeOwner } from './owners.mjs';
+import { messageKey, pinBaseline, readBaselineMap } from './replay.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
@@ -295,6 +297,9 @@ function syncSwipeExtra(msg) {
     if (msg.extra[REMEMBER_KEY]) si.extra[REMEMBER_KEY] = msg.extra[REMEMBER_KEY]; else delete si.extra[REMEMBER_KEY];
     if (msg.extra[DECIDED_KEY]) si.extra[DECIDED_KEY] = msg.extra[DECIDED_KEY]; else delete si.extra[DECIDED_KEY];
     if (msg.extra[APPEAR_KEY]) si.extra[APPEAR_KEY] = msg.extra[APPEAR_KEY]; else delete si.extra[APPEAR_KEY];
+    if (msg.extra.worldscrawl_compose) si.extra.worldscrawl_compose = msg.extra.worldscrawl_compose; else delete si.extra.worldscrawl_compose;
+    if (msg.extra.worldscrawl_npc_baseline) si.extra.worldscrawl_npc_baseline = msg.extra.worldscrawl_npc_baseline;
+    if (msg.extra.worldscrawl_mid) si.extra.worldscrawl_mid = msg.extra.worldscrawl_mid;
 }
 async function undoFlag(id) {
     const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
@@ -341,8 +346,8 @@ async function applyPersonStamps(id, stamped) {
     if (!msg || !stamped?.length) return;
     const clock = npcClock(c.chat, id);
     const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const appearIds = [];
     const applied = [];
+    const toFill = [];
     const noteNpcWarning = (text, source = '') => {
         msg.extra = msg.extra ?? {};
         const swipe = swipeOf(msg);
@@ -375,9 +380,21 @@ async function applyPersonStamps(id, stamped) {
                 const { looks, ...rest } = s;
                 s = { ...rest, fields: fields.join(',') };
             }
+            const pin = readBaselineMap(c.chat)[s.id] || pinBaseline(c.chat, s.id, cur?.body ?? '', cur?.outfit ?? '');
+            const owner = makeOwner({
+                id: s.id, intent: s.intent || '', fields: s.fields || 'body,outfit',
+                layer: { ...(s.body ? { body: s.body } : {}), ...(s.outfit ? { outfit: s.outfit } : {}) },
+                lasts: lastsMinutes(s.lasts), start: Number.isFinite(clock.elapsed) ? clock.elapsed : 0,
+                chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: s.source || '',
+            });
+            owner.candidate.epoch = epochOf(msg);
+            addNpcStamp(msg, owner);
+            applied.push(owner);
+            toFill.push({ owner, pin, name: cur?.name || s.id });
+            continue;
         }
         let stamp = s;
-        if ((s.type === 'npc_fact' || s.type === 'npc_appearance') && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
+        if (s.type === 'npc_fact' && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
         if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
         else if (s.type === 'npc_stay' && !s.place) {
             const place = positionOf(c.chat, id, PLAYER)?.address || '';
@@ -385,7 +402,6 @@ async function applyPersonStamps(id, stamped) {
         }
         addNpcStamp(msg, stamp);
         applied.push(stamp);
-        if (s.type === 'npc_appearance' && stamp.pending !== true) appearIds.push(t);
     }
     const seen = new Set();
     for (const s of applied) {
@@ -396,7 +412,11 @@ async function applyPersonStamps(id, stamped) {
     }
     syncSwipeExtra(msg);
     await c.saveChat?.();
-    if (appearIds.length) await ensureAppearanceRebuilds(id, { ids: [...new Set(appearIds)] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+    for (const row of toFill) {
+        await fillCandidate(c.chat, row.owner.identity, { baseline: row.pin, name: row.name, elapsed: clock.elapsed }).catch(e => console.warn('[WorldScrawl] appearance fill', e));
+    }
+    syncSwipeExtra(msg);
+    await c.saveChat?.();
 }
 function trackerPayloads(people) {
     const stamps = [], found = [], names = [];

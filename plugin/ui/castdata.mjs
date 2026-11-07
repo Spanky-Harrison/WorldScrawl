@@ -370,7 +370,11 @@ const scheduleJson = f => JSON.stringify(recordFromForm({ id: 'x', name: 'x', li
 export function chatStamps(playOrSeed, f) {
     const base = isForm(playOrSeed) ? playOrSeed : formFromPlay(playOrSeed);
     const stamps = [], cannot = [];
-    for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) { if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`); }
+    for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) {
+        if (k === 'looks') { cannot.push('edit Looks (it is derived from body and outfit)'); continue; }
+        if (k === 'body' || k === 'outfit') { if (s(f[k])) stamps.push({ type: 'npc_baseline', field: k, text: s(f[k]) }); else cannot.push(`clear ${field}`); continue; }
+        if (s(f[k])) stamps.push({ type: 'npc_fact', field, text: s(f[k]) }); else cannot.push(`clear ${field}`);
+    }
     const added = (now, was) => now.map(s).filter(Boolean).filter(x => !was.map(s).includes(x));
     const removed = (now, was) => was.map(s).filter(Boolean).filter(x => !now.map(s).includes(x));
     for (const t of added(f.facts ?? [], base.facts)) stamps.push({ type: 'npc_fact', field: 'fact', text: t });

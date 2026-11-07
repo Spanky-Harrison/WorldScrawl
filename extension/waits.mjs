@@ -13,7 +13,9 @@ import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, ensureAppearanceRebuilds, exportNpc, keepRemember, npcEnv, prefetchRemember, refreshLivePlaces, retryAppearance, retryRemember } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember } from './scene.mjs';
+import { decideNpc, fillCandidate, recompose } from './owners.mjs';
+import { paintWordDiff } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -251,12 +253,49 @@ function pendingNpcCard(msg, s, who) {
                 s.intent = next;
             } else s.text = inp.value.trim() || s.text;
             delete s.pending; done();
-            if (isApp) {
-                const mid = (ctx().chat ?? []).indexOf(msg);
-                if (mid >= 0) ensureAppearanceRebuilds(mid, { ids: [s.id] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
-            }
+            if (isApp) return;
         }, `Add this to ${who} for good (with the words in the box)`, true),
         cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
+    return d;
+}
+
+function ownerCard(msg, s, who) {
+    const d = markPending(document.createElement('div'));
+    d.classList.add('worldscrawl_npcpending');
+    const phase = s.candidate?.phase || 'working';
+    const title = document.createElement('div');
+    title.textContent = phase === 'failed' ? `Appearance for ${who} did not resolve.` : phase === 'review' ? `Proposed appearance for ${who}` : `Preparing appearance for ${who}…`;
+    d.append(title);
+    if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
+        const pin = npcAt(ctx().chat ?? [], (ctx().chat ?? []).indexOf(msg), castPack()?.npcs ?? [], s.id);
+        const beforeBody = pin?.pinned?.body ?? '';
+        const beforeOutfit = pin?.pinned?.outfit ?? '';
+        paintWordDiff(document, d, 'Lasting body', beforeBody, s.candidate.lastingPreview.body || '');
+        paintWordDiff(document, d, 'Lasting outfit', beforeOutfit, s.candidate.lastingPreview.outfit || '');
+        if (s.candidate.liveKey !== s.candidate.lastingKey) {
+            paintWordDiff(document, d, 'Live body', beforeBody, s.candidate.livePreview.body || '');
+            paintWordDiff(document, d, 'Live outfit', beforeOutfit, s.candidate.livePreview.outfit || '');
+        }
+    }
+    const ident = s.identity;
+    const rev = s.decisionRev ?? 1;
+    const chat = () => ctx().chat ?? [];
+    const buttons = [];
+    if (phase === 'review') buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
+        const res = decideNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, elapsed: null });
+        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
+        return res;
+    }), 'Apply the reviewed body and outfit', true));
+    buttons.push(cardButton('Discard', () => once(`own-no:${ident?.owner}`, async () => {
+        decideNpc(chat(), ident, rev, 'discard', {});
+        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
+    }), 'Do not change this person', true));
+    buttons.push(cardButton('Check again', () => once(`own-re:${ident?.owner}`, async () => {
+        const edited = decideNpc(chat(), ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts });
+        if (edited?.refill) await fillCandidate(chat(), ident, { baseline: npcAt(chat(), chat().indexOf(msg), castPack()?.npcs ?? [], s.id)?.pinned, name: who });
+        syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
+    }), 'Ask again for this body and outfit', true));
+    d.append(rowOf(buttons));
     return d;
 }
 
@@ -401,7 +440,9 @@ export function renderPatchCards() {
         for (const s of npcStamps) {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
             const who = npcNames.get(s.id) || s.name || s.id;
-            if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; } // a lasting change waits for Approve
+            if (s.type === 'npc_appearance_cache' || !stampSummary(s, who)) continue;
+            if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.candidate && !s.off) { card.append(ownerCard(msg, s, who)); continue; }
+            if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; }
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';
             if (s.type === 'npc_create' && !s.off && (s.looks || s.body || s.outfit || s.history || s.invented?.length)) {
@@ -428,61 +469,34 @@ export function renderPatchCards() {
                             if (s.type === 'npc_appearance' && next && next !== s[textKey]) s.by = 'player';
                             s[textKey] = next;
                         }
+                        const ident = s.identity;
+                        if (ident) {
+                            const payload = s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { intent: inp.value.trim() } : s.type === 'npc_memory' ? { note: inp.value.trim() } : s.type === 'npc_disposition' ? { reason: inp.value.trim() } : s.type === 'npc_create' ? { line: inp.value.trim() } : { text: inp.value.trim() };
+                            decideNpc(ctx().chat ?? [], ident, s.decisionRev ?? 1, 'edit', payload);
+                        } else if (s.type === 'npc_create') s.line = inp.value.trim() || s.line;
+                        else s[textKey] = inp.value.trim();
                         syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
-                        if (s.type === 'npc_appearance') {
-                            const mid = (ctx().chat ?? []).indexOf(msg);
-                            if (mid >= 0) ensureAppearanceRebuilds(mid, { ids: [s.id] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
-                        }
                     });
                     fields.append(inp, save); d.insertBefore(fields, nrow);
                 }, 'Edit this note'));
             }
-            if (s.type === 'npc_appearance_cache' && s.before) {
-                const diff = document.createElement('div');
-                diff.className = 'worldscrawl_appeardiff';
-                diff.style.cssText = 'font-size:0.9em;margin:2px 0 2px 1em;';
-                for (const [k, label] of [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing']]) {
-                    if (!s[k] || s.before[k] === s[k]) continue;
-                    const row = document.createElement('div');
-                    row.textContent = `${label}: ${s.before[k] || '—'} → ${s[k]}`;
-                    diff.append(row);
+            const stampKey = `${id}:${s.identity?.owner || s.type}:${s.id || ''}`;
+            const act = (action, payload) => once(`npc-${action}:${stampKey}`, async () => {
+                const chat = ctx().chat ?? [];
+                const res = s.identity ? decideNpc(chat, s.identity, s.decisionRev ?? 1, action, payload) : { ok: false };
+                if (!res.ok && !s.identity && action === 'undo') {
+                    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
+                    if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
+                } else if (!res.ok && !s.identity && (action === 'off' || action === 'on')) s.off = action === 'off';
+                if (res?.ok && (s.type === 'npc_appearance' || s.type === 'npc_baseline') && action !== 'edit') {
+                    const live = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], s.id);
+                    await recompose(chat, { npc: s.id, swipe: msg.swipe_id ?? 0, baseline: live?.pinned || { body: '', outfit: '' }, name: live?.name || s.id, elapsed: npcClock(chat, Math.max(0, chat.length - 1)).elapsed });
                 }
-                if (diff.childNodes.length) d.append(diff);
-            }
-            const stampKey = `${id}:${s.type}:${s.id || ''}:${s.intent || s.text || s.note || s.key || ''}`;
-            nrow.append(cardButton(s.off ? 'Turn on' : 'Turn off', () => once(`npc-off:${stampKey}`, () => {
-                s.off = !s.off; syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards();
-                if (s.type !== 'npc_appearance' && s.type !== 'npc_appearance_cache') return;
-                if (!s.off) return retryAppearance(id, s.id, '');
-                return ensureAppearanceRebuilds(id, { ids: [s.id] });
-            }), s.off ? 'Use this note again' : 'Keep the note here but stop using it', true));
-            nrow.append(cardButton('Undo', () => once(`npc-undo:${stampKey}`, () => {
-                msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
-                if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
-                syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards();
-                if (s.type === 'npc_appearance' || s.type === 'npc_appearance_cache') ensureAppearanceRebuilds(id, { ids: [s.id] }).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
-            }), 'Remove this note (deleting the message does the same)', true));
-            if (!s.off && s.id && !exported.has(s.id)) {
-                exported.add(s.id);
-                const live = npcAt(ch, ch.length - 1, castPack()?.npcs ?? [], s.id);
-                const castNpc = (castPack()?.npcs ?? []).find(n => n.id === s.id && n.ok !== false && n.from !== 'play');
-                if (live?.from === 'cast' && castNpc) {
-                    nrow.append(cardButton(`Update ${who}`, () => {
-                        d.querySelector('.worldscrawl_castdiff')?.remove();
-                        const now = npcAt(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? [], s.id);
-                        const diff = fileDiff(castNpc, now);
-                        const box = document.createElement('div');
-                        box.className = 'worldscrawl_castdiff';
-                        box.style.cssText = 'margin-top:4px;';
-                        const pre = document.createElement('pre');
-                        pre.style.cssText = 'white-space:pre-wrap;margin:4px 0;font-size:0.9em;';
-                        pre.textContent = diff.changed ? diff.text : 'Nothing has changed since the cast file.';
-                        box.append(pre);
-                        box.append(rowOf(diff.changed && cardButton('Confirm', () => once(`npc-update:${s.id}`, () => exportNpc(s.id, { update: true })), 'Write this record over the cast file', true), cardButton('Cancel', () => { box.remove(); }, 'Leave the cast file as it is')));
-                        d.append(box);
-                    }, 'Show what would change in the cast file, then write it in place'));
-                } else nrow.append(cardButton('Export', () => exportNpc(s.id), 'Write this person into the world\'s cast folder. An existing file is kept.'));
-            }
+                syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
+                return res;
+            });
+            nrow.append(cardButton(s.off ? 'Turn on' : 'Turn off', () => act(s.off ? 'on' : 'off', {}), s.off ? 'Use this note again' : 'Keep the note here but stop using it', true));
+            nrow.append(cardButton('Undo', () => act('undo', {}), 'Remove this note (deleting the message does the same)', true));
             card.append(d);
             if (d._more) card.append(d._more);
         }
