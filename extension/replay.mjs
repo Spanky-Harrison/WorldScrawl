@@ -112,11 +112,19 @@ export function pinBaseline(chat, id, body, outfit) {
     return map[id];
 }
 
-export function composeRecords(chat, swipe) {
+/**
+ * Compose records through message `end` (the whole chat when omitted).
+ * Each message contributes only the block for its own active swipe. A later
+ * message on swipe 1 does not hide an earlier message that is still on swipe 0.
+ */
+export function composeRecords(chat, end = null) {
+    const last = end == null ? (chat?.length ?? 0) - 1 : end;
     const out = [];
-    for (const m of chat ?? []) {
+    for (let i = 0; i <= last && i < (chat?.length ?? 0); i++) {
+        const m = chat[i];
+        const active = m?.swipe_id ?? 0;
         const block = m?.extra?.[COMPOSE_KEY];
-        if (!block || (block.swipe ?? 0) !== (swipe ?? 0)) continue;
+        if (!block || (block.swipe ?? 0) !== active) continue;
         for (const r of block.records ?? []) if (r?.key) out.push(r);
     }
     return out;

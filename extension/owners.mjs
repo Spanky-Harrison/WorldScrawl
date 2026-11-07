@@ -7,7 +7,7 @@ import { render as P } from './shared.mjs';
 async function model() {
     return import('./dig.mjs');
 }
-import { COMPOSE_KEY, composeRecords, contentIdOf, explicitResult, fieldKeyOf, findCompose, isOwnerStamp, liveOps, messageKey, previewOps } from './replay.mjs';
+import { COMPOSE_KEY, composeRecords, contentIdOf, explicitResult, fieldKeyOf, findCompose, isOwnerStamp, liveOps, messageKey, previewOps, readBaselineMap } from './replay.mjs';
 
 const APPEARANCE_TRIES = 2;
 const FILL_TIMEOUT_MS = 45000;
@@ -176,11 +176,11 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     const epoch = stamp.candidate.epoch;
     const rev = stamp.decisionRev;
     const start = stamp.start;
-    const ordered = personOps(chat, identity.npc, identity.swipe);
+    const ordered = personOps(chat, identity.npc);
     const mine = ordered.filter(s => s.committed && s.owner !== stamp.owner);
     const { lastingWith, liveWith } = previewOps(ordered, stamp.candidate, stamp.owner, start, elapsed);
-    const base = baseline ?? { body: '', outfit: '' };
-    const records = composeRecords(chat, identity.swipe);
+    const base = baseline ?? readBaselineMap(chat)[identity.npc] ?? { body: '', outfit: '' };
+    const records = composeRecords(chat);
     const lasting = textOf(base, lastingWith, records);
     const live = textOf(base, liveWith, records);
     let lastingBody = lasting, liveBody = live;
@@ -206,6 +206,7 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
         return { ok: false, error: 'expired' };
     }
     stamp.candidate.phase = 'review';
+    stamp.candidate.baseline = { body: base.body ?? '', outfit: base.outfit ?? '' };
     stamp.candidate.lastingKey = lastingBody.key;
     stamp.candidate.liveKey = liveBody.key;
     stamp.candidate.lastingPreview = { body: lastingBody.body, outfit: lastingBody.outfit };
@@ -226,17 +227,24 @@ function failCandidate(found, part, key, asked) {
     return { ok: false, error: asked.reason || 'failed' };
 }
 
-function personOps(chat, npc, swipe) {
+/** Owners on each message's own active swipe. A later message's swipe does not drop an earlier one. */
+function personOps(chat, npc) {
     const out = [];
     for (const m of chat ?? []) {
-        if ((m?.swipe_id ?? 0) !== (swipe ?? 0) && swipe != null && (m?.swipe_id ?? 0) !== swipe) {
-            // stamps carry their own swipe; the message swipe is the one showing
-        }
+        const active = m?.swipe_id ?? 0;
         for (const s of m?.extra?.worldscrawl_npc ?? []) {
-            if (s && s.id === npc && isOwnerStamp(s) && (s.swipe ?? 0) === (swipe ?? 0)) out.push(s);
+            if (s && s.id === npc && isOwnerStamp(s) && (s.swipe ?? 0) === active) out.push(s);
         }
     }
     return out;
+}
+
+function replayKeys(chat, stamp, candidate, elapsed) {
+    const ordered = personOps(chat, stamp.id);
+    const { lastingWith, liveWith } = previewOps(ordered, candidate, stamp.owner, stamp.start, elapsed);
+    const pin = readBaselineMap(chat)[stamp.id] ?? candidate?.baseline ?? { body: '', outfit: '' };
+    const records = composeRecords(chat);
+    return { lasting: textOf(pin, lastingWith, records).key, live: textOf(pin, liveWith, records).key };
 }
 
 /**
@@ -248,19 +256,28 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
     const found = findStamp(chat, identity);
     if (!found) return { ok: false, stale: true, error: 'That change is gone.' };
     const { msg, stamp } = found;
-    if (identity.chat && stamp.identity?.chat && identity.chat !== stamp.identity.chat) return { ok: false, stale: true };
-    if (!swipeOk(msg, identity)) return { ok: false, stale: true };
+        if (identity.chat && stamp.identity?.chat && identity.chat !== stamp.identity.chat) return { ok: false, stale: true };
+        if (identity.domain && stamp.identity?.domain && identity.domain !== stamp.identity.domain) return { ok: false, stale: true };
+        if (identity.npc && stamp.identity?.npc && identity.npc !== stamp.identity.npc) return { ok: false, stale: true };
+        if (!swipeOk(msg, identity)) return { ok: false, stale: true };
     if (stamp.decisionRev !== decisionRev) return { ok: false, stale: true };
     const policy = policyFor(stamp.type);
     if (!policy[action] && action !== 'check') return { ok: false, error: `${action} is not available for ${stamp.type}` };
     if (action === 'approve' && isOwnerStamp(stamp)) {
         const c = stamp.candidate;
-        if (!c || c.phase !== 'review' || !c.lastingPreview || !c.livePreview) return { ok: false, error: 'not reviewable' };
-        if (c.token !== payload.token && payload.token) return { ok: false, stale: true };
+        if (!c || c.phase !== 'review' || !c.lastingPreview || !c.livePreview || !c.lastingKey || !c.liveKey) return { ok: false, error: 'not reviewable' };
+        if (c.token !== payload.token) return { ok: false, stale: true };
         if (epochOf(msg) !== c.epoch) return { ok: false, stale: true };
         const lasts = c.proposedLasts ?? null;
-        if (lasts > 0 && Number.isFinite(stamp.start) && Number.isFinite(payload.elapsed) && payload.elapsed >= stamp.start + lasts * 60) {
+        if (!Number.isFinite(payload.elapsed)) return { ok: false, stale: true, refill: true };
+        if (lasts > 0 && Number.isFinite(stamp.start) && payload.elapsed >= stamp.start + lasts * 60) {
             return { ok: false, error: 'expired' };
+        }
+        const now = replayKeys(chat, stamp, c, payload.elapsed);
+        if (now.lasting !== c.lastingKey || now.live !== c.liveKey) {
+            stamp.decisionRev += 1;
+            stamp.candidate = { ...c, phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
+            return { ok: false, stale: true, refill: true };
         }
         stamp.decisionRev += 1;
         stamp.committed = c.kind === 'baseline' || stamp.kind === 'baseline'
@@ -270,7 +287,7 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
         stamp.lasts = lasts;
         stamp.contentId = contentIdOf(stamp.committed, stamp.start, stamp.lasts);
         stamp.candidate = null;
-        const swipe = stamp.swipe ?? 0;
+        const swipe = msg.swipe_id ?? stamp.swipe ?? 0;
         writeCompose(msg, swipe, { npc: stamp.id, kind: 'fields', key: c.lastingKey, inputsKey: c.lastingKey, body: c.lastingPreview.body, outfit: c.lastingPreview.outfit });
         if (c.liveKey !== c.lastingKey) writeCompose(msg, swipe, { npc: stamp.id, kind: 'fields', key: c.liveKey, inputsKey: c.liveKey, body: c.livePreview.body, outfit: c.livePreview.outfit });
         clearJob(msg, swipe, stamp.id, c.liveKey, 'fields');
@@ -362,38 +379,39 @@ export function beginCandidate(stamp, msg) {
  * Does not create an owner. A known key is left alone.
  */
 export async function recompose(chat, { npc, swipe, baseline, name, elapsed, timeout = FILL_TIMEOUT_MS } = {}) {
-    const ops = liveOps(personOps(chat, npc, swipe), elapsed);
+    const ops = liveOps(personOps(chat, npc), elapsed);
     const key = fieldKeyOf(baseline, ops);
-    const records = composeRecords(chat, swipe);
+    const records = composeRecords(chat);
     const known = findCompose(records, key);
     const explicit = explicitResult(baseline, ops);
-    const msg = [...(chat ?? [])].reverse().find(m => (m?.swipe_id ?? 0) === (swipe ?? 0)) ?? chat?.at?.(-1);
+    const msg = [...(chat ?? [])].reverse().find(m => swipe == null || (m?.swipe_id ?? 0) === swipe) ?? chat?.at?.(-1);
     if (!msg) return { ok: false, error: 'no message' };
+    const hostSwipe = msg.swipe_id ?? 0;
     if (!ops.length || known?.inputsKey === key || explicit) {
-        if (explicit && !known) writeCompose(msg, swipe ?? 0, { npc, kind: 'fields', key, inputsKey: key, body: explicit.body, outfit: explicit.outfit });
+        if (explicit && !known) writeCompose(msg, hostSwipe, { npc, kind: 'fields', key, inputsKey: key, body: explicit.body, outfit: explicit.outfit });
         const body = known?.body ?? explicit?.body ?? baseline.body ?? '';
         const outfit = known?.outfit ?? explicit?.outfit ?? baseline.outfit ?? '';
-        if (!(body === (baseline.body ?? '') && outfit === (baseline.outfit ?? ''))) await ensureLooks(chat, msg, swipe ?? 0, npc, name, body, outfit, timeout, baseline, elapsed);
+        if (!(body === (baseline.body ?? '') && outfit === (baseline.outfit ?? ''))) await ensureLooks(chat, msg, hostSwipe, npc, name, body, outfit, timeout, baseline, elapsed);
         return { ok: true, key, called: false };
     }
     const asked = await askFields(name, baseline, ops, timeout);
     if (!asked.ok) {
-        setJob(msg, swipe ?? 0, { npc, key, part: 'fields', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
+        setJob(msg, hostSwipe, { npc, key, part: 'fields', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
         return { ok: false, key, error: asked.reason };
     }
-    writeCompose(msg, swipe ?? 0, { npc, kind: 'fields', key, inputsKey: key, body: asked.body, outfit: asked.outfit });
-    clearJob(msg, swipe ?? 0, npc, key, 'fields');
-    await ensureLooks(chat, msg, swipe ?? 0, npc, name, asked.body, asked.outfit, timeout, baseline, elapsed);
+    writeCompose(msg, hostSwipe, { npc, kind: 'fields', key, inputsKey: key, body: asked.body, outfit: asked.outfit });
+    clearJob(msg, hostSwipe, npc, key, 'fields');
+    await ensureLooks(chat, msg, hostSwipe, npc, name, asked.body, asked.outfit, timeout, baseline, elapsed);
     return { ok: true, key, called: true };
 }
 
 async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout, baseline, elapsed) {
     const key = looksInputKey(body, outfit);
-    const hit = findCompose(composeRecords(chat, swipe), key);
+    const hit = findCompose(composeRecords(chat), key);
     if (hit && hit.body === body && hit.outfit === outfit && hit.looks) return;
     const asked = await askLooks(name, body, outfit, timeout);
-    const ops = liveOps(personOps(chat, npc, swipe), elapsed);
-    const now = explicitResult(baseline, ops) || findCompose(composeRecords(chat, swipe), fieldKeyOf(baseline, ops));
+    const ops = liveOps(personOps(chat, npc), elapsed);
+    const now = explicitResult(baseline, ops) || findCompose(composeRecords(chat), fieldKeyOf(baseline, ops));
     if (!now || now.body !== body || now.outfit !== outfit) return;
     if (!asked.ok) {
         setJob(msg, swipe, { npc, key, part: 'looks', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'no looks line' });

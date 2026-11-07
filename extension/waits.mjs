@@ -282,7 +282,8 @@ function ownerCard(msg, s, who) {
     const chat = () => ctx().chat ?? [];
     const buttons = [];
     if (phase === 'review') buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
-        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, elapsed: npcClock(chat(), Math.max(0, chat().indexOf(msg))).elapsed });
+        const now = chat();
+        const res = await settleNpc(now, ident, rev, 'approve', { token: s.candidate?.token, elapsed: npcClock(now, Math.max(0, now.length - 1)).elapsed });
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
         return res;
     }), 'Apply the reviewed body and outfit', true));
@@ -291,8 +292,10 @@ function ownerCard(msg, s, who) {
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
     }), 'Do not change this person', true));
     buttons.push(cardButton('Check again', () => once(`own-re:${ident?.owner}`, async () => {
-        const edited = decideNpc(chat(), ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts });
-        if (edited?.refill) await fillCandidate(chat(), ident, { baseline: npcAt(chat(), chat().indexOf(msg), castPack()?.npcs ?? [], s.id)?.pinned, name: who });
+        const now = chat();
+        const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
+        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts });
+        if (edited?.refill) await fillCandidate(now, ident, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
         syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
     }), 'Ask again for this body and outfit', true));
     d.append(rowOf(buttons));
@@ -456,29 +459,46 @@ export function renderPatchCards() {
             if (s.off) d.style.opacity = '0.6';
             const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
             const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : s.type === 'npc_appearance' ? 'intent' : 'text';
-            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create' || s.type === 'npc_appearance')) {
+            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create' || s.type === 'npc_appearance' || s.type === 'npc_baseline')) {
                 nrow.append(cardButton('Edit', () => {
+                    const appearance = s.type === 'npc_appearance' || s.type === 'npc_baseline';
                     const inp = document.createElement('input');
-                    inp.type = 'text'; inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? ''); inp.className = 'text_pole';
+                    inp.type = 'text';
+                    inp.value = s.type === 'npc_create' ? (s.line ?? '') : appearance ? (s.committed?.intent || s.candidate?.intent || s.intent || '') : (s[textKey] ?? '');
+                    inp.className = 'text_pole';
                     inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
                     inp.addEventListener('click', e => e.stopPropagation());
-                    const save = cardButton('Save', () => {
+                    const bodyInp = document.createElement('input');
+                    const outfitInp = document.createElement('input');
+                    if (appearance && s.type === 'npc_appearance') {
+                        bodyInp.type = 'text'; bodyInp.className = 'text_pole'; bodyInp.placeholder = 'Layer body';
+                        bodyInp.value = s.committed?.layer?.body || s.candidate?.layer?.body || '';
+                        outfitInp.type = 'text'; outfitInp.className = 'text_pole'; outfitInp.placeholder = 'Layer outfit';
+                        outfitInp.value = s.committed?.layer?.outfit || s.candidate?.layer?.outfit || '';
+                        for (const box of [bodyInp, outfitInp]) { box.style.cssText = inp.style.cssText; box.addEventListener('click', e => e.stopPropagation()); }
+                    }
+                    const save = cardButton('Save', async () => {
                         if (s.type === 'npc_create') { s.line = inp.value.trim() || s.line; if (s.name) npcNames.set(s.id, s.name); }
-                        else {
-                            const next = inp.value.trim();
-                            if (s.type === 'npc_appearance' && next && next !== s[textKey]) s.by = 'player';
-                            s[textKey] = next;
-                        }
                         const ident = s.identity;
-                        if (ident) {
-                            const payload = s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { intent: inp.value.trim() } : s.type === 'npc_memory' ? { note: inp.value.trim() } : s.type === 'npc_disposition' ? { reason: inp.value.trim() } : s.type === 'npc_create' ? { line: inp.value.trim() } : { text: inp.value.trim() };
-                            decideNpc(ctx().chat ?? [], ident, s.decisionRev ?? 1, 'edit', payload);
+                        const chat = ctx().chat ?? [];
+                        const elapsed = npcClock(chat, Math.max(0, chat.length - 1)).elapsed;
+                        if (ident && appearance) {
+                            const layer = s.type === 'npc_baseline' ? (s.committed?.layer || s.candidate?.layer || {}) : { ...(bodyInp.value.trim() ? { body: bodyInp.value.trim() } : {}), ...(outfitInp.value.trim() ? { outfit: outfitInp.value.trim() } : {}) };
+                            const fields = [layer.body && 'body', layer.outfit && 'outfit'].filter(Boolean).join(',') || s.committed?.fields || s.candidate?.fields || 'body,outfit';
+                            const payload = s.type === 'npc_baseline'
+                                ? { field: s.committed?.field || s.candidate?.field || 'body', text: inp.value.trim(), lasts: s.lasts }
+                                : { intent: inp.value.trim(), layer, fields, lasts: s.lasts };
+                            const edited = decideNpc(chat, ident, s.decisionRev ?? 1, 'edit', payload);
+                            if (edited?.refill) await fillCandidate(chat, ident, { baseline: npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
+                        } else if (ident) {
+                            const payload = s.type === 'npc_memory' ? { note: inp.value.trim() } : s.type === 'npc_disposition' ? { reason: inp.value.trim() } : s.type === 'npc_create' ? { line: inp.value.trim() } : { text: inp.value.trim() };
+                            decideNpc(chat, ident, s.decisionRev ?? 1, 'edit', payload);
                         } else if (s.type === 'npc_create') s.line = inp.value.trim() || s.line;
                         else s[textKey] = inp.value.trim();
-                        syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
+                        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
                     });
-                    fields.append(inp, save); d.insertBefore(fields, nrow);
-                }, 'Edit this note'));
+                    fields.append(...[inp, appearance && s.type === 'npc_appearance' ? bodyInp : null, appearance && s.type === 'npc_appearance' ? outfitInp : null, save].filter(Boolean)); d.insertBefore(fields, nrow);
+                }, s.type === 'npc_appearance' || s.type === 'npc_baseline' ? 'Edit the intent and the layer text. The composed preview stays read-only.' : 'Edit this note'));
             }
             const stampKey = `${id}:${s.identity?.owner || s.type}:${s.id || ''}`;
             const act = (action, payload) => once(`npc-${action}:${stampKey}`, async () => {

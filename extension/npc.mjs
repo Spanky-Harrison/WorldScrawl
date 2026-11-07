@@ -482,7 +482,8 @@ export function framesOf(chat, index, cast = [], clock = null) {
     for (let i = 0; i <= end; i++) {
         let el = null;
         if (clock) { try { el = clock(i)?.elapsed; } catch { el = null; } }
-        for (const s of stampsOn(chat[i])) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
+        const active = chat[i]?.swipe_id ?? 0;
+        for (const s of stampsOn(chat[i], active)) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
         const flagged = flagsOn(chat[i]).map(normName);
         if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag');
         if (Number.isFinite(el)) for (const n of state.values()) {
@@ -490,11 +491,13 @@ export function framesOf(chat, index, cast = [], clock = null) {
             // Drop expired appearance effects (lasts in game minutes from start; start is elapsed seconds).
             n.effects = (n.effects ?? []).filter(e => !(e.lasts > 0 && Number.isFinite(e.start) && el >= e.start + e.lasts * 60));
         }
-        const swipe = chat[i]?.swipe_id ?? 0;
-        const records = composeRecords(chat, swipe);
+        const records = composeRecords(chat, i);
         const ownersOf = id => {
             const out = [];
-            for (let k = 0; k <= i; k++) for (const s of stampsOn(chat[k])) if (s.id === id && isOwnerStamp(s)) out.push(s);
+            for (let k = 0; k <= i; k++) {
+                const swipe = chat[k]?.swipe_id ?? 0;
+                for (const s of stampsOn(chat[k], swipe)) if (s.id === id && isOwnerStamp(s)) out.push(s);
+            }
             return out;
         };
         for (const n of state.values()) {
@@ -756,6 +759,8 @@ export function npcPlayState(chat, cast, env) {
                 extra.identity = s.identity;
                 extra.decisionRev = s.decisionRev ?? 1;
                 extra.candidate = s.candidate ? s.candidate.phase : '';
+                extra.candidateToken = s.candidate?.token || '';
+                if (s.candidate?.lastingPreview) extra.preview = `body ${s.candidate.lastingPreview.body || '—'}; wearing ${s.candidate.lastingPreview.outfit || '—'}`;
             }
             else if (s.type === 'npc_appearance_cache') continue;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';

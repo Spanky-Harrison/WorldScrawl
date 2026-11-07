@@ -329,36 +329,42 @@ async function prepareNpcs(userMsg) {
     userMsg.extra.worldscrawl_npc_ready = true;
     await loadCalendar();
     const loc = await currentLocation().catch(() => null);
-    if (!loc || !calendarLib) return;
-    const env = npcEnv(chat, loc);
+    if (!loc || !calendarLib) {
+        // No player location: still refresh appearance the cast viewer is showing. Sighting and disposition need a room.
+        await ensureAppearanceRebuilds(chat.length - 1).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+        return;
+    }
     const index = chat.length - 1;
-    const clock = env.clock(index);
-    const here = env.playerAt(index);
-    const frame = framesOf(chat, index, pack.npcs);
-    const now = frame[frame.length - 1];
-    const said = userMsg.mes ?? '';
-    const seeking = /\b(find|seek|where is|look for|ask after|ask about)\b/i.test(said);
-    if (now) for (const n of now.values()) {
-        const oneOff = n.seen_at && !(n.schedule ?? []).some(e => !e.broken);
-        if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day });
-        const check = sightCheck(n, clock, here, env, { appearances: n.appearances, seeks: n.seeks, useRoll: true });
-        if (check.present && check.needsStamp) addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: check.place, day: clock.day, hour: clock.hour });
-    }
-    let present = presentAt(chat, index, pack.npcs, env);
-    for (const p of present) {
-        if (p.disposition?.player?.value !== 'unknown' || (p.fromCast ?? []).includes(PLAYER)) continue;
-        const value = await askDisposition(p, said);
-        addNpcStamp(userMsg, { type: 'npc_disposition', id: p.id, who: PLAYER, value, reason: value === 'indifferent' ? 'No strong impression.' : '', ...(DRAMATIC_RE.test(said) ? { dramatic: true } : {}) });
-    }
-    present = presentAt(chat, index, pack.npcs, env);
-    const rules = focusRules(said, present);
-    let focus = rules;
-    if (rules.ambiguous && present.length) {
-        const id = await askWho(loc, said, present);
-        focus = { id, depth: id ? (rules.depth === 'deep' ? 'deep' : 'focused') : 'present', ambiguous: false };
-    }
-    userMsg.extra[FOCUS_KEY] = { id: focus.id ?? null, depth: focus.depth ?? 'present', swipe: swipeOf(userMsg) };
-    // Expiry (or a prior failed rebuild cleared) may leave present people needing a model rewrite.
+    try {
+        const env = npcEnv(chat, loc);
+        const clock = env.clock(index);
+        const here = env.playerAt(index);
+        const frame = framesOf(chat, index, pack.npcs);
+        const now = frame[frame.length - 1];
+        const said = userMsg.mes ?? '';
+        const seeking = /\b(find|seek|where is|look for|ask after|ask about)\b/i.test(said);
+        if (now) for (const n of now.values()) {
+            const oneOff = n.seen_at && !(n.schedule ?? []).some(e => !e.broken);
+            if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day });
+            const check = sightCheck(n, clock, here, env, { appearances: n.appearances, seeks: n.seeks, useRoll: true });
+            if (check.present && check.needsStamp) addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: check.place, day: clock.day, hour: clock.hour });
+        }
+        let present = presentAt(chat, index, pack.npcs, env);
+        for (const p of present) {
+            if (p.disposition?.player?.value !== 'unknown' || (p.fromCast ?? []).includes(PLAYER)) continue;
+            const value = await askDisposition(p, said);
+            addNpcStamp(userMsg, { type: 'npc_disposition', id: p.id, who: PLAYER, value, reason: value === 'indifferent' ? 'No strong impression.' : '', ...(DRAMATIC_RE.test(said) ? { dramatic: true } : {}) });
+        }
+        present = presentAt(chat, index, pack.npcs, env);
+        const rules = focusRules(said, present);
+        let focus = rules;
+        if (rules.ambiguous && present.length) {
+            const id = await askWho(loc, said, present);
+            focus = { id, depth: id ? (rules.depth === 'deep' ? 'deep' : 'focused') : 'present', ambiguous: false };
+        }
+        userMsg.extra[FOCUS_KEY] = { id: focus.id ?? null, depth: focus.depth ?? 'present', swipe: swipeOf(userMsg) };
+    } catch (e) { console.warn('[WorldScrawl] npc turn', e?.message || e); }
+    // Same pending-only refresh as the no-location path. A resolved person is not asked.
     await ensureAppearanceRebuilds(index).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
 }
 function knownNpcNames(chat) {
@@ -757,12 +763,10 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     if (ids?.length) {
         targets = ids.map(id => appearanceNpc(chat, msgId, pack, id)).filter(Boolean);
     } else {
-        const loc = await currentLocation().catch(() => null);
-        const env = loc ? npcEnv(chat, loc) : null;
-        const present = env ? presentAt(chat, msgId, pack, env) : [];
-        const presentIds = new Set(present.map(p => p.id));
+        // Pending people only, with or without a player location. A resolved person is not asked,
+        // so this is not a fan-out over the cast. The cast viewer shows these same fields.
         const frame = framesOf(chat, msgId, pack, i => npcClock(chat, i)).at(-1);
-        targets = [...(frame?.values() ?? [])].filter(n => presentIds.has(n.id));
+        targets = [...(frame?.values() ?? [])].filter(n => n.appearanceHow === 'pending' || n.looksHow === 'pending');
     }
     abandonStuckAppearance(msg);
     const swipe = swipeOf(msg);
@@ -778,15 +782,24 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
 
 /** Chat card and the map channel both call this. Appearance changes recompose afterwards. */
 async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
-    const res = decideNpc(chat, identity, decisionRev, action, payload);
+    const end = Math.max(0, (chat?.length ?? 1) - 1);
+    const elapsed = Number.isFinite(payload.elapsed) ? payload.elapsed : npcClock(chat, end).elapsed;
+    const host = (chat ?? []).find(m => (m?.extra?.worldscrawl_npc ?? []).some(s => s && (s.owner === identity?.owner || s.identity?.owner === identity?.owner)));
+    const res = decideNpc(chat, identity, decisionRev, action, { ...payload, elapsed });
     const touch = action === 'undo' || action === 'off' || action === 'on' || action === 'approve';
     const appearance = identity?.domain === 'appearance' || identity?.domain === 'baseline' || identity?.npc;
-    if (res?.ok && touch && appearance && identity?.npc) {
-        const end = Math.max(0, (chat?.length ?? 1) - 1);
+    if (res?.ok && touch && appearance && identity?.npc && !res.refill) {
         const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
-        const swipe = identity.swipe ?? 0;
-        await recompose(chat, { npc: identity.npc, swipe, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed: npcClock(chat, end).elapsed });
+        const swipe = host?.swipe_id ?? identity.swipe ?? 0;
+        await recompose(chat, { npc: identity.npc, swipe, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed });
     }
+    try {
+        if (host) syncSwipeExtra(host);
+        await ctx().saveChat?.();
+        await applyFacts();
+        renderPatchCards();
+        broadcastMapState();
+    } catch (e) { console.warn('[WorldScrawl] npc decision refresh', e?.message || e); }
     return res;
 }
 
