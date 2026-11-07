@@ -693,6 +693,7 @@ function publicNpc(n) {
         caches: clone(n.caches ?? {}),
         appearanceHow: n.appearanceHow ?? 'base', appearanceKey: n.appearanceKey ?? '',
         looksHow: n.looksHow ?? 'base', looksKey: n.looksKey ?? '',
+        liveOps: (n.liveOps ?? []).map(o => ({ owner: o.owner, lasts: o.lasts ?? null, start: o.start, intent: o.committed?.intent || o.intent || '', fields: o.committed?.fields || '' })),
         unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
@@ -932,11 +933,10 @@ export function comingsAndGoings(chat, end, cast, env) {
     for (const n of now) {
         const prev = beforeMap.get(n.id);
         if (!prev) continue;
-        const still = new Set((n.effects ?? []).map(e => `${String(e.intent).toLowerCase()}|${effectFields(e.fields).join('+')}`));
-        for (const e of (prev.effects ?? [])) {
-            if (!e.lasts) continue;
-            const key = `${String(e.intent).toLowerCase()}|${effectFields(e.fields).join('+')}`;
-            if (still.has(key)) continue;
+        const still = new Set((n.liveOps ?? []).map(o => o.owner));
+        for (const e of (prev.liveOps ?? [])) {
+            if (!(e.lasts > 0) || !e.intent) continue;
+            if (still.has(e.owner)) continue;
             const expiryMin = Number.isFinite(e.start) && e.lasts
                 ? Math.round((e.start + e.lasts * 60) / 60) % 1440
                 : (c1.minutes ?? 0);
