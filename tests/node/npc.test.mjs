@@ -544,11 +544,12 @@ test('editor: every card field round-trips in Base mode and stamps in In-this-ch
     const g = formFromPlay(play);
     g.outfit = 'Changed.'; g.unknownAs = 'the widow'; g.history = 'New past.';
     assert.deepEqual(chatStamps(play, g).stamps, [
-        { type: 'npc_fact', field: 'appearance.outfit', text: 'Changed.' },
+        { type: 'npc_baseline', field: 'outfit', text: 'Changed.' },
         { type: 'npc_fact', field: 'history', text: 'New past.' },
         { type: 'npc_fact', field: 'unknownAs', text: 'the widow' },
     ]);
-    const chat = [bot('x', { [NPC_KEY]: chatStamps(play, g).stamps.map(s => ({ ...s, id: 'hesk', swipe: 0 })) })];
+    const approved = { type: 'npc_baseline', id: 'hesk', owner: 'o_outfit', swipe: 0, start: 0, lasts: null, contentId: 'c_outfit', candidate: null, identity: { owner: 'o_outfit', message: 'm', swipe: 0, npc: 'hesk', domain: 'baseline', chat: 'c' }, committed: { kind: 'baseline', field: 'outfit', text: 'Changed.' } };
+    const chat = [bot('x', { [NPC_KEY]: [approved, { type: 'npc_fact', id: 'hesk', field: 'history', text: 'New past.', swipe: 0 }, { type: 'npc_fact', id: 'hesk', field: 'unknownAs', text: 'the widow', swipe: 0 }] })];
     const n = framesOf(chat, 0, [rec()])[0].get('hesk');
     assert.deepEqual([n.outfit, n.unknownAs, n.deep.history], ['Changed.', 'the widow', 'New past.']);
 });
@@ -737,7 +738,7 @@ test('a claimed person field that is not on the card is a warning', () => {
     assert.equal(claimResult(npc, { type: 'npc_fact', field: 'personality.summary', text: 'kinder' }), 'missed');
     assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'a new scar', pending: true }), 'waiting');
     assert.equal(claimResult(npc, { type: 'npc_appearance', intent: 'magically young' }), 'missed');
-    assert.equal(claimResult({ ...npc, effects: [{ intent: 'magically young' }] }, { type: 'npc_appearance', intent: 'Magically Young' }), 'landed');
+    assert.equal(claimResult({ ...npc, liveOps: [{ owner: 'o1', lasts: 60 }] }, { type: 'npc_appearance', owner: 'o1', lasts: 60, committed: { intent: 'magically young' } }), 'landed');
     assert.equal(claimResult(npc, { type: 'npc_disposition', who: 'player', value: 'helpful' }), 'missed');
     assert.equal(claimResult(npc, { type: 'npc_memory', note: 'owes a favor' }), 'landed');
     const warns = claimWarnings(npc, [{ type: 'npc_fact', field: 'personality.summary', text: 'kinder' }, { type: 'npc_fact', field: 'fact', text: 'hates rats' }]);
