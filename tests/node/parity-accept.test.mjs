@@ -15,6 +15,7 @@ const { invalidateAppearance } = await import('../../extension/scene.mjs');
 const { readChangeAnswer } = await import('../../plugin/shared/patches.mjs');
 const { castPanel } = await import('../../plugin/ui/castpanel.mjs');
 const { loadCalendar, rememberWorlds } = await import('../../extension/clock.mjs');
+await loadCalendar();
 const { syncSwipeExtra } = await import('../../extension/discovery.mjs');
 
 const HESK = { ok: true, id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool', file: 'hesk.json' };
@@ -875,11 +876,17 @@ test('Check again uses the current clock, and Approve refuses a review whose inp
     c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return '{"body":"should not run","outfit":"wool"}'; };
     const refused = await scene.settleNpc(c.chat, moved.identity, moved.decisionRev, 'approve', { token: moved.candidate.token, elapsed: 0 });
     assert.equal(refused.stale, true);
-    assert.equal(refused.refill, true);
     assert.equal(moved.committed, null);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(moved.candidate.phase, 'review');
+    assert.equal(moved.candidate.livePreview.body, 'should not run');
     const wrong = scene.decideNpc(c.chat, { ...moved.identity, domain: 'place' }, moved.decisionRev, 'approve', { token: 'nope', elapsed: 0 });
     assert.equal(wrong.stale, true);
+    assert.equal(moved.committed, null);
+    const fields = prompts.filter(p => /Rewrite body/.test(p)).length;
+    const accepted = await scene.settleNpc(c.chat, moved.identity, moved.decisionRev, 'approve', { token: moved.candidate.token, elapsed: 0 });
+    assert.equal(accepted.ok, true, accepted.error);
+    assert.equal(moved.committed.layer.body, 'a towering woman');
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, fields);
 });
 
 test('a turn refreshes pending appearance with and without a location, and skips a resolved person', async () => {
@@ -906,4 +913,86 @@ test('a turn refreshes pending appearance with and without a location, and skips
     await scene.prepareNpcs(user);
     assert.ok(prompts.length > asked);
     assert.equal(prompts.some(p => /Bran/.test(p)), false);
+});
+
+test('a failed field or Looks job stays failed on the next turn until Retry or the inputs change', async () => {
+    const { c, prompts } = boot();
+    const a = commit(appearance({ intent: 'gnoll', fields: 'body', layer: {}, owner: 'fa' }));
+    const b = commit(appearance({ intent: 'scarred', fields: 'body', layer: {}, owner: 'fb' }));
+    const user = { mes: 'I look around.', is_user: true, swipe_id: 0, extra: {} };
+    c.chat = [msg([a, b]), user];
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return 'not json'; };
+    globalThis.fetch = async () => { throw new Error('no server'); };
+    await scene.prepareNpcs(user);
+    const failed = prompts.length;
+    assert.ok(failed >= 2);
+    const again = { mes: 'The next turn.', is_user: true, swipe_id: 0, extra: {} };
+    c.chat.push(again);
+    await scene.prepareNpcs(again);
+    assert.equal(prompts.length, failed, 'the next turn does not call the model for the same failed inputs');
+    const job = scene.appearJobs(user).find(j => j.part === 'fields' && j.status === 'failed');
+    assert.ok(job);
+    await scene.retryAppearance(1, 'hesk', job.key);
+    assert.ok(prompts.length > failed);
+
+    prompts.length = 0;
+    c.chat = [msg([commit(appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'lk1' }))])];
+    c.chat[0].swipe_id = 0;
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return /Looks line/.test(String(args.prompt)) ? 'nope' : '{"body":"a towering woman","outfit":"wool"}'; };
+    await scene.ensureAppearanceRebuilds(0);
+    const once = prompts.length;
+    await scene.ensureAppearanceRebuilds(0);
+    assert.equal(prompts.length, once, 'a failed Looks summary is not asked again for the same body and outfit');
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    const looks = scene.appearJobs(c.chat[0]).find(j => j.part === 'looks');
+    const looksBefore = prompts.filter(p => /Looks line/.test(p)).length;
+    await scene.retryAppearance(0, 'hesk', looks.key);
+    assert.ok(prompts.filter(p => /Looks line/.test(p)).length > looksBefore);
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+});
+
+test('the compose record is kept on the swipe that received it', async () => {
+    const { c, prompts } = boot();
+    const a = commit(appearance({ intent: 'gnoll', fields: 'body', layer: {}, owner: 'ka' }));
+    const b = commit(appearance({ intent: 'scarred', fields: 'body', layer: {}, owner: 'kb' }));
+    const host = msg([a, b]);
+    host.swipe_info = [{ extra: {} }, { extra: {} }];
+    c.chat = [host];
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return /Looks line/.test(String(args.prompt)) ? '{"looks":"a stored gnoll"}' : '{"body":"a stored frame","outfit":"wool"}'; };
+    await scene.ensureAppearanceRebuilds(0);
+    assert.equal(host.swipe_info[0].extra.worldscrawl_compose.records.some(r => r.body === 'a stored frame'), true);
+    const asked = prompts.length;
+    host.swipe_id = 1;
+    host.extra = { worldscrawl_mid: host.extra.worldscrawl_mid };
+    assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 })).body, 'sturdy');
+    host.swipe_id = 0;
+    host.extra = JSON.parse(JSON.stringify(host.swipe_info[0].extra));
+    await scene.ensureAppearanceRebuilds(0);
+    assert.equal(prompts.length, asked);
+    assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 })).body, 'a stored frame');
+});
+
+test('Changes shows the live preview of a temporary candidate, and a clockless Approve stays reviewable', async () => {
+    const { c } = boot();
+    const proposal = appearance({ intent: 'soaked', fields: 'outfit', layer: { outfit: 'a soaked cloak' }, lasts: 60, start: 0, owner: 'livep' });
+    c.chat = [msg([proposal])];
+    const filled = await scene.fillCandidate(c.chat, proposal.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    assert.equal(proposal.candidate.lastingPreview.outfit, 'wool');
+    assert.equal(proposal.candidate.livePreview.outfit, 'a soaked cloak');
+    const doc = makeDoc();
+    const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => '', clock: () => ({ elapsed: 0, day: 1, hour: 8, minute: 0, minutes: 480 }) };
+    const panel = castPanel(doc, { load: async () => ({ npcs: [HESK] }), outline: async () => null, play: () => npcPlayState(c.chat, [HESK], env), decideNpc: () => {}, placeName: a => a });
+    await panel.refresh();
+    panel.selectId('hesk', 'changes');
+    assert.match(panel.el.textContent, /live body/);
+    assert.match(panel.el.textContent, /a soaked cloak/);
+    assert.match(panel.el.textContent, /lasting body/);
+    const held = scene.decideNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token });
+    assert.match(held.error, /clock/);
+    assert.equal(proposal.candidate.phase, 'review');
+    assert.equal(proposal.committed, null);
+    const recovered = scene.decideNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token, elapsed: 0 });
+    assert.equal(recovered.ok, true, recovered.error);
+    assert.equal(proposal.committed.layer.outfit, 'a soaked cloak');
 });
