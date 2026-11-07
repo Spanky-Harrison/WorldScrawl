@@ -13,7 +13,8 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | doors.mjs | Door and bar state: open/closed, barred, sight and sound through doors | `doorStates`, `isOpenNow`, `isBarredNow`, `viewOf` |
 | expiry.mjs | Narration when something expires (options, pick prompt, notice) | `expiryPickPrompt`, `expiredNotice`, `ensureStartStamp` |
 | movement.mjs | Choosing a destination from model answers, step-taking, reveals | `parseChoice`, `pickKey`, `stepsTaken`, `applyReveals` |
-| dig.mjs | Digging up new places (prompt, answer reading, duplicate merge) | `digPrompt`, `readDigAnswer`, `mergeDuplicates` |
+| ownedcall.mjs | The timer around one side call. A late answer is dropped even if the provider cannot abort | `ownedCall` |
+| dig.mjs | Digging up new places (prompt, answer reading, duplicate merge). `gen` uses `ownedCall` for every side call | `digPrompt`, `readDigAnswer`, `mergeDuplicates`, `gen` |
 | looking.mjs | Look targets, door look, windows | `lookOptions`, `lookTargetPrompt`, `closedDoorPrompt` |
 | brackets.mjs | Player brackets (`[look]`, `[move]`…) and help text | `parseBracket`, `bracketIntent`, `helpText` |
 | scene.mjs | Scene/NPC tokens fed to the narrator, lore, the found notice and its Edit (`applyFound`, `judgeFoundNow`), live places from `POST /cast/places`, appearance rebuild side-call, the people list the tracker reads (`listedPeople`) | `renderTokens`, `applyFound`, `refreshLivePlaces`, `ensureAppearanceRebuilds`, `retryAppearance`, `listedPeople` |
