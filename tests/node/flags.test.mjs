@@ -541,6 +541,16 @@ test('the tracker scrap is one pass over the live place and every field a person
 });
 }
 
+test('ownedCall drops a late answer when the timer wins', async () => {
+    const { ownedCall } = await import('../../extension/ownedcall.mjs');
+    let late;
+    const raced = await ownedCall(new Promise(resolve => { late = () => resolve('too late'); }), 20);
+    assert.equal(raced.timeout, true);
+    late();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(raced.raw, undefined);
+});
+
 test('appearance rebuild settles complete, bad, and late answers without a partial cache', async () => {
     const fs = await import('node:fs');
     const ext = await import('../../extension/index.js');
