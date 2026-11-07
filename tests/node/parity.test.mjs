@@ -156,6 +156,13 @@ test('player undo of the only name stamp drops named; a second memory keeps met;
     decideNpc(chat, chat[0].extra.worldscrawl_npc[0].identity, chat[0].extra.worldscrawl_npc[0].decisionRev, 'undo', {});
     const still = npcAt(chat, 0, cast, 'hesk');
     assert.equal(still.rel.player.state, 'met');
+    chat[0].extra.worldscrawl_npc.push({ type: 'npc_appearance', id: 'hesk', owner: 'app', swipe: 0, start: 0, lasts: 60, contentId: 'capp', candidate: null, identity: { owner: 'app', message: 'x', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, decisionRev: 1, committed: { kind: 'appearance', intent: 'taller', fields: 'body', layer: { body: 'a towering woman' } } });
+    const during = npcAt(chat, 0, cast, 'hesk', () => ({ elapsed: 0 }));
+    assert.equal(during.body, 'a towering woman');
+    assert.equal(during.rel.player.state, 'met');
+    const expired = npcAt(chat, 0, cast, 'hesk', () => ({ elapsed: 3600 }));
+    assert.equal(expired.body, 'sturdy');
+    assert.equal(expired.rel.player.state, 'met');
 });
 
 test('recompose of an unknown pair calls the model once and does not add an owner', async () => {

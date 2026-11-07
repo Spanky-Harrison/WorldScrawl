@@ -511,6 +511,9 @@ test('a late completion after discard or a swipe is not stored, and a failed edi
     assert.equal(failed.ok, false);
     assert.equal(o.committed.layer.body, 'original edit');
     assert.equal(o.candidate.phase, 'failed');
+    const denied = scene.decideNpc(c.chat, o.identity, o.decisionRev, 'approve', { token: o.candidate.token, elapsed: 0 });
+    assert.equal(denied.ok, false);
+    assert.equal(o.committed.layer.body, 'original edit');
 });
 
 test('start is assigned on the uncommitted proposal and approval does not move it', async () => {
