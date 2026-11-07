@@ -8,8 +8,7 @@ import { api, currentLocation, doorOverrides, doorStates, ensurePrompts, getStor
 import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
 import { discoveredPlaces, lastUserIndex, revealedDoors, stoodInAddresses } from './movement.mjs';
 import { changeEditMismatch, changeEditSession, liveEdit, mapCtx, opsHash, restampChange, swipeOf, toggleChange } from './patches.mjs';
-import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit, retryAppearance } from './scene.mjs';
-import { decideNpc } from './owners.mjs';
+import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit, retryAppearance, settleNpc } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
 
 const THEME_VARS = ['--SmartThemeBodyColor', '--SmartThemeEmColor', '--SmartThemeUnderlineColor', '--SmartThemeQuoteColor', '--SmartThemeBlurTintColor',
@@ -97,8 +96,9 @@ function openMapChannel() {
             const d = ev.data;
             const c = ctx();
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) {
-                const res = decideNpc(c.chat ?? [], d.identity, d.decisionRev, d.action, d.payload ?? {});
-                ch.postMessage({ type: 'npc_decide_result', req: d.req, ...res });
+                settleNpc(c.chat ?? [], d.identity, d.decisionRev, d.action, d.payload ?? {}).then(res => {
+                    ch.postMessage({ type: 'npc_decide_result', req: d.req, ...res });
+                }).catch(e => ch.postMessage({ type: 'npc_decide_result', req: d.req, ok: false, error: e.message }));
             }
         }
         if (ev.data?.type === 'appearance_retry') {

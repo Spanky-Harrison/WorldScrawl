@@ -1,5 +1,6 @@
 // One dispatcher for NPC decisions. Appearance uses committed + candidate.
 // Other types keep their own stamp fields. Composition jobs are not owners.
+import { FOUND_KEY } from './npc.mjs';
 import { classifyAppearanceReply, looksInputKey } from './npceffects.mjs';
 import { render as P } from './shared.mjs';
 
@@ -195,6 +196,9 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
         liveBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: live.key };
     }
     if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
+    const committedOnly = liveOps(mine, elapsed);
+    const lastingBefore = textOf(base, committedOnly.filter(o => !(o.lasts > 0)), records);
+    const liveBefore = textOf(base, committedOnly, records);
     const lasts = stamp.candidate.proposedLasts;
     if (lasts > 0 && Number.isFinite(start) && Number.isFinite(elapsed) && elapsed >= start + lasts * 60) {
         stamp.candidate.phase = 'failed';
@@ -205,6 +209,8 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     stamp.candidate.liveKey = liveBody.key;
     stamp.candidate.lastingPreview = { body: lastingBody.body, outfit: lastingBody.outfit };
     stamp.candidate.livePreview = { body: liveBody.body, outfit: liveBody.outfit };
+    stamp.candidate.lastingBefore = { body: lastingBefore.body, outfit: lastingBefore.outfit, unresolved: !!lastingBefore.unresolved };
+    stamp.candidate.liveBefore = { body: liveBefore.body, outfit: liveBefore.outfit, unresolved: !!liveBefore.unresolved };
     return { ok: true, lasting: stamp.candidate.lastingPreview, live: stamp.candidate.livePreview };
 }
 
@@ -276,6 +282,10 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
     }
     if (action === 'undo') {
         stamp.decisionRev += 1;
+        if (stamp.type === 'npc_found' && Array.isArray(msg.extra[FOUND_KEY])) {
+            msg.extra[FOUND_KEY] = msg.extra[FOUND_KEY].filter(x => !(x && x.id === stamp.id && (x.where ?? '') === (stamp.where ?? '') && (x.swipe ?? 0) === (stamp.swipe ?? 0)));
+            if (!msg.extra[FOUND_KEY].length) delete msg.extra[FOUND_KEY];
+        }
         msg.extra.worldscrawl_npc = (msg.extra.worldscrawl_npc ?? []).filter(s => s !== stamp);
         if (!msg.extra.worldscrawl_npc.length) delete msg.extra.worldscrawl_npc;
         return { ok: true, removed: true };

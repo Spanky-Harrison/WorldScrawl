@@ -761,7 +761,7 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
         const env = loc ? npcEnv(chat, loc) : null;
         const present = env ? presentAt(chat, msgId, pack, env) : [];
         const presentIds = new Set(present.map(p => p.id));
-        const frame = framesOf(chat, msgId, pack).at(-1);
+        const frame = framesOf(chat, msgId, pack, i => npcClock(chat, i)).at(-1);
         targets = [...(frame?.values() ?? [])].filter(n => presentIds.has(n.id));
     }
     abandonStuckAppearance(msg);
@@ -775,6 +775,20 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     }
 }
 
+
+/** Chat card and the map channel both call this. Appearance changes recompose afterwards. */
+async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
+    const res = decideNpc(chat, identity, decisionRev, action, payload);
+    const touch = action === 'undo' || action === 'off' || action === 'on' || action === 'approve';
+    const appearance = identity?.domain === 'appearance' || identity?.domain === 'baseline' || identity?.npc;
+    if (res?.ok && touch && appearance && identity?.npc) {
+        const end = Math.max(0, (chat?.length ?? 1) - 1);
+        const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
+        const swipe = identity.swipe ?? 0;
+        await recompose(chat, { npc: identity.npc, swipe, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed: npcClock(chat, end).elapsed });
+    }
+    return res;
+}
 
 function retryAppearance(msgId, npcId, key) {
     const msg = ctx().chat?.[msgId];
@@ -791,4 +805,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose };
+export { REMEMBER_KEY, APPEAR_KEY, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

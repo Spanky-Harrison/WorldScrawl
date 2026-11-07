@@ -13,8 +13,8 @@ import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember } from './scene.mjs';
-import { decideNpc, fillCandidate, recompose } from './owners.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
+import { decideNpc, fillCandidate } from './owners.mjs';
 import { paintWordDiff } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
@@ -267,14 +267,14 @@ function ownerCard(msg, s, who) {
     title.textContent = phase === 'failed' ? `Appearance for ${who} did not resolve.` : phase === 'review' ? `Proposed appearance for ${who}` : `Preparing appearance for ${who}…`;
     d.append(title);
     if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
-        const pin = npcAt(ctx().chat ?? [], (ctx().chat ?? []).indexOf(msg), castPack()?.npcs ?? [], s.id);
-        const beforeBody = pin?.pinned?.body ?? '';
-        const beforeOutfit = pin?.pinned?.outfit ?? '';
-        paintWordDiff(document, d, 'Lasting body', beforeBody, s.candidate.lastingPreview.body || '');
-        paintWordDiff(document, d, 'Lasting outfit', beforeOutfit, s.candidate.lastingPreview.outfit || '');
+        const lb = s.candidate.lastingBefore || {};
+        const liveB = s.candidate.liveBefore || {};
+        const side = (label, before, after) => paintWordDiff(document, d, before?.unresolved ? `${label} (before unresolved)` : label, before?.body || '', after || '');
+        side('Lasting body', { ...lb, body: lb.body }, s.candidate.lastingPreview.body || '');
+        paintWordDiff(document, d, lb.unresolved ? 'Lasting outfit (before unresolved)' : 'Lasting outfit', lb.outfit || '', s.candidate.lastingPreview.outfit || '');
         if (s.candidate.liveKey !== s.candidate.lastingKey) {
-            paintWordDiff(document, d, 'Live body', beforeBody, s.candidate.livePreview.body || '');
-            paintWordDiff(document, d, 'Live outfit', beforeOutfit, s.candidate.livePreview.outfit || '');
+            paintWordDiff(document, d, liveB.unresolved ? 'Live body (before unresolved)' : 'Live body', liveB.body || '', s.candidate.livePreview.body || '');
+            paintWordDiff(document, d, liveB.unresolved ? 'Live outfit (before unresolved)' : 'Live outfit', liveB.outfit || '', s.candidate.livePreview.outfit || '');
         }
     }
     const ident = s.identity;
@@ -282,12 +282,12 @@ function ownerCard(msg, s, who) {
     const chat = () => ctx().chat ?? [];
     const buttons = [];
     if (phase === 'review') buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
-        const res = decideNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, elapsed: null });
+        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, elapsed: npcClock(chat(), Math.max(0, chat().indexOf(msg))).elapsed });
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
         return res;
     }), 'Apply the reviewed body and outfit', true));
     buttons.push(cardButton('Discard', () => once(`own-no:${ident?.owner}`, async () => {
-        decideNpc(chat(), ident, rev, 'discard', {});
+            await settleNpc(chat(), ident, rev, 'discard', {});
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
     }), 'Do not change this person', true));
     buttons.push(cardButton('Check again', () => once(`own-re:${ident?.owner}`, async () => {
@@ -483,15 +483,11 @@ export function renderPatchCards() {
             const stampKey = `${id}:${s.identity?.owner || s.type}:${s.id || ''}`;
             const act = (action, payload) => once(`npc-${action}:${stampKey}`, async () => {
                 const chat = ctx().chat ?? [];
-                const res = s.identity ? decideNpc(chat, s.identity, s.decisionRev ?? 1, action, payload) : { ok: false };
+                const res = s.identity ? await settleNpc(chat, s.identity, s.decisionRev ?? 1, action, { ...payload, elapsed: npcClock(chat, Math.max(0, chat.length - 1)).elapsed }) : { ok: false };
                 if (!res.ok && !s.identity && action === 'undo') {
                     msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
                     if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
                 } else if (!res.ok && !s.identity && (action === 'off' || action === 'on')) s.off = action === 'off';
-                if (res?.ok && (s.type === 'npc_appearance' || s.type === 'npc_baseline') && action !== 'edit') {
-                    const live = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], s.id);
-                    await recompose(chat, { npc: s.id, swipe: msg.swipe_id ?? 0, baseline: live?.pinned || { body: '', outfit: '' }, name: live?.name || s.id, elapsed: npcClock(chat, Math.max(0, chat.length - 1)).elapsed });
-                }
                 syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
                 return res;
             });
@@ -502,7 +498,7 @@ export function renderPatchCards() {
         }
         const placeLabelOf = a => castPack()?.labels?.[a] || a;
         for (const s of npcStamps) {
-            if (s.type !== 'npc_found' || s.off) continue;
+            if (s.type !== 'npc_found') continue;
             const who = npcNames.get(s.id) || s.id;
             const note = foundNotes.find(x => x.ok && x.id === s.id && (x.where ?? '') === (s.where ?? ''));
             const d = line(`${s.where ? `${who}'s "${s.where}" is now ${placeLabelOf(s.place)}, for the rest of this chat.` : `${who} is now placed in ${placeLabelOf(s.place)}, for the rest of this chat.`}${note?.reason ? ` ${note.reason}` : ''}`);
@@ -529,13 +525,7 @@ export function renderPatchCards() {
                     syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
                 });
                 fields.replaceChildren(inp, save); d.insertBefore(fields, nrow);
-            }, 'Change the room this where-label resolves to'), cardButton('Undo', () => once(`found-undo:${id}:${s.id}:${s.where || ''}`, () => {
-                msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
-                if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
-                msg.extra[FOUND_KEY] = (msg.extra[FOUND_KEY] ?? []).filter(x => !(x && x.ok && x.id === s.id && (x.where ?? '') === (s.where ?? '') && (x.swipe ?? 0) === swipeOf(msg)));
-                if (!msg.extra[FOUND_KEY].length) delete msg.extra[FOUND_KEY];
-                syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
-            }), 'Remove this find (deleting the message does the same)', true));
+            }, 'Change the room this where-label resolves to'), cardButton(s.off ? 'Turn on' : 'Turn off', () => once(`found-off:${id}:${s.id}:${s.where || ''}`, () => settleNpc(ctx().chat ?? [], s.identity, s.decisionRev ?? 1, s.off ? 'on' : 'off', {}).then(() => { syncSwipeExtra(msg); return applyFacts(); }).then(() => { renderPatchCards(); broadcastMapState(); })), s.off ? 'Use this find again' : 'Stop using this find', true), cardButton('Undo', () => once(`found-undo:${id}:${s.id}:${s.where || ''}`, () => settleNpc(ctx().chat ?? [], s.identity, s.decisionRev ?? 1, 'undo', {}).then(() => { syncSwipeExtra(msg); return applyFacts(); }).then(() => { renderPatchCards(); broadcastMapState(); })), 'Remove this find (deleting the message does the same)', true));
             d.append(nrow);
             card.append(d);
         }
