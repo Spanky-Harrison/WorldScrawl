@@ -381,9 +381,11 @@ async function applyPersonStamps(id, stamped) {
                 s = { ...rest, fields: fields.join(',') };
             }
             const pin = readBaselineMap(c.chat)[s.id] || pinBaseline(c.chat, s.id, cur?.body ?? '', cur?.outfit ?? '');
+            const layer = { ...(s.body ? { body: s.body } : {}), ...(s.outfit ? { outfit: s.outfit } : {}) };
+            const namedFields = s.fields != null && String(s.fields).trim() !== '' ? String(s.fields) : '';
             const owner = makeOwner({
-                id: s.id, intent: s.intent || '', fields: s.fields || 'body,outfit',
-                layer: { ...(s.body ? { body: s.body } : {}), ...(s.outfit ? { outfit: s.outfit } : {}) },
+                id: s.id, intent: s.intent || '', fields: namedFields || Object.keys(layer).join(',') || 'body,outfit',
+                layer,
                 lasts: lastsMinutes(s.lasts), start: Number.isFinite(clock.elapsed) ? clock.elapsed : 0,
                 chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: s.source || '',
             });
