@@ -17,6 +17,7 @@ const { castPanel } = await import('../../plugin/ui/castpanel.mjs');
 const { loadCalendar, rememberWorlds } = await import('../../extension/clock.mjs');
 await loadCalendar();
 const { syncSwipeExtra } = await import('../../extension/discovery.mjs');
+(await import('../../extension/patches.mjs')).useDiffLib(await import('../../plugin/ui/diffview.mjs'));
 
 const HESK = { ok: true, id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool', file: 'hesk.json' };
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
@@ -190,7 +191,9 @@ test('a second proposal shows the replay without that candidate, not the pinned 
     // Temporary on top of an unchanged lasting result: only the live Body row, no lasting rows, no outfit row.
     assert.match(card.textContent, /Body \(for now\)/);
     assert.doesNotMatch(card.textContent, /lasting|Lasting|Outfit|before unresolved/);
-    assert.equal(card.querySelectorAll('.worldscrawl_worddiff').length, 1);
+    // Same view as a place: one framed panel titled with the name, one changed field.
+    assert.equal(card.querySelectorAll('.wsdiff-place').length, 1);
+    assert.equal(card.querySelectorAll('.wsdiff-label').length, 1);
     assert.match(card.textContent, /a scarred towering woman/);
     assert.equal(cacheRows(chat), false);
 });
@@ -1044,4 +1047,46 @@ test('scope defaults to light, only clear heavy words count, and it is part of t
     assert.equal(tool.scope, 'heavy');
     assert.equal(tool.why, 'transformed');
     assert.equal(scene.toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'dye' }).scope, 'light');
+});
+
+test('the person card is laid out like the place card: summary list, framed Removed/Added panel, same button order', async () => {
+    const { c, prompts } = boot();
+    const { renderDiff } = await import('../../plugin/ui/diffview.mjs');
+    const next = appearance({ intent: 'turned into a gnoll', fields: 'body', layer: { body: 'a furred gnoll' }, lasts: 60, owner: 'g1' });
+    c.chat = [msg([next])];
+    c.generateRaw = async (args) => { prompts.push(String(args.prompt)); return '{"body":"a furred gnoll with a long snout","outfit":"wool"}'; };
+    const filled = await scene.fillCandidate(c.chat, next.identity, { baseline: { body: 'a tall woman. Pale grey eyes.', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    const card = doc.querySelector('.worldscrawl_npcpending');
+    assert.ok(card);
+    assert.match(card.textContent, /Proposed person change:/);
+    const items = card.querySelectorAll('li').map(li => li.textContent);
+    assert.deepEqual(items, ['Hesk: body rewritten (for 1h)']);
+    const place = card.querySelector('.wsdiff-place');
+    assert.ok(place, 'framed panel like a place');
+    assert.match(place.querySelector('.wsdiff-title').textContent, /^Hesk/);
+    assert.equal(place.querySelector('.wsdiff-tag').textContent, 'person · changed');
+    const marks = place.querySelectorAll('.wsdiff-blk').map(b => b.getAttribute('data-mark')).filter(Boolean);
+    assert.ok(marks.includes('Removed') && marks.includes('Added'), marks.join(','));
+    // The place view draws the same blocks for the same text.
+    const area = renderDiff(doc, { before: { 'r/a': { name: 'Room', description: 'a tall woman. Pale grey eyes.' } }, after: { 'r/a': { name: 'Room', description: 'a furred gnoll with a long snout' } } });
+    assert.deepEqual(area.querySelectorAll('.wsdiff-blk').map(b => b.getAttribute('data-mark')), place.querySelectorAll('.wsdiff-blk').map(b => b.getAttribute('data-mark')));
+    const order = card.querySelectorAll('.worldscrawl_card_btn').map(b => b.textContent);
+    assert.deepEqual(order, ['Check again', 'Edit', 'Make it a full rewrite', 'Approve', 'Discard']);
+
+    // Edit opens the change in a box, like the place card's editor; rewriting with it re-asks and comes back for review.
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const box = doc.querySelector('.worldscrawl_npc_intent');
+    assert.ok(box);
+    assert.ok(!byText(doc, '.worldscrawl_card_btn', 'Approve'), 'the edited change is rewritten and reviewed before it can be approved');
+    box.value = 'turned into a wolf';
+    box.dispatchEvent({ type: 'input' });
+    byText(doc, '.worldscrawl_card_btn', 'Rewrite with this').click();
+    await flush();
+    assert.equal(next.candidate.intent, 'turned into a wolf');
+    assert.equal(next.candidate.phase, 'review');
 });
