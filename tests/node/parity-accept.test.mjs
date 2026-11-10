@@ -1001,3 +1001,47 @@ test('Changes shows the live preview of a temporary candidate, and a clockless A
     assert.equal(recovered.ok, true, recovered.error);
     assert.equal(proposal.committed.layer.outfit, 'a soaked cloak');
 });
+
+test('the tracker picks light or heavy, the rewrite prompt follows it, and the card can switch it', async () => {
+    const { c, prompts } = boot();
+    c.chat = [msg([])];
+    const { applyTrackerResult } = await import('../../extension/discovery.mjs');
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'turned into a gnoll', fields: 'body', lasts: '1 hour', scope: 'heavy', why: 'her whole body changed' }] });
+    const owner = (c.chat[0].extra[NPC_KEY] ?? []).find(s => s.type === 'npc_appearance');
+    assert.equal(owner.candidate.scope, 'heavy');
+    assert.equal(owner.candidate.why, 'her whole body changed');
+    c.generateRaw = async (args) => { const p = String(args?.prompt ?? ''); prompts.push(p); return /Looks line/.test(p) ? '{"looks":"a gnoll"}' : '{"body":"a furred gnoll","outfit":"wool"}'; };
+    const filled = await scene.fillCandidate(c.chat, owner.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    assert.match(prompts.at(-1), /turned into a gnoll \[body\] \(full rewrite\)/);
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    const card = doc.querySelector('.worldscrawl_npcpending');
+    assert.match(card.textContent, /Full rewrite: her whole body changed/);
+    const flip = byText(doc, '.worldscrawl_card_btn', 'Make it a light touch');
+    assert.ok(flip, 'the card offers the other scope');
+    flip.click();
+    await flush();
+    assert.equal(owner.candidate.scope, 'light');
+    assert.equal(owner.candidate.why, 'set by you');
+    assert.match(prompts.at(-1), /turned into a gnoll \[body\] \(light touch\)/);
+    assert.equal(owner.candidate.phase, 'review');
+    const ok = scene.decideNpc(c.chat, owner.identity, owner.decisionRev, 'approve', { token: owner.candidate.token, elapsed: 0 });
+    assert.equal(ok.ok, true, ok.error);
+    assert.equal(owner.committed.scope, 'light');
+});
+
+test('scope defaults to light, only clear heavy words count, and it is part of the composition key', async () => {
+    const { appearanceScope } = await import('../../extension/npceffects.mjs');
+    const { contentIdOf } = await import('../../extension/replay.mjs');
+    for (const v of [undefined, '', 'light', 'medium', 'nope']) assert.equal(appearanceScope(v), 'light');
+    for (const v of ['heavy', 'Full', 'rewrite', 'transform']) assert.equal(appearanceScope(v), 'heavy');
+    const base = { kind: 'appearance', intent: 'gnoll', fields: 'body', layer: {} };
+    assert.notEqual(contentIdOf({ ...base, scope: 'heavy' }, 0, 60), contentIdOf({ ...base, scope: 'light' }, 0, 60));
+    assert.equal(contentIdOf({ ...base, scope: 'light' }, 0, 60), contentIdOf(base, 0, 60), 'old light changes keep their key');
+    const tool = scene.toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'gnoll', scope: 'heavy', why: 'transformed' });
+    assert.equal(tool.scope, 'heavy');
+    assert.equal(tool.why, 'transformed');
+    assert.equal(scene.toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'dye' }).scope, 'light');
+});
