@@ -57,20 +57,21 @@ export function ensureWordDiffCss(doc) {
  * A temporary change leaves the lasting result alone, so it shows as "for now" only.
  * A lasting change with no temporary layer on top shows plain labels.
  */
-export function reviewFields(c) {
+export function reviewFields(c, { all = false } = {}) {
     if (!c?.lastingPreview || !c?.livePreview) return [];
     const lb = c.lastingBefore || {}, vb = c.liveBefore || {};
     const sameKey = c.liveKey === c.lastingKey;
     const out = [];
     const add = (field, name, before, after, suffix) => {
         const b = before?.[field] || '', a = after?.[field] || '';
-        if (!before?.unresolved && b === a) return;
-        out.push({ field, label: `${name}${suffix}${before?.unresolved ? ' (before unresolved)' : ''}`, before: b, after: a });
+        const changed = !!before?.unresolved || b !== a;
+        if (!changed && !all) return;
+        out.push({ field, label: `${name}${suffix}${before?.unresolved ? ' (before unresolved)' : ''}`, before: b, after: a, changed });
     };
     const lastingChanges = ['body', 'outfit'].some(f => lb.unresolved || (lb[f] || '') !== (c.lastingPreview[f] || ''));
     const liveChanges = !sameKey && ['body', 'outfit'].some(f => vb.unresolved || (vb[f] || '') !== (c.livePreview[f] || ''));
     const lastSuffix = liveChanges ? ' (lasting)' : '';
-    if (lastingChanges) { add('body', 'Body', lb, c.lastingPreview, lastSuffix); add('outfit', 'Outfit', lb, c.lastingPreview, lastSuffix); }
+    if (lastingChanges || (all && !liveChanges)) { add('body', 'Body', lb, c.lastingPreview, lastSuffix); add('outfit', 'Outfit', lb, c.lastingPreview, lastSuffix); }
     if (liveChanges) { add('body', 'Body', vb, c.livePreview, ' (for now)'); add('outfit', 'Outfit', vb, c.livePreview, ' (for now)'); }
     return out;
 }

@@ -3,7 +3,7 @@ import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, noticeRow, lockRow, markPending, resolvedText } from './notices.mjs';
 import { render as P } from './shared.mjs';
 import { normName } from './shared.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, stampSummary } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, reviewSummary, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
@@ -12,10 +12,10 @@ import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { drawDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
+import { drawDiff, drawPersonDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
 import { decideNpc, fillCandidate } from './owners.mjs';
-import { paintWordDiff, reviewFields } from './replay.mjs';
+import { reviewFields } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -259,50 +259,71 @@ function pendingNpcCard(msg, s, who) {
     return d;
 }
 
+/** The review card for a person's appearance change, laid out like the place card: summary list, red/green panel, one row. */
 function ownerCard(msg, s, who) {
     const d = markPending(document.createElement('div'));
     d.classList.add('worldscrawl_npcpending');
+    const line = t => { const x = document.createElement('div'); x.textContent = t; return x; };
     const phase = s.candidate?.phase || 'working';
-    const title = document.createElement('div');
-    title.textContent = phase === 'failed' ? `Appearance for ${who} did not resolve.` : phase === 'review' ? `Proposed appearance for ${who}` : `Preparing appearance for ${who}…`;
-    if (s.candidate?.clockError) { const err = document.createElement('div'); err.textContent = s.candidate.clockError; d.append(err); }
-    d.append(title);
+    if (s.candidate?.clockError) d.append(line(s.candidate.clockError));
+    const rows = phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview ? reviewFields(s.candidate) : [];
+    d.append(line(phase === 'failed' ? `👤 Appearance for ${who} did not resolve.` : phase === 'review' ? '👤 Proposed person change:' : `👤 Preparing a change to ${who}…`));
+    if (phase === 'review') {
+        const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
+        for (const t of reviewSummary(s.candidate, who, rows)) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
+        if (!rows.length) { const li = document.createElement('li'); li.textContent = `${who}: no change to body or outfit`; ul.append(li); }
+        d.append(ul);
+    }
     const scoped = s.candidate && s.candidate.kind !== 'baseline' && s.kind !== 'baseline';
     const heavy = scoped && s.candidate.scope === 'heavy';
     if (scoped) {
-        const how = document.createElement('div');
+        const how = line(`${heavy ? 'Full rewrite' : 'Light touch'}${s.candidate.why ? `: ${s.candidate.why}` : ''}`);
         how.className = 'worldscrawl_scope';
-        how.textContent = `${heavy ? 'Full rewrite' : 'Light touch'}${s.candidate.why ? `: ${s.candidate.why}` : ''}`;
         d.append(how);
     }
-    if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
-        const rows = reviewFields(s.candidate);
-        for (const r of rows) paintWordDiff(document, d, r.label, r.before, r.after);
-        if (!rows.length) { const none = document.createElement('div'); none.textContent = 'No change to body or outfit.'; d.append(none); }
+    if (phase === 'review') {
+        const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
+        d.append(diffBox);
+        drawPersonDiff(diffBox, { title: who, rows: reviewFields(s.candidate, { all: true }) });
     }
     const ident = s.identity;
     const rev = s.decisionRev ?? 1;
     const chat = () => ctx().chat ?? [];
+    const askAgain = (key, over = {}) => once(`${key}:${ident?.owner}`, async () => {
+        const now = chat();
+        const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
+        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts, scope: s.candidate?.scope, ...over });
+        if (edited?.refill) await fillCandidate(now, ident, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
+        syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
+    });
+    const formKey = `${ident?.owner}|npcedit`;
+    const open = openForms.get(formKey);
+    if (open) {
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.value = open.intent ?? s.candidate?.intent ?? ''; inp.className = 'text_pole worldscrawl_npc_intent';
+        inp.style.cssText = 'width:20em;display:inline-block;margin:0 4px;padding:1px 4px;';
+        inp.addEventListener('click', e => e.stopPropagation());
+        inp.addEventListener('input', () => { open.intent = inp.value; });
+        d.append(fieldsOf('Change:', inp));
+    }
     const buttons = [];
-    if (phase === 'review') buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
+    buttons.push(cardButton('Check again', () => askAgain('own-re'), 'Ask again for this body and outfit', true));
+    if (phase !== 'working') buttons.push(open
+        ? cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
+        : cardButton('Edit', () => { openForms.set(formKey, { intent: s.candidate?.intent ?? '' }); renderPatchCards(); }, 'Change what this does before approving it'));
+    if (scoped && phase !== 'working') buttons.push(cardButton(heavy ? 'Make it a light touch' : 'Make it a full rewrite', () => askAgain('own-scope', { scope: heavy ? 'light' : 'heavy' }),
+        heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true));
+    if (open) buttons.push(cardButton('Rewrite with this', () => { const intent = (open.intent ?? '').trim() || s.candidate?.intent; openForms.delete(formKey); return askAgain('own-edit', { intent }); }, 'Rewrite the body and outfit for the edited change', true));
+    if (phase === 'review' && !open) buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
         const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token });
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
         return res;
     }), 'Apply the reviewed body and outfit', true));
     buttons.push(cardButton('Discard', () => once(`own-no:${ident?.owner}`, async () => {
-            await settleNpc(chat(), ident, rev, 'discard', {});
+        openForms.delete(formKey);
+        await settleNpc(chat(), ident, rev, 'discard', {});
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
     }), 'Do not change this person', true));
-    const askAgain = (key, scope) => once(`${key}:${ident?.owner}`, async () => {
-        const now = chat();
-        const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
-        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts, scope });
-        if (edited?.refill) await fillCandidate(now, ident, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
-        syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
-    });
-    buttons.push(cardButton('Check again', () => askAgain('own-re', s.candidate?.scope), 'Ask again for this body and outfit', true));
-    if (scoped && phase !== 'working') buttons.push(cardButton(heavy ? 'Make it a light touch' : 'Make it a full rewrite', () => askAgain('own-scope', heavy ? 'light' : 'heavy'),
-        heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true));
     d.append(rowOf(buttons));
     return d;
 }

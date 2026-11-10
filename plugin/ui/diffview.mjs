@@ -182,23 +182,67 @@ function ensureCss(doc) {
     const st = doc.createElement('style'); st.id = 'wsdiff-css'; st.textContent = CSS; (doc.head ?? doc.documentElement).append(st);
 }
 
-/** Before/after word diffs for a list of {label, before, after}, e.g. an NPC appearance review. Empty list says so. */
-export function paintFieldDiffs(doc, rows) {
-    ensureCss(doc);
-    const box = doc.createElement('div');
-    box.className = 'wsdiff';
-    if (!rows.length) { const n = doc.createElement('div'); n.className = 'wsdiff-label'; n.textContent = 'No change to body or outfit.'; box.append(n); return box; }
-    for (const r of rows) {
-        const cap = doc.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = r.label;
-        const line = doc.createElement('div'); line.className = 'wsdiff-text';
-        for (const p of wordDiff(r.before, r.after)) {
-            if (p.type === 'same') { line.append(doc.createTextNode(p.text)); continue; }
-            const sp = doc.createElement('span'); sp.className = p.type === 'del' ? 'wsdiff-wdel' : 'wsdiff-wins'; sp.textContent = p.text; line.append(sp);
+const mkEl = doc => (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+function blkOf(doc, type, text) { const e = mkEl(doc)('div', `wsdiff-blk wsdiff-${type}`, text); if (type !== 'same') e.setAttribute('data-mark', type === 'del' ? 'Removed' : 'Added'); return e; }
+/** One text field: unchanged sentences dimmed, each changed run a Removed block then an Added block, changed words marked. */
+function textDiffOf(doc, f) {
+    const mk = mkEl(doc), blk = (t, x) => blkOf(doc, t, x);
+    const box = mk('div', 'wsdiff-text');
+    if (!f.changed) { box.append(blk('same', f.new || '(empty)')); return box; }
+    const ops = blockDiff(f.old, f.new);
+    ops.forEach((op, k) => {
+        // A removed run followed by an added one: mark the changed words inside each (red struck / green).
+        const pair = op.type === 'del' && ops[k + 1]?.type === 'ins' ? ops[k + 1] : op.type === 'ins' && ops[k - 1]?.type === 'del' ? ops[k - 1] : null;
+        if (!pair) { box.append(blk(op.type, op.blocks.join('\n'))); return; }
+        const e = blk(op.type, '');
+        const [o, nw] = op.type === 'del' ? [op, pair] : [pair, op];
+        for (const p of wordDiff(o.blocks.join('\n'), nw.blocks.join('\n'))) {
+            if (p.type !== 'same' && p.type !== op.type) continue;
+            e.append(p.type === 'same' ? doc.createTextNode(p.text) : mk('span', `wsdiff-w${p.type}`, p.text));
         }
-        box.append(cap, line);
-    }
+        box.append(e);
+    });
     return box;
 }
+const toggleOf = (doc, label, on) => { const a = mkEl(doc)('span', 'wsdiff-toggle', label); a.addEventListener('click', e => { e.stopPropagation(); on(); }); return a; };
+
+/**
+ * A person's change in the same view as a place's: one framed panel titled with the name and "person · changed",
+ * then each field as Removed/Added blocks. rows: [{label, before, after, changed?}] (changed defaults to before !== after).
+ * Unchanged rows sit behind "Show unchanged"; "Raw JSON" shows the rows. Same classes and toggles as renderDiff.
+ */
+export function renderPersonDiff(doc, { title = '', tag = 'person', rows = [] } = {}) {
+    ensureCss(doc);
+    const mk = mkEl(doc);
+    const root = mk('div', 'wsdiff');
+    const fields = rows.map(r => ({ label: r.label, old: String(r.before ?? ''), new: String(r.after ?? ''), changed: r.changed ?? String(r.before ?? '') !== String(r.after ?? '') }));
+    const any = fields.some(f => f.changed);
+    let showSame = false, showRaw = false;
+    const body = mk('div'), bar = mk('div');
+    function draw() {
+        body.replaceChildren();
+        if (any || showSame) {
+            const place = mk('div', 'wsdiff-place');
+            place.setAttribute('data-key', title);
+            const t = mk('div', 'wsdiff-title', title);
+            t.append(mk('span', 'wsdiff-tag', `${tag} · ${any ? 'changed' : 'same'}`));
+            place.append(t);
+            for (const f of fields) {
+                if (!f.changed && !showSame) continue;
+                place.append(mk('div', 'wsdiff-label', `${f.label}${f.changed ? '' : ' (unchanged)'}`), textDiffOf(doc, f));
+            }
+            body.append(place);
+        }
+        if (!any) body.append(mk('div', 'wsdiff-same', 'No change to body or outfit.'));
+        if (showRaw) { const pre = mk('pre', 'wsdiff-raw'); pre.textContent = JSON.stringify(rows, null, 1); body.append(pre); }
+        bar.replaceChildren(toggleOf(doc, showSame ? 'Hide unchanged' : 'Show unchanged', () => { showSame = !showSame; draw(); }), toggleOf(doc, showRaw ? 'Hide raw JSON' : 'Raw JSON', () => { showRaw = !showRaw; draw(); }));
+    }
+    root.append(body, bar);
+    draw();
+    return root;
+}
+/** Kept for old callers: the person view without a title. */
+export const paintFieldDiffs = (doc, rows, title = '') => renderPersonDiff(doc, { title, rows });
 
 /** The red/green view. opts: {before, after, ops, relocate}. Unchanged fields hidden behind a toggle; "Raw JSON" toggle. */
 export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = {}, inherit = {}, names = {} } = {}) {
@@ -209,25 +253,8 @@ export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = 
     const moves = moveGroups({ ops, relocate, before, after, inherit, names });
     let showSame = false, showRaw = false;
     const body = mk('div'), bar = mk('div');
-    const blk = (type, text) => { const e = mk('div', `wsdiff-blk wsdiff-${type}`, text); if (type !== 'same') e.setAttribute('data-mark', type === 'del' ? 'Removed' : 'Added'); return e; };
-    const textDiff = f => {
-        const box = mk('div', 'wsdiff-text');
-        if (!f.changed) { box.append(blk('same', f.new || '(empty)')); return box; }
-        const ops = blockDiff(f.old, f.new);
-        ops.forEach((op, k) => {
-            // A removed run followed by an added one: mark the changed words inside each (red struck / green).
-            const pair = op.type === 'del' && ops[k + 1]?.type === 'ins' ? ops[k + 1] : op.type === 'ins' && ops[k - 1]?.type === 'del' ? ops[k - 1] : null;
-            if (!pair) { box.append(blk(op.type, op.blocks.join('\n'))); return; }
-            const e = blk(op.type, '');
-            const [o, nw] = op.type === 'del' ? [op, pair] : [pair, op];
-            for (const p of wordDiff(o.blocks.join('\n'), nw.blocks.join('\n'))) {
-                if (p.type !== 'same' && p.type !== op.type) continue;
-                e.append(p.type === 'same' ? doc.createTextNode(p.text) : mk('span', `wsdiff-w${p.type}`, p.text));
-            }
-            box.append(e);
-        });
-        return box;
-    };
+    const blk = (type, text) => blkOf(doc, type, text);
+    const textDiff = f => textDiffOf(doc, f);
     const listDiff = f => {
         const box = mk('div', 'wsdiff-text');
         const gone = f.old.filter(x => !f.new.includes(x)), added = f.new.filter(x => !f.old.includes(x)), kept = f.new.filter(x => f.old.includes(x));
@@ -263,7 +290,7 @@ export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = 
         }
         bar.replaceChildren(tog(showSame ? 'Hide unchanged' : 'Show unchanged', () => { showSame = !showSame; draw(); }), tog(showRaw ? 'Hide raw JSON' : 'Raw JSON', () => { showRaw = !showRaw; draw(); }));
     }
-    const tog = (label, on) => { const a = mk('span', 'wsdiff-toggle', label); a.addEventListener('click', e => { e.stopPropagation(); on(); }); return a; };
+    const tog = (label, on) => toggleOf(doc, label, on);
     root.append(body, bar);
     draw();
     return root;

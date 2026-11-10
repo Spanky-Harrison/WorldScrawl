@@ -78,6 +78,19 @@ async function drawDiff(box, pv) {
     if (!dl) { box.textContent = ''; return; }
     box.replaceChildren(dl.renderDiff(document, { before: pv.before ?? {}, after: pv.after ?? {}, ops: pv.ops ?? [], relocate: pv.relocate ?? {}, inherit: pv.inherit ?? {}, names: pv.names ?? {} }));
 }
+/** A person's change in the same red/green view as a place's (see renderPersonDiff). */
+/** Tests hand in the plugin's diff module (the server URL isn't reachable outside SillyTavern). */
+export const useDiffLib = m => { diffLib = m; };
+function drawPersonDiff(box, opts) {
+    // Draw at once when the diff module is already loaded, so a redrawn card never flashes empty.
+    if (diffLib?.renderPersonDiff) { box.replaceChildren(diffLib.renderPersonDiff(document, opts)); return Promise.resolve(); }
+    return drawPersonDiffLater(box, opts);
+}
+async function drawPersonDiffLater(box, opts) {
+    const dl = await loadDiffLib();
+    if (!dl?.renderPersonDiff) { box.textContent = ''; return; }
+    box.replaceChildren(dl.renderPersonDiff(document, opts));
+}
 /** Re-preview edited ops (debounced) and redraw the diff: the view follows the form while you type. */
 const liveTimers = new WeakMap();
 function liveDiff(box0, ops, ctxOver, form = null) {
@@ -272,4 +285,4 @@ export async function liveEdit(ops, note = '', { separate = false } = {}) {
 }
 globalThis.worldscrawlLiveEdit = liveEdit;
 
-export { FLAG_TAG, RANGE_CAP, changeEditSession, confirmOff, drawDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };
+export { FLAG_TAG, RANGE_CAP, changeEditSession, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };
