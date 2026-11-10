@@ -178,8 +178,26 @@ const CSS = `
 .wsdiff-note{font-size:0.85em;opacity:0.75;font-style:italic;margin:1px 0 2px 1.2em;}
 `;
 function ensureCss(doc) {
-    if (doc.getElementById('wsdiff-css')) return;
+    if (typeof doc.getElementById !== 'function' || doc.getElementById('wsdiff-css')) return;
     const st = doc.createElement('style'); st.id = 'wsdiff-css'; st.textContent = CSS; (doc.head ?? doc.documentElement).append(st);
+}
+
+/** Before/after word diffs for a list of {label, before, after}, e.g. an NPC appearance review. Empty list says so. */
+export function paintFieldDiffs(doc, rows) {
+    ensureCss(doc);
+    const box = doc.createElement('div');
+    box.className = 'wsdiff';
+    if (!rows.length) { const n = doc.createElement('div'); n.className = 'wsdiff-label'; n.textContent = 'No change to body or outfit.'; box.append(n); return box; }
+    for (const r of rows) {
+        const cap = doc.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = r.label;
+        const line = doc.createElement('div'); line.className = 'wsdiff-text';
+        for (const p of wordDiff(r.before, r.after)) {
+            if (p.type === 'same') { line.append(doc.createTextNode(p.text)); continue; }
+            const sp = doc.createElement('span'); sp.className = p.type === 'del' ? 'wsdiff-wdel' : 'wsdiff-wins'; sp.textContent = p.text; line.append(sp);
+        }
+        box.append(cap, line);
+    }
+    return box;
 }
 
 /** The red/green view. opts: {before, after, ops, relocate}. Unchanged fields hidden behind a toggle; "Raw JSON" toggle. */

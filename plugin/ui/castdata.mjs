@@ -334,6 +334,7 @@ export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'np
     text: `${x.summary}${x.candidate ? ` (${x.candidate})` : ''}${x.preview ? `: ${x.preview}` : ''}${x.pending && !x.candidate ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`,
     off: !!x.off, pending: !!x.pending, identity: x.identity || null, decisionRev: x.decisionRev ?? 1,
     candidate: x.candidate || '', candidateToken: x.candidateToken || '',
+    diffs: Array.isArray(x.diffs) ? x.diffs : null,
 }));
 const pad2 = n => String(n).padStart(2, '0');
 /** ' (lasting)', ' (until day 3 14:00)', ' (ended day 3 14:00)', ' (for 2h)': when a field change ends. */

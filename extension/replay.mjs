@@ -37,8 +37,47 @@ export function wordDiff(oldText, newText) {
     return out;
 }
 
+// The chat page cannot rely on the map's diff view having loaded, so the card brings its own colors.
+export const WORDDIFF_CSS_ID = 'worldscrawl_worddiff_css';
+export const WORDDIFF_CSS = `.worldscrawl_worddiff{margin:4px 0;}
+.worldscrawl_worddiff .wsdiff-label{font-size:0.8em;opacity:0.75;margin-top:4px;}
+.worldscrawl_worddiff .wsdiff-text{white-space:normal;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,0.2);line-height:1.45;}
+.worldscrawl_worddiff .wsdiff-wdel{background:rgba(220,60,60,0.45);text-decoration:line-through;border-radius:2px;}
+.worldscrawl_worddiff .wsdiff-wins{background:rgba(60,180,80,0.45);border-radius:2px;}`;
+export function ensureWordDiffCss(doc) {
+    if (!doc?.createElement || doc.getElementById?.(WORDDIFF_CSS_ID)) return;
+    const st = doc.createElement('style');
+    st.id = WORDDIFF_CSS_ID;
+    st.textContent = WORDDIFF_CSS;
+    (doc.head ?? doc.documentElement)?.append(st);
+}
+
+/**
+ * The fields an appearance review should show: only Body/Outfit that actually change.
+ * A temporary change leaves the lasting result alone, so it shows as "for now" only.
+ * A lasting change with no temporary layer on top shows plain labels.
+ */
+export function reviewFields(c) {
+    if (!c?.lastingPreview || !c?.livePreview) return [];
+    const lb = c.lastingBefore || {}, vb = c.liveBefore || {};
+    const sameKey = c.liveKey === c.lastingKey;
+    const out = [];
+    const add = (field, name, before, after, suffix) => {
+        const b = before?.[field] || '', a = after?.[field] || '';
+        if (!before?.unresolved && b === a) return;
+        out.push({ field, label: `${name}${suffix}${before?.unresolved ? ' (before unresolved)' : ''}`, before: b, after: a });
+    };
+    const lastingChanges = ['body', 'outfit'].some(f => lb.unresolved || (lb[f] || '') !== (c.lastingPreview[f] || ''));
+    const liveChanges = !sameKey && ['body', 'outfit'].some(f => vb.unresolved || (vb[f] || '') !== (c.livePreview[f] || ''));
+    const lastSuffix = liveChanges ? ' (lasting)' : '';
+    if (lastingChanges) { add('body', 'Body', lb, c.lastingPreview, lastSuffix); add('outfit', 'Outfit', lb, c.lastingPreview, lastSuffix); }
+    if (liveChanges) { add('body', 'Body', vb, c.livePreview, ' (for now)'); add('outfit', 'Outfit', vb, c.livePreview, ' (for now)'); }
+    return out;
+}
+
 /** Paint one field's word diff into `parent`. Read-only. */
 export function paintWordDiff(doc, parent, label, before, after) {
+    ensureWordDiffCss(doc);
     const box = doc.createElement('div');
     box.className = 'worldscrawl_worddiff';
     box.setAttribute('data-field', label);
