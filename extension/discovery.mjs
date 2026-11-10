@@ -427,7 +427,7 @@ function trackerPayloads(people) {
     const stamps = [], found = [], names = [];
     for (const p of people ?? []) {
         if (p.action === 'found') { found.push(p.name || p.id); continue; }
-        if (p.action === 'name') { names.push(p.name || p.id); continue; }
+        if (p.action === 'name') { names.push({ id: p.id, name: p.name || p.id }); continue; }
         const stamp = toolNpcStamp({ ...p, id: p.id || p.name });
         if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
     }
@@ -438,9 +438,13 @@ async function applyLearnedNames(id, learned, source) {
     if (!msg || !learned?.length) return;
     const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     msg.extra = msg.extra ?? {};
-    for (const nm of new Set(learned)) {
-        const n = npcForName(folded, nm);
-        if (n) addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source });
+    const done = new Set();
+    for (const l of learned) {
+        // The tracker names the person by id; the name it heard may be a first name or a nickname.
+        const row = typeof l === 'string' ? { id: '', name: l } : l;
+        const byId = row.id ? folded.find(x => x.id === npcTarget(folded, row.id)) : null;
+        const n = byId ?? npcForName(folded, row.name);
+        if (n && !done.has(n.id)) { done.add(n.id); addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source }); }
     }
     await c.saveChat?.();
 }

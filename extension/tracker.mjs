@@ -54,8 +54,10 @@ export function trackerPeopleLines(people) {
         const stance = bare(p.stance);
         const reason = bare(p.stanceReason);
         const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
+        const unnamed = p.nameKnown === false && bare(p.unknownAs);
         return [
             `${p.name || p.id} [${p.id || p.name}]`,
+            ...(unnamed ? [`Name not yet known to the player: they know this person only as "${bare(p.unknownAs)}"`] : []),
             `Looks: ${textOf(p.looks)}`,
             `Body: ${textOf(p.body)}`,
             `Outfit: ${textOf(p.outfit)}`,
@@ -114,7 +116,7 @@ function readPerson(p) {
     if (action === 'disposition' && !DISPOSITIONS.includes(String(p.value ?? '').toLowerCase())) return null;
     const item = { action, id: id || name };
     if (name) item.name = name;
-    for (const k of ['intent', 'fields', 'lasts', 'text', 'value', 'reason', 'looks', 'body', 'outfit']) {
+    for (const k of ['intent', 'fields', 'lasts', 'text', 'value', 'reason', 'looks', 'body', 'outfit', 'scope', 'why']) {
         if (p[k] != null && String(p[k]).trim()) item[k] = String(p[k]).trim();
     }
     if (item.value) item.value = item.value.toLowerCase();
