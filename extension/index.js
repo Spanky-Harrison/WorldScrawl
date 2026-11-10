@@ -28,7 +28,7 @@ import { mapState, openMapChannel, openMapWindow } from './mapwindow.mjs';
 import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
 import { changeEditUrl, mapCtx } from './patches.mjs';
-import { applyFacts, applyFound, learnNameOn, offerRemember, prepareNpcs, setRelOn } from './scene.mjs';
+import { applyFacts, applyFound, learnNameOn, offerRemember, postPersonExpiryNotices, prepareNpcs, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
 export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiveWorld, worldName, chatWorld, worldSeed, chatChanges, firstSentence } from './clock.mjs';
@@ -316,6 +316,8 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             renderAllExits();
         }
         if ((!type || type === 'normal') && last?.is_user) await prepareNpcs(last);
+        // A person's temporary change that ran out with this turn's time gets its chat notice now (never on a swipe).
+        if ((!type || type === 'normal') && last?.is_user) await postPersonExpiryNotices().catch(e => console.warn('[WorldScrawl] expiry notice', e?.message || e));
         await applyFacts();
     } catch (e) { console.error('[WorldScrawl] interceptor failed', e); }
 };

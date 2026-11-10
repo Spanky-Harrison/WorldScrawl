@@ -407,6 +407,33 @@ function editedCandidate(chat, stamp, c, edited, elapsed) {
     return { candidate: { ...next, lastingKey: keys.lasting, liveKey: keys.live, lastingPreview, livePreview } };
 }
 
+/**
+ * A candidate whose result is text the player typed, reviewed without a model call: the before values are this
+ * person's committed replay, and the typed Body/Outfit go through the same Approve-edited rules (editedCandidate).
+ * Used by the expiry notice's Edit. Refuses while another temporary change sits on top, so "now" is one text.
+ */
+export function reviewTyped(chat, identity, typed, { baseline = null, elapsed = null } = {}) {
+    const found = findStamp(chat, identity);
+    if (!found?.stamp?.candidate) return { ok: false, error: 'no candidate' };
+    const stamp = found.stamp;
+    if (stamp.candidate.proposedLasts > 0) return { ok: false, error: 'Typed text is for a lasting change.' };
+    const base = baseline ?? readBaselineMap(chat)[identity.npc] ?? { body: '', outfit: '' };
+    const records = composeRecords(chat);
+    const others = liveOps(personOps(chat, identity.npc).filter(s => s.committed && s.owner !== stamp.owner), elapsed);
+    const lastingBefore = textOf(base, others.filter(o => !(o.lasts > 0)), records);
+    const liveBefore = textOf(base, others, records);
+    if (lastingBefore.unresolved || liveBefore.unresolved) return { ok: false, error: 'How they look now is still being worked out. Try again in a moment.' };
+    if (lastingBefore.key !== liveBefore.key) return { ok: false, error: 'Another temporary change is still on them. Edit after it ends.' };
+    const now = { body: lastingBefore.body, outfit: lastingBefore.outfit };
+    const seeded = { ...stamp.candidate, phase: 'review', baseline: { body: base.body ?? '', outfit: base.outfit ?? '' },
+        lastingKey: lastingBefore.key, liveKey: liveBefore.key, lastingPreview: { ...now }, livePreview: { ...now },
+        lastingBefore: { ...now, unresolved: false }, liveBefore: { ...now, unresolved: false } };
+    const ed = editedCandidate(chat, stamp, seeded, { lasting: typed, live: typed }, elapsed);
+    if (ed.error) return { ok: false, error: ed.error };
+    stamp.candidate = ed.candidate;
+    return { ok: true, candidate: ed.candidate };
+}
+
 export function beginCandidate(stamp, msg) {
     stamp.candidate = {
         ...(stamp.candidate ?? {}),

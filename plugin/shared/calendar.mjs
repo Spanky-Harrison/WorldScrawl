@@ -210,7 +210,7 @@ const NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, 
 const FILLER = new Set(['for', 'about', 'around', 'roughly', 'some', 'and', 'another', 'more', 'of', 'or', 'so', 'just', 'over', 'nearly', 'almost', 'maybe', 'like', 'a', 'an', 'the', 'good', 'full', 'whole', 'solid']);
 /** Seconds in a loose wait like "1 hour and 1 minute", "an hour", "half an hour", "2 hours 30 minutes", "90 min", "a day", "1h30m"; null if not one. */
 export function waitWords(text, spd = 86400) {
-    const s = String(text ?? '').toLowerCase().replace(/(\d)([a-z])/g, '$1 $2').replace(/([a-z])(\d)/g, '$1 $2').replace(/[,.;!?]/g, ' ').trim();
+    const s = String(text ?? '').toLowerCase().replace(/(\d)([a-z])/g, '$1 $2').replace(/([a-z])(\d)/g, '$1 $2').replace(/[,;!?]|\.(?!\d)|(?<!\d)\./g, ' ').trim(); // "1.5h" keeps its decimal point
     if (!s) return null;
     const toks = s.split(/\s+/);
     let total = 0, num = null, any = false, lastUnit = 0;
@@ -249,7 +249,7 @@ export function parseWait(text, cal = GREGORIAN) {
     if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
     const u = /^(?:until|till|til|to|unti)\s+(.+)$/.exec(s);
     if (u) {
-        const t = u[1].trim().replace(/^the\s+/, '');
+        const t = u[1].trim().replace(/^the\s+/, '').replace(/^(\d{1,2})\.(\d{2})$/, '$1:$2'); // "17.15" is 17:15
         if (t === 'sunrise') return { until: 'dawn' };
         if (t === 'sunset') return { until: 'dusk' };
         if (WAIT_TARGETS.includes(t)) return { until: t };
