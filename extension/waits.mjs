@@ -13,7 +13,8 @@ import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, drawPersonDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, editExpiryRevert, exportNpc, keepRemember, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
+import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { decideNpc, fillCandidate } from './owners.mjs';
 import { reviewFields } from './replay.mjs';
 
@@ -111,7 +112,7 @@ async function keepWaitNow(c, msg, p, nid, amount) {
     if (p.swipe != null) msg.extra[WAIT_KEY].swipe = p.swipe;
     delete msg.extra[WAITCARD_KEY];
     renderPatchCards();
-    await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    await c.saveChat?.(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     return '';
 }
 /** Which temporary changes a re-timed wait now runs past (crossed) or no longer reaches (uncrossed), keyed by change and op. */
@@ -121,6 +122,13 @@ export function waitExpiryDelta(changes, start, oldSec, newSec, expiredBetween) 
     const wk = new Set(was.map(key)), nk = new Set(now.map(key));
     return { crossed: now.filter(g => !wk.has(key(g))), uncrossed: was.filter(g => !nk.has(key(g))) };
 }
+/** Place patches (lib.expiredBetween) and people's temporary changes that run out between two game times, as one list. */
+export function expiredAll(chat, lib, party = partyText()) {
+    return (changes, before, after) => [
+        ...(lib?.expiredBetween ? lib.expiredBetween(changes, before, after) : []),
+        ...personExpiriesIn(chat, before, after, party).map(it => ({ id: it.key, op: 'person', note: changeLabel(it), ends: it.ends, person: it })),
+    ].sort((a, b) => a.ends - b.ends);
+}
 /** Re-time an already-kept wait. The clock moves, so expiries are rechecked: the map is rebuilt from the chat (the server keeps no state). */
 export async function editKeptWait(id, amount) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], old = msg?.extra?.[WAIT_KEY];
@@ -129,9 +137,9 @@ export async function editKeptWait(id, amount) {
     if (w.error) return { error: w.error };
     const lib = await loadPatchLib();
     const start = chatElapsed(chat.slice(0, id + 1)) - old.seconds;
-    const delta = lib?.expiredBetween ? waitExpiryDelta(chatChanges(chat), start, old.seconds, w.seconds, lib.expiredBetween) : { crossed: [], uncrossed: [] };
+    const delta = waitExpiryDelta(chatChanges(chat), start, old.seconds, w.seconds, expiredAll(chat, lib));
     stampWait(msg, w);
-    await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    await c.saveChat?.(); if (delta.crossed.length) await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     if (delta.crossed.length) toastr.info(`WorldScrawl: now runs out during the wait: ${delta.crossed.map(g => g.note).join('; ')}`);
     if (delta.uncrossed.length) toastr.info(`WorldScrawl: still in place after the shorter wait: ${delta.uncrossed.map(g => g.note).join('; ')}`);
     return delta;
@@ -173,8 +181,8 @@ async function waitFacts(chat, loc) {
     const w0 = placeWeatherNow(loc, chat.map((m, j) => (j === r.i ? { ...m, extra: { ...m.extra, [WAIT_KEY]: undefined } } : m))), w1 = placeWeatherNow(loc, chat);
     if (w0?.line && w1?.line && w0.line !== w1.line) lines.push(`Before the wait: ${w0.line} Describe how the weather has changed.`);
     const lib = await loadPatchLib();
-    const gone = lib?.expiredBetween ? lib.expiredBetween(chatChanges(chat), before, after) : [];
-    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => g.note).join('; ')}.`);
+    const gone = expiredAll(chat, lib, who)(chatChanges(chat), before, after);
+    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => g.note).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
     return lines.join('\n');
 }
 
@@ -357,6 +365,51 @@ function ownerCard(msg, s, who) {
     return d;
 }
 
+/**
+ * Under a person-expiry notice: what they look like now, and Edit, which opens the same Body/Outfit boxes as the
+ * person card's editor. Approve edited saves the typed text as a lasting appearance change on this notice.
+ */
+function expiredPersonCard(msg, id, p) {
+    const d = document.createElement('div');
+    d.className = 'worldscrawl_npcexpired';
+    const chat = ctx().chat ?? [];
+    const live = npcAt(chat, id, castPack()?.npcs ?? [], p.id, i => npcClock(chat, i));
+    const edited = (msg.extra?.[NPC_KEY] ?? []).some(s => s?.id === p.id && s.source === 'expiry_edit' && s.committed);
+    for (const [k, label] of [['body', 'Body'], ['outfit', 'Outfit']]) {
+        const row = document.createElement('div');
+        row.className = 'worldscrawl_appeardiff';
+        row.textContent = `${label} now: ${live?.[k] || '—'}`;
+        d.append(row);
+    }
+    const formKey = `${msg.extra?.worldscrawl_mid || id}|npcexpired|${p.id}`;
+    const open = openForms.get(formKey);
+    if (open && live) {
+        for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) {
+            const ta = document.createElement('textarea');
+            ta.className = 'text_pole worldscrawl_npc_text';
+            ta.dataset.part = 'lasting'; ta.dataset.field = field;
+            ta.rows = 3; ta.value = open.text[field] ?? '';
+            ta.style.cssText = 'width:100%;margin:2px 0;padding:2px 4px;';
+            ta.addEventListener('click', e => e.stopPropagation());
+            ta.addEventListener('input', () => { open.text[field] = ta.value; });
+            const cap = document.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = name;
+            d.append(cap, ta);
+        }
+    }
+    if (!live || edited) return d; // after a saved edit, that change's own row has Edit / Turn off / Undo
+    d.append(rowOf(open
+        ? [cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits'),
+            cardButton('Approve edited', () => once(`npcexpired-ok:${formKey}`, async () => {
+                const res = await editExpiryRevert(ctx().chat.indexOf(msg), p.id, { ...open.text });
+                if (res?.ok) openForms.delete(formKey);
+                else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
+                syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
+                return res;
+            }), `Keep ${p.name || p.id}'s body and outfit exactly as typed in the boxes`, true)]
+        : [cardButton('Edit', () => { openForms.set(formKey, { text: { body: live.body ?? '', outfit: live.outfit ?? '' } }); renderPatchCards(); }, `Change what ${p.name || p.id} went back to`)]));
+    return d;
+}
+
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
@@ -384,7 +437,8 @@ export function renderPatchCards() {
         const placeWarn = f && (f.swipe ?? 0) === swipeOf(msg) && f.personWarning ? f.personWarning : '';
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn) continue;
+        const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id) : [];
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -472,6 +526,7 @@ export function renderPatchCards() {
             if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)
             card.append(d);
         }
+        for (const p of expired) card.append(expiredPersonCard(msg, id, p));
         for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
         const warnLine = text => { const d = line(`⚠ ${text}`); d.className = 'worldscrawl_npcwarn'; return d; };
         if (placeWarn) card.append(warnLine(placeWarn));

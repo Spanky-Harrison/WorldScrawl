@@ -73,12 +73,13 @@ export function trackerPeopleLines(people) {
  * the known weather, and each person here. No earlier chat. Weather is listed so a foggy sky is not
  * mistaken for a new fact about the room.
  */
-export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', weather = '', peopleLines = '(none)' } = {}) {
+export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
     return [
         `This place: ${placeTitle(placeName, displayName)}`,
         `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
         `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
         `People here:\n${peopleLines || '(none)'}`,
+        ...(engineLines && engineLines !== '(none)' ? [`Already done by the game (not new changes; do not report them):\n${engineLines}`] : []),
     ].join('\n');
 }
 export const trackerSys = () => P('npc.tracker_system');

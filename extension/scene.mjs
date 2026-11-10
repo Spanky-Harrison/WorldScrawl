@@ -6,7 +6,9 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
-import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose } from './owners.mjs';
+import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
+import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
+import { messageKey } from './replay.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -674,12 +676,73 @@ async function applyFacts() {
         else if (!ep) { const am = await aftermathNote(c.chat ?? [], loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
         const wf = await waitFacts(c.chat ?? [], loc);
         if (wf) text = `${text}\n${wf}`;
+        const gone = expiryNarratorNote(freshPersonExpiries(c.chat ?? [], (c.chat ?? []).length - 1, partyText()), partyText());
+        if (gone) text = `${text}\n${gone}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     // Small models weigh the last lines most: on a move/travel turn, repeat where the turn ends after the player's message.
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
 }
 
+
+// ---- Person expiries: a temporary appearance or fact that ran out. The replay already dropped it; these name it.
+const elapsedAt = chat => i => npcClock(chat, i).elapsed;
+/** The expiries between game times `before` and `after`, with each person as they are at message `end`. `party` words "known only as". */
+function personExpiriesIn(chat, before, after, party = partyText(), end = (chat?.length ?? 0) - 1) {
+    const items = personExpiriesBetween(chat, before, after, elapsedAt(chat));
+    if (!items.length) return [];
+    const cast = castPack()?.npcs ?? [];
+    return describeExpiries(items, id => npcAt(chat, end, cast, id, i => npcClock(chat, i)), party);
+}
+/** The expiries the reply after message `end` has not narrated yet (see expiryWindow). */
+function freshPersonExpiries(chat, end, party = partyText()) {
+    if (!chat?.length || end < 0) return [];
+    const { before, after } = expiryWindow(chat, end, elapsedAt(chat));
+    return personExpiriesIn(chat, before, after, party, end);
+}
+/** One "[Engine: ...]" system notice for expiries not announced yet, like a place expiry's. Never in the prompt. */
+async function postPersonExpiryNotices() {
+    const c = ctx(), chat = c.chat ?? [];
+    if (!isOn() || !chat.length) return null;
+    const seen = noticedExpiries(chat);
+    const items = freshPersonExpiries(chat, chat.length - 1, 'you').filter(it => !seen.has(expiryKey(it)));
+    if (!items.length) return null;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: expiryNoticeText(items),
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: NPC_EXPIRED_KIND, worldscrawl_notice_people: items.map(it => ({ key: it.key, ends: it.ends, id: it.id, kind: it.kind, name: it.name, who: it.who, what: it.what })) } };
+    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    return msg;
+}
+/**
+ * The expiry notice's Edit: the player's own Body/Outfit for what the person went back to. It becomes a normal
+ * lasting appearance change on the notice (owner, reviewed as typed text, approved through settleNpc), so it has
+ * the usual Edit / Turn off / Undo afterwards and deleting the notice removes it.
+ */
+async function editExpiryRevert(at, id, text = {}) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[at];
+    if (msg?.extra?.worldscrawl_notice_kind !== NPC_EXPIRED_KIND) return { ok: false, error: 'That notice is gone.' };
+    const p = (msg.extra.worldscrawl_notice_people ?? []).find(x => x?.id === id);
+    if (!p) return { ok: false, error: 'That person is not on this notice.' };
+    const elapsed = npcClock(chat, at).elapsed;
+    if (!Number.isFinite(elapsed)) return { ok: false, error: 'The game clock is not available yet. Try again once it has loaded.' };
+    const live = npcAt(chat, at, castPack()?.npcs ?? [], id, i => npcClock(chat, i));
+    if (!live) return { ok: false, error: 'That person is not in this chat.' };
+    const typed = { body: String(text.body ?? live.body ?? ''), outfit: String(text.outfit ?? live.outfit ?? '') };
+    const touched = ['body', 'outfit'].filter(f => typed[f].trim() && typed[f].trim() !== String(live[f] ?? '').trim());
+    if (!touched.length) return { ok: false, error: 'The edited text is the same as now.' };
+    const owner = makeOwner({
+        id, intent: `after "${p.what}" wore off: ${touched.join(' and ')} as you wrote it`, fields: touched.join(','), layer: {},
+        lasts: null, start: elapsed, chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: 'expiry_edit', why: 'text edited by you',
+    });
+    owner.candidate.epoch = ownerEpoch(msg);
+    addNpcStamp(msg, owner);
+    const row = (msg.extra[NPC_KEY] ?? []).find(s => s?.owner === owner.owner);
+    const drop = () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => s !== row); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; };
+    const seeded = reviewTyped(chat, owner.identity, typed, { baseline: live.pinned, elapsed });
+    if (!seeded.ok) { drop(); return seeded; }
+    const res = await settleNpc(chat, owner.identity, row.decisionRev, 'approve', { token: row.candidate.token, elapsed });
+    if (!res?.ok) { drop(); syncSwipeExtra(msg); await c.saveChat?.(); }
+    return res ?? { ok: false, error: 'not saved' };
+}
 
 function looksSummaryPrompt(name, body, outfit) {
     return P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') });
@@ -835,4 +898,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, editExpiryRevert, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

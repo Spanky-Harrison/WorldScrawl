@@ -34,9 +34,10 @@ export const VERBS = [
 ];
 const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));
 const TARGET_FILLER = new Set(['to', 'the', 'a', 'an', 'at', 'through', 'into', 'in', 'toward', 'towards', 'out', 'of', 'my', 'way']);
-/** The first bracket whose word is a known verb: {verb, target, raw}, or null. "out" stays when it is all there is ("[move] out"). */
+/** The first bracket whose word is a known verb: {verb, target, raw}, or null. "out" stays when it is all there is ("[move] out").
+ *  A colon or dot between digits is part of the target ("[wait] until 17:15"), not the end of the sentence. */
 export function parseBracket(text) {
-    for (const m of String(text ?? '').matchAll(/\[([^\[\]]{1,40})\]([^\[\n.!?,;:]*)/g)) {
+    for (const m of String(text ?? '').matchAll(/\[([^\[\]]{1,40})\]((?:[^\[\n.!?,;:]|(?<=\d)[:.](?=\d))*)/g)) {
         const v = VERB_OF.get(m[1].trim().toLowerCase().replace(/\s+/g, ' '));
         if (!v) continue;
         const words = m[2].trim().split(/\s+/).filter(Boolean);

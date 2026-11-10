@@ -15,9 +15,10 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, invalidateAppearance, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
-import { epochOf, fillCandidate, makeOwner } from './owners.mjs';
-import { messageKey, pinBaseline, readBaselineMap } from './replay.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, postPersonExpiryNotices, invalidateAppearance, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
+import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
+import { trackerExpiryLines } from './npcexpiry.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
@@ -334,7 +335,7 @@ async function applyProposedWait(id, w, source = '') {
         noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` });
         stampWait(msg, w);
         if (source) { msg.extra[WAIT_KEY].source = source; msg.extra[WAIT_KEY].swipe = swipeOf(msg); }
-        await c.saveChat?.(); await applyFacts(); renderAllExits(); broadcastMapState();
+        await c.saveChat?.(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState();
     } else {
         noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `proposed; why: ${w.reason || '(no reason given)'}` });
         proposeWait(msg, w);
@@ -418,10 +419,27 @@ async function applyPersonStamps(id, stamped) {
     syncSwipeExtra(msg);
     await c.saveChat?.();
     for (const row of toFill) {
-        await fillCandidate(c.chat, row.owner.identity, { baseline: row.pin, name: row.name, elapsed: clock.elapsed }).catch(e => console.warn('[WorldScrawl] appearance fill', e));
+        const filled = await fillCandidate(c.chat, row.owner.identity, { baseline: row.pin, name: row.name, elapsed: clock.elapsed }).catch(e => { console.warn('[WorldScrawl] appearance fill', e); return null; });
+        if (filled?.ok) dropNoopProposal(c.chat, row.owner.identity, id, row.name);
     }
     syncSwipeExtra(msg);
     await c.saveChat?.();
+}
+/**
+ * A proposal whose reviewed result is exactly how the person looks now (often the story narrating an expiry the
+ * engine already applied) asks the player nothing: it is discarded through decideNpc, then the never-committed
+ * stamp is taken off the message, and the call log says why.
+ */
+function dropNoopProposal(chat, identity, at, name) {
+    const found = findStamp(chat, identity);
+    const s = found?.stamp, cand = s?.candidate;
+    if (!cand || cand.phase !== 'review' || s.committed || reviewFields(cand).length) return false;
+    const res = decideNpc(chat, identity, s.decisionRev, 'discard', {});
+    if (!res?.ok) return false;
+    const list = found.msg.extra?.[NPC_KEY];
+    if (Array.isArray(list)) { found.msg.extra[NPC_KEY] = list.filter(x => x !== s); if (!found.msg.extra[NPC_KEY].length) delete found.msg.extra[NPC_KEY]; }
+    noteCall(at, { kind: 'npc_appearance', status: 'skipped', reason: `no change: the result matches how ${name || identity.npc} looks now` });
+    return true;
 }
 function trackerPayloads(people) {
     const stamps = [], found = [], names = [];
@@ -484,7 +502,8 @@ async function runTracker(id) {
         if (!loc?.name && !loc?.address) { noteCall(id, { kind: 'tracker', status: 'skipped', reason: 'place unavailable' }); return; }
         const weather = placeWeatherNow(loc)?.line ?? '';
         const people = listedPeople(chat, id, loc);
-        const scrap = trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people) });
+        const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
+        const scrap = trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people), engineLines });
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id });
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg) return;
