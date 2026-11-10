@@ -187,9 +187,11 @@ test('a second proposal shows the replay without that candidate, not the pinned 
     renderPatchCards();
     const card = doc.querySelector('.worldscrawl_npcpending');
     assert.ok(card, 'the chat card rendered the proposal');
-    assert.match(card.textContent, /Lasting body/);
-    assert.doesNotMatch(card.textContent, /Lasting body \(before unresolved\)/);
-    assert.match(card.textContent, /a towering woman/);
+    // Temporary on top of an unchanged lasting result: only the live Body row, no lasting rows, no outfit row.
+    assert.match(card.textContent, /Body \(for now\)/);
+    assert.doesNotMatch(card.textContent, /lasting|Lasting|Outfit|before unresolved/);
+    assert.equal(card.querySelectorAll('.worldscrawl_worddiff').length, 1);
+    assert.match(card.textContent, /a scarred towering woman/);
     assert.equal(cacheRows(chat), false);
 });
 
@@ -985,9 +987,12 @@ test('Changes shows the live preview of a temporary candidate, and a clockless A
     const panel = castPanel(doc, { load: async () => ({ npcs: [HESK] }), outline: async () => null, play: () => npcPlayState(c.chat, [HESK], env), decideNpc: () => {}, placeName: a => a });
     await panel.refresh();
     panel.selectId('hesk', 'changes');
-    assert.match(panel.el.textContent, /live body/);
+    // Changes shows the same changed-only word diff as the chat card.
+    assert.match(panel.el.textContent, /Outfit \(for now\)/);
     assert.match(panel.el.textContent, /a soaked cloak/);
-    assert.match(panel.el.textContent, /lasting body/);
+    assert.doesNotMatch(panel.el.textContent, /lasting body|live body|Body \(/);
+    assert.ok(panel.el.querySelectorAll('.wsdiff-wins').length >= 1);
+    assert.ok(panel.el.querySelectorAll('.wsdiff-wdel').length >= 1);
     const held = scene.decideNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token });
     assert.match(held.error, /clock/);
     assert.equal(proposal.candidate.phase, 'review');
