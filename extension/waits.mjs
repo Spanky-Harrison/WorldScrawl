@@ -15,7 +15,7 @@ import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcClock, npcEnv, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
 import { decideNpc, fillCandidate } from './owners.mjs';
-import { paintWordDiff } from './replay.mjs';
+import { paintWordDiff, reviewFields } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -268,15 +268,9 @@ function ownerCard(msg, s, who) {
     if (s.candidate?.clockError) { const err = document.createElement('div'); err.textContent = s.candidate.clockError; d.append(err); }
     d.append(title);
     if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
-        const lb = s.candidate.lastingBefore || {};
-        const liveB = s.candidate.liveBefore || {};
-        const side = (label, before, after) => paintWordDiff(document, d, before?.unresolved ? `${label} (before unresolved)` : label, before?.body || '', after || '');
-        side('Lasting body', { ...lb, body: lb.body }, s.candidate.lastingPreview.body || '');
-        paintWordDiff(document, d, lb.unresolved ? 'Lasting outfit (before unresolved)' : 'Lasting outfit', lb.outfit || '', s.candidate.lastingPreview.outfit || '');
-        if (s.candidate.liveKey !== s.candidate.lastingKey) {
-            paintWordDiff(document, d, liveB.unresolved ? 'Live body (before unresolved)' : 'Live body', liveB.body || '', s.candidate.livePreview.body || '');
-            paintWordDiff(document, d, liveB.unresolved ? 'Live outfit (before unresolved)' : 'Live outfit', liveB.outfit || '', s.candidate.livePreview.outfit || '');
-        }
+        const rows = reviewFields(s.candidate);
+        for (const r of rows) paintWordDiff(document, d, r.label, r.before, r.after);
+        if (!rows.length) { const none = document.createElement('div'); none.textContent = 'No change to body or outfit.'; d.append(none); }
     }
     const ident = s.identity;
     const rev = s.decisionRev ?? 1;

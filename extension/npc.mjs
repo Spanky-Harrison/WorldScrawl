@@ -4,7 +4,7 @@
 
 import { npc } from './shared.mjs';
 import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
-import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap } from './replay.mjs';
+import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
 const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, label, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
@@ -760,11 +760,7 @@ export function npcPlayState(chat, cast, env) {
                 extra.decisionRev = s.decisionRev ?? 1;
                 extra.candidate = s.candidate ? s.candidate.phase : '';
                 extra.candidateToken = s.candidate?.token || '';
-                if (s.candidate?.livePreview) {
-                    const live = s.candidate.livePreview, lasting = s.candidate.lastingPreview;
-                    extra.preview = `live body ${live.body || '—'}; wearing ${live.outfit || '—'}`;
-                    if (lasting && s.candidate.liveKey !== s.candidate.lastingKey) extra.preview += `; lasting body ${lasting.body || '—'}; wearing ${lasting.outfit || '—'}`;
-                }
+                if (s.candidate?.phase === 'review') extra.diffs = reviewFields(s.candidate);
             }
             else if (s.type === 'npc_appearance_cache') continue;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
