@@ -342,6 +342,19 @@ export function lastsText(min) {
     return `${d ? `${d}d` : ''}${h ? `${h}h` : ''}${m ? `${m}m` : ''}` || '0m';
 }
 
+/** The summary bullets for a person's pending appearance change, worded like a place's ("Hesk: body rewritten (for 1h)"). */
+export function reviewSummary(c, who, rows) {
+    const lasts = lastsMinutes(c?.proposedLasts);
+    const tail = lasts ? ` (for ${lastsText(lasts)})` : '';
+    const seen = new Set(), out = [];
+    for (const r of rows ?? []) {
+        if (r.changed === false || seen.has(r.field)) continue;
+        seen.add(r.field);
+        out.push(`${who}: ${r.field === 'outfit' ? 'outfit' : 'body'} rewritten${tail}`);
+    }
+    return out;
+}
+
 /** How well an actor knows this person, in order. Automatic changes only move forward; a player edit (npc_rel) can go back. */
 export const REL_STATES = ['unmet', 'met', 'named'];
 /** Move `who`'s relationship with `n` forward to `state` (never back). The first meeting moves an unknown attitude to indifferent. */
@@ -760,7 +773,7 @@ export function npcPlayState(chat, cast, env) {
                 extra.decisionRev = s.decisionRev ?? 1;
                 extra.candidate = s.candidate ? s.candidate.phase : '';
                 extra.candidateToken = s.candidate?.token || '';
-                if (s.candidate?.phase === 'review') extra.diffs = reviewFields(s.candidate);
+                if (s.candidate?.phase === 'review') extra.diffs = reviewFields(s.candidate, { all: true });
                 const sc = s.candidate ?? s.committed;
                 if (sc && sc.kind !== 'baseline' && s.kind !== 'baseline') extra.scopeLevel = sc.scope === 'heavy' ? 'heavy' : 'light', extra.scope = `${sc.scope === 'heavy' ? 'full rewrite' : 'light touch'}${sc.why ? `: ${sc.why}` : ''}`;
             }

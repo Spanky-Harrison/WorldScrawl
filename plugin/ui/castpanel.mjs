@@ -8,7 +8,7 @@
 import { permanentProblem, liveSchedule } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
-import { paintFieldDiffs } from './diffview.mjs';
+import { renderPersonDiff } from './diffview.mjs';
 
 export function castPanel(doc, io) {
     const $ = (tag, attrs = {}, ...kids) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v); } e.append(...kids.flat().filter(x => x !== null && x !== undefined && x !== false)); return e; };
@@ -206,15 +206,15 @@ export function castPanel(doc, io) {
             const review = proposal && x.candidate === 'review';
             const again = proposal && (x.candidate === 'failed' || x.candidate === 'working');
             return [' ',
-                (review || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
-                again ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'retry') }, 'Check again') : null,
+                proposal ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, again ? 'retry' : 'edit', again ? {} : { scope: x.scopeLevel || 'light' }) }, 'Check again') : null,
                 (proposal && x.scopeLevel && x.candidate !== 'working') ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'edit', { scope: x.scopeLevel === 'heavy' ? 'light' : 'heavy' }) }, x.scopeLevel === 'heavy' ? 'Make it a light touch' : 'Make it a full rewrite') : null,
+                (review || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
                 (proposal || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'discard') }, 'Discard') : null,
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, x.off ? 'on' : 'off') }, x.off ? 'Turn on' : 'Turn off'),
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'undo') }, 'Undo')];
         };
         return [st.length ? $('ul', { class: 'cast-stamps' }, ...st.map(x => $('li', { class: x.off ? 'off' : '', 'data-type': x.type },
-            $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '', ...controls(x), x.diffs ? paintFieldDiffs(doc, x.diffs) : null)))
+            $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '', ...controls(x), x.diffs ? renderPersonDiff(doc, { title: r.name || r.id || '', rows: x.diffs }) : null)))
             : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'), permanentBox(r)].filter(Boolean);
     }
     function warnPane(r) {
