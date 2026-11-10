@@ -199,7 +199,7 @@ export function castPanel(doc, io) {
     function changesPane(r) {
         if (!r.play) return [$('p', { class: 'muted' }, 'Open a chat to see what changed.')];
         const st = stampRows(r.play);
-        const act = (x, action) => io.decideNpc?.({ identity: x.identity, decisionRev: x.decisionRev, action, payload: action === 'approve' ? { token: x.candidateToken } : {} });
+        const act = (x, action, extra = {}) => io.decideNpc?.({ identity: x.identity, decisionRev: x.decisionRev, action, payload: action === 'approve' ? { token: x.candidateToken } : extra });
         const controls = x => {
             if (!x.identity || x.type === 'npc_appearance_cache') return [];
             const proposal = (x.type === 'npc_appearance' || x.type === 'npc_baseline') && x.candidate;
@@ -208,6 +208,7 @@ export function castPanel(doc, io) {
             return [' ',
                 (review || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
                 again ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'retry') }, 'Check again') : null,
+                (proposal && x.scopeLevel && x.candidate !== 'working') ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'edit', { scope: x.scopeLevel === 'heavy' ? 'light' : 'heavy' }) }, x.scopeLevel === 'heavy' ? 'Make it a light touch' : 'Make it a full rewrite') : null,
                 (proposal || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'discard') }, 'Discard') : null,
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, x.off ? 'on' : 'off') }, x.off ? 'Turn on' : 'Turn off'),
                 proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'undo') }, 'Undo')];

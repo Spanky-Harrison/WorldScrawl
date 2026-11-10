@@ -1,7 +1,7 @@
 // Appearance replay. The pinned baseline is the cast template copied once per person for this chat.
 // The lasting result is one ordered replay of committed lasting operations. The live result adds
 // surviving temporary owners. Composition keys are those inputs, never the decision counter.
-import { effectFields, looksInputKey } from './npceffects.mjs';
+import { appearanceScope, effectFields, looksInputKey } from './npceffects.mjs';
 
 export const BASELINE_KEY = 'worldscrawl_npc_baseline';
 export const COMPOSE_KEY = 'worldscrawl_compose';
@@ -109,6 +109,7 @@ export function contentIdOf(committed, start, lasts) {
         intent: c.intent || '',
         fields: c.fields || '',
         layer: c.layer || null,
+        ...(c.kind === 'appearance' && appearanceScope(c.scope) === 'heavy' ? { scope: 'heavy' } : {}),
         field: c.field || '',
         text: c.text || '',
         start: Number.isFinite(start) ? start : 0,
@@ -264,7 +265,7 @@ export function previewOps(ordered, candidate, ownerId, start, elapsed = null) {
     const lasts = candidate?.proposedLasts ?? null;
     const committed = candidate?.kind === 'baseline'
         ? { kind: 'baseline', field: candidate.field, text: candidate.text ?? '' }
-        : { kind: 'appearance', intent: candidate?.intent ?? '', fields: candidate?.fields ?? 'body,outfit', layer: candidate?.layer ?? {} };
+        : { kind: 'appearance', intent: candidate?.intent ?? '', fields: candidate?.fields ?? 'body,outfit', layer: candidate?.layer ?? {}, scope: appearanceScope(candidate?.scope) };
     const ghost = {
         type: candidate?.kind === 'baseline' ? 'npc_baseline' : 'npc_appearance',
         identity: { owner: ownerId },

@@ -1,7 +1,7 @@
 // One dispatcher for NPC decisions. Appearance uses committed + candidate.
 // Other types keep their own stamp fields. Composition jobs are not owners.
 import { FOUND_KEY } from './npc.mjs';
-import { classifyAppearanceReply, looksInputKey } from './npceffects.mjs';
+import { appearanceScope, classifyAppearanceReply, looksInputKey } from './npceffects.mjs';
 import { render as P } from './shared.mjs';
 
 async function model() {
@@ -22,7 +22,7 @@ export const epochOf = msg => epochs.get(msg) ?? 0;
 
 const newToken = () => `t_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 
-export function makeOwner({ type = 'npc_appearance', kind = 'appearance', id, intent = '', fields = 'body,outfit', layer = {}, field = '', text = '', lasts = null, start = 0, chatId = '', message = '', swipe = 0, source = '' }) {
+export function makeOwner({ type = 'npc_appearance', kind = 'appearance', id, intent = '', fields = 'body,outfit', layer = {}, field = '', text = '', lasts = null, start = 0, chatId = '', message = '', swipe = 0, source = '', scope = 'light', why = '' }) {
     const owner = `o_${hash(`${id}|${intent}|${start}|${Math.random()}`)}`;
     return {
         type, kind, id, owner, intent, source, swipe,
@@ -30,7 +30,7 @@ export function makeOwner({ type = 'npc_appearance', kind = 'appearance', id, in
         contentId: null, decisionRev: 1, off: false, start, lasts,
         committed: null,
         candidate: {
-            token: newToken(), epoch: 0, proposedLasts: lasts, kind, intent, fields, layer, field, text,
+            token: newToken(), epoch: 0, proposedLasts: lasts, kind, intent, fields, layer, field, text, scope: appearanceScope(scope), why,
             phase: 'working', lastingKey: '', liveKey: '', lastingPreview: null, livePreview: null,
         },
     };
@@ -115,7 +115,8 @@ async function askFields(name, baseline, ops, timeout) {
         const c = o.committed ?? {};
         if (c.kind === 'baseline') return `${i + 1}. replace ${c.field} with the player's text: ${c.text}`;
         const layer = c.layer?.body || c.layer?.outfit ? ` text ${JSON.stringify(c.layer)}` : '';
-        return `${i + 1}. ${c.intent || 'change'} [${c.fields || 'body,outfit'}]${layer}`;
+        const how = appearanceScope(c.scope) === 'heavy' ? ' (full rewrite)' : ' (light touch)';
+        return `${i + 1}. ${c.intent || 'change'} [${c.fields || 'body,outfit'}]${how}${layer}`;
     }).join('\n') || '(none)';
     const base = `- body: ${baseline.body || '(empty)'}\n- outfit: ${baseline.outfit || '(empty)'}`;
     let last = { kind: 'malformed', reason: 'no answer' };
@@ -296,7 +297,7 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
         stamp.decisionRev += 1;
         stamp.committed = c.kind === 'baseline' || stamp.kind === 'baseline'
             ? { kind: 'baseline', field: c.field, text: c.text ?? '' }
-            : { kind: 'appearance', intent: c.intent ?? '', fields: c.fields ?? 'body,outfit', layer: { ...(c.layer ?? {}) } };
+            : { kind: 'appearance', intent: c.intent ?? '', fields: c.fields ?? 'body,outfit', layer: { ...(c.layer ?? {}) }, scope: appearanceScope(c.scope), why: c.why || '' };
         stamp.kind = stamp.committed.kind;
         stamp.lasts = lasts;
         stamp.contentId = contentIdOf(stamp.committed, stamp.start, stamp.lasts);
@@ -358,6 +359,8 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
                 intent: payload.intent ?? prev.intent ?? stamp.committed?.intent ?? stamp.intent ?? '',
                 fields: payload.fields ?? prev.fields ?? stamp.committed?.fields ?? 'body,outfit',
                 layer: payload.layer ?? prev.layer ?? stamp.committed?.layer ?? {},
+                scope: appearanceScope(payload.scope ?? prev.scope ?? stamp.committed?.scope),
+                why: payload.scope && payload.scope !== (prev.scope ?? stamp.committed?.scope) ? 'set by you' : (prev.why ?? stamp.committed?.why ?? ''),
                 field: payload.field ?? prev.field ?? stamp.committed?.field,
                 text: payload.text ?? prev.text ?? stamp.committed?.text ?? '',
                 phase: 'working',

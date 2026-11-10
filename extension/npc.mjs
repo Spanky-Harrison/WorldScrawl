@@ -761,6 +761,8 @@ export function npcPlayState(chat, cast, env) {
                 extra.candidate = s.candidate ? s.candidate.phase : '';
                 extra.candidateToken = s.candidate?.token || '';
                 if (s.candidate?.phase === 'review') extra.diffs = reviewFields(s.candidate);
+                const sc = s.candidate ?? s.committed;
+                if (sc && sc.kind !== 'baseline' && s.kind !== 'baseline') extra.scopeLevel = sc.scope === 'heavy' ? 'heavy' : 'light', extra.scope = `${sc.scope === 'heavy' ? 'full rewrite' : 'light touch'}${sc.why ? `: ${sc.why}` : ''}`;
             }
             else if (s.type === 'npc_appearance_cache') continue;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';

@@ -307,3 +307,8 @@ export function classifyAppearanceReply(raw, fields = []) {
     if (missing.length) return { kind: 'partial', answer: got, missing, reason: `missing ${missing.join(', ')}` };
     return { kind: 'ok', answer: got, reason: '' };
 }
+
+/** How hard the rewrite may rework the description: 'light' edits only what the change names; 'heavy' reworks anything it affects. Light unless clearly heavy. */
+export function appearanceScope(v) {
+    return /^\s*(heavy|full|rewrite|re-write|transform|major|big)/i.test(String(v ?? '')) ? 'heavy' : 'light';
+}
