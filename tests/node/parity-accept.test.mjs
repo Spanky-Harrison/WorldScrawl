@@ -1278,3 +1278,225 @@ test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matche
     assert.equal(npcForName([LANDLADY], 'the'), null);
     assert.equal(npcForName([LANDLADY], 'Hesk').id, 'hesk');
 });
+
+// ---- fix/expiry-notices: person expiries get a notice, reach the narrator, the tracker and a wait's summary;
+// a no-op proposal drops itself; the revert is editable; "[wait] until HH:MM" lands on that minute.
+const { waitFacts, keepWait, editKeptWait } = await import('../../extension/waits.mjs');
+const { onStorySwipe } = await import('../../extension/discovery.mjs');
+const { calendarLib, chatElapsed, clockAt } = await import('../../extension/clock.mjs');
+const { NPC_EXPIRED_KIND } = await import('../../extension/npcexpiry.mjs');
+const { callNotes } = await import('../../extension/calllog.mjs');
+const ROOM = { address: 'riverton:drowned_rat/bar', name: 'Bar', display_name: 'Bar', description: '', exits: [] };
+function bootAt(time = '16:20', cast = [LANDLADY]) {
+    const env = boot();
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast, start_date: { year: 1, day: 1, time } }] });
+    roomFetch();
+    const facts = [];
+    env.c.setExtensionPrompt = (key, text) => { if (key === 'worldscrawl_facts' || /facts/i.test(String(key))) facts.push(String(text ?? '')); };
+    env.facts = facts;
+    return env;
+}
+const clockText = chat => { const d = calendarLib.dateAt(chatElapsed(chat), { year: 1, day: 1, time: '16:20' }, null); return `${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}`; };
+const userMsg = mes => ({ mes, is_user: true, swipe_id: 0, extra: {} });
+/** The model: tracker answers from `tracker`, rewrites return `fields`, Looks lines return `looks`. */
+function model(c, prompts, { tracker = '{"place": null, "people": [], "wait": null}', fields = '{"body":"a furred gnoll","outfit":"wool"}', looks = '{"looks":"a hulking gnoll"}' } = {}) {
+    c.generateRaw = async (args) => {
+        const p = String(args?.prompt ?? '');
+        prompts.push(p);
+        if (/Looks line/.test(p)) return typeof looks === 'function' ? looks(p) : looks;
+        if (/Reply with JSON only:\n\{"place"/.test(p)) return typeof tracker === 'function' ? tracker(p) : tracker;
+        return typeof fields === 'function' ? fields(p) : fields;
+    };
+}
+/** Hesk turned into a gnoll for an hour at 16:20, through the real tracker JSON, fill and chat-card approval path. */
+async function gnollFor1h(c, prompts) {
+    model(c, prompts);
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"place": null, "people": [{"id": "hesk", "action": "appearance", "intent": "turned into a gnoll", "fields": "body", "lasts": "1 hour", "scope": "heavy", "why": "her whole body changed"}], "wait": null}'));
+    const owner = owners(c.chat).at(-1);
+    assert.equal(owner.candidate.phase, 'review');
+    const res = await scene.settleNpc(c.chat, owner.identity, owner.decisionRev, 'approve', { token: owner.candidate.token, elapsed: 0 });
+    assert.equal(res.ok, true, res.error);
+    assert.equal(npcAt(c.chat, 0, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body, 'a furred gnoll');
+    return owner;
+}
+
+test('[wait] until 17:15 lands on 17:15 exactly (the bracket no longer stops at the colon), with no model call', async () => {
+    const { c, prompts } = bootAt('16:20');
+    model(c, prompts);
+    for (const [text, at] of [['I [wait] until 17:15.', '17:15'], ['[wait] until 5:15 pm, then I leave', '17:15'], ['[wait] until 17.15', '17:15'], ['[wait] 1.5h', '17:50']]) {
+        const b = parseBracket(text);
+        const user = userMsg(text);
+        c.chat = [msg([]), user];
+        const r = await bracketIntent(user, b);
+        assert.notEqual(r.kind, 'bracket_failed', r.note);
+        assert.equal(clockText(c.chat), at, text);
+    }
+    assert.equal(prompts.length, 0, 'the parser read every amount; no wait-amount model call');
+    // Already past today: the next 17:15.
+    const user = userMsg('[wait] until 17:15');
+    c.chat = [msg([]), userMsg('[wait] 1h30m'), user];
+    await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
+    assert.equal(clockText(c.chat.slice(0, 2)), '17:50');
+    await bracketIntent(user, parseBracket(user.mes));
+    assert.equal(clockText(c.chat), '17:15');
+    assert.equal(c.chat[2].extra.worldscrawl_wait.seconds, 23 * 3600 + 25 * 60, 'tomorrow, not today');
+});
+
+test('a tracker wait {until: "17:15"} kept on its card also lands on 17:15', async () => {
+    const { c, prompts } = bootAt('16:20');
+    model(c, prompts);
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"place": null, "people": [], "wait": {"duration": "", "until": "17:15", "sleep": false, "reason": "waiting for the coach"}}'));
+    assert.ok(c.chat[0].extra.worldscrawl_waitcard, 'a card waits for the player');
+    assert.equal(await keepWait(0), '');
+    assert.equal(clockText(c.chat), '17:15');
+});
+
+test('a person expiry crossed by a wait: the wait summary names her, one engine notice, the narrator note, the tracker is told, and a no-op proposal drops itself', async () => {
+    const { c, prompts, facts } = bootAt('16:20');
+    await gnollFor1h(c, prompts);
+    const user = userMsg('I [wait] 2h');
+    c.chat.push(user);
+    await bracketIntent(user, parseBracket(user.mes));
+    const live = npcAt(c.chat, 1, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) }));
+    assert.equal(live.body, 'sturdy', 'the engine reverted her');
+    // E: the wait's "ran out" line, from the real waitFacts.
+    const wf = await waitFacts(c.chat, ROOM);
+    assert.match(wf, /these temporary changes ran out and are gone now: the temporary change "turned into a gnoll" on Hesk \(known to You only as "the landlady"\)\./);
+    assert.match(wf, /Describe the people as they are now/);
+    // A: one notice, like a place expiry's [Engine: ...] line, never twice.
+    const posted = await scene.postPersonExpiryNotices();
+    assert.ok(posted);
+    const notice = c.chat.at(-1);
+    assert.equal(notice.is_system, true);
+    assert.equal(notice.extra.worldscrawl_notice, true);
+    assert.equal(notice.extra.worldscrawl_notice_kind, NPC_EXPIRED_KIND);
+    assert.equal(notice.mes, '[Engine: Hesk (known to you only as "the landlady"): "turned into a gnoll" ran out. Looks now: copper braids]');
+    assert.equal(await scene.postPersonExpiryNotices(), null, 'already announced');
+    assert.equal(c.chat.filter(m => m.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND).length, 1);
+    // B: the narrator's facts say who changed back and how she looks now.
+    await scene.applyFacts();
+    const text = facts.at(-1);
+    assert.match(text, /Engine note \(already applied; this is the same person, not someone new\)/);
+    assert.match(text, /Hesk \(known to You only as "the landlady"\): the temporary change "turned into a gnoll" ran out and is gone/);
+    assert.match(text, /What they look like now: Looks: copper braids Body: sturdy Outfit: wool/);
+    // C: the story narrates her turning back; the tracker hears it already happened, and its proposal is dropped.
+    const reply = { mes: 'Hesk shudders and shrinks back into her human shape, fur falling away.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: {} };
+    c.chat.push(reply);
+    const at = c.chat.length - 1;
+    model(c, prompts, {
+        tracker: '{"place": null, "people": [{"id": "hesk", "action": "appearance", "intent": "turned back into a woman", "fields": "body", "scope": "heavy", "why": "the gnoll shape is gone"}], "wait": null}',
+        fields: '{"body":"sturdy","outfit":"wool"}',
+    });
+    await onStorySwipe(at);
+    const trackerPrompt = prompts.find(p => /Reply with JSON only:\n\{"place"/.test(p));
+    assert.ok(trackerPrompt.includes('Already done by the game (not new changes; do not report them):\nHesk [hesk]: The temporary change "turned into a gnoll" on Hesk (known to You only as "the landlady") ran out; the game already changed them back. The Body and Outfit listed above are the result.'), trackerPrompt);
+    assert.ok(prompts.some(p => /turned back into a woman \[body\]/.test(p)), 'the proposal really went through the fill');
+    assert.match(trackerPrompt, /Do not report an appearance change, or a fact, that only describes something under "Already done by the game"/);
+    assert.equal((reply.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_appearance'), false, 'the no-op proposal is not left Waiting on you');
+    assert.ok(callNotes(reply).some(n => n.kind === 'npc_appearance' && n.status === 'skipped' && /no change: the result matches how Hesk looks now/.test(n.reason)), JSON.stringify(callNotes(reply)));
+    const doc = makeDoc();
+    globalThis.document = doc;
+    doc.querySelector('.mes').setAttribute('mesid', String(at));
+    renderPatchCards();
+    assert.equal(doc.querySelector('.worldscrawl_npcpending'), null);
+    // The next turn is not told again.
+    c.chat.push(userMsg('I look at her.'));
+    assert.deepEqual(scene.freshPersonExpiries(c.chat, c.chat.length - 1), []);
+    await scene.applyFacts();
+    assert.doesNotMatch(facts.at(-1), /Engine note/);
+});
+
+test('the no-op backstop keeps a real change: a tracker proposal that does change her still waits on the card', async () => {
+    const { c, prompts } = bootAt('16:20');
+    model(c, prompts, { fields: '{"body":"sturdy, with a fresh bruise on one cheek","outfit":"wool"}' });
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "appearance", "intent": "a bruise on her cheek", "fields": "body", "lasts": "1 day", "scope": "light", "why": "one detail"}]}'));
+    const owner = owners(c.chat).at(-1);
+    assert.equal(owner.candidate.phase, 'review');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    assert.ok(doc.querySelector('.worldscrawl_npcpending'));
+});
+
+test('the expiry notice Edit: Body/Outfit boxes like the person card, Approve edited commits a player-edited lasting change once', async () => {
+    const { c, prompts } = bootAt('16:20');
+    await gnollFor1h(c, prompts);
+    const user = userMsg('[wait] 2h');
+    c.chat.push(user);
+    await bracketIntent(user, parseBracket(user.mes));
+    await scene.postPersonExpiryNotices();
+    const at = c.chat.length - 1;
+    const doc = makeDoc();
+    globalThis.document = doc;
+    doc.querySelector('.mes').setAttribute('mesid', String(at));
+    renderPatchCards();
+    const box = doc.querySelector('.worldscrawl_npcexpired');
+    assert.ok(box);
+    assert.match(box.textContent, /Body now: sturdy/);
+    assert.match(box.textContent, /Outfit now: wool/);
+    assert.deepEqual(buttons(box), ['Edit']);
+    byText(box, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const open = doc.querySelector('.worldscrawl_npcexpired');
+    const tas = open.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(tas.map(t => [t.dataset.field, t.value]), [['body', 'sturdy'], ['outfit', 'wool']]);
+    assert.deepEqual(buttons(open), ['Close editor', 'Approve edited']);
+    tas[0].value = 'sturdy, with a few coarse gnoll hairs still clinging to her forearms';
+    tas[0].dispatchEvent({ type: 'input' });
+    const fieldCalls = () => prompts.filter(p => !/Looks line/.test(p) && !/Reply with JSON only/.test(p)).length;
+    const before = fieldCalls();
+    const ok = byText(open, '.worldscrawl_card_btn', 'Approve edited');
+    ok.click();
+    ok.click();
+    await flush();
+    const mine = (c.chat[at].extra[NPC_KEY] ?? []).filter(s => s.type === 'npc_appearance');
+    assert.equal(mine.length, 1, 'the second click is ignored');
+    const o = mine[0];
+    assert.equal(o.candidate, null);
+    assert.equal(o.committed.layer.body, 'sturdy, with a few coarse gnoll hairs still clinging to her forearms');
+    assert.equal(o.committed.fields, 'body');
+    assert.equal(o.committed.edited, true);
+    assert.equal(o.by, 'player');
+    assert.equal(o.lasts, null);
+    assert.equal(o.source, 'expiry_edit');
+    assert.equal(fieldCalls(), before, 'typed text needs no rewrite call');
+    const now = npcAt(c.chat, c.chat.length - 1, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) }));
+    assert.equal(now.body, 'sturdy, with a few coarse gnoll hairs still clinging to her forearms');
+    assert.equal(now.outfit, 'wool');
+    renderPatchCards();
+    assert.equal(doc.querySelector('.worldscrawl_npcexpired').querySelectorAll('.worldscrawl_card_btn').length, 0, 'the notice Edit gives way to the change row');
+    const row = doc.querySelector('.worldscrawl_npcchange');
+    assert.ok(buttons(row).includes('Turn off') && buttons(row).includes('Undo'));
+    byText(row, '.worldscrawl_card_btn', 'Undo').click();
+    await flush();
+    assert.equal(npcAt(c.chat, c.chat.length - 1, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body, 'sturdy');
+    // Same text as now refuses instead of saving a no-op.
+    const res = await scene.editExpiryRevert(at, 'hesk', { body: 'sturdy', outfit: 'wool' });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /same as now/);
+});
+
+test('re-timing a kept wait rechecks person expiries too, and a temporary fact that runs out is named in the wait line', async () => {
+    const { c, prompts } = bootAt('16:20');
+    await gnollFor1h(c, prompts);
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "fact", "text": "has a split lip", "lasts": "90 minutes"}]}'));
+    model(c, prompts);
+    await applyTrackerResult(0, readTrackerAnswer('{"place": null, "people": [], "wait": {"duration": "30m", "until": "", "sleep": false, "reason": "a short rest"}}'));
+    assert.equal(await keepWait(0), '');
+    assert.equal(c.chat.some(m => m.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND), false, 'nothing ran out in 30 minutes');
+    const longer = await editKeptWait(0, '2h');
+    assert.ok(longer.crossed.some(g => /"turned into a gnoll" on Hesk/.test(g.note)), JSON.stringify(longer.crossed));
+    assert.ok(longer.crossed.some(g => /temporary detail "has a split lip" on Hesk/.test(g.note)));
+    assert.ok(c.chat.some(m => m.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND), 'the re-timed wait posts the notice');
+    c.chat.splice(1);
+    const shorter = await editKeptWait(0, '30m');
+    assert.ok(shorter.uncrossed.some(g => /"turned into a gnoll" on Hesk/.test(g.note)));
+    // The real waitFacts for a 2h wait lists both, people after the time passing.
+    c.chat.push(userMsg('[wait] 2h'));
+    await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
+    const wf = await waitFacts(c.chat, ROOM);
+    assert.match(wf, /ran out and are gone now: [^\n]*the temporary change "turned into a gnoll" on Hesk[^\n]*; the temporary detail "has a split lip" on Hesk/);
+});
