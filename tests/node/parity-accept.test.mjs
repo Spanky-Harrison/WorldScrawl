@@ -1082,11 +1082,199 @@ test('the person card is laid out like the place card: summary list, framed Remo
     await flush();
     const box = doc.querySelector('.worldscrawl_npc_intent');
     assert.ok(box);
-    assert.ok(!byText(doc, '.worldscrawl_card_btn', 'Approve'), 'the edited change is rewritten and reviewed before it can be approved');
+    assert.ok(!byText(doc, '.worldscrawl_card_btn', 'Approve'), 'plain Approve gives way to Approve edited while editing');
+    // While editing the row follows the place card's: Check again, Close editor, scope switch, Rewrite with this, Approve edited, Discard.
+    assert.deepEqual(doc.querySelector('.worldscrawl_npcpending').querySelectorAll('.worldscrawl_card_btn').map(b => b.textContent),
+        ['Check again', 'Close editor', 'Make it a full rewrite', 'Rewrite with this', 'Approve edited', 'Discard']);
     box.value = 'turned into a wolf';
     box.dispatchEvent({ type: 'input' });
     byText(doc, '.worldscrawl_card_btn', 'Rewrite with this').click();
     await flush();
     assert.equal(next.candidate.intent, 'turned into a wolf');
     assert.equal(next.candidate.phase, 'review');
+});
+
+// ---- fix/npc-five: tracker scope, full rewrite prompt, direct text edit, learned names, finding by alias.
+const { readTrackerAnswer, trackerPeopleLines } = await import('../../extension/tracker.mjs');
+const { applyTrackerResult } = await import('../../extension/discovery.mjs');
+const { nameKnown, npcForName, FOUND_KEY } = await import('../../extension/npc.mjs');
+const { bracketIntent, parseBracket } = await import('../../extension/brackets.mjs');
+const LANDLADY = { ...HESK, unknownAs: 'the landlady' };
+const promptText = id => PROMPTS.prompts.find(e => e.id === id).text;
+const { exitsCache } = await import('../../extension/footer.mjs');
+const roomFetch = () => { exitsCache.clear(); globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => '' }, json: async () => ({ address: 'riverton:drowned_rat/bar', name: 'Bar', display_name: 'Bar', description: '', exits: [] }) }); };
+
+test('real tracker JSON keeps scope and why all the way to the owner, the rewrite prompt and the card', async () => {
+    const { c, prompts } = boot();
+    c.chat = [msg([])];
+    c.generateRaw = async (args) => { const p = String(args?.prompt ?? ''); prompts.push(p); return /Looks line/.test(p) ? '{"looks":"a gnoll"}' : '{"body":"a hulking gnoll","outfit":"wool"}'; };
+    const raw = '```json\n{"place": null, "people": [{"id": "hesk", "action": "appearance", "intent": "turned into a gnoll", "fields": "body", "lasts": "1 hour", "scope": "heavy", "why": "her whole body changed"}], "wait": null}\n```';
+    const parsed = readTrackerAnswer(raw);
+    assert.equal(parsed.people[0].scope, 'heavy');
+    assert.equal(parsed.people[0].why, 'her whole body changed');
+    await applyTrackerResult(0, parsed);
+    const owner = owners(c.chat).at(-1);
+    assert.equal(owner.candidate.scope, 'heavy');
+    assert.equal(owner.candidate.why, 'her whole body changed');
+    assert.equal(owner.candidate.phase, 'review', 'applyTrackerResult filled the candidate itself');
+    assert.ok(prompts.some(p => /turned into a gnoll \[body\] \(full rewrite\)/.test(p)), 'the rewrite was asked as a full rewrite');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    const card = doc.querySelector('.worldscrawl_npcpending');
+    assert.match(card.querySelector('.worldscrawl_scope').textContent, /^Full rewrite: her whole body changed$/);
+    assert.ok(byText(doc, '.worldscrawl_card_btn', 'Make it a light touch'));
+});
+
+test('a tracker answer with no scope is a light touch that says it was not judged, not a reason nobody gave', async () => {
+    const { c } = boot();
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "appearance", "intent": "hair dyed blue", "fields": "body", "why": "only her hair"}]}'));
+    const owner = owners(c.chat).at(-1);
+    assert.equal(owner.candidate.scope, 'light');
+    assert.equal(owner.candidate.why, 'not judged, so the default');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    assert.equal(doc.querySelector('.worldscrawl_scope').textContent, 'Light touch: not judged, so the default');
+});
+
+test('prompts: the tracker judges scope by the result, and a full rewrite rebuilds the field instead of keeping sentences', () => {
+    const tracker = promptText('npc.tracker');
+    assert.match(tracker, /Always set scope/);
+    assert.match(tracker, /not by how many words the change takes: "turned into a gnoll" is short but heavy/);
+    const sys = promptText('npc.appearance_rebuild_system');
+    assert.doesNotMatch(sys, /keep details the change does not contradict/);
+    assert.match(sys, /For a full rewrite, write that field again from scratch for what they are now/);
+    assert.match(sys, /frame and build, skin, fur or scales, head and face, hands/);
+    assert.match(sys, /Do not keep the base's sentences or follow its sentence structure/);
+    assert.match(sys, /Carry over only identifying details that still make sense on the new body, such as a scar or eye colour/);
+    assert.match(sys, /For a light touch, change only the words that intent names and keep every other word as written\./);
+    assert.match(sys, /Never copy a previous combined description; start from the base\./);
+});
+
+test('Edit shows the proposed Body and Outfit text; Approve edited commits exactly that text with no fields call, then re-summarizes Looks', async () => {
+    const { c, prompts } = boot();
+    const next = appearance({ intent: 'turned into a gnoll', fields: 'body', layer: {}, owner: 'ed1' });
+    c.chat = [msg([next])];
+    c.generateRaw = async (args) => { const p = String(args?.prompt ?? ''); prompts.push(p); return /Looks line/.test(p) ? '{"looks":"a grey-eyed gnoll"}' : '{"body":"a furred gnoll","outfit":"wool"}'; };
+    const filled = await scene.fillCandidate(c.chat, next.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const boxes = doc.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field, b.value]), [['lasting', 'body', 'a furred gnoll'], ['lasting', 'outfit', 'wool']]);
+    assert.ok(doc.querySelector('.worldscrawl_npc_intent'), 'the Change box and Rewrite with this stay');
+    assert.ok(byText(doc, '.worldscrawl_card_btn', 'Rewrite with this'));
+    assert.deepEqual(doc.querySelector('.worldscrawl_npcpending').querySelectorAll('.worldscrawl_card_btn').map(b => b.textContent),
+        ['Check again', 'Close editor', 'Make it a full rewrite', 'Rewrite with this', 'Approve edited', 'Discard']);
+    boxes[0].value = 'A hulking grey gnoll with a scar through one eyebrow.';
+    boxes[0].dispatchEvent({ type: 'input' });
+    const fieldCalls = () => prompts.filter(p => !/Looks line/.test(p)).length;
+    const before = fieldCalls();
+    const rev = next.decisionRev;
+    const approve = byText(doc, '.worldscrawl_card_btn', 'Approve edited');
+    approve.click();
+    approve.click();
+    await flush();
+    assert.equal(next.decisionRev, rev + 1, 'the second click is ignored');
+    assert.equal(next.candidate, null);
+    assert.equal(next.committed.layer.body, 'A hulking grey gnoll with a scar through one eyebrow.');
+    assert.equal(next.committed.layer.outfit, undefined, 'an untouched field is not pinned');
+    assert.equal(next.committed.fields, 'body');
+    assert.equal(next.committed.edited, true);
+    assert.equal(next.committed.why, 'text edited by you');
+    assert.equal(next.lasts, null);
+    assert.equal(fieldCalls(), before, 'approving typed text asks no rewrite');
+    const live = npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 }));
+    assert.equal(live.body, 'A hulking grey gnoll with a scar through one eyebrow.');
+    assert.equal(live.outfit, 'wool');
+    assert.ok(prompts.some(p => /Looks line/.test(p) && /A hulking grey gnoll/.test(p)), 'Looks is summarized from the typed body');
+    assert.equal(live.looks, 'a grey-eyed gnoll');
+    assert.equal(cacheRows(c.chat), false);
+});
+
+test('Approve edited on a temporary change edits the for-now text and keeps its duration', async () => {
+    const { c, prompts } = boot();
+    const next = appearance({ intent: 'soaked', fields: 'outfit', layer: {}, lasts: 60, owner: 'ed2' });
+    c.chat = [msg([next])];
+    c.generateRaw = async (args) => { const p = String(args?.prompt ?? ''); prompts.push(p); return /Looks line/.test(p) ? '{"looks":"dripping"}' : '{"body":"sturdy","outfit":"a soaked wool dress"}'; };
+    const filled = await scene.fillCandidate(c.chat, next.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const boxes = doc.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field]), [['live', 'body'], ['live', 'outfit']]);
+    const outfit = boxes.find(b => b.dataset.field === 'outfit');
+    outfit.value = 'a wool dress wrung out and still dripping';
+    outfit.dispatchEvent({ type: 'input' });
+    byText(doc, '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush();
+    assert.equal(next.committed?.layer?.outfit, 'a wool dress wrung out and still dripping');
+    assert.equal(next.lasts, 60);
+    assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 })).outfit, 'a wool dress wrung out and still dripping');
+    assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 3600 })).outfit, 'wool', 'it still wears off');
+});
+
+test('Approve edited with text identical to now refuses instead of committing a no-op', async () => {
+    const { c } = boot();
+    const next = appearance({ intent: 'gnoll', fields: 'body', layer: {}, owner: 'ed3' });
+    c.chat = [msg([next])];
+    await scene.fillCandidate(c.chat, next.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    const res = scene.decideNpc(c.chat, next.identity, next.decisionRev, 'approve', { token: next.candidate.token, elapsed: 0, edited: { lasting: { body: 'sturdy', outfit: 'wool' } } });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /same as now/);
+    assert.equal(next.committed, null);
+});
+
+test('the tracker is told who is not known by name, and its real name answer stamps the learned name', async () => {
+    const { c } = boot();
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY] }] });
+    const lines = trackerPeopleLines([{ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', nameKnown: false }, { id: 'tam', name: 'Tam', nameKnown: true }]);
+    assert.match(lines, /^Hesk \[hesk\]\. Name not yet known to the player: they know this person only as "the landlady"\./);
+    assert.doesNotMatch(lines.split('\n')[1], /not yet known/);
+    assert.match(promptText('npc.tracker'), /not yet known by name has their name said in this exchange[^\n]*"action": "name"/);
+    c.chat = [msg([])];
+    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "name", "name": "Hesk"}]}'));
+    assert.ok(c.chat[0].extra[NPC_KEY].some(s => s.type === 'npc_name' && s.id === 'hesk'));
+    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, true);
+    // By the shown name, as the tracker might write it.
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "the landlady", "action": "name"}]}'));
+    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, true);
+});
+
+test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matches nobody', async () => {
+    const { c } = boot();
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY] }] });
+    roomFetch();
+    for (const text of ['I [find] the landlady', 'I [found] landlady']) {
+        const b = parseBracket(text);
+        assert.equal(b.verb, 'found');
+        const user = { mes: text, is_user: true, swipe_id: 0, extra: {} };
+        c.chat = [msg([]), user];
+        const r = await bracketIntent(user, b);
+        assert.equal(r.kind, 'found', r.note);
+        const d = user.extra[FOUND_KEY].at(-1);
+        assert.equal(d.id, 'hesk', d.reason);
+        assert.doesNotMatch(d.reason, /No saved person/);
+    }
+    // The tracker's found action goes through the same lookup.
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"action": "found", "name": "the landlady"}]}'));
+    assert.equal(c.chat[0].extra[FOUND_KEY].at(-1).id, 'hesk');
+    const guards = [{ id: 'g1', name: 'Bors', unknownAs: 'the old guard' }, { id: 'g2', name: 'Ulf', unknownAs: 'the gate guard' }];
+    assert.equal(npcForName(guards, 'guard'), null, 'two people fit: no match');
+    assert.equal(npcForName(guards, 'the gate guard').id, 'g2', 'an exact shown name still wins');
+    assert.equal(npcForName([...guards, { id: 'g3', name: 'Guard', unknownAs: '' }, { id: 'g4', name: 'Ivo', unknownAs: 'the guard' }], 'guard'), null, 'a name and another person\'s shown name tie: no match');
+    assert.equal(npcForName([LANDLADY], "the landlady's daughter"), null, 'a longer description is not her');
+    assert.equal(npcForName([LANDLADY], 'the'), null);
+    assert.equal(npcForName([LANDLADY], 'Hesk').id, 'hesk');
 });
