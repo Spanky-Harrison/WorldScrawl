@@ -259,6 +259,17 @@ function pendingNpcCard(msg, s, who) {
     return d;
 }
 
+/** The text boxes Edit shows: the result this change writes (lasting, or for now when it wears off), plus for now when a temporary change sits on top. */
+function editRows(c) {
+    if (!c?.lastingPreview || !c?.livePreview) return [];
+    const temp = c.proposedLasts > 0, both = !temp && c.liveKey !== c.lastingKey;
+    const rows = [];
+    if (!temp) for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) rows.push({ part: 'lasting', field, label: `${name}${both ? ' (lasting)' : ''}` });
+    if (temp || both) for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) rows.push({ part: 'live', field, label: `${name} (for now)` });
+    return rows;
+}
+const editSeed = c => ({ lasting: { body: c?.lastingPreview?.body ?? '', outfit: c?.lastingPreview?.outfit ?? '' }, live: { body: c?.livePreview?.body ?? '', outfit: c?.livePreview?.outfit ?? '' } });
+
 /** The review card for a person's appearance change, laid out like the place card: summary list, red/green panel, one row. */
 function ownerCard(msg, s, who) {
     const d = markPending(document.createElement('div'));
@@ -305,6 +316,21 @@ function ownerCard(msg, s, who) {
         inp.addEventListener('click', e => e.stopPropagation());
         inp.addEventListener('input', () => { open.intent = inp.value; });
         d.append(fieldsOf('Change:', inp));
+        // The proposed text itself, editable like the place editor's fields; Approve edited keeps exactly this.
+        if (phase === 'review') {
+            if (!open.text || open.token !== s.candidate.token) { open.text = editSeed(s.candidate); open.token = s.candidate.token; }
+            for (const r of editRows(s.candidate)) {
+                const ta = document.createElement('textarea');
+                ta.className = 'text_pole worldscrawl_npc_text';
+                ta.dataset.part = r.part; ta.dataset.field = r.field;
+                ta.rows = 3; ta.value = open.text[r.part]?.[r.field] ?? '';
+                ta.style.cssText = 'width:100%;margin:2px 0;padding:2px 4px;';
+                ta.addEventListener('click', e => e.stopPropagation());
+                ta.addEventListener('input', () => { open.text[r.part] = { ...(open.text[r.part] ?? {}), [r.field]: ta.value }; });
+                const cap = document.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = r.label;
+                d.append(cap, ta);
+            }
+        }
     }
     const buttons = [];
     buttons.push(cardButton('Check again', () => askAgain('own-re'), 'Ask again for this body and outfit', true));
@@ -314,11 +340,14 @@ function ownerCard(msg, s, who) {
     if (scoped && phase !== 'working') buttons.push(cardButton(heavy ? 'Make it a light touch' : 'Make it a full rewrite', () => askAgain('own-scope', { scope: heavy ? 'light' : 'heavy' }),
         heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true));
     if (open) buttons.push(cardButton('Rewrite with this', () => { const intent = (open.intent ?? '').trim() || s.candidate?.intent; openForms.delete(formKey); return askAgain('own-edit', { intent }); }, 'Rewrite the body and outfit for the edited change', true));
-    if (phase === 'review' && !open) buttons.push(cardButton('Approve', () => once(`own-ok:${ident?.owner}`, async () => {
-        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token });
+    if (phase === 'review') buttons.push(cardButton(open ? 'Approve edited' : 'Approve', () => once(`own-ok:${ident?.owner}`, async () => {
+        const edited = open ? { lasting: { ...(open.text?.lasting ?? {}) }, live: { ...(open.text?.live ?? {}) } } : null;
+        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, ...(edited ? { edited } : {}) });
+        if (res?.ok) openForms.delete(formKey);
+        else if (res?.error && edited) toastr.warning(`WorldScrawl: ${res.error}`);
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
         return res;
-    }), 'Apply the reviewed body and outfit', true));
+    }), open ? 'Apply the body and outfit exactly as typed in the boxes' : 'Apply the reviewed body and outfit', true));
     buttons.push(cardButton('Discard', () => once(`own-no:${ident?.owner}`, async () => {
         openForms.delete(formKey);
         await settleNpc(chat(), ident, rev, 'discard', {});

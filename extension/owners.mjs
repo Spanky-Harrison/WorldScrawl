@@ -275,7 +275,7 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
     const policy = policyFor(stamp.type);
     if (!policy[action] && action !== 'check') return { ok: false, error: `${action} is not available for ${stamp.type}` };
     if (action === 'approve' && isOwnerStamp(stamp)) {
-        const c = stamp.candidate;
+        let c = stamp.candidate;
         if (!c || c.phase !== 'review' || !c.lastingPreview || !c.livePreview || !c.lastingKey || !c.liveKey) return { ok: false, error: 'not reviewable' };
         if (c.token !== payload.token) return { ok: false, stale: true };
         if (epochOf(msg) !== c.epoch) return { ok: false, stale: true };
@@ -294,10 +294,16 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
             stamp.candidate = { ...c, phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
             return { ok: false, stale: true, refill: true };
         }
+        if (payload.edited) {
+            const ed = editedCandidate(chat, stamp, c, payload.edited, payload.elapsed);
+            if (ed.error) return { ok: false, error: ed.error };
+            c = ed.candidate;
+        }
         stamp.decisionRev += 1;
         stamp.committed = c.kind === 'baseline' || stamp.kind === 'baseline'
             ? { kind: 'baseline', field: c.field, text: c.text ?? '' }
-            : { kind: 'appearance', intent: c.intent ?? '', fields: c.fields ?? 'body,outfit', layer: { ...(c.layer ?? {}) }, scope: appearanceScope(c.scope), why: c.why || '' };
+            : { kind: 'appearance', intent: c.intent ?? '', fields: c.fields ?? 'body,outfit', layer: { ...(c.layer ?? {}) }, scope: appearanceScope(c.scope), why: c.why || '', ...(c.edited ? { edited: true } : {}) };
+        if (c.edited) stamp.by = 'player';
         stamp.kind = stamp.committed.kind;
         stamp.lasts = lasts;
         stamp.contentId = contentIdOf(stamp.committed, stamp.start, stamp.lasts);
@@ -376,6 +382,29 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
         return { ok: true, rev: stamp.decisionRev };
     }
     return { ok: false, error: 'unsupported' };
+}
+
+/**
+ * Approve edited: the player's own Body/Outfit text becomes this change. The text replaces the fields this change
+ * alters as an explicit layer, and the reviewed results are the typed text, so approving it needs no model call.
+ * `edited` is {lasting: {body, outfit}, live: {body, outfit}}; a temporary change edits only live.
+ */
+function editedCandidate(chat, stamp, c, edited, elapsed) {
+    if (c.kind === 'baseline' || stamp.kind === 'baseline') return { error: 'A base text change is edited as text already.' };
+    const temp = c.proposedLasts > 0;
+    const pick = (row, fb) => ({ body: String(row?.body ?? fb?.body ?? ''), outfit: String(row?.outfit ?? fb?.outfit ?? '') });
+    const sameKey = c.liveKey === c.lastingKey;
+    const own = temp ? pick(edited.live, c.livePreview) : pick(edited.lasting, c.lastingPreview);
+    const before = temp ? (c.liveBefore ?? {}) : (c.lastingBefore ?? {});
+    const touched = ['body', 'outfit'].filter(f => own[f].trim() && own[f].trim() !== String(before[f] ?? '').trim());
+    if (!touched.length) return { error: 'The edited text is the same as now. Discard the change instead.' };
+    const layer = Object.fromEntries(touched.map(f => [f, own[f].trim()]));
+    const next = { ...c, fields: touched.join(','), layer, why: 'text edited by you', edited: true };
+    const keys = replayKeys(chat, stamp, next, elapsed);
+    const lastingPreview = temp ? { ...c.lastingPreview } : { body: own.body.trim() || String(before.body ?? ''), outfit: own.outfit.trim() || String(before.outfit ?? '') };
+    const livePreview = temp ? { body: own.body.trim() || String(before.body ?? ''), outfit: own.outfit.trim() || String(before.outfit ?? '') }
+        : keys.live === keys.lasting || sameKey ? { ...lastingPreview } : pick(edited.live, c.livePreview);
+    return { candidate: { ...next, lastingKey: keys.lasting, liveKey: keys.live, lastingPreview, livePreview } };
 }
 
 export function beginCandidate(stamp, msg) {

@@ -54,6 +54,7 @@ export function listedPeople(chat, id, loc) {
             const stance = p.disposition?.[PLAYER];
             return {
                 id: p.id, name: p.name, looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
+                unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false,
                 facts: [...(p.facts ?? [])], memory: [...(p.memory ?? [])],
                 stance: stance?.value || '', stanceReason: stance?.reason || '',
             };
@@ -621,6 +622,7 @@ function npcDetail(id) {
     if (npc.deep?.relationships) bits.push(`Relationships: ${Object.entries(npc.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
     return bits.filter(Boolean).join('\n');
 }
+const SCOPE_NOT_GIVEN = 'not judged, so the default';
 function toolNpcStamp(args = {}) {
     const action = String(args.action ?? '').toLowerCase();
     const id = String(args.id ?? '').trim();
@@ -639,8 +641,10 @@ function toolNpcStamp(args = {}) {
         const lasts = lastsMinutes(args.lasts);
         const stamp = { type: 'npc_appearance', id, intent, ...(args.fields != null && args.fields !== '' ? { fields: args.fields } : {}), ...(lasts ? { lasts } : {}) };
         for (const f of ['looks', 'body', 'outfit']) if (typeof args[f] === 'string' && args[f].trim()) stamp[f] = String(args[f]).trim();
-        stamp.scope = appearanceScope(args.scope);
-        const why = String(args.why ?? args.scope_reason ?? '').trim();
+        // No scope given: light, and the card says it was not judged rather than showing a reason nobody gave.
+        const given = String(args.scope ?? '').trim();
+        stamp.scope = appearanceScope(given);
+        const why = given ? String(args.why ?? args.scope_reason ?? '').trim() : SCOPE_NOT_GIVEN;
         if (why) stamp.why = why.slice(0, 200);
         return stamp;
     }

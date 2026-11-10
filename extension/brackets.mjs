@@ -29,7 +29,7 @@ export const VERBS = [
     { id: 'lore', words: ['lore'], slash: null, help: 'bring up what locals know about this place (its lore) for the rest of the scene, e.g. [lore] or [lore] The Drowned Rat' },
     { id: 'help', words: ['help'], slash: '/ws-help', help: 'list these commands' },
     { id: 'remember', words: ['remember'], slash: '/ws-npc <name>', help: 'remember a person from the story, e.g. I [remember] Maren' },
-    { id: 'found', words: ['found'], slash: '/ws-found <name>', help: 'you found someone who is off the map, in this room, e.g. [found] Hesk' },
+    { id: 'found', words: ['found', 'find'], slash: '/ws-found <name>', help: 'you found someone who is off the map, in this room, e.g. [found] Hesk or [find] the landlady' },
     { id: 'name', words: ['name'], slash: '/ws-name <name>', help: 'you know this person\'s name from now on, e.g. [name] Hesk' },
 ];
 const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));

@@ -1214,13 +1214,21 @@ export function takeFoundFlags(text) {
     return { names, text: cleaned };
 }
 
-/** The saved person a name flag means: exact name or id first, then a name contained either way. Null when none or several. */
+const ARTICLE = /^(?:the|a|an) /;
+const bareName = s => normName(s).replace(ARTICLE, '');
+/**
+ * The saved person a name means: exact name, id, or unknownAs ("the landlady", with or without "the") first, then a
+ * name contained either way, or the words inside an unknownAs ("landlady"). Null when none or several: no match
+ * rather than the wrong person.
+ */
 export function npcForName(npcs, name) {
-    const key = normName(name);
+    const key = normName(name), bare = bareName(name);
+    if (!key) return null;
     const list = [...(npcs ?? [])];
-    const exact = list.filter(n => normName(n.name) === key || n.id === key);
+    const exact = list.filter(n => normName(n.name) === key || n.id === key || n.id === String(name ?? '').trim() || (n.unknownAs && bareName(n.unknownAs) === bare));
     if (exact.length === 1) return exact[0];
-    const loose = list.filter(n => nameIn(name, n.name) || nameIn(n.name, name));
+    if (exact.length > 1) return null;
+    const loose = list.filter(n => nameIn(name, n.name) || nameIn(n.name, name) || (n.unknownAs && bare && !ARTICLE.test(`${bare} `) && nameIn(n.unknownAs, bare)));
     return loose.length === 1 ? loose[0] : null;
 }
 
