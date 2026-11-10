@@ -331,10 +331,11 @@ export function relText(r) {
 /** The in-play changes list, oldest first. Identity and the decision revision stay on the row so Changes can call the same dispatcher as the chat card. */
 export const stampRows = play => (play?.stamps ?? []).filter(x => x.type !== 'npc_decline').map(x => ({
     msg: x.msg, type: x.type,
-    text: `${x.summary}${x.candidate ? ` (${x.candidate})` : ''}${x.preview ? `: ${x.preview}` : ''}${x.pending && !x.candidate ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`,
+    text: `${x.summary}${x.candidate ? ` (${x.candidate})` : ''}${x.scope ? ` [${x.scope}]` : ''}${x.preview ? `: ${x.preview}` : ''}${x.pending && !x.candidate ? ' (⏳ waiting on you)' : ''}${expiryText(x.expiry)}`,
     off: !!x.off, pending: !!x.pending, identity: x.identity || null, decisionRev: x.decisionRev ?? 1,
     candidate: x.candidate || '', candidateToken: x.candidateToken || '',
     diffs: Array.isArray(x.diffs) ? x.diffs : null,
+    scopeLevel: x.scopeLevel || '',
 }));
 const pad2 = n => String(n).padStart(2, '0');
 /** ' (lasting)', ' (until day 3 14:00)', ' (ended day 3 14:00)', ' (for 2h)': when a field change ends. */

@@ -130,6 +130,8 @@ function registerTools(want) {
                 lasts: { type: 'string', description: 'For fact or appearance: how long it lasts in game time (e.g. "2 hours", "3 days") when it is temporary. Leave out for a lasting change.' },
                 intent: { type: 'string', description: 'For appearance: what actually changed in Looks, Body or Outfit (e.g. "magically young", "soaked from the rain"). Not "looks" or "appeared", and not because they entered or were looked at.' },
                 fields: { type: 'string', description: 'For appearance: which of looks, body, outfit changed (comma-separated). Omit or "all" when a full rewrite.' },
+                scope: { type: 'string', enum: ['light', 'heavy'], description: 'For appearance: light when one detail changes and the rest still fits; heavy when the change remakes them (a transformation, a whole new outfit).' },
+                why: { type: 'string', description: 'For appearance: a few words on why that scope.' },
                 looks: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Looks.' },
                 body: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Body.' },
                 outfit: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; the engine rebuilds Outfit.' },
@@ -387,6 +389,7 @@ async function applyPersonStamps(id, stamped) {
                 id: s.id, intent: s.intent || '', fields: namedFields || Object.keys(layer).join(',') || 'body,outfit',
                 layer,
                 lasts: lastsMinutes(s.lasts), start: Number.isFinite(clock.elapsed) ? clock.elapsed : 0,
+                scope: s.scope, why: s.why || '',
                 chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: s.source || '',
             });
             owner.candidate.epoch = epochOf(msg);

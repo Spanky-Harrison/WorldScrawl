@@ -267,6 +267,14 @@ function ownerCard(msg, s, who) {
     title.textContent = phase === 'failed' ? `Appearance for ${who} did not resolve.` : phase === 'review' ? `Proposed appearance for ${who}` : `Preparing appearance for ${who}…`;
     if (s.candidate?.clockError) { const err = document.createElement('div'); err.textContent = s.candidate.clockError; d.append(err); }
     d.append(title);
+    const scoped = s.candidate && s.candidate.kind !== 'baseline' && s.kind !== 'baseline';
+    const heavy = scoped && s.candidate.scope === 'heavy';
+    if (scoped) {
+        const how = document.createElement('div');
+        how.className = 'worldscrawl_scope';
+        how.textContent = `${heavy ? 'Full rewrite' : 'Light touch'}${s.candidate.why ? `: ${s.candidate.why}` : ''}`;
+        d.append(how);
+    }
     if (phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview) {
         const rows = reviewFields(s.candidate);
         for (const r of rows) paintWordDiff(document, d, r.label, r.before, r.after);
@@ -285,13 +293,16 @@ function ownerCard(msg, s, who) {
             await settleNpc(chat(), ident, rev, 'discard', {});
         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
     }), 'Do not change this person', true));
-    buttons.push(cardButton('Check again', () => once(`own-re:${ident?.owner}`, async () => {
+    const askAgain = (key, scope) => once(`${key}:${ident?.owner}`, async () => {
         const now = chat();
         const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
-        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts });
+        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts, scope });
         if (edited?.refill) await fillCandidate(now, ident, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
         syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
-    }), 'Ask again for this body and outfit', true));
+    });
+    buttons.push(cardButton('Check again', () => askAgain('own-re', s.candidate?.scope), 'Ask again for this body and outfit', true));
+    if (scoped && phase !== 'working') buttons.push(cardButton(heavy ? 'Make it a light touch' : 'Make it a full rewrite', () => askAgain('own-scope', heavy ? 'light' : 'heavy'),
+        heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true));
     d.append(rowOf(buttons));
     return d;
 }

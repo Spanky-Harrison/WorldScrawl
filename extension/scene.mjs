@@ -1,3 +1,4 @@
+import { appearanceScope } from './npceffects.mjs';
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { messageActivity } from './activity.mjs';
 import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once } from './notices.mjs';
@@ -638,6 +639,9 @@ function toolNpcStamp(args = {}) {
         const lasts = lastsMinutes(args.lasts);
         const stamp = { type: 'npc_appearance', id, intent, ...(args.fields != null && args.fields !== '' ? { fields: args.fields } : {}), ...(lasts ? { lasts } : {}) };
         for (const f of ['looks', 'body', 'outfit']) if (typeof args[f] === 'string' && args[f].trim()) stamp[f] = String(args[f]).trim();
+        stamp.scope = appearanceScope(args.scope);
+        const why = String(args.why ?? args.scope_reason ?? '').trim();
+        if (why) stamp.why = why.slice(0, 200);
         return stamp;
     }
     return null;
