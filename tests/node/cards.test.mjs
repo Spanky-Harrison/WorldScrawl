@@ -506,6 +506,25 @@ test('Remember: Preparing… offers Approve, and Approve while the prefetch is i
     assert.equal(created(c)[0].line, 'A knife-grinder.');
 });
 
+test('a double-click on Approve answers once: its second click is dropped, even on the next state\'s Turn off', async () => {
+    const { c } = await rememberCard(async () => JSON.stringify(MAREN));
+    await flush(30);
+    let doc = draw([0, 1]);
+    await flush(10);
+    byText(remEl(doc), 'Approve').click(1);
+    await flush(60);
+    assert.equal(created(c).length, 1);
+    doc = draw([0, 1]);
+    const kept = doc.querySelectorAll('.worldscrawl_npcchange').find(el => /Maren/.test(el.textContent));
+    assert.ok(byText(kept, 'Turn off'), 'the kept card has Turn off where Approve was');
+    byText(kept, 'Turn off').click(2); // the double-click's second click lands on the redrawn card
+    await flush(30);
+    assert.notEqual(created(c)[0].off, true, 'still on');
+    byText(kept, 'Turn off').click(1); // a real click still works
+    await flush(30);
+    assert.equal(created(c)[0].off, true);
+});
+
 test('Remember: a failed card offers Check again, which asks again into review', async () => {
     const { calls } = await rememberCard((p, n) => (n <= 2 ? 'not json' : JSON.stringify(MAREN)));
     const doc = draw([0, 1]);

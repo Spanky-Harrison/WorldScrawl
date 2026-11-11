@@ -155,7 +155,7 @@
     await page.evaluate(async () => { const c = SillyTavern.getContext(); c.chat.splice(1); await c.saveChat(); await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED, 1); });
     await settle(1000);
     check('start button comes back after deleting down to the greeting', await page.locator('#chat .worldscrawl_start_button').count() === 1);
-    const sentMarker = (await reqsNow()).some(r => JSON.stringify(r.messages ?? r.prompt ?? '').includes('[ws-start]'));
+    const sentMarker = (await reqsOf('all')).some(r => JSON.stringify(r.messages ?? r.prompt ?? '').includes('[ws-start]')); // the tracker too: it never reads the greeting
     check('model never saw the [ws-start] marker', !sentMarker);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-off')); await settle(1000);
     check('no start button when WorldScrawl is off in the chat', await page.locator('#chat .worldscrawl_start_button').count() === 0 && await page.evaluate(() => SillyTavern.getContext().chat[0].mes === 'Welcome, traveler. [ws-start]'));

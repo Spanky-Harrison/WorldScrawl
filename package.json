@@ -1,0 +1,12 @@
+{
+    "name": "worldscrawl",
+    "private": true,
+    "description": "WorldScrawl: test scripts for the whole repo (the server plugin's own package is plugin/package.json)",
+    "type": "module",
+    "scripts": {
+        "test": "node --test tests/node/*.test.mjs",
+        "test:snapshot": "E2E_SCRIPT=snapshot.mjs bash tests/e2e/run.sh",
+        "test:e2e": "bash tests/e2e/run.sh",
+        "test:all": "npm test && npm run test:snapshot && npm run test:e2e"
+    }
+}

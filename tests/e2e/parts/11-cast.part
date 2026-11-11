@@ -1,3 +1,4 @@
+    const exportWorld = await M(m => m.effectiveWorld());
     // ---- Phase 1.5: the map's Cast browser / editor. Saves go through /cast/save and /cast/delete; Update goes through the tab.
     const cw = await page.context().newPage(); await cw.setViewportSize({ width: 1300, height: 850 });
     cw.on('pageerror', e => { uiErrors.push(e.message); console.log('[cast pageerror]', e.message); });

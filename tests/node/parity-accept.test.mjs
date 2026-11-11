@@ -62,7 +62,6 @@ function boot() {
     };
     ext.settings().flagNpcs = true;
     ext.settings().flagTags = true;
-    ext.settings().reporterTools = true;
     return { c, prompts };
 }
 function msg(stamps = []) {
@@ -1648,5 +1647,58 @@ test('GUI payload: kept rows carry the summary only (no panel rows), with a shor
         assert.ok(Number.isInteger(x.index));
         const card = stampCard(x, { who: 'Hesk' });
         assert.equal(card.desc.panel, null, `${x.type}: kept card has no panel until opened`);
+    }
+});
+
+// ---- fix/e2e-gate: the tracker reads only an exchange, and never a story that has left the screen.
+const { onReplyForFlags } = await import('../../extension/discovery.mjs');
+const trackerReads = prompts => prompts.filter(p => /Reply with JSON only:\n\{"place"/.test(p));
+const reply = mes => ({ mes, is_user: false, swipe_id: 0, swipes: [mes], swipe_info: [{ extra: {} }], extra: {} });
+
+test('the tracker skips a greeting (no player line before it), [ws-start] marker included, and reads the first exchange', async () => {
+    const { c, prompts } = bootAt('16:20');
+    model(c, prompts);
+    c.chat = [reply('Welcome, traveler. [ws-start]')];
+    await onReplyForFlags(0);
+    assert.equal(trackerReads(prompts).length, 0, 'no model call for the greeting');
+    c.chat.push(userMsg('I look around.'), reply('A smoky bar.'));
+    await onReplyForFlags(2);
+    assert.equal(trackerReads(prompts).length, 1);
+    assert.match(trackerReads(prompts)[0], /A smoky bar\./);
+    assert.doesNotMatch(trackerReads(prompts)[0], /ws-start/);
+});
+
+test('a swipe still being written is read when its reply arrives, never on the old text; a read whose story changed in flight stamps nothing', async () => {
+    const { c, prompts } = bootAt('16:20');
+    ext.settings().autoKeepWaits = false;
+    const WAIT = '{"place": null, "people": [], "wait": {"duration": "45m", "reason": "a long meal"}}';
+    model(c, prompts, { tracker: WAIT });
+    const r = reply('Old telling.');
+    c.chat = [msg([]), userMsg('I eat.'), r];
+    // SillyTavern while it writes a new swipe: swipe_id one past the end, mes still the old text.
+    r.swipe_id = 1;
+    await onStorySwipe(2);
+    assert.equal(trackerReads(prompts).length, 0, 'nothing read while the swipe is being written');
+    assert.equal(r.extra.worldscrawl_waitcard, undefined);
+    // The new swipe arrives.
+    r.swipes.push('New telling.'); r.mes = 'New telling.'; r.swipe_info.push({ extra: {} });
+    await onReplyForFlags(2);
+    assert.equal(trackerReads(prompts).length, 1);
+    assert.match(trackerReads(prompts)[0], /New telling\./);
+    assert.doesNotMatch(trackerReads(prompts)[0], /Old telling/);
+    assert.ok(r.extra.worldscrawl_waitcard, 'the answer for the story on screen lands');
+    // In flight: the story on screen changes (edited, or a new swipe started) before the answer comes back.
+    for (const change of [m => { m.mes = 'Edited telling.'; }, m => { m.swipe_id = m.swipes.length; }]) {
+        r.mes = 'New telling.'; r.swipe_id = 1;
+        let release;
+        const gate = new Promise(res => { release = res; });
+        model(c, prompts, { tracker: () => gate.then(() => WAIT) });
+        const reading = onStorySwipe(2); // drops the tracker's stamps, then reads swipe 1 again
+        await new Promise(res => setTimeout(res, 20));
+        assert.equal(r.extra.worldscrawl_waitcard, undefined);
+        change(r);
+        release();
+        await reading;
+        assert.equal(r.extra.worldscrawl_waitcard, undefined, 'the stale answer has nowhere to land');
     }
 });

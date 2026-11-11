@@ -71,7 +71,8 @@ class El {
     closest(sel) { let p = this; while (p && p !== this.ownerDocument) { if (matchOne(p, sel)) return p; p = p.parent; } return null; }
     querySelectorAll(sel) { const out = [], parts = sel.trim().split(/\s+/); const walk = n => { for (const c of n.children ?? []) { if (matchesDesc(c, parts)) out.push(c); walk(c); } }; walk(this); return out; }
     querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
-    click() { for (const fn of this.listeners.click ?? []) fn({ stopPropagation() {}, preventDefault() {}, target: this, type: 'click' }); }
+    /** detail: the browser's click count (2 = the second click of a double-click). */
+    click(detail = 1) { for (const fn of this.listeners.click ?? []) fn({ stopPropagation() {}, preventDefault() {}, target: this, type: 'click', detail }); }
 }
 export function makeDoc(ids = [0]) {
     const doc = new El(null, 'document');

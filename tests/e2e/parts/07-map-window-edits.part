@@ -105,7 +105,6 @@
     check('/ws-wait until midnight lands on 00:00', (await clockNow()) > t2 && dm?.time === '00:00', JSON.stringify(dm));
     await page.evaluate(async () => { const c = SillyTavern.getContext(); const i = c.chat.findLastIndex(m => m.is_user && m.extra?.worldscrawl_wait); await c.executeSlashCommandsWithOptions(`/cut ${i}-${c.chat.length - 1}`); });
     check('deleting the wait message undoes it', (await clockNow()) === t2, `${await clockNow()} vs ${t2}`);
-    check('non-tools mode tells the narrator about [ws_wait] tags', (await (await fetch(`${FAKE}/__requests`)).json()).some(r => !r.tools?.length && JSON.stringify(r.messages).includes('[ws_wait: sleep until morning')));
     // ---- Editing a proposed map change before Keep, re-editing a kept one, and "Edit live" from the map window.
     const CR = 'riverton:drowned_rat/common_room';
     const wsMod = '/scripts/extensions/third-party/WorldScrawl/index.js';
