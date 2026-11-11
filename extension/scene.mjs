@@ -744,6 +744,31 @@ async function editExpiryRevert(at, id, text = {}) {
     return res ?? { ok: false, error: 'not saved' };
 }
 
+/** How a person looked just before a temporary change ran out (the clock held at `ends` - 1 s): the expiry card's "before". */
+function npcBefore(chat, at, id, ends) {
+    return npcAt(chat, at, castPack()?.npcs ?? [], id, i => { const k = npcClock(chat, i); return Number.isFinite(ends) && k.elapsed >= ends ? clockOf(ends - 1) : k; });
+}
+/**
+ * Approve edited on a kept appearance change: the typed Body/Outfit become the change (the same rules as the review
+ * card's Approve edited, no model call); an edited Change line alone asks again (it comes back as a review card).
+ * A failed typed save leaves the kept change as it was.
+ */
+async function editKeptAppearance(chat, identity, rev, { intent = '', typed = null } = {}) {
+    const end = Math.max(0, chat.length - 1);
+    const elapsed = npcClock(chat, end).elapsed;
+    if (!Number.isFinite(elapsed)) return { ok: false, error: 'The game clock is not available yet. Try again once it has loaded.' };
+    if (!typed) return settleNpc(chat, identity, rev, 'edit', { intent, layer: {}, elapsed });
+    const ed = decideNpc(chat, identity, rev, 'edit', { ...(intent ? { intent } : {}) });
+    if (!ed?.ok) return ed;
+    const back = () => decideNpc(chat, identity, ed.rev, 'discard', {});
+    const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
+    const seeded = reviewTyped(chat, identity, typed, { baseline: live?.pinned, elapsed });
+    if (!seeded.ok) { back(); return seeded; }
+    const res = await settleNpc(chat, identity, ed.rev, 'approve', { token: seeded.candidate.token, elapsed });
+    if (!res?.ok) { const f = (chat ?? []).flatMap(m => m?.extra?.[NPC_KEY] ?? []).find(s => s?.owner === identity.owner); if (f?.candidate) decideNpc(chat, identity, f.decisionRev, 'discard', {}); }
+    return res ?? { ok: false, error: 'not saved' };
+}
+
 function looksSummaryPrompt(name, body, outfit) {
     return P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') });
 }
@@ -898,4 +923,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, editExpiryRevert, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

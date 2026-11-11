@@ -10,9 +10,10 @@ import { FLAG_KEY, broadcastMapState, ctx, hooks } from './index.js';
 import { analyzeFlag, swapRewrite } from './carriers.mjs';
 import { renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, unmergeFlag } from './discovery.mjs';
-import { openEditor, openForms } from './patches.mjs';
+import { isPlaceExpiry, keepExpiryEdit, keptForGood, openEditor, openForms } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
-import { applyFacts, settleNpc } from './scene.mjs';
+import { applyFacts, editExpiryRevert, editKeptAppearance, settleNpc } from './scene.mjs';
+import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
 
 /** Actions that ask the model or write a decision: each must carry its card's ticket. */
 export const ASYNC_ACTIONS = new Set(['again', 'scope', 'rewrite', 'approve', 'save']);
@@ -29,6 +30,13 @@ const TICKETS = {
         const rev = s.decisionRev ?? 1, token = s.candidate?.token ?? null, swipe = swipeOf(msg);
         return { type: 'person', msg, s, who, rev, token, identity: s.identity, key: `${s.identity?.owner}|npcedit`,
             still: () => (msg.extra?.[NPC_KEY] ?? []).includes(s) && (s.decisionRev ?? 1) === rev && swipeOf(msg) === swipe && (s.candidate?.token ?? null) === token };
+    },
+    /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
+    expiry({ id, msg, key, kind, person = null, got = null }) {
+        const swipe = swipeOf(msg);
+        const here = () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe;
+        return { type: 'expiry', id, msg, key, kind, person, got,
+            still: kind === 'person' ? () => here() && msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND : () => here() && isPlaceExpiry(msg) };
     },
 };
 /** The ticket for a card of `type`, taken as it is drawn. */
@@ -102,10 +110,56 @@ const person = {
         await settleNpc(chat(), t.identity, t.rev, 'discard', {});
         await personDone(t.msg, true);
     }),
+    // A kept change: Approve edited saves the typed Body/Outfit (no model call), or asks again for an edited Change line.
+    save: t => once(`own-save:${t.identity?.owner}`, async () => {
+        const s = t.s, v = E()?.editorValues(t.key) ?? { intent: '', fields: {}, dirty: [] }, dirty = new Set(v.dirty);
+        let res;
+        if (s.type === 'npc_baseline' || s.committed?.kind === 'baseline') {
+            const field = s.committed?.field || 'body', text = String(v.fields[field] ?? '').trim();
+            res = dirty.has(field) && text ? await settleNpc(chat(), t.identity, t.rev, 'edit', { field, text, lasts: s.lasts }) : { ok: false, error: 'Nothing changed. Type in the box, or press Close editor.' };
+        } else {
+            const typed = Object.fromEntries(['body', 'outfit'].filter(f => dirty.has(f)).map(f => [f, String(v.fields[f] ?? '')]));
+            const intent = dirty.has('_intent') ? String(v.intent ?? '').trim() : '';
+            res = Object.keys(typed).length ? await editKeptAppearance(chat(), t.identity, t.rev, { intent, typed })
+                : intent ? await editKeptAppearance(chat(), t.identity, t.rev, { intent })
+                : { ok: false, error: 'Nothing changed. Type in a box, or press Close editor.' };
+        }
+        if (res?.ok) E()?.closeCardEditor(t.key);
+        else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
+        await personDone(t.msg, true);
+        return res;
+    }),
+    off: t => once(`npc-off:${t.identity?.owner}`, () => settleNpc(chat(), t.identity, t.rev, 'off', {})),
+    on: t => once(`npc-on:${t.identity?.owner}`, () => settleNpc(chat(), t.identity, t.rev, 'on', {})),
+    undo: t => once(`npc-undo:${t.identity?.owner}`, () => { E()?.closeCardEditor(t.key); return settleNpc(chat(), t.identity, t.rev, 'undo', {}); }),
+};
+
+// ---- expiry notices (a person's or a place's temporary change ran out)
+const expiry = {
+    edit: t => {
+        if (t.kind === 'person') { E()?.openCardEditor(t.key); renderPatchCards(); return; }
+        return openEditor(t.key, keptForGood(t.got?.ran), { loc: t.got?.address ?? '' });
+    },
+    close: t => { openForms.delete(t.key); E()?.closeCardEditor(t.key); renderPatchCards(); },
+    save: t => once(`expiry-ok:${t.key}`, async () => {
+        const note = String(E()?.editorValues(t.key).intent ?? '').trim();
+        if (t.kind === 'place') {
+            const res = await keepExpiryEdit(t.id, t.key, note, t.still);
+            if (res?.ok) E()?.closeCardEditor(t.key);
+            else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
+            return res;
+        }
+        const v = E()?.editorValues(t.key).fields ?? {};
+        const res = await editExpiryRevert(chat().indexOf(t.msg), t.person.id, { body: v.body, outfit: v.outfit });
+        if (res?.ok) E()?.closeCardEditor(t.key);
+        else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
+        await personDone(t.msg, true);
+        return res;
+    }),
 };
 
 /** The handlers: the only per-type card code that acts. */
-export const HANDLERS = { place, person };
+export const HANDLERS = { place, person, expiry };
 
 /**
  * Run a card action. Refuses an action the type does not have, an async action without a ticket, and any action whose

@@ -410,13 +410,13 @@ function editedCandidate(chat, stamp, c, edited, elapsed) {
 /**
  * A candidate whose result is text the player typed, reviewed without a model call: the before values are this
  * person's committed replay, and the typed Body/Outfit go through the same Approve-edited rules (editedCandidate).
- * Used by the expiry notice's Edit. Refuses while another temporary change sits on top, so "now" is one text.
+ * Used by the expiry notice's Edit and a kept change's Edit (a temporary change's typed text is its live text).
+ * Refuses while another temporary change sits on top, so "now" is one text.
  */
 export function reviewTyped(chat, identity, typed, { baseline = null, elapsed = null } = {}) {
     const found = findStamp(chat, identity);
     if (!found?.stamp?.candidate) return { ok: false, error: 'no candidate' };
     const stamp = found.stamp;
-    if (stamp.candidate.proposedLasts > 0) return { ok: false, error: 'Typed text is for a lasting change.' };
     const base = baseline ?? readBaselineMap(chat)[identity.npc] ?? { body: '', outfit: '' };
     const records = composeRecords(chat);
     const others = liveOps(personOps(chat, identity.npc).filter(s => s.committed && s.owner !== stamp.owner), elapsed);
