@@ -57,7 +57,7 @@
     const hl = await cw.evaluate(() => document.querySelectorAll('.node.cast-hl').length);
     check('selecting Hesk highlights her places on the map', hl > 0, String(hl));
     await cw.evaluate(() => wsCast.selectId('hesk', 'changes'));
-    const ratLink = cw.locator('.cast-stamps li', { hasText: 'hates rats' }).locator('.cast-msglink');
+    const ratLink = cw.locator('.cast-stamps .cast-card', { hasText: 'hates rats' }).locator('.cast-msglink');
     const ratMsg = Number(await ratLink.getAttribute('data-msg'));
     await ratLink.click();
     await settle(400);

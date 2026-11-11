@@ -164,10 +164,11 @@
     for (let k = 0; k < 5 && !tabOk; k++) {
         await ui.click(`.node[data-id="${BURNT}"]`).catch(() => {}); await ui.waitForTimeout(1200);
         await ui.click('.side .tabs button:has-text("Changes")').catch(() => {}); await ui.waitForTimeout(500);
-        tabOk = await ui.locator(`.side li.change:has-text("Message #${tA}") .togglechange`).count() === 1;
+        tabOk = await ui.locator(`.side details.change:has-text("Message #${tA}") .worldscrawl_card_btn:text-is("Turn off")`).count() === 1;
     }
-    check('inspector Changes tab has a Turn off button per change', tabOk);
-    await ui.click(`.side li.change:has-text("Message #${tA}") .togglechange`);
+    check('inspector Changes tab has a Turn off button per change (the chat\'s kept card, collapsed)', tabOk && !(await ui.locator(`.side details.change:has-text("Message #${tA}")`).evaluate(d => d.open)));
+    await ui.click(`.side details.change:has-text("Message #${tA}") > summary`);
+    await ui.click(`.side details.change:has-text("Message #${tA}") .worldscrawl_card_btn:text-is("Turn off")`);
     const uconf = ui.locator('.toggle-confirm');
     try { await uconf.waitFor({ timeout: 10000 }); } catch {}
     check('inspector asks first too, listing the dependent', (await uconf.count()) === 1 && (await uconf.innerText()).includes(`#${tB}`));

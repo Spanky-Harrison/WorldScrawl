@@ -123,6 +123,16 @@ class Chan {
     close() {}
 }
 const flush = () => new Promise(r => setTimeout(r, 30));
+/** The map window's askST over the fake channel: post, then the `${type}_result` with the same req. */
+let guiReq = 0;
+function askGui(gui, type, payload) {
+    const req = `g${++guiReq}`;
+    return new Promise(res => {
+        const on = ev => { if (ev.data?.type === `${type}_result` && ev.data.req === req) { gui.listeners = gui.listeners.filter(f => f !== on); res(ev.data); } };
+        gui.addEventListener('message', on);
+        gui.postMessage({ type, req, ...payload });
+    });
+}
 const promptsOf = () => [];
 function boot() {
     ext.setPrompts(PROMPTS);
@@ -300,17 +310,19 @@ test('GUI Changes Turn off is the map channel, and a place Undo cannot remove a 
         load: async () => ({ npcs: [HESK] }),
         outline: async () => null,
         play: () => npcPlayState(c.chat, [HESK], env),
-        decideNpc: spec => gui.postMessage({ type: 'npc_decide', chatId: 'c1', req: 3, identity: spec.identity, decisionRev: spec.decisionRev, action: spec.action, payload: {} }),
+        decideNpc: spec => askGui(gui, 'npc_decide', { chatId: 'c1', ...spec }),
         chatAt: () => ({ msg: 0, swipe: 0 }),
         placeName: a => a,
     });
     await panel.refresh();
     panel.selectId('hesk', 'changes');
-    const off = panel.el.querySelectorAll('button').find(b => b.textContent === 'Turn off');
-    const undo = panel.el.querySelectorAll('button').find(b => b.textContent === 'Undo');
+    const card = panel.el.querySelector('.cast-card');
+    assert.ok(card && !card.open, 'collapsed by default');
+    const off = byText(card, '.worldscrawl_card_btn', 'Turn off');
+    const undo = byText(card, '.worldscrawl_card_btn', 'Undo');
     assert.ok(off);
     assert.ok(undo);
-    assert.equal(panel.el.querySelectorAll('button').some(b => b.textContent === 'Approve'), false);
+    assert.deepEqual(buttons(card), ['Edit', 'Turn off', 'Undo'], 'the chat card\'s kept buttons');
     off.click();
     await flush();
     assert.equal(o.off, true);
@@ -774,13 +786,13 @@ test('the map channel saves, mirrors the swipe, and both surfaces redraw', async
         load: async () => ({ npcs: [HESK] }),
         outline: async () => null,
         play: () => npcPlayState(c.chat, [HESK], env),
-        decideNpc: spec => gui.postMessage({ type: 'npc_decide', chatId: 'c1', req: 11, ...spec }),
+        decideNpc: spec => askGui(gui, 'npc_decide', { chatId: 'c1', ...spec }),
         chatAt: () => ({ msg: 0, swipe: 0 }),
         placeName: a => a,
     });
     await panel.refresh();
     panel.selectId('hesk', 'changes');
-    const approve = panel.el.querySelectorAll('button').find(b => b.textContent === 'Approve');
+    const approve = byText(panel.el, '.worldscrawl_card_btn', 'Approve');
     assert.ok(approve, panel.el.textContent);
     assert.match(panel.el.textContent, /a towering woman/);
     approve.click();
@@ -794,8 +806,8 @@ test('the map channel saves, mirrors the swipe, and both surfaces redraw', async
     renderPatchCards();
     assert.ok(byText(doc, '.worldscrawl_card_btn', 'Turn off'));
     panel.setPlay();
-    assert.equal(panel.el.querySelectorAll('button').some(b => b.textContent === 'Approve'), false);
-    assert.ok(panel.el.querySelectorAll('button').some(b => b.textContent === 'Turn off'));
+    assert.equal(buttons(panel.el).includes('Approve'), false);
+    assert.ok(buttons(panel.el).includes('Turn off'));
 });
 
 test('kept change Edit: the review card\'s Body editor; Approve edited saves typed text, and a failed or late Change edit leaves the committed owner', async () => {
@@ -1596,4 +1608,127 @@ test('re-timing a kept wait rechecks person expiries too, and a temporary fact t
     await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
     const wf = await waitFacts(c.chat, ROOM);
     assert.match(wf, /ran out and are gone now: [^\n]*the temporary change "turned into a gnoll" on Hesk[^\n]*; the temporary detail "has a split lip" on Hesk/);
+});
+
+// ---- S6: the cast Changes tab shows the chat's cards; a click runs the chat card's handler over the map channel
+const { stampCard } = await import('../../plugin/ui/castdata.mjs');
+function guiPanel(c) {
+    Chan.all = [];
+    globalThis.BroadcastChannel = Chan;
+    openMapChannel();
+    const gui = new Chan('worldscrawl');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '', backgroundColor: '' });
+    const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => '', clock: () => ({ elapsed: 0, day: 1, hour: 8, minute: 0, minutes: 480 }) };
+    const panel = castPanel(doc, { load: async () => ({ npcs: [HESK] }), outline: async () => null, play: () => npcPlayState(c.chat, [HESK], env),
+        decideNpc: spec => askGui(gui, 'npc_decide', { chatId: 'c1', ...spec }), chatAt: () => ({ msg: 0, swipe: 0 }), placeName: a => a });
+    return { panel, gui, doc };
+}
+const guiCard = (panel, re) => panel.el.querySelectorAll('.cast-card').find(d => re.test(d.textContent));
+
+test('GUI Changes: a memory card, collapsed; Edit → Approve edited → Turn off → Turn on → Undo run the chat card handler', async () => {
+    const { c } = boot();
+    c.chat = [msg([])];
+    scene.addNpcStamp(c.chat[0], { type: 'npc_memory', id: 'hesk', note: 'she promised a room' });
+    const s = c.chat[0].extra[NPC_KEY][0];
+    const { panel } = guiPanel(c);
+    await panel.refresh();
+    panel.selectId('hesk', 'changes');
+    let card = guiCard(panel, /promised a room/);
+    assert.ok(!card.open, 'collapsed: the title line only until opened');
+    assert.match(card.querySelector('summary').textContent, /#0.*promised a room/);
+    assert.deepEqual(buttons(card), ['Edit', 'Turn off', 'Undo']);
+    byText(card, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    card = guiCard(panel, /promised a room/);
+    assert.equal(card.open, true, 'Edit keeps it open');
+    assert.deepEqual(buttons(card), ['Close editor', 'Approve edited', 'Turn off', 'Undo']);
+    const box = card.querySelector('.worldscrawl_note_text');
+    assert.equal(box.value, 'she promised a room');
+    box.value = 'she promised the attic room'; box.dispatchEvent({ type: 'input' });
+    byText(card, '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush(); await flush();
+    assert.equal(s.note, 'she promised the attic room', 'saved by the chat handler');
+    panel.setPlay();
+    card = guiCard(panel, /attic room/);
+    assert.deepEqual(buttons(card), ['Edit', 'Turn off', 'Undo'], 'the editor closed');
+    byText(card, '.worldscrawl_card_btn', 'Turn off').click();
+    await flush(); await flush();
+    assert.equal(s.off, true);
+    panel.setPlay();
+    card = guiCard(panel, /attic room/);
+    assert.deepEqual(buttons(card), ['Turn on', 'Undo']);
+    byText(card, '.worldscrawl_card_btn', 'Turn on').click();
+    await flush(); await flush();
+    assert.equal(s.off, false);
+    panel.setPlay();
+    byText(guiCard(panel, /attic room/), '.worldscrawl_card_btn', 'Undo').click();
+    await flush(); await flush();
+    assert.equal((c.chat[0].extra[NPC_KEY] ?? []).includes(s), false);
+});
+
+test('GUI Changes stale: a card drawn before the note changed in the chat writes nothing', async () => {
+    const { c } = boot();
+    c.chat = [msg([])];
+    scene.addNpcStamp(c.chat[0], { type: 'npc_memory', id: 'hesk', note: 'she promised a room' });
+    const s = c.chat[0].extra[NPC_KEY][0];
+    const { panel } = guiPanel(c);
+    await panel.refresh();
+    panel.selectId('hesk', 'changes');
+    byText(guiCard(panel, /promised/), '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const card = guiCard(panel, /promised/);
+    const box = card.querySelector('.worldscrawl_note_text');
+    box.value = 'typed in the map'; box.dispatchEvent({ type: 'input' });
+    const ok = byText(card, '.worldscrawl_card_btn', 'Approve edited');
+    s.note = 'she promised the cellar'; // changed in the chat (no revision bump): only the card's seen tag can tell
+    ok.click();
+    await flush(); await flush();
+    assert.equal(s.note, 'she promised the cellar', 'the stale click wrote nothing');
+    assert.match(panel.el.querySelector('.cast-msg').textContent, /moved on/);
+});
+
+test('GUI Changes: a person review Edit → Approve edited commits the typed Body (the chat card handler, no fields call)', async () => {
+    const { c, prompts } = boot();
+    const o = appearance({ intent: 'turned into a gnoll', fields: 'body', layer: {}, owner: 'gui1' });
+    c.chat = [msg([o])];
+    c.generateRaw = async (args) => { const p = String(args?.prompt ?? ''); prompts.push(p); return /Looks line/.test(p) ? '{"looks":"a grey-eyed gnoll"}' : '{"body":"a furred gnoll","outfit":"wool"}'; };
+    const filled = await scene.fillCandidate(c.chat, o.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    assert.equal(filled.ok, true, filled.error);
+    const { panel } = guiPanel(c);
+    await panel.refresh();
+    panel.selectId('hesk', 'changes');
+    let card = panel.el.querySelector('.cast-card');
+    assert.deepEqual(buttons(card), ['Check again', 'Edit', 'Make it a full rewrite', 'Approve', 'Discard'], 'the chat review card\'s buttons');
+    assert.ok(card.querySelector('.worldscrawl_diff'), 'review cards carry their panel');
+    byText(card, '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    card = panel.el.querySelector('.cast-card');
+    assert.deepEqual(buttons(card), ['Check again', 'Close editor', 'Make it a full rewrite', 'Rewrite with this', 'Approve edited', 'Discard']);
+    const boxes = card.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(boxes.map(b => b.value), ['a furred gnoll']);
+    boxes[0].value = 'A hulking grey gnoll.'; boxes[0].dispatchEvent({ type: 'input' });
+    const fields = () => prompts.filter(p => !/Looks line/.test(p)).length, before = fields();
+    byText(card, '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush(); await flush();
+    assert.equal(o.committed?.layer?.body, 'A hulking grey gnoll.');
+    assert.equal(fields(), before, 'no fields call');
+});
+
+test('GUI payload: kept rows carry the summary only (no panel rows), with a short seen tag', () => {
+    const { c } = boot();
+    const o = commit(appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'opay' }));
+    c.chat = [msg([o])];
+    scene.addNpcStamp(c.chat[0], { type: 'npc_fact', id: 'hesk', field: 'fact', text: 'owes a favor' });
+    const env = { exists: () => true, relocate: {}, names: a => a, playerAt: () => '', clock: () => ({ elapsed: 0, day: 1, hour: 8, minute: 0, minutes: 480 }) };
+    const rows = npcPlayState(c.chat, [HESK], env).find(n => n.id === 'hesk').stamps;
+    assert.equal(rows.length, 2);
+    for (const x of rows) {
+        assert.equal(x.diffs, undefined, `${x.type}: no panel rows`);
+        assert.ok(typeof x.sig === 'string' && x.sig.length <= 8, x.sig);
+        assert.ok(Number.isInteger(x.index));
+        const card = stampCard(x, { who: 'Hesk' });
+        assert.equal(card.desc.panel, null, `${x.type}: kept card has no panel until opened`);
+    }
 });
