@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P } from './shared.mjs';
+import { render as P, patches as patchShared } from './shared.mjs';
 import { carrierLine, clip, isCarrier, patchLib, proactiveDiscovery, snapCarriers } from './carriers.mjs';
 import { chatChanges, chatElapsed, defaultWorldId } from './clock.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
@@ -289,5 +289,73 @@ export async function liveEdit(ops, note = '', { separate = false } = {}) {
     return { ok: true, summary: r.preview.summary, msg: chat.length - 1 };
 }
 globalThis.worldscrawlLiveEdit = liveEdit;
+
+
+// ---- The place expiry notice ("the passage seals behind you"): the temporary change that ran out under the party.
+export const isPlaceExpiry = m => m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired === true;
+const touches = (o, address) => o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address);
+/** The change whose temporary op ran out under the party: the server resolver's pick (the latest one touching that room). */
+export function expiredPatchAt(chat, id) {
+    const msg = chat?.[id];
+    if (!isPlaceExpiry(msg) || typeof patchShared.opActive !== 'function') return null;
+    const address = String(msg.extra.worldscrawl_notice_from ?? ''), now = chatElapsed(chat.slice(0, id + 1));
+    const p = chatChanges(chat.slice(0, id)).reverse().find(c => c?.type === 'patch' && c.off !== true && Array.isArray(c.ops)
+        && c.ops.some(o => !patchShared.opActive(o, c, now) && touches(o, address)));
+    if (!p) return null;
+    const ran = p.ops.filter(o => !patchShared.opActive(o, p, now));
+    const made = ran.find(o => o.op === 'create_place' && touches(o, address));
+    return { patch: p, address, now, ran, name: made?.name || p.names?.[address] || p.note || address };
+}
+/** The ops that ran out, kept for good: what the notice's Edit starts from. */
+export const keptForGood = ops => (ops ?? []).map(o => { const { lasts, ...rest } = o; return rest; });
+const expiryViews = new WeakMap(); // notice message -> {sig, preview, error}
+/**
+ * The before/now panel of a place expiry card: a preview of the chat's changes with the ran-out ops (kept for good) and
+ * without them. Fetched once per notice and cached; the card redraws when it arrives.
+ */
+export function expiryView(chat, id) {
+    const got = expiredPatchAt(chat, id);
+    if (!got) return null;
+    const msg = chat[id], sig = `${got.patch._msg}|${got.patch.id}|${got.now}|${JSON.stringify(got.ran)}`;
+    let v = expiryViews.get(msg);
+    if (!v || v.sig !== sig) {
+        v = { sig, preview: null, error: '' };
+        expiryViews.set(msg, v);
+        const others = chatChanges(chat.slice(0, id)).filter(c => !(c._msg === got.patch._msg && c.id === got.patch.id));
+        previewOps(keptForGood(got.ran), { changes: others, now: got.now }).then(r => {
+            if (expiryViews.get(msg) !== v) return;
+            if (r.ok) v.preview = { before: r.preview.after ?? {}, after: r.preview.before ?? {}, ops: [], relocate: {}, inherit: {}, names: r.preview.names ?? {} };
+            else v.error = `Could not show what changed: ${r.errors?.[0]?.error ?? 'preview failed'}`;
+            renderPatchCards();
+        }, e => { if (expiryViews.get(msg) === v) { v.error = `Could not show what changed: ${e?.message || e}`; renderPatchCards(); } });
+    }
+    return { ...got, preview: v.preview, error: v.error };
+}
+/**
+ * Approve edited on a place expiry card: the form's ops become a new kept map change on the notice (from here on;
+ * deleting the notice removes it). `still()` is the card's ticket: a notice deleted or swiped mid-save writes nothing.
+ */
+export async function keepExpiryEdit(id, key, note = '', still = () => true) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id], form = openForms.get(key);
+    if (!isPlaceExpiry(msg) || !form) return { ok: false, error: 'That notice is gone.' };
+    const ops = form.getOps();
+    if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Close editor.' }]); return { ok: false }; }
+    const now = chatElapsed(chat.slice(0, id + 1));
+    const r = await previewOps(ops, { changes: chatChanges(chat.slice(0, id + 1)), now });
+    if (!still()) { renderPatchCards(); return { ok: false, stale: true }; }
+    if (!r.ok) { form.setErrors(r.errors); return { ok: false, errors: r.errors }; }
+    const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: clip(note, 200) || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: now,
+        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: swipeOf(msg), source: 'expiry_edit' };
+    msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
+    syncSwipeExtra(msg);
+    openForms.delete(key);
+    await c.saveChat?.();
+    exitsCache.clear();
+    await applyFacts();
+    renderAllExits();
+    renderPatchCards();
+    broadcastMapState();
+    return { ok: true, patch: p };
+}
 
 export { FLAG_TAG, RANGE_CAP, changeEditSession, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };

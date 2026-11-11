@@ -15,10 +15,10 @@ import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, editExpiryRevert, exportNpc, keepRemember, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
+import { expiryView, failedFor, isPlaceExpiry, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcBefore, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
-import { decideNpc, fillCandidate } from './owners.mjs';
+import { decideNpc } from './owners.mjs';
 import { reviewFields } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
@@ -275,49 +275,54 @@ function personCardEl(msg, s, who) {
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
 }
 
+/** A kept person (appearance or base text) change: the shared card; Edit opens the same Body/Outfit editor as its review. */
+function personKeptEl(msg, id, s, who) {
+    const key = `${s.identity.owner}|npcedit`, editing = !!editLib()?.editorOpen(key);
+    const base = s.type === 'npc_baseline' || s.committed?.kind === 'baseline';
+    const label = f => (f === 'outfit' ? 'Outfit' : 'Body');
+    let fields = [];
+    if (editing && base) { const f = s.committed?.field || 'body'; fields = [{ key: f, label: label(f), value: s.committed?.text ?? '', cls: 'worldscrawl_npc_text', data: { part: 'lasting', field: f } }]; }
+    else if (editing) {
+        const chat = ctx().chat ?? [];
+        const at = npcAt(chat, id, castPack()?.npcs ?? [], s.id, i => npcClock(chat, i));
+        fields = String(s.committed?.fields || 'body,outfit').split(',').map(f => f.trim()).filter(f => f === 'body' || f === 'outfit')
+            .map(f => ({ key: f, label: label(f), value: at?.[f] ?? '', cls: 'worldscrawl_npc_text', data: { part: s.lasts > 0 ? 'live' : 'lasting', field: f } }));
+    }
+    const text = s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`;
+    return drawCard(C.personKept({ key, state: s.off ? 'off' : 'kept', text, editing, intent: s.committed?.intent ?? '', hasIntent: !base, fields }), 'person', ticketFor('person', { msg, s, who }));
+}
+
 /**
- * Under a person-expiry notice: what they look like now, and Edit, which opens the same Body/Outfit boxes as the
- * person card's editor. Approve edited saves the typed text as a lasting appearance change on this notice.
+ * Under a person-expiry notice: the shared expiry card. The panel is how they looked while it lasted next to now;
+ * Edit opens the Body/Outfit editor, and Approve edited saves the typed text as a lasting change on this notice.
  */
-function expiredPersonCard(msg, id, p) {
-    const d = document.createElement('div');
-    d.className = 'worldscrawl_npcexpired';
+function expiredPersonEl(msg, id, p) {
     const chat = ctx().chat ?? [];
-    const live = npcAt(chat, id, castPack()?.npcs ?? [], p.id, i => npcClock(chat, i));
+    const now = npcAt(chat, id, castPack()?.npcs ?? [], p.id, i => npcClock(chat, i));
+    const before = npcBefore(chat, id, p.id, Number(p.ends));
+    const key = `${msg.extra?.worldscrawl_mid || id}|npcexpired|${p.id}`;
     const edited = (msg.extra?.[NPC_KEY] ?? []).some(s => s?.id === p.id && s.source === 'expiry_edit' && s.committed);
-    for (const [k, label] of [['body', 'Body'], ['outfit', 'Outfit']]) {
-        const row = document.createElement('div');
-        row.className = 'worldscrawl_appeardiff';
-        row.textContent = `${label} now: ${live?.[k] || '—'}`;
-        d.append(row);
+    const rows = now ? ['body', 'outfit'].map(f => ({ field: f, part: 'lasting', label: f === 'body' ? 'Body' : 'Outfit', before: before?.[f] ?? '', after: now[f] ?? '', changed: (before?.[f] ?? '') !== (now[f] ?? '') })) : [];
+    const editing = !edited && !!now && !!editLib()?.editorOpen(key);
+    const fields = editing ? rows.map(r => ({ key: r.field, label: r.label, value: now[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: 'lasting', field: r.field } })) : [];
+    const who = p.name || p.id;
+    return drawCard(C.personExpiry({ key, who, what: p.what ?? '', rows, editing, fields, edited: edited || !now }), 'expiry', ticketFor('expiry', { id, msg, key, kind: 'person', person: p }));
+}
+
+/** Under a place-expiry notice: the shared expiry card (before = with the temporary change, now = without it). */
+function expiredPlaceEl(msg, id, got) {
+    const ch = ctx().chat ?? [];
+    const key = `${id}|expiry`, form = openForms.get(key);
+    const edited = patchesOn(msg).some(p => p.source === 'expiry_edit');
+    const desc = C.placeExpiry({ key, name: castPack()?.labels?.[got.address] || got.name, preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.patch.note ?? '', edited });
+    if (desc.editor) desc.editor.formEl = form.el;
+    const rc = drawCard(desc, 'expiry', ticketFor('expiry', { id, msg, key, kind: 'place', got }));
+    if (form && !edited && rc._panel) {
+        const at = { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) };
+        form.diffBox = rc._panel; form.onLive = ops => liveDiff(rc._panel, ops, at, form);
+        if (!form.lastPreview) form.onLive(form.getOps());
     }
-    const formKey = `${msg.extra?.worldscrawl_mid || id}|npcexpired|${p.id}`;
-    const open = openForms.get(formKey);
-    if (open && live) {
-        for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) {
-            const ta = document.createElement('textarea');
-            ta.className = 'text_pole worldscrawl_npc_text';
-            ta.dataset.part = 'lasting'; ta.dataset.field = field;
-            ta.rows = 3; ta.value = open.text[field] ?? '';
-            ta.style.cssText = 'width:100%;margin:2px 0;padding:2px 4px;';
-            ta.addEventListener('click', e => e.stopPropagation());
-            ta.addEventListener('input', () => { open.text[field] = ta.value; });
-            const cap = document.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = name;
-            d.append(cap, ta);
-        }
-    }
-    if (!live || edited) return d; // after a saved edit, that change's own row has Edit / Turn off / Undo
-    d.append(rowOf(open
-        ? [cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits'),
-            cardButton('Approve edited', () => once(`npcexpired-ok:${formKey}`, async () => {
-                const res = await editExpiryRevert(ctx().chat.indexOf(msg), p.id, { ...open.text });
-                if (res?.ok) openForms.delete(formKey);
-                else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
-                syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
-                return res;
-            }), `Keep ${p.name || p.id}'s body and outfit exactly as typed in the boxes`, true)]
-        : [cardButton('Edit', () => { openForms.set(formKey, { text: { body: live.body ?? '', outfit: live.outfit ?? '' } }); renderPatchCards(); }, `Change what ${p.name || p.id} went back to`)]));
-    return d;
+    return rc;
 }
 
 export function renderPatchCards() {
@@ -348,7 +353,8 @@ export function renderPatchCards() {
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
         const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id) : [];
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length) continue;
+        const placeGone = isPlaceExpiry(msg) && C?.placeExpiry ? expiryView(ch, id) : null;
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -431,7 +437,8 @@ export function renderPatchCards() {
             if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)
             card.append(d);
         }
-        for (const p of expired) card.append(expiredPersonCard(msg, id, p));
+        for (const p of expired) card.append(expiredPersonEl(msg, id, p));
+        if (placeGone) card.append(expiredPlaceEl(msg, id, placeGone));
         for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
         const warnLine = text => { const d = line(`⚠ ${text}`); d.className = 'worldscrawl_npcwarn'; return d; };
         if (placeWarn) card.append(warnLine(placeWarn));
@@ -460,6 +467,7 @@ export function renderPatchCards() {
             const who = npcNames.get(s.id) || s.name || s.id;
             if (s.type === 'npc_appearance_cache' || !stampSummary(s, who)) continue;
             if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.candidate && !s.off) { card.append(personCardEl(msg, s, who)); continue; }
+            if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.identity?.owner && s.committed) { card.append(personKeptEl(msg, id, s, who)); continue; }
             if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; }
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';
@@ -473,47 +481,28 @@ export function renderPatchCards() {
             }
             if (s.off) d.style.opacity = '0.6';
             const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
-            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : s.type === 'npc_appearance' ? 'intent' : 'text';
-            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create' || s.type === 'npc_appearance' || s.type === 'npc_baseline')) {
+            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
+            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
                 nrow.append(cardButton('Edit', () => {
-                    const appearance = s.type === 'npc_appearance' || s.type === 'npc_baseline';
                     const inp = document.createElement('input');
                     inp.type = 'text';
-                    inp.value = s.type === 'npc_create' ? (s.line ?? '') : appearance ? (s.committed?.intent || s.candidate?.intent || s.intent || '') : (s[textKey] ?? '');
+                    inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? '');
                     inp.className = 'text_pole';
                     inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
                     inp.addEventListener('click', e => e.stopPropagation());
-                    const bodyInp = document.createElement('input');
-                    const outfitInp = document.createElement('input');
-                    if (appearance && s.type === 'npc_appearance') {
-                        bodyInp.type = 'text'; bodyInp.className = 'text_pole'; bodyInp.placeholder = 'Layer body';
-                        bodyInp.value = s.committed?.layer?.body || s.candidate?.layer?.body || '';
-                        outfitInp.type = 'text'; outfitInp.className = 'text_pole'; outfitInp.placeholder = 'Layer outfit';
-                        outfitInp.value = s.committed?.layer?.outfit || s.candidate?.layer?.outfit || '';
-                        for (const box of [bodyInp, outfitInp]) { box.style.cssText = inp.style.cssText; box.addEventListener('click', e => e.stopPropagation()); }
-                    }
                     const save = cardButton('Save', async () => {
                         if (s.type === 'npc_create') { s.line = inp.value.trim() || s.line; if (s.name) npcNames.set(s.id, s.name); }
                         const ident = s.identity;
                         const chat = ctx().chat ?? [];
-                        const elapsed = npcClock(chat, Math.max(0, chat.length - 1)).elapsed;
-                        if (ident && appearance) {
-                            const layer = s.type === 'npc_baseline' ? (s.committed?.layer || s.candidate?.layer || {}) : { ...(bodyInp.value.trim() ? { body: bodyInp.value.trim() } : {}), ...(outfitInp.value.trim() ? { outfit: outfitInp.value.trim() } : {}) };
-                            const fields = [layer.body && 'body', layer.outfit && 'outfit'].filter(Boolean).join(',') || s.committed?.fields || s.candidate?.fields || 'body,outfit';
-                            const payload = s.type === 'npc_baseline'
-                                ? { field: s.committed?.field || s.candidate?.field || 'body', text: inp.value.trim(), lasts: s.lasts }
-                                : { intent: inp.value.trim(), layer, fields, lasts: s.lasts };
-                            const edited = decideNpc(chat, ident, s.decisionRev ?? 1, 'edit', payload);
-                            if (edited?.refill) await fillCandidate(chat, ident, { baseline: npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
-                        } else if (ident) {
+                        if (ident) {
                             const payload = s.type === 'npc_memory' ? { note: inp.value.trim() } : s.type === 'npc_disposition' ? { reason: inp.value.trim() } : s.type === 'npc_create' ? { line: inp.value.trim() } : { text: inp.value.trim() };
                             decideNpc(chat, ident, s.decisionRev ?? 1, 'edit', payload);
                         } else if (s.type === 'npc_create') s.line = inp.value.trim() || s.line;
                         else s[textKey] = inp.value.trim();
                         syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
                     });
-                    fields.append(...[inp, appearance && s.type === 'npc_appearance' ? bodyInp : null, appearance && s.type === 'npc_appearance' ? outfitInp : null, save].filter(Boolean)); d.insertBefore(fields, nrow);
-                }, s.type === 'npc_appearance' || s.type === 'npc_baseline' ? 'Edit the intent and the layer text. The composed preview stays read-only.' : 'Edit this note'));
+                    fields.append(inp, save); d.insertBefore(fields, nrow);
+                }, 'Edit this note'));
             }
             const stampKey = `${id}:${s.identity?.owner || s.type}:${s.id || ''}`;
             const act = (action, payload) => once(`npc-${action}:${stampKey}`, async () => {

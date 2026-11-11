@@ -78,3 +78,60 @@ export function personReview(v) {
         actions: within('person', phase, actions),
     };
 }
+
+/**
+ * A kept person (appearance) change on its message. v: {key, state ('kept'|'off'), text, editing, intent, hasIntent,
+ * fields: [{key, label, value, data}]}. Edit opens the same Change: + Body/Outfit editor as the review card.
+ */
+export function personKept(v) {
+    const state = v.state === 'off' ? 'off' : 'kept';
+    const actions = state === 'off'
+        ? [act('on', 'Use this change again', true), act('undo', 'Remove this change (deleting the message does the same)', true)]
+        : [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change the words or the body and outfit text of this change'),
+            v.editing ? act('save', 'Keep the body and outfit exactly as typed (or ask again for an edited Change line)', true) : null,
+            act('off', 'Keep the change here but stop using it', true),
+            act('undo', 'Remove this change (deleting the message does the same)', true)];
+    return {
+        key: v.key, type: 'person', state, pending: false, cls: 'worldscrawl_npcchange',
+        title: v.text, summary: [], notes: [], panel: null,
+        editor: v.editing ? { key: v.key, intent: v.hasIntent === false ? null : { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_npc_intent' }, fields: v.fields ?? [] } : null,
+        actions: within('person', state, actions),
+    };
+}
+
+/**
+ * A person's temporary change ran out (info, already applied). v: {key, who, what, rows (before = while it lasted,
+ * after = now), editing, fields, edited}. Edit opens Body/Outfit; Approve edited writes a new kept change.
+ */
+export function personExpiry(v) {
+    const actions = v.edited ? [] : v.editing
+        ? [act('close', 'Forget the edits'), act('save', `Keep ${v.who}'s body and outfit exactly as typed in the boxes`, true)]
+        : [act('edit', `Change what ${v.who} went back to`)];
+    return {
+        key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_npcexpired',
+        title: '👤 A temporary change ran out:', summary: [`${v.who}: "${v.what}" ran out`], notes: [],
+        panel: v.rows?.length ? { type: 'fields', title: v.who, tag: 'ran out', rows: v.rows } : null,
+        editor: v.editing ? { key: v.key, intent: null, fields: v.fields ?? [] } : null,
+        actions: within('expiry', 'info', actions),
+    };
+}
+
+/**
+ * A temporary map change ran out under the party (the passage sealed). v: {key, name, preview (before = with the
+ * temporary change, after = now) or null while it loads, loadError, editing, intent, edited}. Edit opens the map form
+ * and Change:; Approve edited stamps a new kept map change on the notice.
+ */
+export function placeExpiry(v) {
+    const actions = v.edited ? [] : v.editing
+        ? [act('close', 'Forget the edits'), act('save', 'Put the edited change on the map, for good, from this notice on', true)]
+        : [act('edit', 'Change what the place went back to (starts from the change that ran out, kept for good)')];
+    const notes = [];
+    if (!v.preview && !v.edited) notes.push({ text: v.loadError ? `⚠ ${v.loadError}` : 'Working out what changed…', tone: v.loadError ? 'error' : 'muted', cls: 'worldscrawl_expiry_loading' });
+    return {
+        key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_placeexpired',
+        title: '🗺 A temporary map change ran out:', summary: [`${v.name} ran out`], notes,
+        panel: v.preview ? { type: 'place', preview: v.preview } : null,
+        editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_flag_intent' }, fields: [], form: 'patch' } : null,
+        actions: within('expiry', 'info', actions),
+    };
+}
