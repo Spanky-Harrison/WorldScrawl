@@ -5,7 +5,7 @@ import { removeChange } from './carriers.mjs';
 import { calendarLib, defaultWorldId, gameDate, listedWorlds, loadCalendar, placeWeatherNow, rememberWorlds, weatherLib, worldName, worldTimes } from './clock.mjs';
 import { baseReply, gen } from './dig.mjs';
 import { api, currentLocation, doorOverrides, doorStates, ensurePrompts, getStoredLocation } from './doors.mjs';
-import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
+import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealMapOn, revealNamesOn, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
 import { discoveredPlaces, lastUserIndex, revealedDoors, stoodInAddresses } from './movement.mjs';
 import { liveEdit, mapCtx, restampChange, swipeOf, toggleChange } from './patches.mjs';
 import { runGuiCardAction } from './cardacts.mjs';
@@ -25,7 +25,7 @@ export function themeVars(el = document.documentElement) {
 /** The state the map window shows: this chat's world, where the player is (the party marker), what it knows, open doors and changes. */
 export async function mapState() {
     const c = ctx();
-    const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars(), showEditMessages: !!settings().showEditMessages };
+    const base = { type: 'state', chatId: c.chatId ?? c.getCurrentChatId?.() ?? null, chatName: c.name2 ?? '', theme: themeVars(), showEditMessages: !!settings().showEditMessages, revealMap: !!revealMapOn(), revealNames: revealNamesOn() };
     if (!isOn() || !base.chatId) return { ...base, on: false };
     syncWorld();
     const stood = [...await stoodInAddresses()];
@@ -46,7 +46,7 @@ function openMapChannel() {
         if (ev.data?.type === 'set_debug' && ev.data.key === 'showEditMessages') { // the map's Debug menu toggle
             settings().showEditMessages = !!ev.data.value; ctx().saveSettingsDebounced?.(); renderPatchCards(); broadcastMapState();
         }
-        if (ev.data?.type === 'reveal') { // the map's Debug > Reveal map: the same as /ws-reveal (the map asked to confirm)
+        if (ev.data?.type === 'reveal') { // the map's Debug > Reveal map / Reveal names switches: the same as /ws-reveal
             const c = ctx(), d = ev.data;
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) revealPlaces(String(d.what ?? 'all'))
                 .then(t => { toastr.info(t); ch.postMessage({ type: 'reveal_result', req: d.req, ok: true, text: t }); })

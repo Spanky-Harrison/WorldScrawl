@@ -295,7 +295,7 @@ export const TOOLS = [
 ];
 export const DEBUG = [
     { id: 'show-edit-messages', label: 'Show map edit messages', toggle: true, checked: () => ..., set: on => ... },
-    { id: 'reveal-map', label: 'Reveal map', open: () => ... },
+    { id: 'reveal-map', label: 'Reveal map', toggle: true, checked: () => ..., set: on => ... },
 ];
 ```
 
@@ -304,7 +304,7 @@ An item is an action `{id, label, open()}` or a toggle `{id, label, toggle: true
 Debug items:
 
 - **Show map edit messages** (setting `showEditMessages`, off by default). Off: the hidden chat messages that carry map edits are shown as a thin collapsed bar. On: they're shown as full messages with their list of changes open.
-- **Reveal map** asks first, then does the same as `/ws-reveal all` in the chat open in SillyTavern.
+- **Reveal map** and **Reveal names** are per-chat debug switches with a checkmark, the same as `/ws-reveal all` / `/ws-reveal off` and `/ws-reveal names` / `/ws-reveal names off` in the chat open in SillyTavern.
 
 ## On/off per chat
 
@@ -385,7 +385,10 @@ By default the model never touches the map:
 
 Put `[ws-start]` anywhere in a character's greeting (or alternate greetings). WorldScrawl shows a **Start your adventure** button there instead of the marker; clicking it sends "I look around" as your first message, so the model only runs when you choose to start. The greeting's stored text isn't changed, and the button disappears once the chat has more than the greeting.
 
-`/ws-reveal all` marks every place in the world as visited, so the map shows it and `/ws-go` / clicking a place can travel there. `/ws-reveal region` and `/ws-reveal subregion` do the same for the region or subregion you're in; `/ws-reveal <id>` takes a place (`riverton:streets/market_lane`), subregion (`riverton:streets`) or region (`riverton`) id. It's stamped on a small message like other knowledge (no review card): delete that message, or type `/ws-reveal off` to turn the latest reveal off. Moves redirect revealed places like any other stamped address.
+**Debug switches** (per chat, saved in the chat's metadata; checked whenever they are used, so nothing is stamped and turning one off is exactly the state before):
+
+- **Reveal map**: `/ws-reveal all` counts every place in the world as visited, so the map shows it and `/ws-go` / clicking a place can travel there. `/ws-reveal region` and `/ws-reveal subregion` do the same for the region or subregion you're in; `/ws-reveal <id>` takes a place (`riverton:streets/market_lane`), subregion (`riverton:streets`) or region (`riverton`) id. Places added to the map later are in too. `/ws-reveal off` turns it off.
+- **Reveal names**: `/ws-reveal names` makes the name portal treat every name as known, so the narrator and the side calls see real names (no gated name line). `/ws-reveal names off` turns it off. Name stamps are not touched.
 
 `/ws-known` lists the places this chat knows, in two groups: "Been there" and "Seen" (places spotted through exits or windows but never visited). It never names hidden-exit destinations.
 
