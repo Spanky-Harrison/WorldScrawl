@@ -354,13 +354,15 @@ The inspector's "What the narrator was told" table shows, for each person: the t
 
 ### Name knowledge
 
-Names are known per actor (the player, or another NPC), never per party. A name counts as known only when one of these happened:
+All of this goes through the name portal (`extension/names.mjs`). Names are known per actor, never per party, and known-ness is read from the folded stamps at a message, so turning off or undoing a name stamp hides the name again at once. A name counts as known only when:
 
 - a remember stamp (`npc_create` marks the rememberer: "known: remembered");
-- the narrator's `[ws_flag: npc | Name]` earlier in the chat ("known: flagged");
-- the narrator's `[ws_flag: name | Name]`, which writes an `npc_name` stamp ("known: name flag").
+- an `npc_name` stamp; or
+- the player's `/ws-know Name | named` edit.
 
-It is never inferred from chat text. A card with no `unknownAs` counts as known.
+A card with no `unknownAs` counts as known. `aliases` (other names: nicknames, short forms) are treated like the name.
+
+`learnName` (scene.mjs) is the only writer of `npc_name`. A learn from the model (the tracker's `name` item, the narrator's `[ws_flag: name | Name]`) must pass the portal's rules: the person resolves (the tracker's item by its own id or handle; its name is only what was heard), is in the scene, does not already know the name, the heard name is their name or an alias, and it was spoken: inside double quotes in the reply, or anywhere in the player's own line. A refused learn is noted in the model-call log. The player's `[name]` and `/ws-name` always land; a rule they skipped is kept on the stamp as `override` and shown in the inspector ("player override: ...").
 
 While the name is unknown, the narrator sees `the landlady [hesk]` together with the real name. It is told not to let the player's character use the name, and to end its reply with `[ws_flag: name | Hesk]` once someone says the name to them. There is no player bracket for this yet.
 
