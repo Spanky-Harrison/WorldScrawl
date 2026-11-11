@@ -53,7 +53,6 @@ test('notices use the shared row and Approve labels (no Keep button labels left)
     const src = extSource();
     assert.doesNotMatch(src, /cardButton\('Keep/);
     assert.doesNotMatch(src, /cardButton\(form \? 'Keep/);
-    assert.match(src, /cardButton\('Approve', \(\) => keepRemember\(id\)/);
-    assert.match(src, /markPending\(document\.createElement\('div'\)\); d\.classList\.add\('worldscrawl_remembercard'\)/);
+    assert.doesNotMatch(src, /cardButton\('Adjust', \(\) => keepRemember/, 'the Remember card has no Adjust');
     assert.doesNotMatch(src, /d\.append\(' ', cardButton/, 'no buttons inline at the start/middle of a notice');
 });

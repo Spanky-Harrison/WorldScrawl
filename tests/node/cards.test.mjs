@@ -466,3 +466,139 @@ test('place expiry stale: a notice deleted before the click, or during the save,
     assert.equal(n2.extra.worldscrawl_patches ?? null, null, 'deleted during the save');
     patchesExt.openForms.clear();
 });
+
+// ---- S3: the Remember card
+const MAREN = { name: 'Maren', personality: { summary: 'A knife-grinder.', manner: 'Brisk.', speech: 'Clipped.' }, appearance: { summary: 'wiry woman', body: 'Wiry, with grey eyes.', outfit: 'A patched smock.' },
+    history: 'Came upriver years ago; a scar on the chin from a bad whetstone.', facts: ['Sharpens knives in the square'], invented: ['grey eyes', 'scar on the chin'], disposition: { value: 'friendly', reason: 'You paid.' } };
+const isRemember = p => /Remember this person/.test(p);
+/** A Remember card for Maren on message 1; `answer(prompt)` is the model's remember answer. */
+async function rememberCard(answer) {
+    const c = boot([
+        { is_user: true, mes: 'I hand my knife to the grinder.', swipe_id: 0, extra: {} },
+        { is_user: false, mes: 'Maren, the knife-grinder, works the wheel.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: {} },
+    ], []);
+    const calls = [];
+    SillyTavern.getContext().generateRaw = async args => { const p = String(args?.prompt ?? ''); if (isRemember(p)) calls.push(p); return isRemember(p) ? answer(p, calls.length) : '{}'; };
+    await scene.offerRemember(c.chat[1], 'Maren');
+    return { c, calls, card: () => c.chat[1].extra[scene.REMEMBER_KEY] };
+}
+const remEl = doc => doc.querySelector('.worldscrawl_remembercard');
+const created = c => (c.chat[1].extra[NPC_KEY] ?? []).filter(s => s.type === 'npc_create');
+
+test('Remember: Preparing… offers Approve, and Approve while the prefetch is in flight saves its answer with no second call', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const { c, calls } = await rememberCard(async () => { await gate; return JSON.stringify(MAREN); });
+    const doc = draw([0, 1]);
+    await flush(10);
+    let el = remEl(doc);
+    assert.equal(el.dataset.state, 'working');
+    assert.match(el.textContent, /Preparing…/);
+    assert.deepEqual(btns(el), ['Approve', 'Discard']);
+    assert.equal(calls.length, 1, 'the prefetch is asking');
+    byText(el, 'Approve').click();
+    await flush(10);
+    release();
+    await flush(60);
+    assert.equal(calls.length, 1, 'no second call');
+    assert.equal(created(c).length, 1);
+    assert.equal(created(c)[0].name, 'Maren');
+    assert.equal(created(c)[0].line, 'A knife-grinder.');
+});
+
+test('Remember: a failed card offers Check again, which asks again into review', async () => {
+    const { calls } = await rememberCard((p, n) => (n <= 2 ? 'not json' : JSON.stringify(MAREN)));
+    const doc = draw([0, 1]);
+    await flush(60);
+    let el = remEl(doc);
+    assert.equal(el.dataset.state, 'failed');
+    assert.match(el.textContent, /Could not prepare the card/);
+    assert.deepEqual(btns(el), ['Check again', 'Discard']);
+    byText(el, 'Check again').click();
+    await flush(60);
+    el = remEl(doc);
+    assert.equal(el.dataset.state, 'review');
+    assert.equal(calls.length, 3);
+    assert.match(el.querySelector('.worldscrawl_card_summary').textContent, /New person: Maren — A knife-grinder\./);
+});
+
+test('Remember review: the new-person panel marks made-up details; Edit opens every field; Rewrite with this keeps what was typed; Approve edited clears only changed fields\' marks', async () => {
+    const { c, calls, card } = await rememberCard((p, n) => JSON.stringify(n === 1 ? MAREN : { ...MAREN, personality: { ...MAREN.personality, summary: 'An old knife-grinder.' }, appearance: { ...MAREN.appearance, outfit: 'Fine robes.' } }));
+    const doc = draw([0, 1]);
+    await flush(60);
+    let el = remEl(doc);
+    assert.equal(el.dataset.state, 'review');
+    assert.deepEqual(btns(el), ['Check again', 'Edit', 'Approve', 'Discard']);
+    const panel = el.querySelector('.worldscrawl_diff').textContent;
+    assert.match(panel, /new person/);
+    assert.match(panel, /Body ⚠ made up: grey eyes/);
+    assert.match(panel, /History ⚠ made up: scar on the chin/);
+    assert.match(el.querySelector('.worldscrawl_invented').textContent, /⚠ grey eyes; ⚠ scar on the chin/);
+    byText(el, 'Edit').click();
+    await flush(10);
+    el = remEl(doc);
+    assert.deepEqual(btns(el), ['Check again', 'Close editor', 'Rewrite with this', 'Approve edited', 'Discard']);
+    const box = k => remEl(doc).querySelector(`.worldscrawl_remember_${k}`);
+    assert.deepEqual(['name', 'line', 'looks', 'manner', 'voice', 'body', 'outfit', 'history', 'starts', 'facts'].map(k => box(k)?.value),
+        ['Maren', 'A knife-grinder.', 'wiry woman', 'Brisk.', 'Clipped.', 'Wiry, with grey eyes.', 'A patched smock.', MAREN.history, 'friendly — You paid.', 'Sharpens knives in the square']);
+    // Rewrite with this: the Change note goes to the model, the typed outfit stays exactly.
+    box('outfit').value = 'A leather apron.'; box('outfit').dispatchEvent({ type: 'input' });
+    const intent = remEl(doc).querySelector('.worldscrawl_remember_intent');
+    intent.value = 'older'; intent.dispatchEvent({ type: 'input' });
+    byText(remEl(doc), 'Rewrite with this').click();
+    await flush(60);
+    assert.equal(calls.length, 2);
+    assert.match(calls[1], /The player's note on the last card: older/);
+    assert.match(calls[1], /- Wearing: A leather apron\./);
+    assert.equal(card().proposal.got.outfit, 'A leather apron.', 'the typed field stays');
+    assert.equal(card().proposal.got.line, 'An old knife-grinder.', 'the model filled the rest');
+    // Approve edited: a changed Body drops its "grey eyes" mark; the History mark stays.
+    el = remEl(doc);
+    assert.equal(el.dataset.state, 'review');
+    byText(el, 'Edit').click();
+    await flush(10);
+    box('body').value = 'Wiry and stooped.'; box('body').dispatchEvent({ type: 'input' });
+    box('starts').value = 'helpful — she likes you'; box('starts').dispatchEvent({ type: 'input' });
+    byText(remEl(doc), 'Approve edited').click();
+    await flush(60);
+    const [made] = created(c);
+    assert.ok(made);
+    assert.equal(made.body, 'Wiry and stooped.');
+    assert.equal(made.outfit, 'A leather apron.');
+    assert.deepEqual(made.invented, ['scar on the chin']);
+    const disp = (c.chat[1].extra[NPC_KEY] ?? []).find(s => s.type === 'npc_disposition');
+    assert.equal(disp.value, 'helpful');
+    assert.equal(disp.reason, 'she likes you');
+    assert.equal(calls.length, 2, 'Approve edited asks nothing');
+});
+
+test('Remember: Discard declines for this scene; a stale Approve (the card was asked again since) saves nothing', async () => {
+    let { c, card } = await rememberCard(() => JSON.stringify(MAREN));
+    let doc = draw([0, 1]);
+    await flush(60);
+    byText(remEl(doc), 'Discard').click();
+    await flush(30);
+    assert.equal(card().status, 'declined');
+    assert.ok((c.chat[1].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_decline' && s.name === 'Maren'));
+
+    ({ c, card } = await rememberCard((p, n) => JSON.stringify(n === 1 ? MAREN : { ...MAREN, name: 'Maren Vell' })));
+    doc = draw([0, 1]);
+    await flush(60);
+    const old = byText(remEl(doc), 'Approve');
+    await scene.retryRemember(1); // asked again elsewhere: a new proposal
+    await flush(60);
+    old.click();
+    await flush(60);
+    assert.equal(created(c).length, 0, 'the stale Approve saved nothing');
+    assert.equal(card().status, 'review');
+    // Starts must be a disposition.
+    doc = draw([0, 1]);
+    byText(remEl(doc), 'Edit').click();
+    await flush(10);
+    const st = remEl(doc).querySelector('.worldscrawl_remember_starts');
+    st.value = 'grumpy'; st.dispatchEvent({ type: 'input' });
+    byText(remEl(doc), 'Approve edited').click();
+    await flush(30);
+    assert.equal(created(c).length, 0, 'a bad Starts is refused');
+    cardedit.closeCardEditor('1|remember');
+});
