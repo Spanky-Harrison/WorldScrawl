@@ -2,8 +2,8 @@
 // people keep theirs as stamps on messages (appearance owners with start/lasts, and temporary facts).
 // The engine drops an elapsed one from the replay by itself; this module names it, so the narrator,
 // the tracker, the chat notice and a wait's summary all hear about it once.
-import { NPC_KEY, lastsMinutes, nameKnown } from './npc.mjs';
-import { capFirst, handleOf, shownName } from './names.mjs';
+import { NPC_KEY, lastsMinutes } from './npc.mjs';
+import { capFirst, handleOf, knows, shownName } from './names.mjs';
 import { isOwnerStamp } from './replay.mjs';
 
 export const NPC_EXPIRED_KIND = 'npc_expired';
@@ -59,7 +59,7 @@ export function expiryWindow(chat, end, clock) {
 /** How to name the person: the real name, plus how the player knows them while the name is unknown. */
 export function whoText(n, party = 'the player') {
     const name = n?.name || n?.id || 'someone';
-    if (n && !nameKnown(n).known && n.unknownAs) return `${name} (known to ${party} only as "${n.unknownAs}")`;
+    if (n && !knows(n).known && n.unknownAs) return `${name} (known to ${party} only as "${n.unknownAs}")`;
     return name;
 }
 
@@ -68,7 +68,7 @@ export function describeExpiries(items, person, party) {
     return (items ?? []).flatMap(it => {
         const n = person(it.id);
         if (!n) return [];
-        return [{ ...it, name: n.name || it.id, who: whoText(n, party), shown: shownName(n), handle: handleOf(n.id || it.id), looks: n.looks || '', body: n.body || '', outfit: n.outfit || '' }];
+        return [{ ...it, name: n.name || it.id, who: whoText(n, party), shown: shownName(n), handle: handleOf(n.id || it.id), looks: n.looks || '', body: n.body || '', outfit: n.outfit || '' }]; // name-ok: the chat notice (player-facing); the model gets shown
     });
 }
 

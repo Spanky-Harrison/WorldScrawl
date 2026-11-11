@@ -111,6 +111,11 @@ export function judgeLearn({ person, present = [], heard = '', said = '', story 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
 const NPC_TOKEN = /\{\{\s*npc(!?)\s*:\s*([^{}\s]*)\s*\}\}/gi;
+const nameRe = (n, flags = '') => new RegExp(`(?<![\\p{L}\\p{N}_])${esc(n.trim())}(?![\\p{L}\\p{N}_])`, `u${flags}`);
+/** Is the match at `at` inside one of the map's place names ("Hesk's Room")? */
+function inPlace(all, at, m) {
+    return safe(wiring.places, []).some(pl => typeof pl === 'string' && pl.includes(m) && (() => { const i = all.lastIndexOf(pl, at); return i >= 0 && i <= at && i + pl.length >= at + m.length; })());
+}
 
 /**
  * Engine text for the model: every real name or alias of a person in `people` the player does not know becomes their
@@ -133,19 +138,13 @@ export function maskText(text, people, { onUnknown = null, keepGate = false } = 
         tokens.push(v);
         return `\u0001${tokens.length - 1}\u0001`;
     });
-    const hidden = list.filter(p => p.unknownAs && !isKnown(p));
-    if (hidden.length && out) {
-        const places = safe(wiring.places, []).filter(x => typeof x === 'string' && x.trim());
-        for (const p of hidden) {
-            for (const n of namesOf(p)) {
-                const re = new RegExp(`(?<![\\p{L}\\p{N}_])${esc(n.trim())}(?![\\p{L}\\p{N}_])`, 'gu');
-                const guarded = places.filter(pl => pl.includes(n.trim()));
-                out = out.replace(re, (m, at, all) => {
-                    if (guarded.some(pl => { const i = all.lastIndexOf(pl, at); return i >= 0 && i <= at && i + pl.length >= at + m.length; })) return m;
-                    const before = all.slice(0, at);
-                    return !before.trim() || /[.!?:]\s*$|\n\s*$/.test(before) ? capFirst(p.unknownAs) : p.unknownAs;
-                });
-            }
+    for (const p of list.filter(p => p.unknownAs && !isKnown(p))) {
+        for (const n of namesOf(p)) {
+            out = out.replace(nameRe(n, 'g'), (m, at, all) => {
+                if (inPlace(all, at, m)) return m;
+                const before = all.slice(0, at);
+                return !before.trim() || /[.!?:]\s*$|\n\s*$/.test(before) ? capFirst(p.unknownAs) : p.unknownAs;
+            });
         }
     }
     return out.replace(/\u0001(\d+)\u0001/g, (_all, i) => tokens[Number(i)] ?? '');
@@ -154,13 +153,16 @@ export function maskText(text, people, { onUnknown = null, keepGate = false } = 
 /** maskText against everyone in the cast as they are now: for engine-built side-call text (never story or player text). */
 export const maskForModel = (text, opts = {}) => maskText(text, safe(wiring.people, []), opts);
 
-/** Unknown people whose real name or alias is in `text` (engine blocks only; the choke-point check). */
+/**
+ * Unknown people whose real name or alias is in `text` outside a place name: the choke-point check, run on the final
+ * engine block (with the portal's own gated lines taken out). [{id, name}].
+ */
 export function nameLeaks(text, people) {
     const t = String(text ?? '');
     const out = [];
     for (const p of people ?? []) {
         if (!p?.unknownAs || isKnown(p)) continue;
-        const hit = namesOf(p).find(n => new RegExp(`(?<![\\p{L}\\p{N}_])${esc(n.trim())}(?![\\p{L}\\p{N}_])`, 'u').test(t));
+        const hit = namesOf(p).find(n => [...t.matchAll(nameRe(n, 'g'))].some(m => !inPlace(t, m.index, m[0])));
         if (hit) out.push({ id: p.id, name: hit });
     }
     return out;

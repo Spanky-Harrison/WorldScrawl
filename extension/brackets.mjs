@@ -86,7 +86,7 @@ export async function bracketIntent(msg, b) {
         const hits = requestLore(msg, loc, b.target ?? '', 'bracket');
         if (!hits.length) {
             msg.extra[LORE_KEY] = (msg.extra[LORE_KEY] ?? []).slice(0, -1);
-            const known = [...loreChain(loc).map(c => c.name), ...(castPack()?.elsewhere ?? []).filter(s => s.lore && !s.shadowed).map(s => s.name)];
+            const known = [...loreChain(loc).map(c => c.name), ...(castPack()?.elsewhere ?? []).filter(s => s.lore && !s.shadowed).map(s => s.name)]; // name-ok: place names
             return failed(loc, known.length ? `[${b.word}]${b.target ? ` ${b.target}` : ''}: lore on file: ${[...new Set(known)].join(', ')}.` : `[${b.word}]: no lore on file here.`);
         }
         return { kind: 'lore', loc };

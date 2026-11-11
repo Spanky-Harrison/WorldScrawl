@@ -105,7 +105,7 @@ export function exportRecord(npc) {
         npc = { ...npc, line: p.summary, manner: p.manner, voice: p.speech, looks: a.summary, body: a.body, outfit: a.outfit,
             deep: { ...(npc.deep ?? {}), ...(npc.history ? { history: npc.history } : {}) } };
     }
-    const out = { id: npc.id, name: npc.name };
+    const out = { id: npc.id, name: npc.name }; // name-ok: a cast file export
     if (npc.unknownAs) out.unknownAs = npc.unknownAs;
     if (Array.isArray(npc.aliases) && npc.aliases.length) out.aliases = [...npc.aliases];
     out.personality = { summary: npc.line };

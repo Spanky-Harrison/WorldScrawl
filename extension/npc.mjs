@@ -3,12 +3,12 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
-import { capFirst, findPerson, knows, labelOf, shownName } from './names.mjs';
+import { capFirst, knows, labelOf, shownName } from './names.mjs';
 import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
 import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
-const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NPC_TOKEN, exportRecord, authorRecord, isObj, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
+const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, exportRecord, authorRecord, isObj, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
 
 export const NPC_KEY = 'worldscrawl_npc';
 
@@ -197,14 +197,14 @@ export function offMapReport(play, elsewhere = []) {
     for (const n of play ?? []) {
         const s = n.why?.schedule;
         if (!s?.offmap) continue;
-        people.push({ id: n.id, name: n.name, activity: s.activity ?? '', where: s.where ?? '', near: s.near ?? { kind: 'none' }, how: nearPhrase(s.near) });
+        people.push({ id: n.id, name: n.name, activity: s.activity ?? '', where: s.where ?? '', near: s.near ?? { kind: 'none' }, how: nearPhrase(s.near) }); // name-ok: inspector map state
     }
     const stubs = (elsewhere ?? []).map(s => ({
-        id: s.id, name: s.name, about: s.about ?? '', lore: !!s.lore, shadowed: !!s.shadowed,
-        who: people.filter(p => p.near?.kind === 'stub' && p.near.id === s.id).map(p => ({ id: p.id, name: p.name, activity: p.activity, where: p.where })),
+        id: s.id, name: s.name, about: s.about ?? '', lore: !!s.lore, shadowed: !!s.shadowed, // name-ok: a stub place
+        who: people.filter(p => p.near?.kind === 'stub' && p.near.id === s.id).map(p => ({ id: p.id, name: p.name, activity: p.activity, where: p.where })), // name-ok: inspector map state
     }));
     const found = [];
-    for (const n of play ?? []) for (const a of n.foundAttempts ?? []) found.push({ id: n.id, name: n.name, ...a });
+    for (const n of play ?? []) for (const a of n.foundAttempts ?? []) found.push({ id: n.id, name: n.name, ...a }); // name-ok: inspector map state
     return { people, stubs, found };
 }
 
@@ -375,7 +375,7 @@ function applyStamp(state, s, index, elapsed = null) {
     const id = s.id;
     if (s.type === 'npc_create') {
         if (!id || !NPC_ID.test(id) || state.has(id)) return;
-        const name = str(s.name, 80), line = str(s.line, 400);
+        const name = str(s.name, 80), line = str(s.line, 400); // name-ok: a remember card answer (inbound)
         if (!name || !line) return;
         const t = (k, max = 400) => str(s[k], max) ?? '';
         const history = t('history', HISTORY_MAX);
@@ -493,7 +493,7 @@ export function framesOf(chat, index, cast = [], clock = null) {
         const active = chat[i]?.swipe_id ?? 0;
         for (const s of stampsOn(chat[i], active)) applyStamp(state, s, i, Number.isFinite(el) ? el : null);
         const flagged = flagsOn(chat[i]).map(normName);
-        if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag');
+        if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag'); // name-ok: inbound match
         if (Number.isFinite(el)) for (const n of state.values()) {
             if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
             // Drop expired appearance effects (lasts in game minutes from start; start is elapsed seconds).
@@ -659,7 +659,7 @@ export function presentAt(chat, index, cast, env) {
             else if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
             else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${capFirst(shownName(now))}'s hour here has passed.`;
         }
-        out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: nameKnown(now, chat, end) });
+        out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -699,7 +699,7 @@ function publicNpc(n) {
     for (const [who, row] of Object.entries(n.disposition ?? {})) disposition[who] = { ...row };
     if (!disposition[PLAYER]) disposition[PLAYER] = { value: 'unknown', reason: '' };
     return {
-        id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '',
+        id: n.id, name: n.name, line: n.line, manner: n.manner ?? '', voice: n.voice ?? '', looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '', // name-ok: the record, not prompt text
         pinned: n.pinned ? { ...n.pinned } : null,
         lasting: n.lasting ? { ...n.lasting } : null,
         base: { ...(n.base ?? { looks: n.looks ?? '', body: n.body ?? '', outfit: n.outfit ?? '' }) },
@@ -786,7 +786,7 @@ export function npcPlayState(chat, cast, env) {
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
             else if (s.type === 'npc_disposition') { extra.value = s.value ?? ''; extra.reason = typeof s.reason === 'string' ? s.reason : ''; }
             else if (s.type === 'npc_schedule') extra.count = Array.isArray(s.schedule) ? s.schedule.length : 0;
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}), index, sig: stampSig(s) });
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}), index, sig: stampSig(s) }); // name-ok: inspector
         });
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -818,7 +818,7 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
     const tier = n.manner || n.voice || deepKeys.length ? 'full' : 'stub';
     const out = { clock: clock ? { day: clock.day, hour: clock.hour, minute: clock.minute } : null, tier, from: n.from, following: n.following ? { ...n.following } : null,
         held: null, schedule: null, sighting: null, kind: null, place: null, reason: '', declined: false };
-    if (declined && declined.has(normName(n.name))) out.declined = true;
+    if (declined && declined.has(normName(n.name))) out.declined = true; // name-ok: inbound match
     if (!clock) { out.reason = 'No game clock yet.'; return out; }
     let due = null; try { due = duePlace(n, j, env); } catch { /* no position */ }
     out.kind = due?.kind ?? null; out.place = due?.address ?? null;
@@ -896,7 +896,7 @@ export function whoAt(chat, index, cast, env, place) {
             else if (w.schedule && w.schedule.address !== place) reason = `Not here: ${w.schedule.why} (${placeLabel(env, w.schedule.address ?? '') || 'nowhere'}${w.schedule.activity ? `, ${w.schedule.activity}` : ''})`;
             else reason = `Not here now. ${w.reason}`;
         }
-        out.push({ id: n.id, name: n.name, here, inScene: present.has(n.id), kind: here ? due?.kind ?? null : null, activity: here ? due?.activity ?? '' : '', reason });
+        out.push({ id: n.id, name: n.name, here, inScene: present.has(n.id), kind: here ? due?.kind ?? null : null, activity: here ? due?.activity ?? '' : '', reason }); // name-ok: inspector
     }
     out.sort((a, b) => (b.here - a.here) || a.name.localeCompare(b.name));
     return out;
@@ -919,10 +919,10 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
     try { asked = askedLoreNames(chat, before, i => env.playerAt(i)); } catch { asked = []; }
     const tiers = npcTiers(present, focus, { chat, index: before, said: ui >= 0 ? chat[ui]?.mes ?? '' : '', asked });
     const slices = npcSlices(present, focus, { tiers, pc: env?.pc || 'the player' });
-    const listed = present.map(p => ({ id: p.id, name: p.name, depth: focus?.id === p.id && focus.depth !== 'present' ? focus.depth : 'present',
+    const listed = present.map(p => ({ id: p.id, name: p.name, depth: focus?.id === p.id && focus.depth !== 'present' ? focus.depth : 'present', // name-ok: inspector
         memories: focus?.id === p.id && focus.depth && focus.depth !== 'present' ? [...(p.memory ?? [])] : [],
         tier: tiers[p.id].tier, why: tiers[p.id].why, topical: tiers[p.id].topical ? tiers[p.id].topicalWhy : '',
-        known: p.known?.known !== false, nameWhy: p.known?.reason ?? '', shownAs: p.known?.known === false ? p.unknownAs : p.name }));
+        known: p.known?.known !== false, nameWhy: p.known?.reason ?? '', shownAs: p.known?.known === false ? p.unknownAs : p.name })); // name-ok: inspector
     let comings = [];
     try { comings = comingsAndGoings(chat, before, cast, env); } catch { comings = []; }
     return { reply, user: ui, focus: focus ? { id: focus.id ?? null, depth: focus.depth ?? 'present', stored: !!(stored && stored.depth) } : null, listed, comings, ...slices };
@@ -992,7 +992,7 @@ export function followersAt(chat, index, cast = []) {
     const frames = framesOf(chat, index, cast);
     const end = frames.length - 1;
     if (end < 0) return [];
-    return [...frames[end].values()].filter(n => n.following).map(n => ({ id: n.id, name: n.name, who: n.following.who }));
+    return [...frames[end].values()].filter(n => n.following).map(n => ({ id: n.id, name: n.name, who: n.following.who })); // name-ok: followers list (movement, not prompt text)
 }
 
 /** Index where the scene holding message `index` starts (player at the same place). */
@@ -1006,7 +1006,7 @@ export function declinesInScene(chat, index, playerAt) {
     if (end < 0) return new Set();
     const scene = sceneStart(end, i => playerAt(Math.min(i, end)));
     const names = new Set();
-    for (let i = scene; i <= end; i++) for (const s of stampsOn(chat[i])) if (s.type === 'npc_decline' && s.name) names.add(normName(s.name));
+    for (let i = scene; i <= end; i++) for (const s of stampsOn(chat[i])) if (s.type === 'npc_decline' && s.name) names.add(normName(s.name)); // name-ok: inbound match
     return names;
 }
 
@@ -1022,7 +1022,7 @@ const LOOK_AT_RE = /\b(look(?:s|ed|ing)?|watch(?:es|ed|ing)?|stud(?:y|ies|ied)|e
  */
 export function focusRules(text, present) {
     const said = String(text ?? '');
-    const named = (present ?? []).filter(p => nameIn(said, p.name) || nameIn(said, p.id));
+    const named = (present ?? []).filter(p => nameIn(said, p.name) || nameIn(said, p.id)); // name-ok: inbound match (the player's words)
     let id = null, ambiguous = false;
     if (named.length === 1) id = named[0].id;
     else if (named.length > 1) ambiguous = true;
@@ -1040,11 +1040,6 @@ function dispositionLine(n) {
 }
 
 const LOOK_BRACKET_RE = /\[\s*look\b/i;
-
-/** Whether actor `who` knows NPC n's name, and why: the name portal's `knows` (names.mjs). */
-export function nameKnown(n, chat = [], index = -1, who = PLAYER) {
-    return knows(n, who);
-}
 
 /** The lore requests in this scene up to `index` that name no place (e.g. [lore] Hesk or [ws_flag: lore | Hesk]): their asked names. */
 export function askedLoreNames(chat, index, playerAt) {
@@ -1071,7 +1066,7 @@ export function npcTiers(present, focus, { chat = [], index = -1, said = '', ask
         seen++;
         flagged.push(...flagsOn(m));
     }
-    const names = p => [p.name, p.id, p.unknownAs].filter(Boolean);
+    const names = p => [p.name, p.id, p.unknownAs].filter(Boolean); // name-ok: inbound match
     const hits = (list, p) => list.some(x => names(p).some(nm => normName(x) === normName(nm) || nameIn(x, nm)));
     for (const p of present ?? []) {
         const focused = focus?.id === p.id && focus.depth && focus.depth !== 'present';
@@ -1108,7 +1103,7 @@ export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player'
     const lines = list.map(p => {
         const t = tierOf(p);
         const bits = [`${labelOf(p)}:`];
-        if (gate && p.unknownAs && shownName(p) !== p.name) bits.push(gate(p));
+        if (gate && p.unknownAs && shownName(p) !== p.name) bits.push(gate(p)); // name-ok: portal compare
         if (p.looks) bits.push(`Looks: ${p.looks}.`);
         bits.push(`Demeanor: ${p.line}`);
         if (p.activity) bits.push(`Now: ${p.activity}.`);
@@ -1211,16 +1206,7 @@ export function takeFoundFlags(text) {
     return { names, text: cleaned };
 }
 
-/** The saved person a name, alias, unknownAs, handle or id means: the name portal's `findPerson` (names.mjs). */
-export function npcForName(npcs, name) {
-    return findPerson(name, npcs);
-}
-
 /** Names the narrator flagged on message m (the shown swipe). */
-/** The saved person a tag or tool call means: its id when that id is saved, else a saved person by that name; null when neither. */
-export function npcTarget(npcs, idOrName) {
-    return findPerson(idOrName, npcs)?.id ?? null;
-}
 export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
 
 /**
@@ -1239,7 +1225,7 @@ export function flaggedPeople(chat, from, to, { known = [], declined = [], thres
             if (!key || seen.has(key) || skip.has(key) || known.some(k => nameIn(name, k) || nameIn(k, name))) continue;
             seen.add(key);
             const row = rows.get(key) ?? { key, name, count: 0, last: i };
-            row.count++; row.last = i; row.name = name;
+            row.count++; row.last = i; row.name = name; // name-ok: an unsaved name (inbound)
             rows.set(key, row);
         }
     }
@@ -1359,20 +1345,6 @@ export function stampSummary(s, name = '') {
         return `${who}: schedule (${n} ${n === 1 ? 'entry' : 'entries'})`;
     }
     return who;
-}
-
-/**
- * {{npc:id}} -> that NPC's name. An unknown id renders as the bare id ("someone" when empty) and is passed to `onUnknown`.
- * `cast` is a list of {id, name} (or a Map id -> name).
- */
-export function renderNpcTokens(text, cast, onUnknown = null) {
-    const byId = cast instanceof Map ? cast : new Map((cast ?? []).filter(n => n?.id).map(n => [String(n.id).toLowerCase(), n.name]));
-    return String(text ?? '').replace(NPC_TOKEN, (_all, id) => {
-        const name = byId.get(String(id).toLowerCase());
-        if (name) return name;
-        onUnknown?.(id);
-        return id || 'someone';
-    });
 }
 
 export const LORE_KEY = 'worldscrawl_lore';
