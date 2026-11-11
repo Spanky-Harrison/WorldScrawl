@@ -602,3 +602,248 @@ test('Remember: Discard declines for this scene; a stale Approve (the card was a
     assert.equal(created(c).length, 0, 'a bad Starts is refused');
     cardedit.closeCardEditor('1|remember');
 });
+
+// ---- S4: kept and committed rows
+/** A kept map change on message 1 (the stool proposal, approved through its card). */
+async function keptChange() {
+    const { c } = await placeProposal();
+    const doc = draw();
+    byText(doc.querySelector('.worldscrawl_flagreview'), 'Approve').click();
+    await flush(60);
+    const [p] = c.chat[1].extra.worldscrawl_patches ?? [];
+    assert.ok(p, 'kept');
+    return { c, p };
+}
+const keptEl = doc => doc.querySelector('.worldscrawl_change_kept') ?? doc.querySelector('.worldscrawl_change_off');
+
+test('kept map change: Edit opens the in-card map form (no tab), Approve edited re-stamps it; Turn off, Turn on, Undo', async () => {
+    const { c, p } = await keptChange();
+    const opened = [];
+    globalThis.window = { open: (...a) => { opened.push(a); return {}; } };
+    try {
+        let doc = draw();
+        let el = keptEl(doc);
+        assert.equal(el.dataset.state, 'kept');
+        assert.match(el.querySelector('.worldscrawl_card_title').textContent, /^🗺 Map changed here:/);
+        assert.deepEqual(btns(el), ['Edit', 'Turn off', 'Undo']);
+        const show = el.querySelector('.worldscrawl_change_show');
+        assert.ok(show && !show.open, '"Show change" starts collapsed');
+        byText(el, 'Edit').click();
+        await flush(60);
+        assert.equal(opened.length, 0, 'no editor tab');
+        doc = draw();
+        el = keptEl(doc);
+        assert.deepEqual(btns(el), ['Close editor', 'Approve edited', 'Turn off', 'Undo']);
+        assert.ok(el.querySelector('.worldscrawl_card_editor .wspf'), 'the same map form as the review card');
+        assert.ok(el.querySelector('.worldscrawl_card_editor .worldscrawl_flag_intent'), 'with the Change box');
+        const ta = el.querySelector('.wspf-text');
+        assert.equal(ta.value, BOARDS);
+        ta.value = 'A scorched common room, the bar charred black.';
+        ta.dispatchEvent({ type: 'input' });
+        byText(el, 'Approve edited').click();
+        await flush(80);
+        const now = c.chat[1].extra.worldscrawl_patches;
+        assert.equal(now.length, 1);
+        assert.equal(now[0].id, p.id, 'same change, same message');
+        assert.equal(now[0].ops[0].text, 'A scorched common room, the bar charred black.');
+        doc = draw();
+        assert.deepEqual(btns(keptEl(doc)), ['Edit', 'Turn off', 'Undo'], 'the editor closed');
+        byText(keptEl(doc), 'Turn off').click();
+        await flush(80);
+        assert.equal(now[0].off, true);
+        doc = draw();
+        el = keptEl(doc);
+        assert.equal(el.dataset.state, 'off');
+        assert.deepEqual(btns(el), ['Turn on', 'Undo']);
+        byText(el, 'Turn on').click();
+        await flush(80);
+        assert.equal(now[0].off === true, false);
+        doc = draw();
+        byText(keptEl(doc), 'Undo').click();
+        await flush(80);
+        assert.equal(c.chat[1].extra.worldscrawl_patches ?? null, null, 'Undo removes it');
+    } finally { delete globalThis.window; }
+});
+
+test('kept map change stale: edited elsewhere before the click, or the message deleted during the save, writes nothing', async () => {
+    let { c, p } = await keptChange();
+    let doc = draw();
+    byText(keptEl(doc), 'Edit').click();
+    await flush(60);
+    doc = draw();
+    let ta = keptEl(doc).querySelector('.wspf-text');
+    ta.value = 'Typed here.'; ta.dispatchEvent({ type: 'input' });
+    const ok = byText(keptEl(doc), 'Approve edited');
+    p.ops = [{ ...p.ops[0], text: 'Edited in the map meanwhile.' }];
+    ok.click();
+    await flush(80);
+    assert.equal(c.chat[1].extra.worldscrawl_patches[0].ops[0].text, 'Edited in the map meanwhile.', 'the stale save wrote nothing');
+    patchesExt.openForms.clear(); cardedit.closeCardEditor(`1|${p.id}`);
+
+    ({ c, p } = await keptChange());
+    doc = draw();
+    byText(keptEl(doc), 'Edit').click();
+    await flush(60);
+    doc = draw();
+    ta = keptEl(doc).querySelector('.wspf-text');
+    ta.value = 'Typed here.'; ta.dispatchEvent({ type: 'input' });
+    const msg1 = c.chat[1];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => { if (/patch\/preview/.test(String(url)) && c.chat[1] === msg1) c.chat.splice(1, 1); return real(url, opts); };
+    try { byText(keptEl(doc), 'Approve edited').click(); await flush(80); } finally { globalThis.fetch = real; }
+    assert.equal(msg1.extra.worldscrawl_patches[0].ops[0].text, BOARDS, 'deleted during the save: unchanged');
+    patchesExt.openForms.clear(); cardedit.closeCardEditor(`1|${p.id}`);
+});
+
+/** Person notes on message 0: the stamps given, through the real addNpcStamp (owners and identity). */
+function notes(stamps, cast) {
+    const c = boot([{ is_user: false, mes: 'Hesk wipes the bar.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_mid: 'm0' } }], cast);
+    for (const s of stamps) scene.addNpcStamp(c.chat[0], s);
+    return { c, st: type => c.chat[0].extra[NPC_KEY].find(s => s.type === type) };
+}
+const noteEl = (doc, re) => [...doc.querySelectorAll('.worldscrawl_card_fact')].find(e => re.test(e.textContent));
+
+test('a pending lasting fact is a review card: Edit → Approve edited adds it as typed; Discard drops one', async () => {
+    const { c, st } = notes([{ type: 'npc_fact', id: 'hesk', field: 'fact', text: 'owes a favor', pending: true }, { type: 'npc_fact', id: 'hesk', field: 'fact', text: 'hates rats', pending: true }]);
+    let doc = draw([0]);
+    let el = noteEl(doc, /owes a favor/);
+    assert.ok(el.className.includes('worldscrawl_npcpending'));
+    assert.equal(el.dataset.state, 'review');
+    assert.deepEqual(btns(el), ['Edit', 'Approve', 'Discard']);
+    assert.match(el.querySelector('.worldscrawl_diff').textContent, /Fact/);
+    byText(el, 'Edit').click();
+    await flush(10);
+    el = noteEl(doc, /owes a favor/);
+    assert.deepEqual(btns(el), ['Close editor', 'Approve edited', 'Discard']);
+    const box = el.querySelector('.worldscrawl_note_text');
+    box.value = 'owes Hesk a big favor'; box.dispatchEvent({ type: 'input' });
+    byText(el, 'Approve edited').click();
+    await flush(30);
+    const f = c.chat[0].extra[NPC_KEY].find(s => /big favor/.test(s.text ?? ''));
+    assert.ok(f && !f.pending);
+    byText(noteEl(doc, /hates rats/), 'Discard').click();
+    await flush(30);
+    assert.equal(c.chat[0].extra[NPC_KEY].some(s => s.text === 'hates rats'), false);
+    assert.equal(noteEl(doc, /big favor/).dataset.state, 'kept');
+});
+
+test('committed notes: fact, memory and disposition Edit → Approve edited → Turn off → Turn on → Undo through the card', async () => {
+    for (const [s, re, typed, key] of [
+        [{ type: 'npc_fact', id: 'hesk', field: 'fact', text: 'owes a favor' }, /owes a favor/, 'owes two favors', 'text'],
+        [{ type: 'npc_memory', id: 'hesk', note: 'she promised a room' }, /promised a room/, 'she promised the attic room', 'note'],
+        [{ type: 'npc_disposition', id: 'hesk', who: 'player', value: 'friendly', reason: 'a kind word' }, /a kind word/, 'you tipped well', 'reason'],
+    ]) {
+        const { c, st } = notes([s]);
+        const stamp = st(s.type);
+        let doc = draw([0]);
+        let el = noteEl(doc, re);
+        assert.ok(el.className.includes('worldscrawl_npcchange'), s.type);
+        assert.deepEqual(btns(el), ['Edit', 'Turn off', 'Undo'], s.type);
+        byText(el, 'Edit').click();
+        await flush(10);
+        el = noteEl(doc, re);
+        assert.deepEqual(btns(el), ['Close editor', 'Approve edited', 'Turn off', 'Undo'], s.type);
+        const box = el.querySelector('.worldscrawl_note_text');
+        box.value = typed; box.dispatchEvent({ type: 'input' });
+        byText(el, 'Approve edited').click();
+        await flush(30);
+        assert.equal(stamp[key], typed, s.type);
+        const typedRe = new RegExp(typed);
+        byText(noteEl(doc, typedRe), 'Turn off').click();
+        await flush(30);
+        assert.equal(stamp.off, true, s.type);
+        el = noteEl(doc, typedRe);
+        assert.equal(el.dataset.state, 'off');
+        assert.deepEqual(btns(el), ['Turn on', 'Undo']);
+        byText(el, 'Turn on').click();
+        await flush(30);
+        assert.equal(stamp.off, false, s.type);
+        byText(noteEl(doc, typedRe), 'Undo').click();
+        await flush(30);
+        assert.equal((c.chat[0].extra[NPC_KEY] ?? []).includes(stamp), false, s.type);
+    }
+});
+
+test('a remembered person: the new-person panel replaces the Looks/Body block; Edit opens every field and clears only the changed field\'s ⚠', async () => {
+    const { st } = notes([{ type: 'npc_create', id: 'maren', name: 'Maren', line: 'A knife-grinder.', looks: 'wiry woman', body: 'Wiry, with grey eyes.', outfit: 'A patched smock.', history: 'A scar on the chin.', facts: [], invented: ['grey eyes', 'scar on the chin'] }]);
+    const s = st('npc_create');
+    let doc = draw([0]);
+    let el = noteEl(doc, /Maren remembered/);
+    assert.equal(doc.querySelector('.worldscrawl_npccreate_more'), null, 'no old block');
+    assert.match(el.querySelector('.worldscrawl_diff').textContent, /new person/);
+    assert.match(el.querySelector('.worldscrawl_invented').textContent, /grey eyes; scar on the chin/);
+    byText(el, 'Edit').click();
+    await flush(10);
+    el = noteEl(doc, /Maren remembered/);
+    const box = k => noteEl(doc, /Maren remembered/).querySelector(`.worldscrawl_remember_${k}`);
+    assert.deepEqual(['name', 'line', 'looks', 'body', 'outfit', 'history'].map(k => box(k)?.value), ['Maren', 'A knife-grinder.', 'wiry woman', 'Wiry, with grey eyes.', 'A patched smock.', 'A scar on the chin.']);
+    box('body').value = 'Wiry and stooped.'; box('body').dispatchEvent({ type: 'input' });
+    byText(el, 'Approve edited').click();
+    await flush(30);
+    assert.equal(s.body, 'Wiry and stooped.');
+    assert.deepEqual(s.invented, ['scar on the chin']);
+});
+
+const UPSTAIRS = 'riverton:drowned_rat/upstairs', STABLE = 'riverton:drowned_rat/stable';
+const ROAMER = { ...HESK, schedule: [{ activity: 'resting', where: 'her own room', near: 'riverton:drowned_rat' }] };
+test('found: Edit opens the room box, Approve edited moves the find; a stale card does nothing; Turn off, Turn on, Undo', async () => {
+    const { c, st } = notes([{ type: 'npc_found', id: 'hesk', where: 'her own room', place: TAVERN }], [ROAMER]);
+    const s = st('npc_found');
+    // The world's places, so the found check can see that her own room is near the Drowned Rat.
+    const { load_world } = await import('../../plugin/world.mjs');
+    const { worldPlaces } = await import('../../plugin/cast.mjs');
+    const wp = worldPlaces(load_world(RIVERTON));
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [ROAMER], places: [...wp.addresses], subs: wp.subs, regions: wp.regions, elsewhere: wp.elsewhere, place_names: wp.names, place_labels: wp.labels }] });
+    let doc = draw([0]);
+    let el = doc.querySelector('.worldscrawl_found');
+    assert.ok(el.className.includes('worldscrawl_card_found'));
+    assert.deepEqual(btns(el), ['Edit', 'Turn off', 'Undo']);
+    byText(el, 'Edit').click();
+    await flush(10);
+    el = doc.querySelector('.worldscrawl_found');
+    assert.deepEqual(btns(el), ['Close editor', 'Approve edited', 'Turn off', 'Undo']);
+    let box = el.querySelector('.worldscrawl_found_place');
+    assert.equal(box.value, TAVERN);
+    box.value = UPSTAIRS; box.dispatchEvent({ type: 'input' });
+    byText(el, 'Approve edited').click();
+    await flush(60);
+    assert.equal(s.place, UPSTAIRS, 'moved');
+    // Stale: the find moved in place after the card was drawn (no revision bump, so only the ticket can tell).
+    byText(doc.querySelector('.worldscrawl_found'), 'Edit').click();
+    await flush(10);
+    el = doc.querySelector('.worldscrawl_found');
+    box = el.querySelector('.worldscrawl_found_place');
+    const stale = byText(el, 'Approve edited');
+    s.place = STABLE;
+    box.value = TAVERN; box.dispatchEvent({ type: 'input' });
+    stale.click();
+    await flush(60);
+    assert.equal(s.place, STABLE, 'the stale save wrote nothing');
+    cardedit.closeCardEditor(`0|found|hesk|her own room`);
+    doc = draw([0]);
+    byText(doc.querySelector('.worldscrawl_found'), 'Turn off').click();
+    await flush(30);
+    assert.equal(s.off, true);
+    byText(doc.querySelector('.worldscrawl_found'), 'Turn on').click();
+    await flush(30);
+    assert.equal(s.off, false);
+    byText(doc.querySelector('.worldscrawl_found'), 'Undo').click();
+    await flush(30);
+    assert.equal((c.chat[0].extra[NPC_KEY] ?? []).includes(s), false);
+});
+
+test('note stale: an edit from a card drawn before the note was edited elsewhere writes nothing', async () => {
+    const { c, st } = notes([{ type: 'npc_memory', id: 'hesk', note: 'she promised a room' }]);
+    const s = st('npc_memory');
+    let doc = draw([0]);
+    byText(noteEl(doc, /promised/), 'Edit').click();
+    await flush(10);
+    const el = noteEl(doc, /promised/);
+    const box = el.querySelector('.worldscrawl_note_text');
+    box.value = 'typed here'; box.dispatchEvent({ type: 'input' });
+    const ok = byText(el, 'Approve edited');
+    s.note = 'she promised the cellar'; // rewritten in place (no revision bump), so only the card's ticket can tell
+    ok.click();
+    await flush(30);
+    assert.equal(s.note, 'she promised the cellar');
+});

@@ -135,29 +135,27 @@
     await card.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await settle(1500);
     const kept1 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
     check('review card: Keep stamps exactly the edited change', kept1?.length === 1 && kept1[0].ops.length === 1 && kept1[0].ops[0].text === 'Charred beams and ash.', JSON.stringify(kept1));
-    // Edit on a kept change opens the map editor in its own tab: one tab per touched place, place forms, no op dropdown.
-    const edTab = page.context().waitForEvent('page', { timeout: 15000 });
-    await card.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
-    const ed = await edTab;
-    const edErrors = []; ed.on('pageerror', e => { edErrors.push(e.message); console.log('[editor pageerror]', e.message); });
-    await ed.waitForSelector('.change-editor .ce-place', { timeout: 20000 }).catch(() => {});
-    const ed0 = await ed.evaluate(() => ({ url: location.search, tabs: [...document.querySelectorAll('.ce-tab')].map(t => t.dataset.target), desc: document.querySelector('.ce-place .placeform > .pf-row[data-field="description"] textarea')?.value, opSelect: !!document.querySelector('.wspf-op'), raw: !!document.querySelector('.ce-raw-box textarea') }));
-    check('kept change Edit: opens the editor tab for this message\'s change, one tab per touched place, place form starts after the change, no op dropdown, Raw JSON there', /edit=1/.test(ed0.url) && new RegExp(`msg=${flagId}`).test(ed0.url) && ed0.tabs.length === 1 && ed0.tabs[0] === CR && ed0.desc === 'Charred beams and ash.' && !ed0.opSelect && ed0.raw, JSON.stringify(ed0));
-    await ed.fill('.ce-place .placeform > .pf-row[data-field="description"] textarea', 'Rebuilt, smelling of fresh pine.');
-    await ed.waitForTimeout(800);
-    await ed.click('.ce-save');
-    try { await ed.waitForFunction(() => /Saved on message/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
+    // Edit on a kept change opens the same map form inside the card: no tab.
+    const kept = page.locator(`#chat .mes[mesid="${flagId}"] .worldscrawl_change_kept`);
+    let tabs = 0; const onTab = () => { tabs++; }; page.context().on('page', onTab);
+    await kept.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    await kept.locator('.worldscrawl_card_editor .wspf-text').first().waitFor({ timeout: 10000 });
+    check('kept change Edit: the in-card map form starts after the change, no tab opens', await kept.locator('.wspf-text').first().inputValue() === 'Charred beams and ash.' && tabs === 0, String(tabs));
+    await kept.locator('.wspf-text').first().fill('Rebuilt, smelling of fresh pine.');
+    await settle(800);
+    await kept.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await settle(1500);
     const kept2 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
-    check('editor tab Save: the SillyTavern tab re-stamps the change on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops.at(-1).text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2) + await ed.evaluate(() => document.querySelector('.change-editor')?.innerText.slice(-300)));
+    check('kept change Approve edited: re-stamps the change on the same message', kept2?.length === 1 && kept2[0].id === kept1[0].id && kept2[0].ops.at(-1).text === 'Rebuilt, smelling of fresh pine.', JSON.stringify(kept2));
+    await kept.locator('.worldscrawl_card_btn', { hasText: /^Edit$/ }).click();
+    await kept.locator('.wspf-text').first().waitFor({ timeout: 10000 });
+    await kept.locator('.wspf-text').first().fill('Typed over a stale card.');
     await page.evaluate(id => { const p = SillyTavern.getContext().chat[id].extra.worldscrawl_patches[0]; p.ops = [{ ...p.ops.at(-1), text: 'Changed in the chat meanwhile.' }]; }, flagId);
-    await ed.click('.ce-save');
-    try { await ed.waitForFunction(() => /Not saved/.test(document.querySelector('.ce-status')?.textContent ?? ''), null, { timeout: 10000 }); } catch {}
-    const edStale = await ed.evaluate(() => document.querySelector('.change-editor')?.innerText ?? '');
+    await kept.locator('.worldscrawl_card_btn', { hasText: 'Approve edited' }).click(); await settle(1500);
     const kept3 = await page.evaluate(id => SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId);
-    check('editor tab Save refused with a note when the change was edited since it opened', /edited since/.test(edStale) && kept3[0].ops.length === 1 && kept3[0].ops[0].text === 'Changed in the chat meanwhile.', edStale.slice(-300) + JSON.stringify(kept3));
-    check('editor tab: no page errors', !edErrors.length, edErrors.join(' | '));
-    await ed.close();
-    await card.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click(); await settle(1000);
+    check('kept change Approve edited refused when the change was edited since the card was drawn', kept3[0].ops.length === 1 && kept3[0].ops[0].text === 'Changed in the chat meanwhile.', JSON.stringify(kept3));
+    page.context().off('page', onTab);
+    check('kept change: still no tab opened', tabs === 0, String(tabs));
+    await page.locator(`#chat .mes[mesid="${flagId}"] .worldscrawl_change_kept .worldscrawl_card_btn`, { hasText: 'Undo' }).click(); await settle(1000);
     check('Undo removes the edited change', await page.evaluate(id => !SillyTavern.getContext().chat[id].extra.worldscrawl_patches, flagId));
     // Edit live from the map window's inspector.
     await ui.click('#editorToggle'); await ui.waitForTimeout(800);
