@@ -254,3 +254,123 @@ test('a missing or older plugin shows one "update the plugin" line, never the ol
     } finally { assert.equal(cardlib.useCardLib(card, cardedit), true); }
     assert.equal(btns(draw([0])).includes('Approve'), true);
 });
+
+// ---- S1b: every person action goes through settleNpc (Check again, the scope switch, Rewrite with this)
+function commitOwner(o) {
+    o.committed = { kind: 'appearance', intent: o.candidate.intent, fields: o.candidate.fields, layer: { ...(o.candidate.layer ?? {}) }, scope: 'light', why: '' };
+    o.kind = 'appearance'; o.lasts = o.candidate.proposedLasts; o.contentId = `c_${o.owner}`; o.candidate = null;
+    return o;
+}
+function owner(id, intent, fields, layer, lasts) {
+    const o = scene.makeOwner({ id: 'hesk', intent, fields, layer, lasts, start: 0, message: 'm', swipe: 0, chatId: 'cards1' });
+    o.owner = id; o.identity.owner = id;
+    return o;
+}
+/** Knarfy's layered test: a committed gnoll body change and a proposed stripper (body and outfit), each temporary. */
+async function layered(gnollLasts, stripperLasts) {
+    const gnoll = commitOwner(owner(`gnoll${gnollLasts}`, 'turned into a gnoll', 'body', { body: 'a gnoll frame' }, gnollLasts));
+    const stripper = owner(`strip${stripperLasts}`, 'turned into a sexy stripper', 'body,outfit', {}, stripperLasts);
+    const c = boot([{ mes: 'The spell takes hold.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_mid: 'm', [NPC_KEY]: [gnoll, stripper] } }]);
+    const prompts = [];
+    c.generateRaw = async args => {
+        const p = String(args?.prompt ?? '');
+        prompts.push(p);
+        if (/Looks line/.test(p)) return '{"looks":"a sultry look"}';
+        if (/gnoll/.test(p) && /stripper/.test(p)) return '{"body":"a gnoll in glitter","outfit":"silver sequins"}';
+        if (/stripper/.test(p)) return '{"body":"a lithe dancer","outfit":"silver sequins"}';
+        return '{"body":"should not be asked","outfit":"wool"}';
+    };
+    await scene.fillCandidate(c.chat, stripper.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
+    return { c, gnoll, stripper, prompts };
+}
+for (const [order, gnollLasts, stripperLasts] of [['the stripper ends first', 120, 60], ['the gnoll ends first', 60, 120]]) {
+    test(`layered gnoll + stripper through the card's Check again and scope switch: ${order}`, async () => {
+        const { c, stripper, prompts } = await layered(gnollLasts, stripperLasts);
+        let doc = draw([0]);
+        const fieldAsks = () => prompts.filter(p => /Rewrite body/.test(p));
+        const before = fieldAsks().length;
+        byText(doc, 'Check again').click();
+        await flush(60);
+        assert.ok(fieldAsks().length > before, 'Check again asked the rewrite again');
+        assert.equal(stripper.candidate.phase, 'review');
+        assert.equal(stripper.candidate.livePreview.body, 'a gnoll in glitter', 'for now it sits on the gnoll');
+        assert.deepEqual(stripper.candidate.lastingPreview, { body: 'sturdy', outfit: 'wool' }, 'the pinned baseline underneath both temporary changes');
+        doc = draw([0]);
+        byText(doc, 'Make it a full rewrite').click();
+        await flush(60);
+        assert.equal(stripper.candidate.scope, 'heavy');
+        assert.match(fieldAsks().at(-1), /turned into a sexy stripper \[body,outfit\] \(full rewrite\)/);
+        doc = draw([0]);
+        byText(doc, 'Approve').click();
+        await flush(80);
+        assert.ok(stripper.committed, 'approved from the card');
+        assert.equal(npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 })).outfit, 'silver sequins');
+        // An hour passes: one of the two runs out, and the other is what she looks like.
+        c.chat.push({ mes: 'An hour later.', is_user: false, swipe_id: 0, extra: { worldscrawl_wait: { seconds: 3600 } } });
+        await scene.ensureAppearanceRebuilds(1, { ids: ['hesk'], timeout: 80 });
+        const hour = npcAt(c.chat, 1, [HESK], 'hesk', i => ({ elapsed: i === 0 ? 0 : 3600 }));
+        if (stripperLasts < gnollLasts) assert.deepEqual([hour.body, hour.outfit], ['a gnoll frame', 'wool'], 'back to the gnoll, not to human');
+        else assert.deepEqual([hour.body, hour.outfit], ['a lithe dancer', 'silver sequins'], 'the stripper alone, without the gnoll');
+        assert.equal(prompts.some(p => /should not be asked/.test(p)), false);
+        // Both over: back to her own body and clothes.
+        c.chat.push({ mes: 'Later still.', is_user: false, swipe_id: 0, extra: { worldscrawl_wait: { seconds: 7200 } } });
+        const late = npcAt(c.chat, 2, [HESK], 'hesk', i => ({ elapsed: i === 0 ? 0 : i === 1 ? 3600 : 10800 }));
+        assert.deepEqual([late.body, late.outfit], ['sturdy', 'wool']);
+    });
+}
+
+test('the person scope switch asks before dropping typed text; Rewrite with this asks again with the Change box', async () => {
+    const { o } = await personProposal('pc6');
+    const asked = [];
+    const prev = ext.hooks.confirm;
+    try {
+        let doc = draw([0]);
+        byText(doc, 'Edit').click();
+        doc = draw([0]);
+        ext.hooks.confirm = async t => { asked.push(t); return false; };
+        // Nothing typed: no question.
+        byText(doc, 'Make it a full rewrite').click();
+        await flush(60);
+        assert.equal(asked.length, 0);
+        assert.equal(o.candidate.scope, 'heavy');
+        doc = draw([0]);
+        byText(doc, 'Edit').click();
+        doc = draw([0]);
+        const box = doc.querySelectorAll('textarea').find(t => t.dataset.field === 'body');
+        box.value = 'my own words'; box.dispatchEvent({ type: 'input' });
+        byText(doc, 'Make it a light touch').click();
+        await flush(60);
+        assert.equal(asked.length, 1);
+        assert.match(asked[0], /drops the text you typed/);
+        assert.equal(o.candidate.scope, 'heavy', 'cancelled: nothing asked');
+        assert.equal(draw([0]).querySelectorAll('textarea').find(t => t.dataset.field === 'body').value, 'my own words', 'and the typed text stays');
+        ext.hooks.confirm = async t => { asked.push(t); return true; };
+        byText(document, 'Make it a light touch').click();
+        await flush(60);
+        assert.equal(o.candidate.scope, 'light');
+        assert.equal(cardedit.editorOpen('pc6|npcedit'), false);
+        // Rewrite with this: the typed Change line is the new intent.
+        doc = draw([0]);
+        byText(doc, 'Edit').click();
+        doc = draw([0]);
+        const intent = doc.querySelector('.worldscrawl_npc_intent');
+        intent.value = 'taller and scarred'; intent.dispatchEvent({ type: 'input' });
+        byText(doc, 'Rewrite with this').click();
+        await flush(60);
+        assert.equal(o.candidate.intent, 'taller and scarred');
+    } finally { ext.hooks.confirm = prev; }
+});
+
+test('stale: a person Check again from a card drawn before the change was decided elsewhere asks nothing', async () => {
+    const { c, o } = await personProposal('pc7');
+    const doc = draw([0]);
+    const again = byText(doc, 'Check again');
+    const calls = model({ fields: '{"body":"should not land","outfit":"wool"}' });
+    await scene.settleNpc(c.chat, o.identity, o.decisionRev, 'approve', { token: o.candidate.token, elapsed: 0 });
+    const committed = JSON.stringify(o.committed);
+    again.click();
+    await flush(60);
+    assert.equal(JSON.stringify(o.committed), committed);
+    assert.equal(o.candidate, null);
+    assert.equal(calls.filter(p => /Rewrite body/.test(p)).length, 0);
+});

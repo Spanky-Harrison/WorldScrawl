@@ -1166,7 +1166,8 @@ test('Edit shows the proposed Body and Outfit text; Approve edited commits exact
     byText(doc, '.worldscrawl_card_btn', 'Edit').click();
     await flush();
     const boxes = doc.querySelectorAll('.worldscrawl_npc_text');
-    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field, b.value]), [['lasting', 'body', 'a furred gnoll'], ['lasting', 'outfit', 'wool']]);
+    // Only the fields the panel shows as changed are editable: a body change edits Body, not Outfit.
+    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field, b.value]), [['lasting', 'body', 'a furred gnoll']]);
     assert.ok(doc.querySelector('.worldscrawl_npc_intent'), 'the Change box and Rewrite with this stay');
     assert.ok(byText(doc, '.worldscrawl_card_btn', 'Rewrite with this'));
     assert.deepEqual(doc.querySelector('.worldscrawl_npcpending').querySelectorAll('.worldscrawl_card_btn').map(b => b.textContent),
@@ -1210,7 +1211,7 @@ test('Approve edited on a temporary change edits the for-now text and keeps its 
     byText(doc, '.worldscrawl_card_btn', 'Edit').click();
     await flush();
     const boxes = doc.querySelectorAll('.worldscrawl_npc_text');
-    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field]), [['live', 'body'], ['live', 'outfit']]);
+    assert.deepEqual(boxes.map(b => [b.dataset.part, b.dataset.field]), [['live', 'outfit']]);
     const outfit = boxes.find(b => b.dataset.field === 'outfit');
     outfit.value = 'a wool dress wrung out and still dripping';
     outfit.dispatchEvent({ type: 'input' });
