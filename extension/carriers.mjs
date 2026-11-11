@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { render as P, hasPrompts, patches } from './shared.mjs';
-import { baseReply, gen, mergeDuplicates, nearbyRooms } from './dig.mjs';
+import { baseReply, gen, mergeDuplicates, nearbyRooms, noteCall } from './dig.mjs';
 import { analyzeDiscovery, keepFlag, syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, ensurePrompts } from './doors.mjs';
 import { aftermathNote, applyNudge, applyTools } from './expiry.mjs';
@@ -9,6 +9,7 @@ import { FLAG_KEY, MOVE_KEY, PATCH_KEY, baseUrl, broadcastMapState, ctx, isOn, s
 import { RANGE_CAP, changeDependents, confirmOff, loadFormLib, mapCtx, patchesOn } from './patches.mjs';
 import { applyFacts } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
+import { REWRITE_SET_BY_YOU, mergeRewrite, rewriteGuard, targetLines, textTargets } from './arearewrite.mjs';
  // from the ws_flag tool: attached to the reply when it arrives
 let patchLib = null;
 
@@ -178,12 +179,29 @@ globalThis.worldscrawlScene = { get: sceneOverrides, set: setSceneOverride };
 /** Proactive room discovery for this scene: the scene override wins, then the setting (off by default). */
 export function proactiveDiscovery() { const o = sceneOverrides().proactiveDiscovery; return typeof o === 'boolean' ? o : !!settings().proactiveDiscovery; }
 function discoveryChanged() { try { if (hasPrompts() && isOn()) { applyTools(); applyNudge(); } } catch (e) { console.warn('[WorldScrawl]', e?.message); } } // a flagged player message waiting for the narrator's reply
-async function analyzeFlag(id) {
-    const c = ctx(), chat = c.chat ?? [], msg = chat[id], f = msg?.extra?.[FLAG_KEY];
+// ---- Stale results: each analysis or rewrite of a flag takes a ticket; a newer one, a swipe, Discard or Approve makes it stale,
+// and a stale one writes nothing (the flag object is replaced on a new flag, deleted on Discard, and kept on Approve).
+const flagTickets = new WeakMap();
+const rewriting = new WeakMap(); // flag -> { to: 'light' | 'full' } while a scope switch is asking (not saved: a reload never sticks)
+export const rewritingOf = f => (f ? rewriting.get(f)?.to ?? '' : '');
+function takeTicket(id) {
+    const msg = ctx().chat?.[id], f = msg?.extra?.[FLAG_KEY];
+    const n = (flagTickets.get(f) ?? 0) + 1;
+    if (f) flagTickets.set(f, n);
+    const stale = () => ctx().chat?.[id] !== msg || msg?.extra?.[FLAG_KEY] !== f || flagTickets.get(f) !== n || (f.swipe ?? 0) !== (msg.swipe_id ?? 0) || f.status === 'kept';
+    return { msg, f, stale };
+}
+/** Check again and Rewrite with this: both steps again. `note` (from Edit's Change box) replaces the flag's note; the
+ *  player's light touch / full rewrite pick and the story range are kept. */
+async function analyzeFlag(id, { note } = {}) {
+    const c = ctx(), chat = c.chat ?? [];
+    const { msg, f, stale } = takeTicket(id);
     if (!f) return;
     if (f.kind === 'discover') return analyzeDiscovery(id);
+    rewriting.delete(f);
+    if (typeof note === 'string' && note.trim() && note.trim() !== f.note) { f.note = clip(note, 200); f.noteBy = 'player'; }
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
-    f.status = 'working'; f.error = ''; delete f.proposal;
+    f.status = 'working'; f.error = ''; delete f.proposal; delete f.rewriteError;
     renderPatchCards();
     try {
         await ensurePrompts();
@@ -195,6 +213,7 @@ async function analyzeFlag(id) {
         const c1 = await flagContext(f);
         const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
         const a1 = parseJsonAnswer(await askModel(c, 'which rooms', { prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
+        if (stale()) return;
         if (!a1 || typeof a1 !== 'object') throw new Error("the model's answer about which rooms changed was not JSON");
         const known = [...new Set(c1.outline.map(o => o.address))];
         const toKnown = a => { a = String(a).trim().toLowerCase(); if (known.includes(a)) return a; const t = a.slice(a.indexOf(':') + 1), hit = known.filter(k => k.endsWith(t.includes('/') ? `:${t}` : `/${t}`)); return hit.length === 1 ? hit[0] : null; };
@@ -205,12 +224,14 @@ async function analyzeFlag(id) {
         if (!rooms.length && !areas.length) { f.status = 'nothing'; f.error = 'no known room was named'; return; }
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
-        const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}` });
+        const rewrite = f.rewrite === 'full' ? 'full' : 'light';
+        const patchQ = (err = '') => pl.patchPrompt(c2, { story: clip(story, 6000), what, err, range: `#${f.start}-#${id}`, rewrite });
         let ops = null, err = '', preview = null, merged = [], unmerged = null;
         const nearHere = f.loc ? await nearbyRooms({ address: f.loc }).catch(() => []) : [];
         for (let tries = 0; tries < 2; tries++) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
             const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
+            if (stale()) return;
             if (ans?.personClaims?.length && pl.personClaimWarning) f.personWarning = pl.personClaimWarning(ans.personClaims);
             else if (ans) delete f.personWarning;
             if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
@@ -226,17 +247,19 @@ async function analyzeFlag(id) {
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; break; }
             err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
+        if (stale()) return;
         if (!preview) {
             f.error = `The suggested change didn't fit the map: ${err}`;
-            if (Array.isArray(ops) && ops.length) { f.status = 'review'; f.proposal = { ops, invalid: true, summary: [`⚠ ${f.error}`], relocate: {}, inherit: {}, names: {}, before: {}, after: {} }; }
+            if (Array.isArray(ops) && ops.length) { f.status = 'review'; f.proposal = { ops, invalid: true, summary: [`⚠ ${f.error}`], relocate: {}, inherit: {}, names: {}, before: {}, after: {}, rewrite }; }
             else f.status = 'error';
             return;
         }
         const mergedLines = merged.map(m => `Connected to ${m.to_name} (already on the map, ${m.steps} step${m.steps === 1 ? '' : 's'} away) instead of adding a new "${m.name}".`);
-        f.proposal = { ops, summary: [...preview.summary, ...mergedLines], relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after, ...(merged.length ? { merged, unmerged } : {}) };
+        f.proposal = { ops, summary: [...preview.summary, ...mergedLines], relocate: preview.relocate, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after, rewrite, ...(merged.length ? { merged, unmerged } : {}) };
         f.status = 'review';
         if (settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
+        if (stale()) return;
         console.error('[WorldScrawl] map flag', e);
         f.status = 'error'; f.error = e?.message || String(e);
     } finally {
@@ -245,4 +268,59 @@ async function analyzeFlag(id) {
     }
 }
 
-export { analyzeFlag, askModel, carrierLine, clip, discoveryChanged, loadPatchLib, onMessagesDeleted, patchLib, removeFromCard, storyText };
+export const rewriteSys = (pl, rewrite) => P('change.rewrite_system', { reply: baseReply('json'), rewrite: pl.rewritePiece(rewrite), style: P('change.style') });
+export const rewritePrompt = (pl, { story, what, targets, rewrite }) => P('change.rewrite', { story, what, targets: targetLines(targets), rewrite: pl.rewritePiece(rewrite) });
+/**
+ * The light touch / full rewrite switch on a proposed place change: ask again for ONLY the proposal's existing texts
+ * (one call listing them), keep every other edit, the rooms and the lasts, and check the result with rewriteGuard. On any
+ * failure the old proposal stays and the card says why. Returns '' or the reason.
+ */
+async function swapRewrite(id, to) {
+    const c = ctx(), chat = c.chat ?? [];
+    const { msg, f, stale } = takeTicket(id);
+    const pr = f?.proposal;
+    if (!f || f.status !== 'review' || !pr || pr.invalid) return 'there is no proposed change to rewrite';
+    to = to === 'full' ? 'full' : 'light';
+    const targets = textTargets(pr);
+    const fail = why => { if (stale()) return why; f.rewriteError = `Couldn't switch to ${to === 'full' ? 'a full rewrite' : 'a light touch'}: ${why}. The change is as it was.`; noteCall(id, { kind: 'map rewrite', status: 'failed', reason: why }); toastr.warning(`WorldScrawl: ${f.rewriteError}`); return why; };
+    if (!targets.length) return fail('this change rewrites no existing description, notes or exit text');
+    const mine = { to };
+    rewriting.set(f, mine); delete f.rewriteError;
+    renderPatchCards();
+    try {
+        await ensurePrompts();
+        const pl = await loadPatchLib();
+        if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
+        const story = clip(storyText(chat, f.start ?? id, id), 6000);
+        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
+        const raw = await askModel(c, `rewrite (${to})`, { prompt: rewritePrompt(pl, { story, what, targets, rewrite: to }), systemPrompt: rewriteSys(pl, to), responseLength: 1200 });
+        if (stale()) return 'stale';
+        const ans = pl.readChangeAnswer(parseJsonAnswer(raw));
+        if (!ans || ans.cant || !Array.isArray(ans.ops)) return fail(ans?.cant ? `the model said it can't: ${ans.cant}` : ans?.nothing ? 'the model rewrote nothing' : "the model's answer was not {\"ops\": [...]} JSON");
+        const m = mergeRewrite(pr.ops, targets, ans.ops);
+        if (m.error) return fail(m.error);
+        const bad = rewriteGuard(pr.ops, m.ops);
+        if (bad) return fail(bad);
+        const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: m.ops }, ...mapCtx() }) });
+        if (stale()) return 'stale';
+        if (!r.ok) return fail(`the rewritten change didn't fit the map: ${r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status)}`);
+        if (r.body.noops?.length) return fail(`the rewrite left ${r.body.noops.length === 1 ? 'a text' : `${r.body.noops.length} texts`} exactly as before the change`);
+        const after = rewriteGuard(pr.ops, r.body.ops ?? m.ops); // the engine's own check of what the map would apply
+        if (after) return fail(after);
+        const keep = { merged: pr.merged, unmerged: pr.unmerged, newRoom: pr.newRoom };
+        f.proposal = { ops: r.body.ops ?? m.ops, summary: [...r.body.summary, ...(pr.summary ?? []).filter(l => /^(Connected to|Added as a new room)/.test(l))], relocate: r.body.relocate ?? {}, inherit: r.body.inherit ?? {}, names: r.body.names ?? {}, before: r.body.before, after: r.body.after, rewrite: to,
+            ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v != null)) };
+        f.rewrite = to; f.why = REWRITE_SET_BY_YOU;
+        noteCall(id, { kind: 'map rewrite', status: 'ok', reason: `${to === 'full' ? 'full rewrite' : 'light touch'} of ${m.rewritten.length} text${m.rewritten.length === 1 ? '' : 's'}` });
+        return '';
+    } catch (e) {
+        console.error('[WorldScrawl] map rewrite', e);
+        return fail(e?.message || String(e));
+    } finally {
+        if (rewriting.get(f) === mine) rewriting.delete(f);
+        try { await c.saveChat?.(); } catch (e) { console.error('[WorldScrawl] save', e); }
+        renderPatchCards();
+    }
+}
+
+export { analyzeFlag, swapRewrite, askModel, carrierLine, clip, discoveryChanged, loadPatchLib, onMessagesDeleted, patchLib, removeFromCard, storyText };

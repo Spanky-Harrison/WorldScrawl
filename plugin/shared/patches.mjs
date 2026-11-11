@@ -864,8 +864,9 @@ export function relocated(address, changes = []) {
 /**
  * The patch call's prompt. `c` is /patch/context's answer: rooms (full JSON of the changed places), areas, outline,
  * and neighbors (one exit beyond the change, compact). Neighbors may get proposals too; leaving them alone is fine.
+ * `rewrite` ('light' | 'full') says how deeply existing descriptions are rewritten; '' leaves it out.
  */
-export function patchPrompt(c, { story = '', what = '', err = '', range = '' } = {}) {
+export function patchPrompt(c, { story = '', what = '', err = '', range = '', rewrite = '' } = {}) {
     const outline = (c.outline ?? []).map(o => `${o.address} = ${o.name} [${o.area_name}]; exits: ${(o.exits ?? []).map(x => `${x.direction}->${x.to}${x.door ? ` (${x.door})` : ''}`).join(', ') || 'none'}`).join('\n');
     const nb = (c.neighbors ?? []).map(n => `${n.address} = ${n.name}: ${n.description ?? ''} | exits: ${(n.exits ?? []).map(x => `${x.direction}->${x.to}${x.description ? ` "${x.description}"` : ''}`).join('; ') || 'none'}`).join('\n');
     const ments = (c.mentions ?? []).map(m => `${m.where}${m.field ? `.${m.field}` : ''}: ${m.text}`).join('\n');
@@ -873,7 +874,11 @@ export function patchPrompt(c, { story = '', what = '', err = '', range = '' } =
         areas: Object.keys(c.areas ?? {}).length ? P('change.patch_areas', { areas: JSON.stringify(c.areas) }) + '\n' : '',
         neighbors: nb ? P('change.patch_neighbors', { neighbors: nb }) + '\n' : '',
         mentions: (c.mentions ?? []).length ? P('change.patch_mentions', { mentions: ments }) + '\n' : '',
-        outline, range, story, what, retry: err ? P('change.patch_retry', { error: err }) + '\n' : '' });
+        outline, range, story, what, rewrite: rewritePiece(rewrite), retry: err ? P('change.patch_retry', { error: err }) + '\n' : '' });
+}
+/** The light touch / full rewrite line for a place change's prompts ('' when none is given). */
+export function rewritePiece(rewrite) {
+    return rewrite === 'full' ? P('change.rewrite_full') : rewrite === 'light' ? P('change.rewrite_light') : '';
 }
 
 /** Rooms one exit away from any affected room (either direction), outside the affected set. `w` is a built World. */

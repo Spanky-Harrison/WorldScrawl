@@ -4,13 +4,14 @@ import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, not
 import { render as P } from './shared.mjs';
 import { normName } from './shared.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, reviewSummary, stampSummary } from './npc.mjs';
-import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, suggestStart } from './carriers.mjs';
+import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, rewritingOf, suggestStart, swapRewrite } from './carriers.mjs';
+import { textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
 import { discardFlag, flagMessage, keepFlag, markUnreadTags, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
-import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, isOn, openCarriers, settings } from './index.js';
+import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, drawPersonDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, editExpiryRevert, exportNpc, keepRemember, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
@@ -201,6 +202,14 @@ function cardButton(label, onClick, title = '', decides = false) {
         Promise.resolve().then(onClick).catch(err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }).finally(() => { if (row?.isConnected) renderPatchCards(); });
     });
     return b;
+}
+/** The light touch / full rewrite switch on a place card. Hand edits in the open editor are asked about first (they go). */
+async function switchRewrite(id, to) {
+    const key = `${id}|flag`, form = openForms.get(key);
+    const edited = form && form.startOps != null && JSON.stringify(form.getOps()) !== form.startOps;
+    if (edited && !(await hooks.confirm(`Switch to ${to === 'full' ? 'a full rewrite' : 'a light touch'}? It rewrites the suggested change's text and drops the edits you made in the editor.`))) return 'cancelled';
+    openForms.delete(key);
+    return once(`flag-rewrite:${id}`, () => swapRewrite(id, to));
 }
 /** Notice text, then ONE right-aligned button row at the end. */
 const rowOf = (...buttons) => noticeRow(document, buttons.flat().filter(Boolean));
@@ -473,19 +482,38 @@ export function renderPatchCards() {
                 card.append(ul);
                 const here = getStoredLocation();
                 if (here && f.proposal.relocate?.[here]) card.append(line(`The party will be moved to ${f.proposal.relocate[here]}.`));
+                // Light touch / full rewrite, laid out like the person card's: only when the change rewrites existing prose.
+                const busy = rewritingOf(f);
+                const scoped = !f.proposal.invalid && textTargets(f.proposal).length > 0;
+                const full = (f.rewrite ?? f.proposal.rewrite) === 'full';
+                if (busy) { const w = line(`🗺 Rewriting the text as ${busy === 'full' ? 'a full rewrite' : 'a light touch'}…`); w.className = 'worldscrawl_rewriting'; card.append(w); }
+                else if (scoped) { const how = line(`${full ? 'Full rewrite' : 'Light touch'}${f.why ? `: ${f.why}` : ''}`); how.className = 'worldscrawl_scope'; card.append(how); }
+                if (f.rewriteError && !busy) { const w = line(`⚠ ${f.rewriteError}`); w.className = 'worldscrawl_rewrite_error'; card.append(w); }
                 const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
                 card.append(diffBox);
-                const form = openForms.get(`${id}|flag`);
+                const formKey = `${id}|flag`, form = openForms.get(formKey);
                 drawDiff(diffBox, form?.lastPreview ?? f.proposal);
                 if (form) {
-                    card.append(form.el); form.diffBox = diffBox;
+                    // The change in words, like the person card's Change box; Rewrite with this asks both steps again with it.
+                    const inp = document.createElement('input');
+                    inp.type = 'text'; inp.value = form.intent ?? f.note ?? ''; inp.className = 'text_pole worldscrawl_flag_intent';
+                    inp.style.cssText = 'width:20em;display:inline-block;margin:0 4px;padding:1px 4px;';
+                    inp.addEventListener('click', e => e.stopPropagation());
+                    inp.addEventListener('input', () => { form.intent = inp.value; });
+                    card.append(fieldsOf('Change:', inp), form.el); form.diffBox = diffBox;
                     form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
                 }
-                card.append(fieldsOf(startPicker()), rowOf(cardButton('Check again', () => once(`flag-retry:${id}`, () => { openForms.delete(`${id}|flag`); return analyzeFlag(id); }), 'Ask again with this story range', true),
-                    form ? cardButton('Close editor', () => { openForms.delete(`${id}|flag`); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
-                        : cardButton('Edit', () => openEditor(`${id}|flag`, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before approving it'),
+                const checkAgain = cardButton('Check again', () => once(`flag-retry:${id}`, () => { openForms.delete(formKey); return analyzeFlag(id); }), 'Ask again with this story range', true);
+                const discard = cardButton('Discard', () => { openForms.delete(formKey); return discardFlag(id); }, 'Leave the map as it is', true);
+                const buttons = busy ? [checkAgain, discard] : [checkAgain,
+                    form ? cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
+                        : cardButton('Edit', () => openEditor(formKey, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before approving it'),
+                    scoped ? cardButton(full ? 'Make it a light touch' : 'Make it a full rewrite', () => switchRewrite(id, full ? 'light' : 'full'),
+                        full ? 'Rewrite the text again, changing only what this names (exits, rooms and durations stay as they are)' : 'Rewrite the text again so it fits what the place is now (exits, rooms and durations stay as they are)', true) : null,
                     !form && f.proposal.unmerged?.length ? cardButton('Make it a new room instead', () => unmergeFlag(id), `Add a separate new room instead of connecting to ${f.proposal.merged.map(m => m.to_name).join(', ')}`) : null,
-                    cardButton(form ? 'Approve edited' : 'Approve', () => keepFlag(id), 'Put this change on the map', true), cardButton('Discard', () => { openForms.delete(`${id}|flag`); return discardFlag(id); }, 'Leave the map as it is', true)));
+                    form ? cardButton('Rewrite with this', () => { const note = String(form.intent ?? '').trim(); openForms.delete(formKey); return once(`flag-retry:${id}`, () => analyzeFlag(id, { note })); }, 'Work out the map change again from the edited Change line', true) : null,
+                    cardButton(form ? 'Approve edited' : 'Approve', () => keepFlag(id), 'Put this change on the map', true), discard];
+                card.append(fieldsOf(startPicker()), rowOf(buttons));
                 }
             }
         }

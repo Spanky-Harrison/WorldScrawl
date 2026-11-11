@@ -2,6 +2,7 @@
 // This pass is one question. It reads the latest exchange plus the live fields it may change, not earlier chat.
 import { render as P } from './shared.mjs';
 import { FOUND_KEY, NPC_KEY, NPC_WARN_KEY } from './npc.mjs';
+import { areaRewrite } from './arearewrite.mjs';
 
 export const TRACKER_SOURCE = 'tracker';
 const FLAG_KEY = 'worldscrawl_flag';
@@ -85,14 +86,18 @@ export function trackerScrap({ placeName = '', displayName = '', placeDescriptio
 export const trackerSys = () => P('npc.tracker_system');
 export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000) });
 
-function readPlace(p) {
+export function readPlace(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (p.changed === false) return null;
     const note = String(p.note ?? p.text ?? '').trim();
     if (!note) return null;
     const kind = String(p.kind ?? 'change').toLowerCase() === 'discover' ? 'discover' : 'change';
     const hint = String(p.hint ?? p.where ?? '').trim();
-    return { changed: true, kind, note: note.slice(0, 200), ...(hint ? { hint: hint.slice(0, 80) } : {}) };
+    // Light touch or full rewrite (not "scope": a change's scope is which rooms). Kept only when given; why only with it.
+    const given = String(p.rewrite ?? '').trim();
+    const why = given ? String(p.why ?? p.rewrite_reason ?? '').trim() : '';
+    return { changed: true, kind, note: note.slice(0, 200), ...(hint ? { hint: hint.slice(0, 80) } : {}),
+        ...(given ? { rewrite: areaRewrite(given) } : {}), ...(why ? { why: why.slice(0, 200) } : {}) };
 }
 function readWait(w) {
     if (!w || typeof w !== 'object' || Array.isArray(w)) return null;

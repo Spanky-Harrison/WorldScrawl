@@ -19,6 +19,7 @@ import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
+import { REWRITE_NOT_JUDGED, areaRewrite } from './arearewrite.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
@@ -236,7 +237,7 @@ export async function unmergeFlag(id) {
  * Flag message `id` as the place where a map change settled, and start the review. The one door for every trigger
  * (button, tool, tag, /ws-change, and future engine actions): opts {note, hint, start, source}.
  */
-export async function flagMessage(id, { note = '', hint = '', start = null, source = 'button', kind = '' } = {}) {
+export async function flagMessage(id, { note = '', hint = '', start = null, source = 'button', kind = '', rewrite = '', why = '' } = {}) {
     if (!isOn()) return 'WorldScrawl is off in this chat.';
     const c = ctx(), chat = c.chat ?? [];
     id = Number(id);
@@ -253,13 +254,20 @@ export async function flagMessage(id, { note = '', hint = '', start = null, sour
     }
     let loc = null, err = '';
     try { await loadPatchLib(); loc = locationAt(id) ?? (await currentLocation())?.address ?? null; } catch (e) { console.error('[WorldScrawl] map flag', e); err = e?.message || String(e); }
-    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: err ? 'error' : 'working', ...(err ? { error: err } : {}), ...(kind === 'discover' ? { kind } : {}) };
+    msg.extra[FLAG_KEY] = { swipe: swipeOf(msg), loc, note: clip(note, 200), hint: clip(hint, 80), source, start: start ?? suggestStart(chat, id, loc), status: err ? 'error' : 'working', ...(err ? { error: err } : {}), ...(kind === 'discover' ? { kind } : flagRewrite(source, rewrite, why)) };
     try { await c.saveChat?.(); } catch (e) { console.error('[WorldScrawl] save', e); }
     if (err) { renderPatchCards(); return `Map change failed: ${err}`; }
     analyzeFlag(id).catch(e => { const f = msg.extra?.[FLAG_KEY]; if (f) { f.status = 'error'; f.error = e?.message || String(e); } console.error('[WorldScrawl] map flag', e); renderPatchCards(); });
     return kind === 'discover' ? 'Adding the room behind that door…' : 'Checking what changed on the map…';
 }
 globalThis.worldscrawlFlag = flagMessage;
+/** Light touch or full rewrite for a new place flag: the tracker's pick, else light. A tracker answer without one says it
+ *  was not judged; a flag the player or narrator raised (button, /ws-change, tag, tool) is a plain light touch. */
+function flagRewrite(source, rewrite, why) {
+    const given = String(rewrite ?? '').trim();
+    if (given) return { rewrite: areaRewrite(given), ...(String(why ?? '').trim() ? { why: clip(why, 200) } : {}) };
+    return { rewrite: 'light', ...(source === TRACKER_SOURCE ? { why: REWRITE_NOT_JUDGED } : {}) };
+}
 
 /** Keep: stamp the proposed patch on the message (the only thing that changes the map). */
 async function keepFlag(id, { quiet = false } = {}) {
@@ -477,7 +485,7 @@ export async function applyTrackerResult(id, parsed) {
     if (found.length) await applyFound(msg, found, TRACKER_SOURCE);
     const existing = msg.extra?.[FLAG_KEY];
     const taggedPlace = existing && (existing.swipe ?? 0) === swipeOf(msg) && existing.source !== TRACKER_SOURCE;
-    if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE });
+    if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE, rewrite: gated.place.rewrite ?? '', why: gated.place.why ?? '' });
     if (gated.wait) {
         const args = gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
         const w = await planWait(args, gated.wait.sleep, gated.wait.reason);

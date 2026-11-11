@@ -81,6 +81,8 @@ async function drawDiff(box, pv) {
 /** A person's change in the same red/green view as a place's (see renderPersonDiff). */
 /** Tests hand in the plugin's diff module (the server URL isn't reachable outside SillyTavern). */
 export const useDiffLib = m => { diffLib = m; };
+/** Tests hand in the plugin's patch form module the same way. */
+export const useFormLib = m => { formLib = m; };
 function drawPersonDiff(box, opts) {
     // Draw at once when the diff module is already loaded, so a redrawn card never flashes empty.
     if (diffLib?.renderPersonDiff) { box.replaceChildren(diffLib.renderPersonDiff(document, opts)); return Promise.resolve(); }
@@ -116,6 +118,7 @@ async function openEditor(key, ops, context = {}) {
     const ch = await formChoices();
     let form = null;
     form = fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, names: ch.names, areaNames: ch.areaNames, context, onChange: o => { form?.onLive?.(o); } });
+    form.startOps = JSON.stringify(form.getOps()); // what it opened with: a scope switch asks before dropping hand edits
     openForms.set(key, form);
     renderPatchCards();
 }
