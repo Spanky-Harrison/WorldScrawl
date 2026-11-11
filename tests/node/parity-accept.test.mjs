@@ -1307,7 +1307,9 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     await scene.applyFacts();
     const text = facts.at(-1);
     assert.match(text, /Engine note \(already applied; this is the same person, not someone new\)/);
-    assert.match(text, /Hesk \(known to You only as "the landlady"\): the temporary change "turned into a gnoll" ran out and is gone/);
+    // The facts block goes through the name portal: she is not named there.
+    assert.match(text, /the landlady \(known to You only as "the landlady"\): the temporary change "turned into a gnoll" ran out and is gone/);
+    assert.doesNotMatch(text, /Hesk/);
     assert.match(text, /What they look like now: Looks: copper braids Body: sturdy Outfit: wool/);
     // C: the story narrates her turning back; the tracker hears it already happened, and its proposal is dropped.
     const reply = { mes: 'Hesk shudders and shrinks back into her human shape, fur falling away.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: {} };

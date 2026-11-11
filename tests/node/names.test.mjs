@@ -29,17 +29,26 @@ const CANARY_CARD = {
     memory: [`${CANARY} threw a drunk out last week.`],
     schedule: [{ place: TAVERN, activity: 'pouring drinks', from: '00:00', to: '23:59', importance: 'high' }],
 };
-const worldsDir = (() => {
+// The same card asleep off the map near the Drowned Rat all day: the "Hesk remains asleep" leak path (absentAt).
+const ASLEEP_CARD = { ...CANARY_CARD, schedule: [{ activity: 'asleep', where: 'her own room', near: 'riverton:drowned_rat' }] };
+const servers = new Map();
+function serverFor(card) {
+    if (servers.has(card)) return servers.get(card);
     const d = tmpPath();
     copytree(path.dirname(RIVERTON), d);
-    write(path.join(d, 'riverton', 'cast', 'hesk.json'), JSON.stringify(CANARY_CARD));
-    return d;
-})();
-const server = clientDir(worldsDir);
+    write(path.join(d, 'riverton', 'cast', 'hesk.json'), JSON.stringify(card));
+    // The tavern lore names her by token and in plain text (with the alias).
+    const rf = path.join(d, 'riverton', 'regions', 'riverton.json');
+    write(rf, fs.readFileSync(rf, 'utf8').replace('{{npc:hesk}}.', `{{npc:hesk}}. ${CANARY} keeps a cudgel under the bar; regulars call her ${CANARY_ALIAS}.`));
+    const sv = clientDir(d);
+    servers.set(card, sv);
+    return sv;
+}
 
 /** A fresh chat in the common room with the canary cast; every model call and every injected block is recorded. */
-function boot({ tracker = () => '{"place": null, "people": [], "wait": null}' } = {}) {
+function boot({ tracker = () => '{"place": null, "people": [], "wait": null}', card = CANARY_CARD } = {}) {
     exitsCache.clear();
+    const server = serverFor(card);
     globalThis.fetch = async (url, opts = {}) => {
         const u = new URL(String(url), 'http://local');
         const r = server.request(opts.method || 'GET', u.pathname.replace(/^\/api\/plugins\/worldscrawl/, '') + u.search, { json: opts.body ? JSON.parse(opts.body) : undefined });
@@ -53,6 +62,8 @@ function boot({ tracker = () => '{"place": null, "people": [], "wait": null}' } 
     c.saveChat = async () => {}; c.saveSettingsDebounced = () => {}; c.updateMessageBlock = () => {};
     const calls = [], blocks = {};
     c.setExtensionPrompt = (key, text) => { blocks[key] = String(text ?? ''); };
+    const tools = {};
+    c.registerFunctionTool = t => { tools[t.name] = t; }; c.unregisterFunctionTool = () => {};
     c.generateRaw = async args => {
         const prompt = String(args?.prompt ?? ''), sys = String(args?.systemPrompt ?? '');
         calls.push({ prompt, sys });
@@ -61,7 +72,7 @@ function boot({ tracker = () => '{"place": null, "people": [], "wait": null}' } 
     };
     Object.assign(ext.settings(), { flagNpcs: true, flagTags: true, autoKeep: false });
     c.chat = [{ is_user: false, mes: 'Welcome.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_world: { id: 'riverton', name: 'Riverton' }, worldscrawl_location: TAVERN } }];
-    return { c, calls, blocks };
+    return { c, calls, blocks, tools };
 }
 const say = (c, text) => { const m = { is_user: true, mes: text, swipe_id: 0, extra: {} }; c.chat.push(m); return m; };
 const reply = (c, text) => { const m = { is_user: false, mes: text, swipe_id: 0, swipes: [text], swipe_info: [{ extra: {} }], extra: {} }; c.chat.push(m); return c.chat.length - 1; };
@@ -206,4 +217,65 @@ test('canary inbound: the player\'s [name] always lands, and the skipped rule is
     assert.equal(known(c), true);
     const nobody = say(c, 'I [name] Elara');
     assert.match((await scene.learnNameOn(nobody, 'Elara')).reason, /No saved person is called "Elara"/);
+});
+
+// ---- Narrator outbound (S2): the facts block is the prompt choke point.
+const GATE = new RegExp(`^.*If the landlady is introduced or called by name in spoken dialogue, their name is ${CANARY}\\..*$`, 'm');
+const leaks = text => [CANARY, CANARY_ALIAS, '[hesk]', '(hesk)'].filter(w => text.includes(w));
+const facts = async blocks => { await scene.applyFacts(); return blocks[ext.FACTS_KEY ?? 'worldscrawl_facts'] ?? Object.values(blocks).find(t => /People here/.test(t)) ?? ''; };
+
+test('canary narrator: present and unknown, she is "the landlady [handle]", with the gated name line and nothing else', async () => {
+    const { c, blocks } = boot();
+    say(c, 'I look around.');
+    const f = await facts(blocks);
+    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`));
+    assert.match(f, GATE, 'the one gated line while she is here');
+    assert.equal(f.match(new RegExp(CANARY, 'g')).length, 1);
+    assert.deepEqual(leaks(f.replace(GATE, '')), [], 'demeanor, memory and everything else are masked; no cast id');
+    assert.match(f, /The landlady's inn: stern/);
+});
+
+test('canary narrator: once [name] lands she is named, and the gated line goes away', async () => {
+    const { c, blocks } = boot();
+    const m = say(c, `I [name] ${CANARY}`);
+    await bracketIntent(m, parseBracket(m.mes));
+    const f = await facts(blocks);
+    assert.match(f, new RegExp(`${CANARY} \\[${handle()}\\]:`));
+    assert.doesNotMatch(f, GATE);
+});
+
+test('canary narrator: asleep off the map, fed lore with her token and her plain name: never the name (the Hesk leak)', async () => {
+    const { c, blocks } = boot({ card: ASLEEP_CARD });
+    const m = say(c, '[lore] The Drowned Rat');
+    await bracketIntent(m, parseBracket(m.mes));
+    const f = await facts(blocks);
+    assert.match(f, /The landlady: asleep, somewhere off the map/);
+    assert.match(f, /run by its sharp-tongued landlady, the landlady\. The landlady keeps a cudgel under the bar; regulars call her the landlady\./);
+    assert.doesNotMatch(f, GATE, 'no gated line while she is not here');
+    assert.deepEqual(leaks(f), []);
+});
+
+test('canary narrator: the lore tool answers about her by shown name, history masked', async () => {
+    const { c, tools } = boot();
+    ext.settings().flagTools = true;
+    const { registerTools } = await import('../../extension/discovery.mjs');
+    registerTools(new Set(['ws_flag']));
+    say(c, 'Who is she?');
+    const out = await tools.ws_flag.action({ action: 'lore', note: 'the landlady' });
+    assert.match(out, /^The landlady's history: The landlady came to Riverton as a bargeman's daughter; the landlady to her friends\.$/);
+    delete ext.settings().flagTools;
+});
+
+test('canary narrator: the ws_npc tool takes her handle (detail answers masked; a tag by handle lands on her)', async () => {
+    const { c, tools } = boot();
+    const { registerTools } = await import('../../extension/discovery.mjs');
+    registerTools(new Set(['ws_npc']));
+    say(c, 'I look at the landlady.');
+    const out = await tools.ws_npc.action({ action: 'detail', id: handle() });
+    assert.match(out, /^Personality: The landlady's inn/);
+    assert.deepEqual(leaks(out), []);
+    assert.equal(await tools.ws_npc.action({ action: 'detail', id: 'nobody' }), 'No saved person with that id is here.');
+    const id = reply(c, `She glares. [ws_npc: fact | ${handle()} | a scar on her knuckle]`);
+    await onReplyForFlags(id);
+    assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_fact' && s.id === 'hesk'), 'stored under the cast id');
 });

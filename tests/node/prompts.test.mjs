@@ -297,7 +297,7 @@ test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, k
     const tool = P('narration.npc_tool').text;
     // Appearance leads; concrete example; fact lasts drop disguise; tools intent-enough.
     assert.match(tags, /^When someone's Looks, Body or Outfit changes/);
-    assert.match(tags, /\[ws_npc: appearance \| hesk \| magically young \| body \| 1 hour\]/);
+    assert.match(tags, /\[ws_npc: appearance \| p3k9 \| magically young \| body \| 1 hour\]/);
     assert.doesNotMatch(tags, /a bruise, a mood, a disguise/);
     assert.match(tags, /a bruise, a mood/);
     assert.match(tools, /^When someone's Looks, Body or Outfit changes/);
