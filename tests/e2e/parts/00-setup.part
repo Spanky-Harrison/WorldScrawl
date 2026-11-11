@@ -3,9 +3,16 @@ const E2E_TMP = process.env.E2E_TMP || '/tmp';
 const BASE = `http://localhost:${process.env.E2E_PORT || 8767}/`;
 const FAKE = `http://127.0.0.1:${process.env.E2E_FAKE_PORT || 9098}`;
 let failures = 0;
-const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} ${extra}`); if (!ok) failures++; };
+let passes = 0, skips = 0;
+const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} ${extra}`); if (ok) passes++; else failures++; };
+// A check that a known product bug fails: skipped, with the bug it waits on. Fix the bug, then turn it back into check().
+const skip = (name, bug) => { console.log(`SKIP: ${name} (${bug})`); skips++; };
 const pickSet = (loc, v) => loc.evaluate((el, x) => el.setValue(x), v); // a map pick field's value, as a pick sets it
 const queue = q => fetch(`${FAKE}/__queue`, { method: 'POST', body: JSON.stringify(q) });
+// The after-reply tracker answers on its own ({} unless a {kind: 'tracker'} item is queued) and is left out of
+// /__requests, so "the last request" is the story call again. reqsOf('tracker') / reqsOf('all') read the others.
+await fetch(`${FAKE}/__mode`, { method: 'POST', body: JSON.stringify({ autoTracker: true }) });
+const reqsOf = async (kind = '') => (await fetch(`${FAKE}/__requests${kind ? `?kind=${kind}` : ''}`)).json();
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'], headless: true });
 try {

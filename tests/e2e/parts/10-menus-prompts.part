@@ -149,10 +149,10 @@
     const prop = await page.evaluate(() => {
         const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
         const m = [...SillyTavern.getContext().chat].reverse().find(x => x.extra?.worldscrawl_remember);
-        return { head: card?.querySelector('.worldscrawl_remember_head')?.textContent ?? '', invented: card?.querySelector('.worldscrawl_invented')?.textContent ?? '', cached: !!m?.extra?.worldscrawl_remember?.proposal?.got };
+        return { head: card?.querySelector('.worldscrawl_card_summary')?.textContent ?? '', panel: card?.querySelector('.worldscrawl_diff')?.textContent ?? '', invented: card?.querySelector('.worldscrawl_invented')?.textContent ?? '', cached: !!m?.extra?.worldscrawl_remember?.proposal?.got };
     });
     const reqsPrefetched = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /Maren \(shown as "the knife-grinder"/.test(prop.head) && /squeaky cart.*wiry woman/.test(prop.head) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 1, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
+    check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /New person: Maren — A traveling knife-grinder with a squeaky cart/.test(prop.head) && /Shown as "the knife-grinder"/.test(prop.head) && /wiry woman with a cart/.test(prop.panel) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 1, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
     await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); m.renderPatchCards(); m.renderPatchCards(); });
     await settle(500);
     check('remember prefetch: redraws do not call again', (await (await fetch(`${FAKE}/__requests`)).json()).length === reqsPrefetched);
@@ -207,7 +207,7 @@
     await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }]);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Corwin'));
     const lastCardText = () => page.evaluate(() => [...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '');
-    await page.waitForFunction(() => /Corwin/.test(([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.querySelector('input')?.value ?? '')) && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
+    await page.waitForFunction(() => /Remember Corwin\?/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '') && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
     const preparing = /Preparing…/.test(await lastCardText());
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ }).last().click();
     await settle(300);
@@ -289,21 +289,4 @@
     const five = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; const u = [...ch].reverse().find(m => m.extra?.worldscrawl_wait); return u?.extra?.worldscrawl_wait ?? null; });
     const afterWait = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('/ws-wait until 5pm parses with no extra model call', five?.until === '17:00' && five.seconds > 0 && afterWait === beforeWait + 1, JSON.stringify({ five, calls: afterWait - beforeWait }));
-    await page.locator('.worldscrawl_npcchange', { hasText: 'remembered' }).filter({ hasText: 'Maren' }).locator('.worldscrawl_card_btn', { hasText: 'Export' }).first().click();
-    await settle(600);
-    const exportWorld = await M(m => m.effectiveWorld());
-    const cast1 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
-    check('Export to cast writes Maren without replacing Hesk', cast1.npcs?.some(n => n.id === 'hesk') && cast1.npcs?.some(n => n.id === 'maren' && /knife-grinder/.test(n.line ?? '')), JSON.stringify({ world: exportWorld, ids: cast1.npcs?.map(n => n.id) }));
-    await queue([{ content: 'stay' }, { content: 'She taps the bar. [ws_npc: fact | hesk | a knife under the bar]' }]);
-    await send('I ask what Hesk keeps under the bar.', 2);
-    await page.locator('.worldscrawl_npcpending', { hasText: 'a knife under the bar' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(400); // lasting fact: approve first
-    const knife = page.locator('.worldscrawl_npcchange', { hasText: 'a knife under the bar' });
-    await knife.locator('.worldscrawl_card_btn', { hasText: 'Update Hesk' }).click();
-    await settle(200);
-    const diffText = await knife.locator('.worldscrawl_castdiff').innerText();
-    check('Update Hesk shows a diff against the cast file', /facts/.test(diffText) && /a knife under the bar/.test(diffText), diffText);
-    await knife.locator('.worldscrawl_card_btn', { hasText: 'Confirm' }).click();
-    await settle(600);
-    const cast2 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
-    const heskNow = cast2.npcs?.find(n => n.id === 'hesk');
-    check('Update writes Hesk in place and does not add hesk-2', heskNow?.facts?.includes('a knife under the bar') && cast2.npcs?.some(n => n.id === 'maren') && !cast2.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast2.npcs?.map(n => n.id)));
+    // Writing a chat person to the cast file is the map's Cast panel now (11-cast); chat cards have no Export / Update.

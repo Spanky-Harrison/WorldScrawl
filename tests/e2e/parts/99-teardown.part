@@ -1,5 +1,6 @@
 } finally {
     await browser.close();
 }
+console.log(`${passes} passed, ${failures} failed, ${skips} skipped`);
 console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
 process.exit(failures ? 1 : 0);
