@@ -49,6 +49,8 @@ function serverFor(card) {
 function boot({ tracker = () => '{"place": null, "people": [], "wait": null}', card = CANARY_CARD } = {}) {
     exitsCache.clear();
     const server = serverFor(card);
+    globalThis.BroadcastChannel = undefined; // no map window
+    globalThis.document = { querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: () => ({ style: {}, append() {}, appendChild() {} }), body: {}, documentElement: {} };
     globalThis.fetch = async (url, opts = {}) => {
         const u = new URL(String(url), 'http://local');
         const r = server.request(opts.method || 'GET', u.pathname.replace(/^\/api\/plugins\/worldscrawl/, '') + u.search, { json: opts.body ? JSON.parse(opts.body) : undefined });
@@ -365,4 +367,63 @@ test('guard hint: prompt-building modules never read a person\'s .name without a
         if (re.test(code)) bad.push(`${f}:${i + 1}: ${l.trim().slice(0, 120)}`);
     });
     assert.deepEqual(bad, [], 'use shownName / labelOf for model text, or add // name-ok: <reason>');
+});
+
+// ---- Debug switches (S5): per chat, read when used; off is exactly the state before.
+test('Reveal names: the narrator and the tracker see her real name, with no gated line; off masks her again', async () => {
+    const { c, blocks, calls } = boot();
+    say(c, 'I look around.');
+    assert.match(await ext.revealPlaces('names'), /Reveal names is on/);
+    assert.equal(c.chatMetadata.worldscrawl_reveal_names, true);
+    let f = await facts(blocks);
+    assert.match(f, new RegExp(`${CANARY} \\[${handle()}\\]:`));
+    assert.doesNotMatch(f, GATE);
+    const id = reply(c, 'She wipes the bar.');
+    await onReplyForFlags(id);
+    assert.match(calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt)).prompt, new RegExp(`${CANARY} \\[${handle()}\\]`));
+    assert.equal(nameStamps(c.chat[id]).length, 0, 'nothing is stamped');
+    assert.match(await ext.revealPlaces('names off'), /Reveal names is off/);
+    assert.equal('worldscrawl_reveal_names' in c.chatMetadata, false);
+    f = await facts(blocks);
+    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`));
+    assert.match(f, GATE);
+});
+
+test('Reveal names does not block a real learn: the stamp lands, and stays when the switch goes off', async () => {
+    const { c } = boot({ tracker: () => JSON.stringify({ place: null, people: [{ id: N.handleOf('hesk'), action: 'name', name: CANARY }], wait: null }) });
+    await ext.revealPlaces('names');
+    say(c, 'Who are you?');
+    const id = reply(c, `"Name's ${CANARY}," she says.`);
+    await onReplyForFlags(id);
+    assert.equal(nameStamps(c.chat[id]).length, 1);
+    await ext.revealPlaces('names off');
+    assert.equal(known(c), true);
+});
+
+test('Reveal map: /ws-reveal sets the switch (nothing stamped), every place counts as visited, off is the state before', async () => {
+    const { c } = boot();
+    const known0 = await ext.knownText(), n0 = c.chat.length;
+    const t = await ext.revealPlaces('all');
+    assert.match(t, /^WorldScrawl: Reveal map is on \(all: \d+ places count as visited\)/);
+    assert.deepEqual(c.chatMetadata.worldscrawl_reveal_map, { what: 'all', here: TAVERN });
+    assert.equal(c.chat.length, n0, 'no message');
+    const been = s => s.split('. Seen')[0].split(',').length;
+    const known1 = await ext.knownText();
+    assert.ok(been(known1) > been(known0) + 5, known1);
+    assert.equal(c.chat.some(m => m.extra?.worldscrawl_reveal), false);
+    assert.match(await ext.revealPlaces('off'), /Reveal map is off/);
+    assert.equal('worldscrawl_reveal_map' in c.chatMetadata, false);
+    assert.equal(await ext.knownText(), known0, 'exactly as before');
+    assert.match(await ext.revealPlaces('off'), /already off/);
+    await assert.rejects(ext.revealPlaces('nowhere:at_all'), /nothing matches/);
+    assert.equal('worldscrawl_reveal_map' in c.chatMetadata, false);
+});
+
+test('Reveal map by scope: the subregion you stand in only', async () => {
+    const { c } = boot();
+    const t = await ext.revealPlaces('subregion');
+    const n = Number(t.match(/subregion: (\d+) place/)[1]);
+    assert.ok(n > 1 && n < 20, t);
+    assert.deepEqual(c.chatMetadata.worldscrawl_reveal_map, { what: 'subregion', here: TAVERN });
+    await ext.revealPlaces('off');
 });

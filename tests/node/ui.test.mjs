@@ -383,11 +383,12 @@ test('menu registry checks items', () => {
     assert.deepEqual(registryProblems([{ id: 'a', label: 'A', open() {} }, { id: 'b', label: 'B', toggle: true, checked: () => true, set() {} }]), []);
     assert.equal(registryProblems([{ id: 'a', label: 'A' }, { id: 'a', label: 'A', open() {} }]).length, 2);
 });
-test('app.js registers Tools > Prompt Editor and the two Debug items', () => {
+test('app.js registers Tools > Prompt Editor and the Debug items (Reveal map and Reveal names are switches)', () => {
     const src = fs.readFileSync(new URL('../../plugin/ui/app.js', import.meta.url), 'utf8');
     assert.match(src, /id: 'prompts', label: 'Prompt Editor'/);
     assert.match(src, /label: 'Show map edit messages', toggle: true/);
-    assert.match(src, /label: 'Reveal map'/);
+    assert.match(src, /label: 'Reveal map', toggle: true, checked: \(\) => !!state\?\.revealMap/);
+    assert.match(src, /label: 'Reveal names', toggle: true, checked: \(\) => !!state\?\.revealNames/);
     assert.match(src, /querySelector\('\.brand'\)\.after\(buildMenu\('tools'/);
 });
 test('extension handles the Debug messages and the new setting', () => {
@@ -395,6 +396,7 @@ test('extension handles the Debug messages and the new setting', () => {
     assert.match(src, /showEditMessages: false/);
     assert.match(src, /type === 'reveal'[\s\S]{0,300}revealPlaces/);
     assert.match(src, /type === 'set_debug'/);
+    assert.match(src, /revealMap: !!revealMapOn\(\), revealNames: revealNamesOn\(\)/, 'the map state carries both switches');
 });
 test('missing and unknown placeholders', () => {
     const e = { placeholders: [{ name: 'a' }, { name: 'b', optional: true }, { name: 'edit_types', generated: true }] };

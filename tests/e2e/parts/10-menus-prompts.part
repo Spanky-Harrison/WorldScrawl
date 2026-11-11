@@ -109,16 +109,21 @@
         const mark = await ui.locator('#menu-debug [data-item="show-edit-messages"] .menu-check').textContent();
         await ui.click('#menu-debug [data-item="show-edit-messages"]'); await ui.waitForTimeout(600);
         check('Debug > Show map edit messages toggles the setting, with a checkmark', c0 === 'false' && on && c1 === 'true' && mark === '✓' && !(await st()), JSON.stringify({ c0, on, c1, mark }));
+        // Reveal map / Reveal names: per-chat switches with a checkmark; nothing is stamped, off removes the switch.
         const n0 = await page.evaluate(() => SillyTavern.getContext().chat.length);
-        answers.push(false);
-        await ui.click('#menu-debug .menu-title'); await ui.click('#menu-debug [data-item="reveal-map"]'); await ui.waitForTimeout(800);
-        const nNo = await page.evaluate(() => SillyTavern.getContext().chat.length);
-        answers.push(true);
-        await ui.click('#menu-debug .menu-title'); await ui.click('#menu-debug [data-item="reveal-map"]');
-        await page.waitForFunction(n => SillyTavern.getContext().chat.length > n, n0, { timeout: 10000 }).catch(() => {});
-        const rev = await page.evaluate(n => { const c = SillyTavern.getContext(), m = c.chat[c.chat.length - 1]; return { grew: c.chat.length > n, kind: m.extra?.worldscrawl_notice_kind, n: m.extra?.worldscrawl_reveal?.addresses?.length ?? 0 }; }, n0);
-        check('Debug > Reveal map asks first (cancel does nothing), then reveals like /ws-reveal all', nNo === n0 && rev.grew && rev.kind === 'reveal' && rev.n > 10, JSON.stringify({ nNo, n0, rev }));
-        await page.evaluate(async n => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n}-${c.chat.length - 1}`); }, n0); await settle(800);
+        const meta = k => page.evaluate(key => SillyTavern.getContext().chatMetadata?.[key] ?? null, k);
+        const flip = async item => { await ui.click('#menu-debug .menu-title'); await ui.click(`#menu-debug [data-item="${item}"]`); await ui.waitForTimeout(1200); };
+        const checkOf = async item => { await ui.click('#menu-debug .menu-title'); const v = await ui.locator(`#menu-debug [data-item="${item}"]`).getAttribute('aria-checked'); await ui.click('#menu-debug .menu-title'); return v; };
+        await flip('reveal-map');
+        const mapOn = await meta('worldscrawl_reveal_map'), mapMark = await checkOf('reveal-map');
+        await flip('reveal-map');
+        const mapOff = await meta('worldscrawl_reveal_map');
+        await flip('reveal-names');
+        const namesOn = await meta('worldscrawl_reveal_names'), namesMark = await checkOf('reveal-names');
+        await flip('reveal-names');
+        const namesOff = await meta('worldscrawl_reveal_names');
+        const n1 = await page.evaluate(() => SillyTavern.getContext().chat.length);
+        check('Debug > Reveal map and Reveal names are per-chat switches (checkmark; nothing stamped; off removes them)', mapOn?.what === 'all' && mapMark === 'true' && mapOff === null && namesOn === true && namesMark === 'true' && namesOff === null && n1 === n0, JSON.stringify({ mapOn, mapMark, mapOff, namesOn, namesMark, namesOff, n0, n1 }));
         ui.off('dialog', dlg);
     }
     check('map window raised no page errors', uiErrors.length === 0, JSON.stringify(uiErrors));
