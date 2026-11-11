@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveNear, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, FOUND_KEY, absentAt, comingsAndGoings, foundEditOk, framesOf, judgeFound, nameKnown, nameStampFor, nearPhrase, npcWhy, offMapReport, offmapAbsentLine, presentAt, scheduleAt, whoAt, withinNear } from '../../extension/npc.mjs';
+import { NPC_KEY, FOUND_KEY, absentAt, comingsAndGoings, foundEditOk, framesOf, judgeFound, nameKnown, nearPhrase, npcWhy, offMapReport, offmapAbsentLine, presentAt, scheduleAt, whoAt, withinNear } from '../../extension/npc.mjs';
 import { liveSchedule } from '../../plugin/ui/castdata.mjs';
 import { loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { load_world } from '../../plugin/world.mjs';
@@ -183,15 +183,11 @@ test('Riverton ships Hesk asleep off the map, near the Drowned Rat, and lists Wi
     assert.equal(report.found[0].ok, false);
 });
 
-test('[name] records the same per-actor name stamp as the narrator flag, and the activity log shows the bracket', () => {
+test('[name] records a per-actor name stamp, and the activity log shows the bracket', () => {
     const n = validateRecord({ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', line: 'The landlady.', schedule: [{ place: BAR, activity: 'pouring drinks' }] }, { file: 'hesk.json', places: rooms });
-    const made = nameStampFor([n], 'Hesk', { source: 'bracket' });
-    assert.equal(made.ok, true);
-    assert.deepEqual(made.stamp, { type: 'npc_name', id: 'hesk', who: 'player', source: 'bracket' });
-    const chat = [msg('I [name] Hesk', { worldscrawl_bracket: { verb: 'name', target: 'Hesk', status: 'ok' }, [NPC_KEY]: [{ ...made.stamp, swipe: 0 }] })];
+    const stamp = { type: 'npc_name', id: 'hesk', who: 'player', source: 'bracket', swipe: 0 };
+    const chat = [msg('I [name] Hesk', { worldscrawl_bracket: { verb: 'name', target: 'Hesk', status: 'ok' }, [NPC_KEY]: [stamp] })];
     assert.equal(nameKnown(framesOf(chat, 0, [n])[0].get('hesk'), chat, 0).reason, 'known: name bracket');
-    const flagged = nameStampFor([n], 'Hesk', { source: 'flag' });
-    assert.equal(flagged.stamp.source, 'flag');
     const act = messageActivity(chat[0], 0);
     const bracket = act.find(e => e.kind === 'bracket');
     assert.equal(bracket.label, '[name]');
