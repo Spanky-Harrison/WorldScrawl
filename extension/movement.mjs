@@ -6,7 +6,7 @@ import { PLAIN_DIRECTIONS, addNotice, withArticle } from './brackets.mjs';
 import { worldSeed } from './clock.mjs';
 import { api, currentLocation, isStuck, stuckWhy } from './doors.mjs';
 import { exitsText, fetchLocationCached, fetchRaw, newRoom, primeCache, renderAllExits, warmRooms } from './footer.mjs';
-import { DEFAULTS, MOVE_KEY, REVEAL_KEY, ctx, engineBusy, goTarget, settings } from './index.js';
+import { DEFAULTS, MOVE_KEY, ctx, engineBusy, goTarget, revealedAddresses, settings } from './index.js';
 import { mapCtx, relocateFrom } from './patches.mjs';
 import { castPack } from './scene.mjs';
 
@@ -153,10 +153,10 @@ export const placeLabel = (name, sub) => (sub && sub !== name ? `${name} (${sub}
 /** Unambiguous name for the model: "Common Room (The Drowned Rat)". */
 export const displayName = loc => loc.display_name ?? placeLabel(loc.name, loc.subregion?.name);
 
-/** Places stood in during this chat: the start plus every location (and route step) saved on its messages. */
+/** Places stood in during this chat: the start plus every location (and route step) saved on its messages, plus Reveal map's places while it is on. */
 async function stoodInAddresses() {
     await syncDoors();
-    const saved = chatAddresses();
+    const saved = [...new Set([...chatAddresses(), ...await revealedAddresses()])];
     await warmRooms([...saved, ...(worldSeed()?.stood ?? []), ...(worldSeed()?.seen ?? [])]); // anything not remembered yet (e.g. after a reload) comes in one batch request
     const set = new Set();
     const start = await fetchLocationCached(null);
@@ -175,8 +175,6 @@ function chatAddresses() {
         if (loc) add(loc);
         for (const a of m?.extra?.[MOVE_KEY]?.via ?? []) add(a);
         if (m?.extra?.worldscrawl_notice_loc) add(m.extra.worldscrawl_notice_loc);
-        const rv = m?.extra?.[REVEAL_KEY]; // /ws-reveal: places marked as been-there (unless turned off)
-        if (rv && rv.off !== true) for (const a of rv.addresses ?? []) add(a);
     });
     return [...new Set(out)];
 }

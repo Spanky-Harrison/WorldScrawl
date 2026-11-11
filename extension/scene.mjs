@@ -17,7 +17,7 @@ import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
 import { aftermathNote, chatKey, relocationNote } from './expiry.mjs';
-import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, toolsOn } from './index.js';
+import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, revealNamesOn, toolsOn } from './index.js';
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
 import { renderPatchCards, waitFacts } from './waits.mjs';
@@ -125,7 +125,7 @@ function castPack() {
     return base && livePlaces && livePlaces.key === liveKey() ? livePlaces.pack : base;
 }
 // The name portal reads the chat (handle salt) and the map's place names through these.
-configureNames({ salt: () => ctx().getCurrentChatId?.() ?? ctx().chatId ?? '', places: () => castPack()?.names ?? [], people: () => peopleNow() });
+configureNames({ reveal: () => revealNamesOn(), salt: () => ctx().getCurrentChatId?.() ?? ctx().chatId ?? '', places: () => castPack()?.names ?? [], people: () => peopleNow() });
 function chatRelocate(chat) {
     const out = {};
     for (const m of chat ?? []) for (const p of m?.extra?.[PATCH_KEY] ?? []) {

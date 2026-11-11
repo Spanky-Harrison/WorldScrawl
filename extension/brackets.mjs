@@ -54,7 +54,8 @@ export const unbracket = text => String(text ?? '').replace(/\[([^\[\]]{1,40})\]
 export const SLASH_ONLY = [
     ['/ws-change [what changed]', 'the map changed in the latest message (fire, collapse...): work out the change'],
     ['/ws-exits', 'show the exits from here'], ['/ws-known', 'list the places this chat knows'],
-    ['/ws-reveal all|region|subregion|<id>|off', 'mark places as visited so you can travel there'],
+    ['/ws-reveal all|region|subregion|<id>|off', 'debug: Reveal map (places count as visited, so you can travel there)'],
+    ['/ws-reveal names|names off', 'debug: Reveal names (the model sees every real name)'],
     ['/ws-removeexit <exit>', 'remove an exit from this room'], ['/ws-map', 'open the map window'],
     ['/ws-know <name> | unmet|met|named', 'set how well you and a saved person know each other (the only way back)'],
     ['/ws-save-world <name>', "save this chat's world as a new world"], ['/ws-on, /ws-off', 'turn WorldScrawl on or off in this chat'],

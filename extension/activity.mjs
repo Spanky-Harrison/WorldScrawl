@@ -28,7 +28,6 @@ registerActivity('worldscrawl_focus', v => ({ kind: 'focus', label: 'narrator fo
 registerActivity('worldscrawl_npc', v => list(v).map(s => ({ kind: 'npc', label: s?.type ?? 'npc', text: s?.summary ?? (s?.type === 'npc_schedule' ? `${s?.id ?? ''}: schedule (${(s?.schedule ?? []).length} entries)` : s?.type === 'npc_disposition' ? `${s?.id ?? ''}: ${s?.value ?? ''} toward ${s?.who ?? 'player'}${s?.reason ? ` — ${s.reason}` : ''}` : [s?.id, s?.text ?? s?.note ?? s?.value ?? s?.place ?? s?.name].filter(Boolean).join(': ')), status: s?.off ? 'off' : null, swipe: s?.swipe ?? null })));
 registerActivity('worldscrawl_badtags', v => list(v).flatMap(b => list(b?.tags).map(t => ({ kind: 'warning', label: 'warning', text: `unreadable tag: ${t}`, status: 'warning', swipe: b?.swipe ?? null }))));
 registerActivity('worldscrawl_npcwarn', v => list(v).map(w => ({ kind: 'warning', label: 'warning', text: w?.text ?? '', status: 'warning', swipe: w?.swipe ?? null })));
-registerActivity('worldscrawl_reveal', v => ({ kind: 'map', label: 'revealed', text: short(v) }));
 registerActivity('worldscrawl_scene', v => ({ kind: 'scene', label: 'scene', text: short(v) }));
 const QUIET = new Set(['worldscrawl_enabled', 'worldscrawl_notice', 'worldscrawl_notice_kind']);
 

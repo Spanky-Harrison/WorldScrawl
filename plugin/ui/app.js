@@ -881,6 +881,13 @@ export const TOOLS = [
     }, { unlocked: () => unlockPrompts, choose }))) },
 ];
 const pendingReveals = new Map();
+async function askReveal(what) {
+    if (!state?.on || !state.chatId) return setStatus('Open a WorldScrawl chat first.');
+    const req = `r${Date.now().toString(36)}`;
+    const r = await new Promise(res => { pendingReveals.set(req, res); channel.postMessage({ type: 'reveal', req, chatId: state.chatId, what }); setTimeout(() => res({ ok: false, error: 'SillyTavern did not answer' }), 15000); });
+    pendingReveals.delete(req);
+    setStatus(r.ok ? r.text : r.error);
+}
 // Debug > Activity log: a full view (like the tools), so it never shares the side pane with Cast or the Editor.
 let actView = null;
 listeners.add(() => { if (actView && document.getElementById('tool-activity')) actView.refresh(); });
@@ -899,14 +906,9 @@ export const DEBUG = [
         try { const r = await postJson(`${API}/cache/clear`, {}); setStatus(`Map cache cleared (${r.checkpoints} snapshots). It rebuilds from the chat on the next map request.`); }
         catch (e) { setStatus(`Clear map cache failed: ${e.message}`); }
     } },
-    { id: 'reveal-map', label: 'Reveal map', open: async () => {
-        if (!state?.on || !state.chatId) return setStatus('Open a WorldScrawl chat first.');
-        if (!confirm('Reveal the whole map? Every place is marked as visited, so you can travel anywhere (the same as /ws-reveal all). Delete the reveal message in the chat to undo.')) return;
-        const req = `r${Date.now().toString(36)}`;
-        const r = await new Promise(res => { pendingReveals.set(req, res); channel.postMessage({ type: 'reveal', req, chatId: state.chatId, what: 'all' }); setTimeout(() => res({ ok: false, error: 'SillyTavern did not answer' }), 15000); });
-        pendingReveals.delete(req);
-        setStatus(r.ok ? r.text : r.error);
-    } },
+    // Per-chat debug switches (read when used; off is exactly the state before): the same as /ws-reveal all|off and /ws-reveal names|names off.
+    { id: 'reveal-map', label: 'Reveal map', toggle: true, checked: () => !!state?.revealMap, set: on => askReveal(on ? 'all' : 'off') },
+    { id: 'reveal-names', label: 'Reveal names', toggle: true, checked: () => !!state?.revealNames, set: on => askReveal(on ? 'names' : 'names off') },
 ];
 function buildMenus() {
     const bar = document.getElementById('topbar');

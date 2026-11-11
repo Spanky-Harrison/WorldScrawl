@@ -661,8 +661,8 @@ function registerSlashCommands() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-reveal',
         callback: whenOn(async (_args, what) => { try { const t = await revealPlaces(String(what ?? '').trim()); toastr.info(t); return t; } catch (e) { toastr.error(e.message); return ''; } }),
-        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'all | region | subregion | <place, subregion or region id> | off', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-        helpString: 'WorldScrawl: mark places as visited so you can travel there: all (the whole world), region or subregion (the current one), or an id. "off" turns the latest reveal off. Stamped on a small message (delete it to undo).',
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'all | region | subregion | <place, subregion or region id> | off | names | names off', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl debug switches for this chat. Reveal map: all (the whole world), region or subregion (the current one), or an id counts those places as visited so you can travel there; "off" turns it off. Reveal names: "names" shows every real name to the model, "names off" turns it off. Nothing is stamped: off is exactly as before.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'ws-known',
@@ -671,7 +671,19 @@ function registerSlashCommands() {
     }));
 }
 
-const REVEAL_KEY = 'worldscrawl_reveal';
+// ---- Debug switches, per chat, read when used (nothing is stamped): turning one off is exactly the state before.
+// Reveal map: the discovered check counts every place in the scope as been there. Reveal names: the name portal's
+// knows() says known for everyone. A future director mode would set both.
+export const REVEAL_MAP_KEY = 'worldscrawl_reveal_map', REVEAL_NAMES_KEY = 'worldscrawl_reveal_names';
+const meta = () => ctx().chatMetadata ?? null;
+export const revealMapOn = () => meta()?.[REVEAL_MAP_KEY] ?? null;
+export const revealNamesOn = () => !!meta()?.[REVEAL_NAMES_KEY];
+async function setSwitch(key, value) {
+    const c = ctx();
+    if (!c.chatMetadata) throw new Error('WorldScrawl: no chat open.');
+    if (value) c.chatMetadata[key] = value; else delete c.chatMetadata[key];
+    await (c.saveMetadataDebounced ?? c.saveMetadata)?.();
+}
 /** Which addresses a /ws-reveal scope covers, out of the effective map's addresses. */
 export function revealScope(what, addresses, here) {
     const w = String(what ?? '').trim();
@@ -684,23 +696,40 @@ export function revealScope(what, addresses, here) {
     const pre = w.includes(':') ? `${w}/` : `${w}:`;
     return addresses.filter(a => a.startsWith(pre));
 }
-/** /ws-reveal: stamp places as been-there (stateless; delete the message or "/ws-reveal off" to undo). */
-export async function revealPlaces(what) {
-    const c = ctx(), chat = c.chat ?? [];
-    if (what === 'off') {
-        for (let i = chat.length - 1; i >= 0; i--) { const rv = chat[i]?.extra?.[REVEAL_KEY]; if (rv && rv.off !== true) { rv.off = true; syncSwipeExtra?.(chat[i]); await c.saveChat?.(); await afterReveal(); return `WorldScrawl: turned off the reveal from #${i}.`; } }
-        return 'WorldScrawl: no reveal to turn off.';
-    }
-    const idx = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
+let indexMemo = { key: '', addresses: [] };
+async function mapAddresses() {
+    const body = JSON.stringify(mapCtx());
+    if (indexMemo.key === body) return indexMemo.addresses;
+    const idx = await api('/inspect/index', { method: 'POST', body });
     if (!idx.ok) throw new Error(`WorldScrawl: couldn't read the map (${idx.status}).`);
+    indexMemo = { key: body, addresses: idx.body.addresses ?? [] };
+    return indexMemo.addresses;
+}
+/** The places Reveal map counts as been there right now (read from the map each time, so new places are in). [] when off. */
+export async function revealedAddresses() {
+    const rv = revealMapOn();
+    if (!rv) return [];
+    try { return revealScope(rv.what, await mapAddresses(), rv.here); } catch (e) { console.warn('[WorldScrawl] reveal map', e.message); return []; }
+}
+/**
+ * /ws-reveal and the map's Debug switches. "all", "region", "subregion" or an id turns Reveal map on for that scope;
+ * "off" turns it off. "names" / "names off" turn Reveal names on or off.
+ */
+export async function revealPlaces(what) {
+    const w = String(what ?? '').trim();
+    if (/^names(\s+on)?$/i.test(w)) { await setSwitch(REVEAL_NAMES_KEY, true); await afterReveal(); return 'WorldScrawl: Reveal names is on: the narrator and the side calls see every real name.'; }
+    if (/^names\s+off$/i.test(w)) { await setSwitch(REVEAL_NAMES_KEY, null); await afterReveal(); return 'WorldScrawl: Reveal names is off.'; }
+    if (w === 'off') {
+        if (!revealMapOn()) return 'WorldScrawl: Reveal map is already off.';
+        await setSwitch(REVEAL_MAP_KEY, null); await afterReveal();
+        return 'WorldScrawl: Reveal map is off; the map shows what this chat has found.';
+    }
     const here = (await currentLocation().catch(() => null))?.address ?? getStoredLocation();
-    const addresses = revealScope(what, idx.body.addresses ?? [], here);
-    if (!addresses.length) throw new Error(`WorldScrawl: nothing matches "${what}".`);
-    const text = `Map: revealed ${addresses.length} place${addresses.length === 1 ? '' : 's'} (${what}).`;
-    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: text, extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'reveal', [REVEAL_KEY]: { scope: what, addresses } } };
-    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    const addresses = revealScope(w, await mapAddresses(), here);
+    if (!addresses.length) throw new Error(`WorldScrawl: nothing matches "${w}".`);
+    await setSwitch(REVEAL_MAP_KEY, { what: w, here });
     await afterReveal();
-    return text;
+    return `WorldScrawl: Reveal map is on (${w}: ${addresses.length} place${addresses.length === 1 ? '' : 's'} count as visited). "/ws-reveal off" turns it off.`;
 }
 async function afterReveal() { renderAllExits?.(); broadcastMapState(); }
 globalThis.worldscrawlReveal = revealPlaces;
@@ -803,4 +832,4 @@ const openCarriers = new WeakSet();
     console.log('[WorldScrawl] loaded');
 })();
 
-export { CHANGE_KEY, DEFAULTS, DEFAULT_NUDGE, FACTS_KEY, FLAGHINT_KEY, FLAG_KEY, MOVE_KEY, NOT_RUNNING, NUDGE_KEY, PATCH_KEY, REMINDER_KEY, REVEAL_KEY, TOOL_NAMES, WAITCARD_KEY, WAIT_KEY, WORLD_KEY, activeWorld, addChangeMessage, applyChatState, baseUrl, csrfHeaders, ctx, engineBusy, expiryPending, goTarget, hasExit, lookAction, mapVersion, missingRoomFallback, moveAction, openCarriers, refreshSaveName, roomLabel, toolsOn };
+export { CHANGE_KEY, DEFAULTS, DEFAULT_NUDGE, FACTS_KEY, FLAGHINT_KEY, FLAG_KEY, MOVE_KEY, NOT_RUNNING, NUDGE_KEY, PATCH_KEY, REMINDER_KEY, TOOL_NAMES, WAITCARD_KEY, WAIT_KEY, WORLD_KEY, activeWorld, addChangeMessage, applyChatState, baseUrl, csrfHeaders, ctx, engineBusy, expiryPending, goTarget, hasExit, lookAction, mapVersion, missingRoomFallback, moveAction, openCarriers, refreshSaveName, roomLabel, toolsOn };
