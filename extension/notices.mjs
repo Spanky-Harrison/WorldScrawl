@@ -1,5 +1,4 @@
-// In-chat notices: one shared layout (text first, ONE right-aligned button row at the end), a "Waiting on you"
-// highlight while the engine waits on the player, and decide-once bookkeeping keyed by a stable notice id.
+// In-chat notices: decide-once bookkeeping keyed by a stable notice id, and the once() guard.
 export const DECIDED_KEY = 'worldscrawl_decided'; // msg.extra[DECIDED_KEY] = { [noticeId]: { action, swipe, text } }
 
 let seq = 0;
@@ -30,33 +29,8 @@ export async function once(key, fn) {
 }
 export const busy = key => inFlight.has(key);
 
-/** The button row at the end of a notice (right-aligned). Clicking any button disables the whole row and shows "Saving…". */
-export function noticeRow(doc, buttons) {
-    const row = doc.createElement('div');
-    row.className = 'worldscrawl_notice_row';
-    row.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:4px;margin-top:4px;';
-    for (const b of buttons.filter(Boolean)) row.append(b);
-    return row;
-}
-/** Lock a row at once (first click): every button disabled, a "Saving…" label. */
-export function lockRow(row, text = 'Saving…') {
-    if (!row || row.dataset.locked) return false;
-    row.dataset.locked = '1';
-    for (const b of row.querySelectorAll('.worldscrawl_card_btn')) { b.classList.add('disabled'); b.setAttribute('aria-disabled', 'true'); b.style.pointerEvents = 'none'; b.style.opacity = '0.5'; }
-    const s = row.ownerDocument.createElement('span'); s.className = 'worldscrawl_saving'; s.textContent = text; s.style.cssText = 'opacity:.8;font-style:italic;margin-right:auto;';
-    row.prepend(s);
-    return true;
-}
-/** Mark a notice as waiting on the player: accent border/background and a "Waiting on you" label first. */
-export function markPending(el) {
-    el.classList.add('worldscrawl_notice', 'worldscrawl_pending');
-    const l = el.ownerDocument.createElement('div'); l.className = 'worldscrawl_waiting_label'; l.textContent = '⏳ Waiting on you';
-    el.prepend(l);
-    return el;
-}
-export const NOTICE_CSS = `.worldscrawl_notice.worldscrawl_pending{border:1px solid var(--SmartThemeQuoteColor,#e8a33d)!important;border-left-width:4px!important;background:color-mix(in srgb,var(--SmartThemeQuoteColor,#e8a33d) 12%,transparent);border-radius:6px;padding:4px 8px;margin:4px 0;}
-.worldscrawl_waiting_label{font-weight:bold;font-size:.85em;color:var(--SmartThemeQuoteColor,#e8a33d);margin-bottom:2px;}
-.worldscrawl_resolved{opacity:.75;font-size:.95em;}`;
+// The card layout (button row, Saving… lock, Waiting on you frame, card CSS) is plugin/ui/card.mjs; this file keeps the
+// decisions and the once() guard the engine uses outside cards too.
 /** Text for a decided notice. */
 export function resolvedText(d) {
     const verb = { approve: 'Approved', adjust: 'Approved (adjusted)', discard: 'Discarded' }[d?.action] ?? 'Done';

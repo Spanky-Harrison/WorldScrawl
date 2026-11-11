@@ -1,19 +1,21 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { waitReason } from './words.mjs';
-import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, noticeRow, lockRow, markPending, resolvedText } from './notices.mjs';
-import { render as P } from './shared.mjs';
+import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, resolvedText } from './notices.mjs';
+import { render as P, cards as C } from './shared.mjs';
+import { UPDATE_LINE, cardLib, editLib } from './cardlib.mjs';
+import { runCardAction, ticketFor } from './cardacts.mjs';
 import { normName } from './shared.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, reviewSummary, stampSummary } from './npc.mjs';
-import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, rewritingOf, suggestStart, swapRewrite } from './carriers.mjs';
+import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, rewritingOf, suggestStart } from './carriers.mjs';
 import { textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
-import { discardFlag, flagMessage, keepFlag, markUnreadTags, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
+import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra, undoFlag } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { drawDiff, drawPersonDiff, failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
+import { failedFor, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, editExpiryRevert, exportNpc, keepRemember, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { decideNpc, fillCandidate } from './owners.mjs';
@@ -187,32 +189,15 @@ async function waitFacts(chat, loc) {
     return lines.join('\n');
 }
 
-/** A notice button. decides: answering the notice (Approve / Adjust / Discard...): the first click locks the whole row
- * ("Saving…"), later clicks are ignored, and the notice redraws when the work is done (the write itself is decide-once). */
-function cardButton(label, onClick, title = '', decides = false) {
-    const b = document.createElement('span');
-    b.className = 'menu_button worldscrawl_card_btn'; b.textContent = label; if (title) b.title = title;
-    b.style.cssText = 'display:inline-block;padding:2px 8px;margin:0;font-size:0.9em;white-space:nowrap;width:auto;';
-    if (decides) b.dataset.decides = '1';
-    b.addEventListener('click', e => {
-        e.stopPropagation();
-        if (!decides) return onClick();
-        const row = b.closest('.worldscrawl_notice_row');
-        if (row && !lockRow(row)) return; // already saving
-        Promise.resolve().then(onClick).catch(err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }).finally(() => { if (row?.isConnected) renderPatchCards(); });
-    });
-    return b;
-}
-/** The light touch / full rewrite switch on a place card. Hand edits in the open editor are asked about first (they go). */
-async function switchRewrite(id, to) {
-    const key = `${id}|flag`, form = openForms.get(key);
-    const edited = form && form.startOps != null && JSON.stringify(form.getOps()) !== form.startOps;
-    if (edited && !(await hooks.confirm(`Switch to ${to === 'full' ? 'a full rewrite' : 'a light touch'}? It rewrites the suggested change's text and drops the edits you made in the editor.`))) return 'cancelled';
-    openForms.delete(key);
-    return once(`flag-rewrite:${id}`, () => swapRewrite(id, to));
-}
+/** A notice button (the shared card button): decides locks the row on the first click and redraws the cards after. */
+const cardHooks = { onError: err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }, after: () => renderPatchCards() };
+function cardButton(label, onClick, title = '', decides = false) { return cardLib().cardButton(document, label, onClick, title, decides, cardHooks); }
+const markPending = el => cardLib().markPending(el);
+const lockRow = (row, text) => cardLib().lockRow(row, text);
+/** Draw a shared card; its clicks go through the action layer with the ticket taken now. */
+function drawCard(desc, type, ticket) { return cardLib().renderCard(document, desc, (id, a) => runCardAction(type, id, ticket, a), cardHooks); }
 /** Notice text, then ONE right-aligned button row at the end. */
-const rowOf = (...buttons) => noticeRow(document, buttons.flat().filter(Boolean));
+const rowOf = (...buttons) => cardLib().noticeRow(document, buttons.flat().filter(Boolean));
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
 /** The proposed card on a Remember notice: what Approve will save. Invented details are marked. */
 function rememberProposalEl(got) {
@@ -285,93 +270,18 @@ function editRows(c) {
     if (temp || both) for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) rows.push({ part: 'live', field, label: `${name} (for now)` });
     return rows;
 }
-const editSeed = c => ({ lasting: { body: c?.lastingPreview?.body ?? '', outfit: c?.lastingPreview?.outfit ?? '' }, live: { body: c?.livePreview?.body ?? '', outfit: c?.livePreview?.outfit ?? '' } });
-
-/** The review card for a person's appearance change, laid out like the place card: summary list, red/green panel, one row. */
-function ownerCard(msg, s, who) {
-    const d = markPending(document.createElement('div'));
-    d.classList.add('worldscrawl_npcpending');
-    const line = t => { const x = document.createElement('div'); x.textContent = t; return x; };
-    const phase = s.candidate?.phase || 'working';
-    if (s.candidate?.clockError) d.append(line(s.candidate.clockError));
-    const rows = phase === 'review' && s.candidate.lastingPreview && s.candidate.livePreview ? reviewFields(s.candidate) : [];
-    d.append(line(phase === 'failed' ? `👤 Appearance for ${who} did not resolve.` : phase === 'review' ? '👤 Proposed person change:' : `👤 Preparing a change to ${who}…`));
-    if (phase === 'review') {
-        const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
-        for (const t of reviewSummary(s.candidate, who, rows)) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
-        if (!rows.length) { const li = document.createElement('li'); li.textContent = `${who}: no change to body or outfit`; ul.append(li); }
-        d.append(ul);
-    }
-    const scoped = s.candidate && s.candidate.kind !== 'baseline' && s.kind !== 'baseline';
-    const heavy = scoped && s.candidate.scope === 'heavy';
-    if (scoped) {
-        const how = line(`${heavy ? 'Full rewrite' : 'Light touch'}${s.candidate.why ? `: ${s.candidate.why}` : ''}`);
-        how.className = 'worldscrawl_scope';
-        d.append(how);
-    }
-    if (phase === 'review') {
-        const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
-        d.append(diffBox);
-        drawPersonDiff(diffBox, { title: who, rows: reviewFields(s.candidate, { all: true }) });
-    }
-    const ident = s.identity;
-    const rev = s.decisionRev ?? 1;
-    const chat = () => ctx().chat ?? [];
-    const askAgain = (key, over = {}) => once(`${key}:${ident?.owner}`, async () => {
-        const now = chat();
-        const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
-        const edited = decideNpc(now, ident, rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts, scope: s.candidate?.scope, ...over });
-        if (edited?.refill) await fillCandidate(now, ident, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: who, elapsed });
-        syncSwipeExtra(msg); await ctx().saveChat?.(); renderPatchCards(); broadcastMapState();
-    });
-    const formKey = `${ident?.owner}|npcedit`;
-    const open = openForms.get(formKey);
-    if (open) {
-        const inp = document.createElement('input');
-        inp.type = 'text'; inp.value = open.intent ?? s.candidate?.intent ?? ''; inp.className = 'text_pole worldscrawl_npc_intent';
-        inp.style.cssText = 'width:20em;display:inline-block;margin:0 4px;padding:1px 4px;';
-        inp.addEventListener('click', e => e.stopPropagation());
-        inp.addEventListener('input', () => { open.intent = inp.value; });
-        d.append(fieldsOf('Change:', inp));
-        // The proposed text itself, editable like the place editor's fields; Approve edited keeps exactly this.
-        if (phase === 'review') {
-            if (!open.text || open.token !== s.candidate.token) { open.text = editSeed(s.candidate); open.token = s.candidate.token; }
-            for (const r of editRows(s.candidate)) {
-                const ta = document.createElement('textarea');
-                ta.className = 'text_pole worldscrawl_npc_text';
-                ta.dataset.part = r.part; ta.dataset.field = r.field;
-                ta.rows = 3; ta.value = open.text[r.part]?.[r.field] ?? '';
-                ta.style.cssText = 'width:100%;margin:2px 0;padding:2px 4px;';
-                ta.addEventListener('click', e => e.stopPropagation());
-                ta.addEventListener('input', () => { open.text[r.part] = { ...(open.text[r.part] ?? {}), [r.field]: ta.value }; });
-                const cap = document.createElement('div'); cap.className = 'wsdiff-label'; cap.textContent = r.label;
-                d.append(cap, ta);
-            }
-        }
-    }
-    const buttons = [];
-    buttons.push(cardButton('Check again', () => askAgain('own-re'), 'Ask again for this body and outfit', true));
-    if (phase !== 'working') buttons.push(open
-        ? cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
-        : cardButton('Edit', () => { openForms.set(formKey, { intent: s.candidate?.intent ?? '' }); renderPatchCards(); }, 'Change what this does before approving it'));
-    if (scoped && phase !== 'working') buttons.push(cardButton(heavy ? 'Make it a light touch' : 'Make it a full rewrite', () => askAgain('own-scope', { scope: heavy ? 'light' : 'heavy' }),
-        heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true));
-    if (open) buttons.push(cardButton('Rewrite with this', () => { const intent = (open.intent ?? '').trim() || s.candidate?.intent; openForms.delete(formKey); return askAgain('own-edit', { intent }); }, 'Rewrite the body and outfit for the edited change', true));
-    if (phase === 'review') buttons.push(cardButton(open ? 'Approve edited' : 'Approve', () => once(`own-ok:${ident?.owner}`, async () => {
-        const edited = open ? { lasting: { ...(open.text?.lasting ?? {}) }, live: { ...(open.text?.live ?? {}) } } : null;
-        const res = await settleNpc(chat(), ident, rev, 'approve', { token: s.candidate?.token, ...(edited ? { edited } : {}) });
-        if (res?.ok) openForms.delete(formKey);
-        else if (res?.error && edited) toastr.warning(`WorldScrawl: ${res.error}`);
-        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
-        return res;
-    }), open ? 'Apply the body and outfit exactly as typed in the boxes' : 'Apply the reviewed body and outfit', true));
-    buttons.push(cardButton('Discard', () => once(`own-no:${ident?.owner}`, async () => {
-        openForms.delete(formKey);
-        await settleNpc(chat(), ident, rev, 'discard', {});
-        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
-    }), 'Do not change this person', true));
-    d.append(rowOf(buttons));
-    return d;
+/** The review card for a person's appearance change: the shared card (summary list, red/green panel, one row). */
+function personCardEl(msg, s, who) {
+    const key = `${s.identity?.owner}|npcedit`;
+    const c = s.candidate, phase = c?.phase || 'working';
+    const rows = phase === 'review' && c.lastingPreview && c.livePreview ? reviewFields(c) : [];
+    const scoped = !!c && c.kind !== 'baseline' && s.kind !== 'baseline';
+    const editing = !!editLib()?.editorOpen(key);
+    // The proposed text itself, editable like the place editor's fields; Approve edited keeps exactly this.
+    const fields = editing && phase === 'review' ? editRows(c).map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: (r.part === 'live' ? c.livePreview : c.lastingPreview)?.[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
+    const desc = C.personReview({ key, who, phase, summary: phase === 'review' ? reviewSummary(c, who, rows) : [], panelRows: phase === 'review' ? reviewFields(c, { all: true }) : [],
+        scoped, heavy: scoped && c.scope === 'heavy', why: c?.why ?? '', clockError: c?.clockError ?? '', editing, intent: c?.intent ?? '', fields });
+    return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
 }
 
 /**
@@ -452,6 +362,11 @@ export function renderPatchCards() {
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
         const line = t => { const d = document.createElement('div'); d.textContent = t; return d; };
+        if (!cardLib() || !C?.placeReview) { // a missing or older plugin: one line, never the old cards
+            const u = line(UPDATE_LINE); u.className = 'worldscrawl_update_plugin'; card.append(u);
+            (el.querySelector('.mes_block') ?? el).appendChild(card);
+            continue;
+        }
         const startPicker = () => {
             const wrap = document.createElement('span');
             wrap.append('Story from message #');
@@ -474,47 +389,18 @@ export function renderPatchCards() {
                 const bs = [view.buttons.includes('Retry') && cardButton('Retry', () => once(`flag-retry:${id}`, () => analyzeFlag(id)), 'Ask again', true), view.buttons.includes('Dismiss') && cardButton('Dismiss', () => discardFlag(id), 'Dismiss this notice', true)].filter(Boolean);
                 if (bs.length) card.append(rowOf(bs));
             } else if (f.status === 'review' && f.proposal) {
-                const rc = markPending(document.createElement('div')); rc.classList.add('worldscrawl_flagreview'); card.append(rc);
-                { const card = rc; // the review notice: text, diff, fields, then one row
-                card.append(line(f.proposal.invalid ? "🗺 The suggested change didn't fit the map. Press Edit to fix it (Approve opens the editor):" : '🗺 Proposed map change:'));
-                const ul = document.createElement('ul'); ul.style.margin = '2px 0 4px 1.2em';
-                for (const s of f.proposal.summary ?? []) { const li = document.createElement('li'); li.textContent = s; ul.append(li); }
-                card.append(ul);
                 const here = getStoredLocation();
-                if (here && f.proposal.relocate?.[here]) card.append(line(`The party will be moved to ${f.proposal.relocate[here]}.`));
                 // Light touch / full rewrite, laid out like the person card's: only when the change rewrites existing prose.
-                const busy = rewritingOf(f);
-                const scoped = !f.proposal.invalid && textTargets(f.proposal).length > 0;
-                const full = (f.rewrite ?? f.proposal.rewrite) === 'full';
-                if (busy) { const w = line(`🗺 Rewriting the text as ${busy === 'full' ? 'a full rewrite' : 'a light touch'}…`); w.className = 'worldscrawl_rewriting'; card.append(w); }
-                else if (scoped) { const how = line(`${full ? 'Full rewrite' : 'Light touch'}${f.why ? `: ${f.why}` : ''}`); how.className = 'worldscrawl_scope'; card.append(how); }
-                if (f.rewriteError && !busy) { const w = line(`⚠ ${f.rewriteError}`); w.className = 'worldscrawl_rewrite_error'; card.append(w); }
-                const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
-                card.append(diffBox);
                 const formKey = `${id}|flag`, form = openForms.get(formKey);
-                drawDiff(diffBox, form?.lastPreview ?? f.proposal);
-                if (form) {
-                    // The change in words, like the person card's Change box; Rewrite with this asks both steps again with it.
-                    const inp = document.createElement('input');
-                    inp.type = 'text'; inp.value = form.intent ?? f.note ?? ''; inp.className = 'text_pole worldscrawl_flag_intent';
-                    inp.style.cssText = 'width:20em;display:inline-block;margin:0 4px;padding:1px 4px;';
-                    inp.addEventListener('click', e => e.stopPropagation());
-                    inp.addEventListener('input', () => { form.intent = inp.value; });
-                    card.append(fieldsOf('Change:', inp), form.el); form.diffBox = diffBox;
-                    form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
-                }
-                const checkAgain = cardButton('Check again', () => once(`flag-retry:${id}`, () => { openForms.delete(formKey); return analyzeFlag(id); }), 'Ask again with this story range', true);
-                const discard = cardButton('Discard', () => { openForms.delete(formKey); return discardFlag(id); }, 'Leave the map as it is', true);
-                const buttons = busy ? [checkAgain, discard] : [checkAgain,
-                    form ? cardButton('Close editor', () => { openForms.delete(formKey); renderPatchCards(); }, 'Forget the edits and keep the suggestion as it was')
-                        : cardButton('Edit', () => openEditor(formKey, f.proposal.ops, { loc: Object.keys(f.proposal.before ?? {})[0] ?? getStoredLocation() ?? '' }), 'Change, add or remove parts of this change before approving it'),
-                    scoped ? cardButton(full ? 'Make it a light touch' : 'Make it a full rewrite', () => switchRewrite(id, full ? 'light' : 'full'),
-                        full ? 'Rewrite the text again, changing only what this names (exits, rooms and durations stay as they are)' : 'Rewrite the text again so it fits what the place is now (exits, rooms and durations stay as they are)', true) : null,
-                    !form && f.proposal.unmerged?.length ? cardButton('Make it a new room instead', () => unmergeFlag(id), `Add a separate new room instead of connecting to ${f.proposal.merged.map(m => m.to_name).join(', ')}`) : null,
-                    form ? cardButton('Rewrite with this', () => { const note = String(form.intent ?? '').trim(); openForms.delete(formKey); return once(`flag-retry:${id}`, () => analyzeFlag(id, { note })); }, 'Work out the map change again from the edited Change line', true) : null,
-                    cardButton(form ? 'Approve edited' : 'Approve', () => keepFlag(id), 'Put this change on the map', true), discard];
-                card.append(fieldsOf(startPicker()), rowOf(buttons));
-                }
+                const scoped = !f.proposal.invalid && textTargets(f.proposal).length > 0;
+                const desc = C.placeReview({ key: formKey, invalid: !!f.proposal.invalid, summary: f.proposal.summary ?? [], relocateTo: here ? f.proposal.relocate?.[here] ?? '' : '',
+                    busy: rewritingOf(f), scoped, full: (f.rewrite ?? f.proposal.rewrite) === 'full', why: f.why ?? '', rewriteError: f.rewriteError ?? '',
+                    preview: form?.lastPreview ?? f.proposal, editing: !!form, intent: f.note ?? '', unmerged: !!f.proposal.unmerged?.length, mergedNames: (f.proposal.merged ?? []).map(m => m.to_name) });
+                if (desc.editor) desc.editor.formEl = form.el;
+                desc.extras = [fieldsOf(startPicker())];
+                const rc = drawCard(desc, 'place', ticketFor('place', { id }));
+                if (form && rc._panel) { form.diffBox = rc._panel; form.onLive = ops => liveDiff(rc._panel, ops, { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) }, form); }
+                card.append(rc);
             }
         }
         if (waitCard) {
@@ -582,7 +468,7 @@ export function renderPatchCards() {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
             const who = npcNames.get(s.id) || s.name || s.id;
             if (s.type === 'npc_appearance_cache' || !stampSummary(s, who)) continue;
-            if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.candidate && !s.off) { card.append(ownerCard(msg, s, who)); continue; }
+            if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.candidate && !s.off) { card.append(personCardEl(msg, s, who)); continue; }
             if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; }
             const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
             d.className = 'worldscrawl_npcchange';

@@ -9,6 +9,7 @@ import { MAP_URL, PATCH_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn,
 import { rememberToggle } from './expiry.mjs';
 import { applyFacts } from './scene.mjs';
 import { cardButton, renderPatchCards } from './waits.mjs';
+import { editLib } from './cardlib.mjs';
 
 // ---- Map patches: lasting changes to places (a fire, a collapse, a smashed door). A patch is stamped on the message
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
@@ -116,6 +117,7 @@ async function openEditor(key, ops, context = {}) {
     const fl = await loadFormLib();
     if (!fl) { toastr.error('WorldScrawl: the change editor could not load. Restart SillyTavern after updating.'); return; }
     const ch = await formChoices();
+    editLib()?.closeCardEditor(key); // a fresh editor: nothing typed earlier comes back
     let form = null;
     form = fl.buildPatchForm(document, { ops, rooms: ch.rooms, areas: ch.areas, names: ch.names, areaNames: ch.areaNames, context, onChange: o => { form?.onLive?.(o); } });
     form.startOps = JSON.stringify(form.getOps()); // what it opened with: a scope switch asks before dropping hand edits
