@@ -274,7 +274,7 @@ test('a display-name rewrite does not take her off a stop that is still on the m
     const wait = [{ mes: 'The rain keeps on.', is_user: false }, msg('I wait until evening.')];
     const clocks = [{ day: 1, hour: 15, minute: 30, minutes: 15 * 60 + 30, elapsed: 15 * 3600 + 1800 }, { day: 1, hour: 16, minute: 30, minutes: 16 * 60 + 30, elapsed: 16 * 3600 + 1800 }];
     const arrive = { ...envAt(leftover), playerAt: () => BAR, clock: i => clocks[i] };
-    assert.deepEqual(comingsAndGoings(wait, 1, cast, arrive), ['[16:00] the landlady arrives.']);
+    assert.deepEqual(comingsAndGoings(wait, 1, cast, arrive), ['[16:00] The landlady arrives.']);
 });
 
 test('found: a dynamically discovered room inside the near subregion counts as within it', () => {

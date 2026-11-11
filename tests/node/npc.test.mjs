@@ -271,7 +271,8 @@ test('slices, suggestions, read-back and tags', () => {
     assert.equal(focus.depth, 'deep');
     assert.equal(focus.ambiguous, false);
     const slice = npcSlices(present, focus);
-    assert.match(slice.npcs_present, /Hesk \(hesk\)/);
+    assert.match(slice.npcs_present, /^Hesk \[p[0-9a-z]+\]:/, 'the shown name and an opaque handle, never the cast id');
+    assert.doesNotMatch(slice.npcs_present, /\bhesk\b/);
     assert.match(slice.npcs_present, /indifferent/);
     assert.match(slice.npcs_present, /Manner: Brisk/);
     assert.match(slice.npc_focus, /kettle crew/);
@@ -471,7 +472,10 @@ test('name knowledge: per actor, from stamps only, never from chat text', () => 
     const [h] = presentAt(chat, 0, [rec()], env);
     assert.deepEqual(h.known, { known: false, reason: 'not known: shown as "the landlady"' });
     const s = npcSlices([h], {}).npcs_present;
-    assert.match(s, /^the landlady \[hesk\] \(the player does not know this person's name yet; it is Hesk\. Do not have the player's character use it until it is learned\.\)/);
+    assert.match(s, /^the landlady \[p[0-9a-z]+\]:/);
+    assert.doesNotMatch(s, /Hesk|\bhesk\b/, 'no gate given: the name is nowhere');
+    const gated = npcSlices([h], {}, { gate: p => `GATE(${p.id})` }).npcs_present;
+    assert.match(gated, /^the landlady \[p[0-9a-z]+\]: GATE\(hesk\)/, 'the gated line follows an unknown person');
     assert.doesNotMatch(s, /ws_flag/);
     assert.equal(nameKnown(tam, [], 0).reason, 'known: no unknownAs on the card');
     const flaggedChat = [bot('Hesk glares.', { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Hesk'] }] })];
