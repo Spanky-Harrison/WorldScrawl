@@ -365,5 +365,5 @@ test('npc memory prompts demand real names', async () => {
   const s = readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8');
   const j = JSON.parse(s); const all = JSON.stringify(j);
   assert.doesNotMatch(all, /The stranger lied/);
-  assert.equal((all.match(/never \\"the stranger\\"/g) || []).length, 2);
+  assert.equal((all.match(/never \\"the stranger\\"/g) || []).length, 3); // narrator tag, narrator tool, tracker
 });

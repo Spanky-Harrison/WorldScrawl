@@ -89,7 +89,8 @@ async function proposed(place, patch, more = {}) {
 const sentences = t => t.split(/(?<=\.)\s+/);
 
 test('tracker rewrite/why: readPlace keeps them, the flag and proposal carry them, the patch prompt follows, the card shows them', async () => {
-    assert.deepEqual(readPlace({ changed: true, kind: 'change', note: 'boards', rewrite: 'Full', why: 'remade' }), { changed: true, kind: 'change', note: 'boards', rewrite: 'full', why: 'remade' });
+    const given = { changed: true, kind: 'change', note: 'boards', rewrite: 'Full', why: 'remade' };
+    assert.deepEqual(readPlace(given), { changed: true, kind: 'change', note: 'boards', rewrite: 'full', why: 'remade', raw: given });
     assert.equal(readPlace({ changed: true, note: 'boards', why: 'no pick given' }).why, undefined, 'a reason without a pick is dropped');
     assert.equal(readTrackerAnswer('{"changes":[{"type":"place","note":"boards","rewrite":"light","why":"one spot"}]}').place.rewrite, 'light', 'the changes[] form too');
     const { calls, f } = await proposed({ note: 'the stool splintered the floorboards', rewrite: 'light', why: 'only the floor' }, ops([descOp(BOARDS), blockBack]));
@@ -125,6 +126,29 @@ test('no pick from the tracker says "not judged"; a flag the player raised is a 
     model({ other: '{}' });
     await flagMessage(1, { note: 'the trapdoor', kind: 'discover', source: 'command' });
     assert.equal(flagOf().rewrite, undefined, 'discoveries make new rooms: no rewrite');
+});
+
+test('an unclear pick: a why that leads with the word gives it (word taken out), else not judged; the raw place object stays on the flag', async () => {
+    const cases = [
+        { place: { note: 'the inn burned', rewrite: 'medium', why: 'full: the inn burned to its beams' }, rewrite: 'full', label: 'Full rewrite: the inn burned to its beams', patch: /How much to rewrite: full rewrite/ },
+        { place: { note: 'a scorched wall', rewrite: 'yes', why: 'Light touch - one wall scorched' }, rewrite: 'light', label: 'Light touch: one wall scorched', patch: /How much to rewrite: light touch/ },
+        { place: { note: 'a flood', why: 'heavy, the cellar is under water' }, rewrite: 'full', label: 'Full rewrite: the cellar is under water', patch: /How much to rewrite: full rewrite/ },
+        { place: { note: 'the boards', rewrite: 'medium', why: 'some of it' }, rewrite: 'light', label: 'Light touch: not judged, so the default', patch: /How much to rewrite: light touch/ },
+        { place: { note: 'the boards', rewrite: 'full', why: 'Full' }, rewrite: 'full', label: 'Full rewrite', patch: /How much to rewrite: full rewrite/ },
+        { place: { note: 'the boards', rewrite: 'light', why: 'full: the whole floor' }, rewrite: 'light', label: 'Light touch: full: the whole floor', patch: /How much to rewrite: light touch/ }, // a clear rewrite wins; the why that disagrees stays as given
+    ];
+    for (const k of cases) {
+        const { calls, f } = await proposed(k.place, ops([descOp(BOARDS)]));
+        assert.equal(f.rewrite, k.rewrite, k.place.why);
+        assert.deepEqual(f.trackerPlace, { changed: true, kind: 'change', ...k.place }, 'the tracker\'s place object as given');
+        assert.match(calls.find(x => /Write the patch JSON/.test(x.prompt)).prompt, k.patch);
+        assert.equal(draw().querySelector('.worldscrawl_scope').textContent, k.label);
+    }
+    // Only the tracker's flags carry it.
+    boot();
+    model({ rooms: `{"rooms":["${TAVERN}"]}`, patch: ops([descOp(BOARDS)]) });
+    await flagMessage(1, { note: 'the floor splintered', source: 'command', raw: { rewrite: 'x' } });
+    assert.equal((await settled()).trackerPlace, undefined);
 });
 
 test('a light swap rewrites only the listed text: sentences the note does not name stay, every other edit and lasts stay', async () => {
@@ -398,5 +422,7 @@ test('prompts: the tracker judges rewrite by the result; the patch and rewrite p
     assert.equal(pl.rewritePiece(''), '');
     assert.equal(pl.patchPrompt({ outline: [] }, {}), pl.patchPrompt({ outline: [] }, { rewrite: '' }));
     assert.match(pl.patchPrompt({ outline: [] }, { rewrite: 'full' }), /How much to rewrite: full rewrite/);
-    assert.equal(rr.areaRewrite('heavy'), 'full'); assert.equal(rr.areaRewrite('medium'), 'light'); assert.equal(rr.areaRewrite(undefined), 'light');
+    assert.match(text('npc.tracker'), /rewrite is exactly "light" or "full", nothing else, and why gives only the reason, without repeating the word/);
+    assert.equal(rr.areaRewrite('heavy'), 'full'); assert.equal(rr.areaRewrite('Light'), 'light');
+    assert.equal(rr.areaRewrite('medium'), '', 'an unclear word is not judged'); assert.equal(rr.areaRewrite(undefined), '');
 });
