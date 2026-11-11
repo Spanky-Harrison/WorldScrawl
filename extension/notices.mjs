@@ -31,8 +31,3 @@ export const busy = key => inFlight.has(key);
 
 // The card layout (button row, Saving… lock, Waiting on you frame, card CSS) is plugin/ui/card.mjs; this file keeps the
 // decisions and the once() guard the engine uses outside cards too.
-/** Text for a decided notice. */
-export function resolvedText(d) {
-    const verb = { approve: 'Approved', adjust: 'Approved (adjusted)', discard: 'Discarded' }[d?.action] ?? 'Done';
-    return `✓ ${verb}${d?.text ? `: ${d.text}` : ''}`;
-}

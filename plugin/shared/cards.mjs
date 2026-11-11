@@ -258,3 +258,64 @@ export function foundKept(v) {
         actions: within('found', state, actions),
     };
 }
+
+/**
+ * An area flag that is not a proposal (yet): the player's own message, checking, nothing found, can't be shown, failed.
+ * v: {key, status ('user'|'working'|'nothing'|'cant'|'error'|other), text}. Check again re-reads the story range in the
+ * card's range picker; Dismiss closes an info notice; Discard drops a failed one.
+ */
+export function placeStatus(v) {
+    const state = v.status === 'working' ? 'working' : v.status === 'user' || v.status === 'nothing' ? 'info' : 'failed';
+    const again = v.status === 'user' ? null : act('again', 'Ask again with this story range', true);
+    const actions = state === 'working' ? [] : [again, act('discard', state === 'info' ? 'Dismiss this notice' : 'Leave the map as it is', true)];
+    return {
+        key: v.key, type: 'place', state, pending: false, cls: 'worldscrawl_flagstatus', title: v.text, titleCls: `worldscrawl_flag_${v.status}`,
+        summary: [], notes: [], panel: null, editor: null,
+        actions: within('place', state, actions),
+    };
+}
+
+/**
+ * A narrator wait for the player to approve. v: {key, label, amount, reason, before, after (clock text, '' if unknown),
+ * editing}. Edit opens the amount; Approve (edited) lets that time pass; Discard lets none pass.
+ */
+export function waitReview(v) {
+    const actions = [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change how much time passes'),
+        act('approve', v.editing ? 'Let the amount in the box pass instead' : `Let ${v.amount} pass`, true), act('discard', 'No time passes', true)];
+    const notes = [];
+    if (v.reason) notes.push({ text: `Why: ${v.reason}`, tone: 'info', cls: 'worldscrawl_wait_reason' });
+    notes.push({ text: 'A shortened or discarded wait may disagree with the story text; swipe the reply to fix that.', tone: 'muted', cls: 'worldscrawl_wait_note' });
+    return {
+        key: v.key, type: 'wait', state: 'review', pending: true, cls: 'worldscrawl_waitcard',
+        title: `⏳ The narrator passed time: ${v.label}.`, summary: [], notes,
+        panel: { type: 'fields', title: '', tag: 'time', rows: [{ field: 'time', part: 'lasting', label: 'Time passes', before: v.before || 'now', after: v.after || v.label, changed: true }] },
+        editor: v.editing ? { key: v.key, intent: null, fields: [{ key: 'amount', label: 'Amount', value: v.amount ?? '', kind: 'text', cls: 'worldscrawl_wait_amount', placeholder: 'e.g. 45m, 2h, 1h30m, until dawn' }] } : null,
+        actions: within('wait', 'review', actions),
+    };
+}
+
+/** An appearance rebuild in flight or failed. v: {key, name, status ('working'|'failed'), reason}. */
+export function appearJob(v) {
+    const state = v.status === 'failed' ? 'failed' : 'working';
+    return {
+        key: v.key, type: 'job', state, pending: state === 'failed', cls: 'worldscrawl_appearpending',
+        title: state === 'failed' ? `Appearance rebuild for ${v.name} failed.${v.reason ? ` ${v.reason}` : ''}` : `Appearance rebuild for ${v.name}: working…`,
+        titleCls: state === 'failed' ? 'worldscrawl_remember_failed' : '',
+        summary: [], notes: [], panel: null, editor: null,
+        actions: within('job', state, state === 'failed' ? [act('again', 'Ask the model again to rewrite the appearance', true)] : []),
+    };
+}
+
+/** The line a decided card leaves ("✓ Approved: …"). d: the stored decision {action, text}. */
+export function resolvedText(d) {
+    const verb = { approve: 'Approved', adjust: 'Approved (edited)', discard: 'Discarded' }[d?.action] ?? 'Done';
+    return `✓ ${verb}${d?.text ? `: ${d.text}` : ''}`;
+}
+/** A decided card, kept as one dim line. */
+export function resolvedNote(d) {
+    return { key: '', type: 'resolved', state: 'resolved', pending: false, cls: 'worldscrawl_notice worldscrawl_resolved', title: resolvedText(d), summary: [], notes: [], panel: null, editor: null, actions: [] };
+}
+/** A warning about a change (an npc warning, a place's person warning): one "⚠" note. */
+export function warnNote(text) {
+    return { key: '', type: 'warn', state: 'info', pending: false, cls: 'worldscrawl_npcwarn', title: '', summary: [], notes: [{ text: `⚠ ${text}`, tone: 'warn', cls: 'worldscrawl_warn_text' }], panel: null, editor: null, actions: [] };
+}

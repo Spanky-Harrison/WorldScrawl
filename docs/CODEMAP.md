@@ -21,7 +21,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | footer.mjs | Exits text and the footer shown under replies | `exitsText`, `namedNpcsAt` |
 | mapwindow.mjs | Opening the map window, theme vars, map state | `openMapWindow`, `mapState` |
 | patches.mjs | Map patches (lasting changes), a kept change's in-card Approve edited (`saveKeptEdit`, re-stamped on its message), the place expiry notice's before/now view and its Approve edited, and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `saveKeptEdit`, `expiryView`, `keepExpiryEdit`, `FLAG_TAG` |
-| carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagCardView` |
+| carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagStatusText` |
 | discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration, feeding tracker results into the place rewrite and person apply | `onReplyForFlags`, `flagMessage`, `registerTools`, `applyTrackerResult`, `onStorySwipe` |
 | arearewrite.mjs | Light touch / full rewrite on place changes: which ops are existing text (`textTargets`), merging the rewrite answer (`mergeRewrite`) and the guard that refuses anything but text changing (`rewriteGuard`). No DOM, fetch or model calls (the call is `swapRewrite` in carriers.mjs) | `areaRewrite`, `textTargets`, `mergeRewrite`, `rewriteGuard` |
 | tracker.mjs | After-reply tracker: the question, the answer reader, flag gates, and dropping a swipe's tracker stamps. No DOM or fetch | `shouldTrackReply`, `readTrackerAnswer`, `gateTracker`, `trackerPrompt`, `dropTrackerMarks` |
@@ -35,7 +35,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
 | notices.mjs | Card decisions (decide-once per card id) and the `once()` guard | `markDecided`, `once` |
 | cardlib.mjs | Loads the shared card and editor (plugin/ui/card.mjs, cardedit.mjs) at startup and checks their `CARD_VERSION`; a missing or older plugin gets one "update the plugin" line instead of cards | `cardLib`, `editLib`, `UPDATE_LINE`, `useCardLib` |
-| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember, kept map changes, person notes, found rows) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
+| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember, kept map changes, person notes, found rows, narrator waits, appearance rebuild jobs) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
 | manifest.json | SillyTavern extension manifest (entry `index.js`) | — |
 

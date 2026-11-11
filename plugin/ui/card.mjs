@@ -58,11 +58,6 @@ export const CARD_CSS = `.worldscrawl_notice.worldscrawl_pending{border:1px soli
 .worldscrawl_resolved{opacity:.75;font-size:.95em;}
 .worldscrawl_card_input{display:inline-block;margin:0 4px;padding:1px 4px;}
 .worldscrawl_card_area{width:100%;margin:2px 0;padding:2px 4px;}`;
-/** Text for a decided card ("✓ Approved: …"). */
-export function resolvedText(d) {
-    const verb = { approve: 'Approved', adjust: 'Approved (adjusted)', discard: 'Discarded' }[d?.action] ?? 'Done';
-    return `✓ ${verb}${d?.text ? `: ${d.text}` : ''}`;
-}
 
 /**
  * A card button. decides: answering the card (Approve, Discard, Check again…): the first click locks the whole row

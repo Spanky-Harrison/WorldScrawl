@@ -8,7 +8,7 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
-import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, resolvedText } from './notices.mjs';
+import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
 import { cardLib } from './cardlib.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts, sharedError, slug } from './shared.mjs';
@@ -46,7 +46,7 @@ export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
 export { revealsDestination } from './shared.mjs';
 export { themeVars, mapState, expandSys, openMapWindow, openWorldFolder } from './mapwindow.mjs';
 export { flagHint, flagToolText, flagActionText, waitHint, patchesOn, previewOps, restampChange, changeDependents, toggleChange, liveEdit } from './patches.mjs';
-export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagCardView, USER_FLAG_NOTE, replyAfter, SCENE_KEY, sceneOverrides, setSceneOverride, proactiveDiscovery } from './carriers.mjs';
+export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagStatusText, USER_FLAG_NOTE, replyAfter, SCENE_KEY, sceneOverrides, setSceneOverride, proactiveDiscovery } from './carriers.mjs';
 export { modelWait, planWait, MIN_NARRATOR_WAIT, narratorWaitAction, waitAmount, proposeWait, keepWait, waitExpiryDelta, editKeptWait, discardWait, waitNote, renderPatchCards } from './waits.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';

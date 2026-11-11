@@ -9,13 +9,13 @@ import { NPC_KEY, foundEditOk, npcAt } from './npc.mjs';
 import { normName } from './shared.mjs';
 import { decideNpc } from './owners.mjs';
 import { currentLocation } from './doors.mjs';
-import { FLAG_KEY, PATCH_KEY, broadcastMapState, ctx, hooks } from './index.js';
+import { FLAG_KEY, PATCH_KEY, WAITCARD_KEY, broadcastMapState, ctx, hooks } from './index.js';
 import { analyzeFlag, isCarrier, removeFromCard, swapRewrite } from './carriers.mjs';
-import { renderPatchCards } from './waits.mjs';
+import { discardWait, keepWait, renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
 import { isPlaceExpiry, keepExpiryEdit, keptForGood, openEditor, openForms, saveKeptEdit, toggleFromCard } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
-import { REMEMBER_KEY, applyFacts, castPack, npcClock, npcEnv, refreshLivePlaces, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryRemember, settleNpc } from './scene.mjs';
+import { REMEMBER_KEY, appearJobs, applyFacts, castPack, npcClock, npcEnv, refreshLivePlaces, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryAppearance, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
 
 /** Actions that ask the model or write a decision: each must carry its card's ticket. */
@@ -54,6 +54,16 @@ const TICKETS = {
     /** A person note or a found row: current while the stamp is still on its message, same swipe, same revision and on/off. */
     personNote({ id, msg, s, key }) { return stampTicket('personNote', id, msg, s, key); },
     found({ id, msg, s, key }) { return stampTicket('found', id, msg, s, key); },
+    /** A narrator wait card: current while that card is still on its message, on the same swipe. */
+    wait({ id, msg }) {
+        const wc = msg?.extra?.[WAITCARD_KEY], swipe = swipeOf(msg);
+        return { type: 'wait', id, msg, wc, key: `${id}|wait`, still: () => ctx().chat?.[id] === msg && msg.extra?.[WAITCARD_KEY] === wc && !!wc && swipeOf(msg) === swipe };
+    },
+    /** An appearance rebuild job: current while the same job is still failed on that message and swipe. */
+    job({ id, msg, job }) {
+        const swipe = swipeOf(msg), same = j => j.id === job.id && j.key === job.key && j.status === job.status && (j.token ?? null) === (job.token ?? null);
+        return { type: 'job', id, msg, job, key: `${id}|job|${job.id}|${job.key}`, still: () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe && appearJobs(msg).some(same) };
+    },
     /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
     expiry({ id, msg, key, kind, person = null, got = null }) {
         const swipe = swipeOf(msg);
@@ -323,8 +333,25 @@ const found = {
     undo: t => settleNote(t, 'undo'),
 };
 
+// ---- a narrator wait: Edit opens the amount; Approve (edited) lets it pass; Discard lets none pass
+const wait = {
+    edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
+    close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
+    approve: async t => {
+        const typed = E()?.editorOpen?.(t.key) ? String(E()?.editorValues(t.key).fields.amount ?? '').trim() : '';
+        const r = await keepWait(t.id, typed || null);
+        if (!r) E()?.closeCardEditor(t.key);
+        return r;
+    },
+    discard: t => { E()?.closeCardEditor(t.key); return discardWait(t.id); },
+};
+// ---- an appearance rebuild job: Check again asks the model again
+const job = {
+    again: t => retryAppearance(t.id, t.job.id, t.job.key),
+};
+
 /** The handlers: the only per-type card code that acts. */
-export const HANDLERS = { place, person, expiry, remember, placeKept, personNote, found };
+export const HANDLERS = { place, person, expiry, remember, placeKept, personNote, found, wait, job };
 
 /**
  * Run a card action. Refuses an action the type does not have, an async action without a ticket, and any action whose

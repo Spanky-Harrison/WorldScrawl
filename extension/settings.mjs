@@ -44,7 +44,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes</label>
       <small>Unused this pass. Story tools are not registered from this checkbox, and the after-reply tracker does not read it.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
-      <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the Approve / Adjust / Discard card)</label>
+      <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the wait card)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="typed"> Clicks, commands and typed moves</label>

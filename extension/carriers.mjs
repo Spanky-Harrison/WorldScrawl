@@ -146,18 +146,18 @@ async function askModel(c, label, args) {
     return raw;
 }
 /** How a flag's result is shown: every status ends in a visible line (never an empty card). */
-export function flagCardView(f, id) {
+export function flagStatusText(f, id) {
     const range = `messages #${f.start}–#${id}`;
     switch (f.status) {
-        case 'user': return { text: `🗺 ${USER_FLAG_NOTE}`, buttons: ['Dismiss'] };
-        case 'working': return { text: `🗺 Checking what changed on the map (${range})…`, buttons: [] };
-        case 'nothing': return { text: `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`, buttons: ['Retry', 'Dismiss'] };
-        case 'cant': return { text: `🗺 Can't show this on the map: ${f.error || 'no reason given'}`, buttons: ['Retry', 'Dismiss'] };
-        case 'review': if (f.proposal) return { text: '🗺 Proposed map change:', buttons: ['review'] }; break;
-        case 'error': return { text: `🗺 Map change failed: ${f.error || 'something went wrong.'}`, buttons: ['Retry', 'Dismiss'] };
+        case 'user': return `🗺 ${USER_FLAG_NOTE}`;
+        case 'working': return `🗺 Checking what changed on the map (${range})…`;
+        case 'nothing': return `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`;
+        case 'cant': return `🗺 Can't show this on the map: ${f.error || 'no reason given'}`;
+        case 'review': if (f.proposal) return ''; break;
+        case 'error': return `🗺 Map change failed: ${f.error || 'something went wrong.'}`;
     }
-    if (f.status === 'kept' || f.status === 'discarded') return null;
-    return { text: `🗺 Map change failed: unexpected state "${f.status}".`, buttons: ['Retry', 'Dismiss'] };
+    if (f.status === 'kept' || f.status === 'discarded') return '';
+    return `🗺 Map change failed: unexpected state "${f.status}".`;
 }
 export const USER_FLAG_NOTE = "That's your own message: the narrator's reply will be checked with it when it arrives.";
 /** The narrator reply right after message id (skipping engine notices), or -1 if a player message or the end comes first. */
