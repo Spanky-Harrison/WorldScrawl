@@ -56,6 +56,12 @@ export function validateRecord(raw, { file = 'npc', places = null, nearIndex = n
     } else if (raw.appearance != null) fail(`${file}: "appearance" must be {summary, body, outfit}`);
     const history = sub(raw, 'history', HISTORY_MAX, 'history');
     const unknownAs = sub(raw, 'unknownAs', 80, 'unknownAs');
+    // Other names for the same person (nicknames, a short form). Masked like the name until it is learned.
+    let aliases = [];
+    if (raw.aliases != null) {
+        if (!Array.isArray(raw.aliases)) fail(`${file}: "aliases" must be a list of names`);
+        else aliases = raw.aliases.map(a => str(a, 80)).filter(Boolean).slice(0, 12);
+    }
     const disposition = {};
     if (raw.disposition != null) {
         if (!isObj(raw.disposition)) fail(`${file}: "disposition" must be an object keyed by person`);
@@ -92,7 +98,7 @@ export function validateRecord(raw, { file = 'npc', places = null, nearIndex = n
     const facts = Array.isArray(raw.facts) ? raw.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 24) : [];
     const memory = Array.isArray(raw.memory) ? raw.memory.map(f => (typeof f === 'string' ? f.trim() : isObj(f) ? str(f.note, 240) : '')).filter(Boolean).slice(-MEMORY_CAP) : [];
     const ok = errors.length === 0 && !!id && !!name && !!line;
-    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
+    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, aliases, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
 }
 
 function validateEntry(e, where, places, fail, nearIndex = null) {

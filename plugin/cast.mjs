@@ -156,6 +156,7 @@ export function tidyRecord(raw) {
     const out = {};
     const s = v => (typeof v === 'string' ? v.trim() : '');
     for (const k of ['id', 'name', 'unknownAs']) if (s(raw[k])) out[k] = s(raw[k]);
+    if (Array.isArray(raw.aliases)) { const a = raw.aliases.map(s).filter(Boolean); if (a.length) out.aliases = a; }
     for (const [k, keys] of [['personality', ['summary', 'manner', 'speech']], ['appearance', ['summary', 'body', 'outfit']]]) {
         const sub = {};
         if (isObj(raw[k])) for (const x of keys) if (s(raw[k][x])) sub[x] = s(raw[k][x]);

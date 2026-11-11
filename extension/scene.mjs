@@ -5,10 +5,11 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
+import { configureNames, findPerson, judgeLearn } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -115,6 +116,8 @@ function castPack() {
     const base = baseCastPack();
     return base && livePlaces && livePlaces.key === liveKey() ? livePlaces.pack : base;
 }
+// The name portal reads the chat (handle salt) and the map's place names through these.
+configureNames({ salt: () => ctx().getCurrentChatId?.() ?? ctx().chatId ?? '', places: () => castPack()?.names ?? [] });
 function chatRelocate(chat) {
     const out = {};
     for (const m of chat ?? []) for (const p of m?.extra?.[PATCH_KEY] ?? []) {
@@ -203,19 +206,50 @@ function addNpcStamp(msg, stamp) {
     }
     msg.extra[NPC_KEY] = [...(Array.isArray(msg.extra[NPC_KEY]) ? msg.extra[NPC_KEY] : []), row];
 }
-/** [name] /ws-name: the same npc_name stamp the narrator's name flag writes, with source bracket. */
+/**
+ * The only writer of npc_name stamps. `target` is who (a handle, id, name or unknownAs), `heard` the name said.
+ * Model sources (tracker, flag) must pass the portal's rules (judgeLearn: present, not yet known, the real name or an
+ * alias, spoken in dialogue or in the player's line); a refusal is noted on the call log. The player's [name] and
+ * /ws-name (source bracket) always land, and a rule they skipped is kept on the stamp as `override` for the inspector.
+ * {ok, reason, id, name}.
+ */
+async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
+    const c = ctx(), chat = c.chat ?? [];
+    const at = Math.max(0, chat.indexOf(msg));
+    const cast = castPack()?.npcs ?? [];
+    const folded = [...(framesOf(chat, at, cast).at(-1)?.values() ?? [])];
+    const people = folded.length ? folded : cast;
+    const person = findPerson(target, people);
+    const player = source === 'bracket';
+    if (!person) {
+        const reason = `No saved person is called "${String(target ?? '').trim()}".`;
+        if (!player) noteCall(at, { kind: 'name learn', status: 'skipped', reason: `${source}: ${reason}` });
+        return { ok: false, reason };
+    }
+    let present = [];
+    try { const loc = await currentLocation(); present = presentAt(chat, at, cast, npcEnv(chat, loc)); } catch { present = []; }
+    const ui = (() => { for (let i = at - 1; i >= 0; i--) if (chat[i]?.is_user) return i; return -1; })();
+    const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
+    const story = msg.is_user ? '' : msg.mes ?? '';
+    const j = judgeLearn({ person, present, heard: heard || (player ? person.name : ''), said: msg.is_user ? msg.mes ?? '' : said, story });
+    if (!j.ok && !player) {
+        noteCall(at, { kind: 'name learn', status: 'skipped', reason: `${source}: ${j.reason}` });
+        return { ok: false, reason: j.reason, id: person.id, name: person.name };
+    }
+    const swipe = swipeOf(msg);
+    msg.extra = msg.extra ?? {};
+    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && s.source === source && (s.swipe ?? 0) === swipe && s.id === person.id));
+    addNpcStamp(msg, { type: 'npc_name', id: person.id, who: PLAYER, source, ...(j.ok ? {} : { override: j.reason }) });
+    return { ok: true, reason: j.ok ? j.reason : `player override: ${j.reason}`, id: person.id, name: person.name };
+}
+/** [name] /ws-name: the player's own name learn (always lands; see learnName). */
 async function learnNameOn(msg, name) {
     const who = String(name ?? '').trim();
     msg.extra = msg.extra ?? {};
     msg.extra.worldscrawl_bracket = { verb: 'name', target: who };
     if (!who) { msg.extra.worldscrawl_bracket.status = 'rejected'; msg.extra.worldscrawl_bracket.reason = '[name] needs a name.'; return { ok: false, reason: '[name] needs a name.' }; }
-    const chat = ctx().chat ?? [];
-    const id = Math.max(0, chat.indexOf(msg));
-    const folded = [...(framesOf(chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const r = nameStampFor(folded.length ? folded : (castPack()?.npcs ?? []), who, { source: 'bracket' });
+    const r = await learnName(msg, { target: who, heard: who, source: 'bracket' });
     if (!r.ok) { msg.extra.worldscrawl_bracket.status = 'rejected'; msg.extra.worldscrawl_bracket.reason = r.reason; return r; }
-    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && s.source === 'bracket' && (s.swipe ?? 0) === swipeOf(msg) && s.id === r.id));
-    addNpcStamp(msg, r.stamp);
     msg.extra.worldscrawl_bracket.status = 'ok';
     syncSwipeExtra(msg);
     await ctx().saveChat?.();
@@ -228,7 +262,7 @@ async function setRelOn(msg, arg) {
     const chat = ctx().chat ?? [];
     const id = Math.max(0, chat.indexOf(msg));
     const folded = [...(framesOf(chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const n = npcForName(folded, name) ?? folded.find(x => x.id === name);
+    const n = findPerson(name, folded);
     if (!n) return { ok: false, reason: `No saved person is called ${name}.` };
     addNpcStamp(msg, { type: 'npc_rel', id: n.id, who: PLAYER, state });
     syncSwipeExtra(msg);
@@ -242,7 +276,7 @@ async function judgeFoundNow(name) {
     const env = npcEnv(chat, loc);
     const end = Math.max(0, chat.length - 1);
     const folded = [...(framesOf(chat, end, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const n = npcForName(folded, name);
+    const n = findPerson(name, folded);
     if (!n) return { ok: false, reason: `No saved person is called "${name}".` };
     return judgeFound(n, env.clock(end), env.playerAt(end), env);
 }
@@ -265,7 +299,7 @@ async function applyFound(msg, names, source) {
     const prev = (msg.extra[FOUND_KEY] ?? []).filter(f => (f?.swipe ?? 0) !== swipe || f.source !== source);
     const decisions = [];
     for (const nm of list) {
-        const n = npcForName(folded, nm);
+        const n = findPerson(nm, folded);
         if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '' }); continue; }
         const j = judgeFound(n, env.clock(at), env.playerAt(at), env);
         decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, source, where: j.where ?? '', place: j.place ?? '' });
@@ -952,4 +986,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

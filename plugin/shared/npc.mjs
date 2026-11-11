@@ -112,6 +112,7 @@ export function exportRecord(npc) {
     }
     const out = { id: npc.id, name: npc.name };
     if (npc.unknownAs) out.unknownAs = npc.unknownAs;
+    if (Array.isArray(npc.aliases) && npc.aliases.length) out.aliases = [...npc.aliases];
     out.personality = { summary: npc.line };
     if (npc.manner) out.personality.manner = npc.manner;
     if (npc.voice) out.personality.speech = npc.voice;

@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, npcForName, npcTarget, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
@@ -15,10 +15,11 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, postPersonExpiryNotices, invalidateAppearance, judgeFoundNow, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, postPersonExpiryNotices, invalidateAppearance, judgeFoundNow, learnName, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
+import { findPerson } from './names.mjs';
 import { REWRITE_NOT_JUDGED, areaRewrite } from './arearewrite.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
@@ -78,7 +79,7 @@ function registerTools(want) {
                 let hits = loreFor(chain, String(location || note || ''));
                 const asked = String(location || note || '').trim();
                 if (!hits.length) { const stub = matchStubLore(asked); if (stub) hits = [{ level: 'elsewhere', id: stub.id, name: stub.name, text: stub.lore }]; }
-                const person = !hits.length && asked ? npcForName([...(framesOf(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? []).at(-1)?.values() ?? [])], asked) : null;
+                const person = !hits.length && asked ? findPerson(asked, [...(framesOf(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? []).at(-1)?.values() ?? [])]) : null;
                 if (person?.deep?.history) { pendingLoreFlags.push(asked); return `${person.name}'s history: ${person.deep.history}`; }
                 if (!hits.length) return chain.length ? `No lore on file for that. Lore on file: ${chain.map(c => c.name).join(', ')}.` : 'No lore on file here.';
                 pendingLoreFlags.push(...hits.map(h => h.name));
@@ -369,7 +370,7 @@ async function applyPersonStamps(id, stamped) {
     };
     for (const s0 of stamped) {
         const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
-        const t = npcTarget(folded, s0.id);
+        const t = findPerson(s0.id, folded)?.id ?? null;
         if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }
         let s = t === s0.id ? s0 : { ...s0, id: t };
         const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
@@ -453,24 +454,22 @@ function trackerPayloads(people) {
     const stamps = [], found = [], names = [];
     for (const p of people ?? []) {
         if (p.action === 'found') { found.push(p.name || p.id); continue; }
-        if (p.action === 'name') { names.push({ id: p.id, name: p.name || p.id }); continue; }
+        if (p.action === 'name') { names.push({ id: p.id, name: p.name || '' }); continue; }
         const stamp = toolNpcStamp({ ...p, id: p.id || p.name });
         if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
     }
     return { stamps, found, names };
 }
+/** Tracker name items: the item's handle (or id) says who, its name is what was heard. No name-only fallback. */
 async function applyLearnedNames(id, learned, source) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg || !learned?.length) return;
-    const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    msg.extra = msg.extra ?? {};
     const done = new Set();
-    for (const l of learned) {
-        // The tracker names the person by id; the name it heard may be a first name or a nickname.
-        const row = typeof l === 'string' ? { id: '', name: l } : l;
-        const byId = row.id ? folded.find(x => x.id === npcTarget(folded, row.id)) : null;
-        const n = byId ?? npcForName(folded, row.name);
-        if (n && !done.has(n.id)) { done.add(n.id); addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source }); }
+    for (const row of learned) {
+        if (!row?.id) { noteCall(id, { kind: 'name learn', status: 'skipped', reason: `${source}: the name item named nobody (no id)` }); continue; }
+        if (done.has(row.id)) continue;
+        done.add(row.id);
+        await learnName(msg, { target: row.id, heard: row.name, source });
     }
     await c.saveChat?.();
 }
@@ -582,11 +581,9 @@ export async function onReplyForFlags(id) {
         try { c.updateMessageBlock?.(id, msg); } catch {}
     }
     if (learned.length) {
-        const ch = c.chat ?? [];
-        const folded = [...(framesOf(ch, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
         msg.extra = msg.extra ?? {};
-        msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && (s.swipe ?? 0) === swipeOf(msg)));
-        for (const nm of new Set(learned)) { const n = npcForName(folded, nm); if (n) addNpcStamp(msg, { type: 'npc_name', id: n.id, who: PLAYER, source: 'flag' }); }
+        msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && s.source === 'flag' && (s.swipe ?? 0) === swipeOf(msg)));
+        for (const nm of new Set(learned)) await learnName(msg, { target: nm, heard: nm, source: 'flag' });
         await c.saveChat?.();
     }
     const nf = takeNpcFlags(msg.mes ?? ''), npcNames = [...pendingNpcFlags.splice(0), ...nf.names];

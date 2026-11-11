@@ -342,6 +342,7 @@ export function castPanel(doc, io) {
         const effBox = $('div', { class: 'cf-effective' });
         form.append(fieldRow('name', 'Name', text('name')), fieldRow('id', 'Id', idIn, 'The cast file name. Lowercase, like old-tam.'),
             fieldRow('unknownAs', 'Known as (before the name)', text('unknownAs', { ph: 'the landlady' }), 'What the player calls them until they learn the name. Empty: the name is used from the start.'),
+            fieldRow('aliases', 'Other names', text('aliases', { ph: 'Hessy, Mistress Hesk' }), 'Nicknames or short forms, comma separated. Hidden from the narrator like the name until it is learned.'),
             $('b', {}, 'Personality'),
             fieldRow('line', 'Summary', text('line', { ph: 'stern, watchful, sharp-tongued' }), 'Always fed while they are here.'),
             fieldRow('manner', 'Manner', text('manner', { area: true })), fieldRow('voice', 'Speech', text('voice')),

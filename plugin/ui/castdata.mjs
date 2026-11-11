@@ -74,7 +74,7 @@ export function formFromRecord(rec = null) {
     const raw = r.raw && typeof r.raw === 'object' ? r.raw : r;
     const d = raw.disposition?.player ?? {};
     return {
-        id: s(raw.id) || s(r.id), name: s(raw.name), unknownAs: s(raw.unknownAs),
+        id: s(raw.id) || s(r.id), name: s(raw.name), unknownAs: s(raw.unknownAs), aliases: Array.isArray(raw.aliases) ? raw.aliases.map(String).join(', ') : '',
         // A cast file (nested personality / appearance) or a loaded or folded record (flat line / manner / voice / looks / body / outfit).
         line: s(raw.personality?.summary ?? raw.line), manner: s(raw.personality?.manner ?? raw.manner), voice: s(raw.personality?.speech ?? raw.voice),
         looks: s(raw.appearance?.summary ?? raw.looks), body: s(raw.appearance?.body ?? raw.body), outfit: s(raw.appearance?.outfit ?? raw.outfit),
@@ -93,6 +93,8 @@ export function formFromRecord(rec = null) {
 export function recordFromForm(f) {
     const out = { id: s(f.id), name: s(f.name) };
     if (s(f.unknownAs)) out.unknownAs = s(f.unknownAs);
+    const aliases = String(f.aliases ?? '').split(',').map(x => x.trim()).filter(Boolean);
+    if (aliases.length) out.aliases = aliases;
     out.personality = { summary: s(f.line) };
     if (s(f.manner)) out.personality.manner = s(f.manner);
     if (s(f.voice)) out.personality.speech = s(f.voice);
