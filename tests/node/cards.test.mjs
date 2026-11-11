@@ -987,3 +987,61 @@ test('resolved and warning lines are drawn by the shared card', () => {
     assert.equal(btns(r).length + btns(w).length, 0);
     void c;
 });
+
+// ---- S6: the inspector's Approve edited on a kept change (map channel change_restamp)
+const { openMapChannel } = await import('../../extension/mapwindow.mjs');
+class FakeChan {
+    static all = [];
+    constructor(name) { this.name = name; this.listeners = []; FakeChan.all.push(this); }
+    addEventListener(type, fn) { if (type === 'message') this.listeners.push(fn); }
+    removeEventListener(type, fn) { this.listeners = this.listeners.filter(f => f !== fn); }
+    postMessage(data) { for (const ch of FakeChan.all) if (ch !== this && ch.name === this.name) for (const fn of [...ch.listeners]) fn({ data }); }
+    close() {}
+}
+function mapSide() {
+    FakeChan.all = [];
+    globalThis.BroadcastChannel = FakeChan;
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '', backgroundColor: '' });
+    openMapChannel();
+    const gui = new FakeChan('worldscrawl');
+    let n = 0;
+    const ask = (type, payload) => new Promise(res => {
+        const req = `t${++n}`, on = ev => { if (ev.data?.type === `${type}_result` && ev.data.req === req) { gui.removeEventListener('message', on); res(ev.data); } };
+        gui.addEventListener('message', on); gui.postMessage({ type, req, chatId: 'cards1', ...payload });
+    });
+    return { ask };
+}
+
+test('inspector Approve edited: change_restamp re-stamps the kept change on its message; a stale sig or off state writes nothing', async () => {
+    const { c, p } = await keptChange();
+    const { ask } = mapSide();
+    const typed = [{ ...p.ops[0], text: 'Rebuilt, smelling of fresh pine.' }];
+    let r = await ask('change_restamp', { msg: 1, id: p.id, ops: typed, note: 'rebuilt', sig: JSON.stringify(p.ops), off: false });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const now = c.chat[1].extra.worldscrawl_patches[0];
+    assert.equal(now.id, p.id, 'same change, same message');
+    assert.equal(now.ops[0].text, 'Rebuilt, smelling of fresh pine.');
+    assert.equal(now.note, 'rebuilt');
+    r = await ask('change_restamp', { msg: 1, id: p.id, ops: [{ ...p.ops[0], text: 'From an older inspector.' }], sig: JSON.stringify([{ ...p.ops[0], text: BOARDS }]), off: false });
+    assert.equal(r.stale, true, 'drawn before the edit');
+    assert.equal(now.ops[0].text, 'Rebuilt, smelling of fresh pine.');
+    r = await ask('change_restamp', { msg: 1, id: p.id, ops: [{ ...p.ops[0], text: 'Drawn while it was off.' }], sig: JSON.stringify(now.ops), off: true });
+    assert.equal(r.stale, true, 'drawn in another on/off state');
+    assert.equal(now.ops[0].text, 'Rebuilt, smelling of fresh pine.');
+});
+
+test('the GUI cards come from the same adapters: buttons for each Changes row type', async () => {
+    const { stampCard } = await import('../../plugin/ui/castdata.mjs');
+    const base = { msg: 0, index: 0, identity: { owner: 'o' }, decisionRev: 1, sig: 'x', summary: 'Hesk: owes a favor' };
+    const ids = x => stampCard(x, { who: 'Hesk' }).desc.actions.map(a => a.id);
+    assert.deepEqual(ids({ ...base, type: 'npc_fact', text: 'owes a favor', pending: true }), ['edit', 'approve', 'discard']);
+    assert.deepEqual(ids({ ...base, type: 'npc_fact', text: 'owes a favor' }), ['edit', 'off', 'undo']);
+    assert.deepEqual(ids({ ...base, type: 'npc_memory', note: 'n', off: true }), ['on', 'undo']);
+    assert.deepEqual(ids({ ...base, type: 'npc_found', where: 'the bar', place: TAVERN }), ['edit', 'off', 'undo']);
+    assert.deepEqual(ids({ ...base, type: 'npc_appearance', fields: 'body' }), ['edit', 'off', 'undo']);
+    assert.deepEqual(ids({ ...base, type: 'npc_appearance', candidate: 'failed', scopeLevel: 'light' }), ['again', 'edit', 'scope', 'discard']);
+    assert.equal(stampCard({ ...base, type: 'npc_appearance_cache' }), null);
+    const found = stampCard({ ...base, type: 'npc_found', where: 'the bar', place: TAVERN }, { who: 'Hesk', editing: true });
+    assert.equal(found.type, 'found');
+    assert.equal(found.desc.editor.fields[0].value, TAVERN);
+});
