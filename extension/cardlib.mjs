@@ -26,7 +26,7 @@ async function load() {
 }
 await load();
 
-/** The loaded card module (renderCard, cardButton, noticeRow, lockRow, markPending, resolvedText…), or null. */
+/** The loaded card module (renderCard, cardButton, noticeRow, lockRow, markPending…), or null. */
 export const cardLib = () => lib;
 /** The loaded editor module (buildCardEditor, editorOpen, editorValues…), or null. */
 export const editLib = () => edit;

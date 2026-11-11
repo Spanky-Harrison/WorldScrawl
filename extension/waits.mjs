@@ -1,11 +1,11 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { waitReason } from './words.mjs';
-import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, resolvedText } from './notices.mjs';
+import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
 import { render as P, cards as C } from './shared.mjs';
 import { UPDATE_LINE, cardLib, editLib } from './cardlib.mjs';
 import { runCardAction, ticketFor } from './cardacts.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
-import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
+import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
 import { textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
@@ -82,7 +82,7 @@ export function narratorWaitAction(chatBefore, w, autoKeep = false) {
     }
     return autoKeep ? 'keep' : 'card';
 }
-/** A narrator wait waits for the player: Keep, Adjust or Discard on a card (unless Auto-keep waits is on). */
+/** A narrator wait waits for the player: Approve, Edit → Approve edited, or Discard on a card (unless Auto-keep waits is on). */
 const waitAsk = () => (settings().autoKeepWaits ? '' : ' (The player will confirm it.)');
 /** The amount as the player would type it: "until morning", "2h 30m". */
 export const waitAmount = w => (w.until ? `until ${w.until}` : calendarLib?.formatDuration ? calendarLib.formatDuration(w.seconds) : `${Math.round(w.seconds / 60)}m`);
@@ -90,7 +90,7 @@ export function proposeWait(msg, w) {
     msg.extra = msg.extra ?? {};
     msg.extra[WAITCARD_KEY] = { nid: newNoticeId('wait'), swipe: swipeOf(msg), seconds: w.seconds, sleep: !!w.sleep, label: w.label, until: w.until ?? null, amount: waitAmount(w), reason: w.reason || '' };
 }
-/** Keep (amount unchanged) or Adjust (a new amount) a proposed wait: the same stamp as a narrator wait kept at once. */
+/** Approve (amount unchanged) or Approve edited (a new amount) a proposed wait: the same stamp as a narrator wait kept at once. */
 export async function keepWait(id, amount = null) {
     const c = ctx(), msg = c.chat?.[id], p = msg?.extra?.[WAITCARD_KEY];
     if (!p) return 'no wait to keep';
@@ -188,7 +188,7 @@ async function waitFacts(chat, loc) {
 }
 
 /** The descriptor adapters this extension draws with: an older plugin without one of them shows the update line. */
-const CARD_ADAPTERS = ['placeReview', 'personReview', 'personKept', 'personExpiry', 'placeExpiry', 'rememberReview'];
+const CARD_ADAPTERS = ['placeReview', 'personReview', 'personKept', 'personExpiry', 'placeExpiry', 'rememberReview', 'placeKept', 'personNote', 'foundKept', 'placeStatus', 'waitReview', 'appearJob', 'resolvedNote', 'warnNote'];
 /** A notice button (the shared card button): decides locks the row on the first click and redraws the cards after. */
 const cardHooks = { onError: err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }, after: () => renderPatchCards() };
 function cardButton(label, onClick, title = '', decides = false) { return cardLib().cardButton(document, label, onClick, title, decides, cardHooks); }
@@ -325,6 +325,21 @@ function expiredPlaceEl(msg, id, got) {
     return rc;
 }
 
+/** The clock at a message and after a proposed wait there ("8:00 AM" → "10:00 AM"), or '' when unknown. */
+function waitTimes(id, wc) {
+    const t = worldTimes.get(activeWorld || defaultWorldId), lib = calendarLib;
+    if (!lib?.dateAt || !t) return { before: '', after: '' };
+    try {
+        const at = chatElapsed((ctx().chat ?? []).slice(0, id + 1));
+        const txt = sec => lib.dateAt(sec, t.start_date, t.calendar)?.time ?? '';
+        return { before: txt(at), after: txt(at + (Number(wc.seconds) || 0)) };
+    } catch { return { before: '', after: '' }; }
+}
+function waitEl(msg, id, wc) {
+    const key = `${id}|wait`, editing = !!editLib()?.editorOpen(key);
+    const { before, after } = waitTimes(id, wc);
+    return drawCard(C.waitReview({ key, label: wc.label, amount: wc.amount, reason: wc.reason ?? '', before, after: after ? `${after} (${wc.label})` : '', editing }), 'wait', ticketFor('wait', { id, msg }));
+}
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
@@ -379,12 +394,11 @@ export function renderPatchCards() {
             return wrap;
         };
         if (f && (f.swipe ?? 0) === swipeOf(msg)) {
-            const view = flagCardView(f, id);
-            if (view && view.buttons[0] !== 'review') {
-                const t = line(view.text); t.className = `worldscrawl_flag_${f.status}`; card.append(t);
-                if (view.buttons.includes('Retry')) card.append(fieldsOf(startPicker()));
-                const bs = [view.buttons.includes('Retry') && cardButton('Retry', () => once(`flag-retry:${id}`, () => analyzeFlag(id)), 'Ask again', true), view.buttons.includes('Dismiss') && cardButton('Dismiss', () => discardFlag(id), 'Dismiss this notice', true)].filter(Boolean);
-                if (bs.length) card.append(rowOf(bs));
+            const text = flagStatusText(f, id);
+            if (text) {
+                const desc = C.placeStatus({ key: `${id}|flag`, status: f.status, text });
+                if (desc.actions.some(a => a.id === 'again')) desc.extras = [fieldsOf(startPicker())];
+                card.append(drawCard(desc, 'place', ticketFor('place', { id })));
             } else if (f.status === 'review' && f.proposal) {
                 const here = getStoredLocation();
                 // Light touch / full rewrite, laid out like the person card's: only when the change rewrites existing prose.
@@ -400,45 +414,17 @@ export function renderPatchCards() {
                 card.append(rc);
             }
         }
-        if (waitCard) {
-            const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_waitcard');
-            d.append(line(`⏳ The narrator passed time: ${wc.label}.`));
-            if (wc.reason) { const r = line(`Why: ${wc.reason}`); r.className = 'worldscrawl_wait_reason'; d.append(r); }
-            const inp = document.createElement('input');
-            inp.type = 'text'; inp.value = wc.amount; inp.className = 'text_pole worldscrawl_wait_amount'; inp.title = 'e.g. 45m, 2h, 1h30m, until dawn';
-            inp.style.cssText = 'width:9em;display:inline-block;margin:0 4px;padding:1px 4px;';
-            inp.addEventListener('click', e => e.stopPropagation());
-            const note = line('A shortened or discarded wait may disagree with the story text; swipe the reply to fix that.');
-            note.style.opacity = '0.7'; note.style.fontSize = '0.9em';
-            d.append(fieldsOf('Amount:', inp), note, rowOf(cardButton('Approve', () => keepWait(id), `Let ${wc.amount} pass`, true), cardButton('Adjust', () => keepWait(id, inp.value), 'Let the amount in the box pass instead', true),
-                cardButton('Discard', () => discardWait(id), 'No time passes', true)));
-            card.append(d);
-        }
+        if (waitCard) card.append(waitEl(msg, id, wc));
         if (rememberCard) card.append(rememberEl(msg, id, remember));
         for (const p of expired) card.append(expiredPersonEl(msg, id, p));
         if (placeGone) card.append(expiredPlaceEl(msg, id, placeGone));
-        for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }
-        const warnLine = text => { const d = line(`⚠ ${text}`); d.className = 'worldscrawl_npcwarn'; return d; };
-        if (placeWarn) card.append(warnLine(placeWarn));
-        for (const w of npcWarns) card.append(warnLine(w.text));
+        for (const [, dd] of resolved) card.append(drawCard(C.resolvedNote(dd), 'resolved', null));
+        if (placeWarn) card.append(drawCard(C.warnNote(placeWarn), 'warn', null));
+        for (const w of npcWarns) card.append(drawCard(C.warnNote(w.text), 'warn', null));
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
-        for (const job of appearJobs(msg)) {
-            if (job.status === 'working') {
-                const d = line(`Appearance rebuild for ${job.name || job.id}: working…`);
-                d.className = 'worldscrawl_appearpending';
-                card.append(d);
-            } else if (job.status === 'failed') {
-                const d = markPending(document.createElement('div'));
-                d.classList.add('worldscrawl_appearpending');
-                const t = line(`Appearance rebuild for ${job.name || job.id} failed.`);
-                t.className = 'worldscrawl_remember_failed';
-                const why = job.reason ? ` ${job.reason}` : '';
-                t.textContent = `Appearance rebuild for ${job.name || job.id} failed.${why}`;
-                d.append(t, rowOf(cardButton('Retry', () => retryAppearance(id, job.id, job.key), 'Ask the model again to rewrite the appearance', true)));
-                card.append(d);
-            }
-        }
+        for (const job of appearJobs(msg)) if (job.status === 'working' || job.status === 'failed')
+            card.append(drawCard(C.appearJob({ key: `${id}|job|${job.id}|${job.key}`, name: job.name || job.id, status: job.status, reason: job.reason ?? '' }), 'job', ticketFor('job', { id, msg, job })));
         let exported = new Set();
         for (const s of npcStamps) {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
