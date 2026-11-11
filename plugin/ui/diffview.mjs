@@ -241,8 +241,6 @@ export function renderPersonDiff(doc, { title = '', tag = 'person', rows = [] } 
     draw();
     return root;
 }
-/** Kept for old callers: the person view without a title. */
-export const paintFieldDiffs = (doc, rows, title = '') => renderPersonDiff(doc, { title, rows });
 
 /** The red/green view. opts: {before, after, ops, relocate}. Unchanged fields hidden behind a toggle; "Raw JSON" toggle. */
 export function renderDiff(doc, { before = {}, after = {}, ops = [], relocate = {}, inherit = {}, names = {} } = {}) {
