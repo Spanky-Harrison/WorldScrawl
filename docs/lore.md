@@ -22,7 +22,7 @@ Each request is stamped on its message as `msg.extra.worldscrawl_lore`: `[{swipe
 
 ## People in lore
 
-Write cast NPCs as `{{npc:id}}`. In lore and descriptions it renders as the NPC's name before SillyTavern macros run. An unknown id shows as the bare id (or "someone") and logs a warning. Only tokens in lore being fed add presence lines ("Hesk is upstairs, asleep" / "Pell isn't here right now"); a place is never invented.
+Write cast NPCs as `{{npc:id}}`. In lore and descriptions it renders as what the player knows them as (the name once learned, else their unknownAs) before SillyTavern macros run. An unknown id shows as the bare id (or "someone") and logs a warning. Only tokens in lore being fed add presence lines ("Hesk is upstairs, asleep" / "Pell isn't here right now"); a place is never invented.
 
 Loading a world warns when lore or a description names a cast NPC (or one of their aliases) in plain text ("did you mean {{npc:hesk}}?"), and when a token's id matches no cast NPC.
 

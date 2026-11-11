@@ -364,7 +364,7 @@ A card with no `unknownAs` counts as known. `aliases` (other names: nicknames, s
 
 `learnName` (scene.mjs) is the only writer of `npc_name`. A learn from the model (the tracker's `name` item, the narrator's `[ws_flag: name | Name]`) must pass the portal's rules: the person resolves (the tracker's item by its own id or handle; its name is only what was heard), is in the scene, does not already know the name, the heard name is their name or an alias, and it was spoken: inside double quotes in the reply, or anywhere in the player's own line. A refused learn is noted in the model-call log. The player's `[name]` and `/ws-name` always land; a rule they skipped is kept on the stamp as `override` and shown in the inspector ("player override: ...").
 
-While the name is unknown, the narrator sees `the landlady [hesk]` together with the real name. It is told not to let the player's character use the name, and to end its reply with `[ws_flag: name | Hesk]` once someone says the name to them. There is no player bracket for this yet.
+While the name is unknown, every engine block the narrator gets says `the landlady` instead of the name or an alias (the facts block is masked as a whole in applyFacts, the prompt choke point), and people are listed with an opaque per-chat handle (`the landlady [p7k2]`), never the cast id. The one exception is a gated line, only while she is in the scene: "If the landlady is introduced or called by name in spoken dialogue, their name is Hesk." (`narration.name_gate`). The narrator ends its reply with `[ws_flag: name | Hesk]` once the name is said; the learn rules above still apply. Past chat text is not masked; the guarantee covers engine-injected blocks only.
 
 ### Remember
 

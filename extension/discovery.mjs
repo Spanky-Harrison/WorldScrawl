@@ -19,7 +19,7 @@ import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
-import { findPerson } from './names.mjs';
+import { capFirst, findPerson, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, areaRewrite } from './arearewrite.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
@@ -80,7 +80,7 @@ function registerTools(want) {
                 const asked = String(location || note || '').trim();
                 if (!hits.length) { const stub = matchStubLore(asked); if (stub) hits = [{ level: 'elsewhere', id: stub.id, name: stub.name, text: stub.lore }]; }
                 const person = !hits.length && asked ? findPerson(asked, [...(framesOf(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? []).at(-1)?.values() ?? [])]) : null;
-                if (person?.deep?.history) { pendingLoreFlags.push(asked); return `${person.name}'s history: ${person.deep.history}`; }
+                if (person?.deep?.history) { pendingLoreFlags.push(asked); return renderTokens(`${capFirst(shownName(person))}'s history: ${person.deep.history}`); }
                 if (!hits.length) return chain.length ? `No lore on file for that. Lore on file: ${chain.map(c => c.name).join(', ')}.` : 'No lore on file here.';
                 pendingLoreFlags.push(...hits.map(h => h.name));
                 return renderTokens(P('narration.lore_block', { lore: hits.map(c => `- ${c.name}: ${c.text}`).join('\n') }));

@@ -5,11 +5,11 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
-import { configureNames, findPerson, judgeLearn } from './names.mjs';
+import { capFirst, configureNames, findPerson, judgeLearn, maskText, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -22,10 +22,18 @@ import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } fr
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
 import { renderPatchCards, waitFacts } from './waits.mjs';
 
-/** {{npc:id}} -> the cast name (before ST macros run); an unknown id shows as the bare id, with a console warning. */
-export function renderTokens(text) {
-    const pack = castPack();
-    return renderNpcTokens(text, pack?.npcs ?? [], id => console.warn(`[WorldScrawl] {{npc:${id}}}: no cast NPC has that id; shown as "${id || 'someone'}".`));
+/** Everyone in the cast as they are at the end of the chat (names, aliases, rel): what the portal masks against. */
+export function peopleNow() {
+    const chat = ctx().chat ?? [];
+    return [...(framesOf(chat, Math.max(0, chat.length - 1), castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
+}
+/**
+ * Engine text for the model through the name portal (before ST macros run): unknown people's names and aliases become
+ * their unknownAs and {{npc:id}} renders as the shown name; an unknown id shows as the bare id, with a console warning.
+ * `keepGate` leaves the gated {{npc!:id}} line for the final pass in applyFacts.
+ */
+export function renderTokens(text, { keepGate = false } = {}) {
+    return maskText(text, peopleNow(), { keepGate, onUnknown: id => console.warn(`[WorldScrawl] {{npc:${id}}}: no cast NPC has that id; shown as "${id || 'someone'}".`) });
 }
 /** Where the player stood at message i (for lore scenes; works without a cast). */
 function lorePlayerAt(chat, loc) {
@@ -332,7 +340,8 @@ function npcPromptBits(loc) {
         const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
         const focus = stored && stored.depth ? stored : focusRules(said, present);
         const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
-        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc });
+        const gate = p => P('narration.name_gate', { shown: shownName(p), name: `{{npc!:${p.id}}}` });
+        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc, gate });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
@@ -662,9 +671,13 @@ async function npcChatEdit(d) {
     return { ok: true, count: stamps.length, msg: i };
 }
 function npcDetail(id) {
-    const chat = ctx().chat ?? [];
-    const npc = npcAt(chat, chat.length - 1, castPack()?.npcs ?? [], id);
+    // The narrator names people by their handle (or a name it was shown): resolve through the portal, answer masked.
+    const people = peopleNow();
+    const npc = findPerson(id, people);
     if (!npc) return 'No saved person with that id is here.';
+    return maskText(npcDetailText(npc), people);
+}
+function npcDetailText(npc) {
     const bits = [`Personality: ${npc.line}`];
     if (npc.manner) bits.push(`Manner: ${npc.manner}`);
     if (npc.voice) bits.push(`Speech: ${npc.voice}`);
@@ -742,6 +755,8 @@ async function applyFacts() {
         const gone = expiryNarratorNote(freshPersonExpiries(c.chat ?? [], (c.chat ?? []).length - 1, partyText()), partyText());
         if (gone) text = `${text}\n${gone}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
+    // The prompt choke point: every person name in the block goes through the portal (the gated name line renders here).
+    try { const people = peopleNow(); text = maskText(text, people); reminder = maskText(reminder, people); } catch (e) { console.warn('[WorldScrawl] name mask:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     // Small models weigh the last lines most: on a move/travel turn, repeat where the turn ends after the player's message.
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);

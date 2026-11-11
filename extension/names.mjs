@@ -109,22 +109,24 @@ export function judgeLearn({ person, present = [], heard = '', said = '', story 
 
 // ---- Outbound text.
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
+export const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
 const NPC_TOKEN = /\{\{\s*npc(!?)\s*:\s*([^{}\s]*)\s*\}\}/gi;
 
 /**
  * Engine text for the model: every real name or alias of a person in `people` the player does not know becomes their
  * unknownAs (exact, case-sensitive, whole words; capitalized at a sentence start; place names are left alone), then
  * {{npc:id}} tokens render as the shown name and {{npc!:id}} (the portal's own gated line only) as the real name.
- * Unknown token ids render as the bare id ("someone" when empty) and go to `onUnknown`.
+ * Unknown token ids render as the bare id ("someone" when empty) and go to `onUnknown`. `keepGate` leaves {{npc!:id}}
+ * as is, for a block that is masked again at the prompt choke point (applyFacts).
  */
-export function maskText(text, people, { onUnknown = null } = {}) {
+export function maskText(text, people, { onUnknown = null, keepGate = false } = {}) {
     const list = [...(people ?? [])].filter(p => p?.id);
     const byId = new Map(list.map(p => [String(p.id).toLowerCase(), p]));
     const tokens = [];
     // Tokens out first (so masking never touches an id), back in last.
-    let out = String(text ?? '').replace(NPC_TOKEN, (_all, bang, id) => {
+    let out = String(text ?? '').replace(NPC_TOKEN, (all, bang, id) => {
         const p = byId.get(String(id).toLowerCase());
+        if (bang && keepGate) { tokens.push(all); return `\u0001${tokens.length - 1}\u0001`; }
         let v;
         if (p) v = bang ? (p.name || id) : shownName(p);
         else { onUnknown?.(id); v = id || 'someone'; }

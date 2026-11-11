@@ -291,7 +291,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (move?.traversal?.length && move.to === loc.address) lines.push(P('narration.on_the_way', { steps: move.traversal.join(' Then: ') }));
     if ((move && move.to === loc.address) || ((extra.lookAround || extra.look?.kind === 'around') && !move)) lines.push(P('narration.exits_hint'));
     lines.push(moveTools ? P('narration.rules_tools') : P('narration.rules', { party: who }));
-    return renderTokens(lines.filter(Boolean).join('\n'));
+    return renderTokens(lines.filter(Boolean).join('\n'), { keepGate: true });
 }
 
 export { PLAIN_DIRECTIONS, addNotice, withArticle };

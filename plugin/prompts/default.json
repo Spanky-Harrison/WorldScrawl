@@ -82,7 +82,7 @@
     "scrap": "The short list the tracker sees: this place, the people here with the appearance already on the card, and the known weather.",
     "kind": "what kind of place it is: \"region\", \"area\" or \"room\"",
     "label": "the name of a place the player already knows about",
-    "lines": "saved people who came or went since the last reply, one per line with the game time, e.g. [14:20] Hesk arrives.",
+    "lines": "saved people who came or went since the last reply, one per line with the game time, e.g. [14:20] The landlady arrives.",
     "mentions": "other world text that names a changed place (from the Map changes piece), or empty",
     "name": "the name of the place or person being written about",
     "body": "the person's resolved Body text, the physical description already in force",
@@ -135,7 +135,8 @@
     "rewrite": "How deeply a map change rewrites existing descriptions, notes and exit texts: the 'Map changes: light touch' or 'Map changes: full rewrite' piece (filled in by the game), or empty.",
     "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game).",
     "hint": "The player's Change note on the Remember card, or (none)",
-    "kept": "The fields the player typed on the Remember card, one \"- Field: text\" line each, or (none)"
+    "kept": "The fields the player typed on the Remember card, one \"- Field: text\" line each, or (none)",
+    "shown": "what the player knows a person as: their name once learned, else their unknownAs (e.g. the landlady)"
   },
   "prompts": [
     {
@@ -1676,6 +1677,22 @@
       ]
     },
     {
+      "id": "narration.name_gate",
+      "title": "Narration: a name not learned yet",
+      "description": "Alongside, inside {{npcs_present}}, after a person here whose name the player has not learned: the one place the narrator is told the real name, so someone can say it.",
+      "group": "narration",
+      "locked": "The game fills these from the cast. Everywhere else the narrator only sees what the player knows them as.",
+      "text": "If {{shown}} is introduced or called by name in spoken dialogue, their name is {{name}}.",
+      "placeholders": [
+        {
+          "name": "shown"
+        },
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
       "id": "narration.npc_tags",
       "title": "Narration: how to report a person (tags)",
       "description": "Piece: fills {{how_to_report}} when reporter tools are off and NPC changes may be flagged.",
@@ -1683,7 +1700,7 @@
       "piece": true,
       "locked": "The game reads these [ws_npc: …] tags.",
       "placeholders": [],
-      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), end your reply with [ws_npc: appearance | their-id | short intent | fields | lasts], e.g. [ws_npc: appearance | hesk | magically young | body | 1 hour]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 1 hour) when temporary, omit when lasting. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | hesk | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | hesk | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. A place changing is not a reason to report a person update. Report someone only when their own looks, a fact about them, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Report appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not report it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
+      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), end your reply with [ws_npc: appearance | their-id | short intent | fields | lasts], e.g. [ws_npc: appearance | p3k9 | magically young | body | 1 hour]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 1 hour) when temporary, omit when lasting. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | p3k9 | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | p3k9 | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. A place changing is not a reason to report a person update. Report someone only when their own looks, a fact about them, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Report appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not report it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tools",

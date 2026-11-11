@@ -1,6 +1,6 @@
 // NPC record checks and the near-index: server only (cast files). The rest of the NPC code is in shared/npc.mjs
 // (both sides) and extension/npc.mjs (play).
-import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isObj, label, matchEnum, resolveNear, str } from './shared/npc.mjs';
+import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isObj, matchEnum, resolveNear, str } from './shared/npc.mjs';
 
 export const DISPOSITION_ALL = ['unknown', ...DISPOSITIONS];
 
