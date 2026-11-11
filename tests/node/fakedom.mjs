@@ -1,4 +1,4 @@
-// A tiny DOM for card tests (copied from parity-accept.test.mjs): enough of createElement, classes, querySelector and click.
+// A tiny DOM for card tests: enough of createElement, classes, querySelector and click.
 function matchOne(el, part) {
     let rest = part;
     if (rest[0] !== '.' && rest[0] !== '#' && rest[0] !== '[') {

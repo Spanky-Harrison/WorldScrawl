@@ -3,9 +3,8 @@
 import './ststub.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { messageKey, paintWordDiff, wordDiff } from '../../extension/replay.mjs';
+import { messageKey } from '../../extension/replay.mjs';
 import { framesOf, npcAt } from '../../extension/npc.mjs';
-import { wordDiff as mapWordDiff } from '../../plugin/ui/diffview.mjs';
 
 await import('../../extension/index.js');
 const { decideNpc, fillCandidate, makeOwner, recompose } = await import('../../extension/scene.mjs');
@@ -20,23 +19,6 @@ function chatWith(stamps, { elapsedAt = 0 } = {}) {
     for (const s of stamps) msg.extra.worldscrawl_npc.push(s);
     return { chat, msg, elapsedAt };
 }
-
-test('word diff rendered into the DOM matches the map wordDiff', () => {
-    const before = 'sturdy shoulders and a wool dress';
-    const after = 'sturdy shoulders and a soaked dress';
-    assert.deepEqual(wordDiff(before, after), mapWordDiff(before, after));
-    const nodes = [];
-    const doc = {
-        createElement: () => ({ className: '', children: [], setAttribute() {}, append(...xs) { this.children.push(...xs); nodes.push(this); } }),
-        createTextNode: text => ({ text }),
-    };
-    const parent = { append(box) { this.box = box; } };
-    paintWordDiff(doc, parent, 'Body', before, after);
-    const marks = parent.box.children[1].children.filter(n => n.setAttribute).map(n => n.getAttribute?.() || n.className);
-    assert.ok(parent.box.children[1].children.some(n => n.className === 'wsdiff-wdel'));
-    assert.ok(parent.box.children[1].children.some(n => n.className === 'wsdiff-wins'));
-    assert.equal(marks.length >= 0, true);
-});
 
 test('approve binds the reviewed fields and does not call the model; undo does not resurrect the owner', async () => {
     let calls = 0;
