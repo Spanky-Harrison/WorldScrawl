@@ -3,6 +3,7 @@
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
 import { npc } from './shared.mjs';
+import { findPerson, knows } from './names.mjs';
 import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
 import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
@@ -243,12 +244,6 @@ export function foundEditOk(npc, where, place, env) {
     return { ok: true, place: r.address };
 }
 
-/** The npc_name stamp a [name] / [ws_flag: name] records, or why the name matched nobody. */
-export function nameStampFor(npcs, name, { who = PLAYER, source = 'bracket' } = {}) {
-    const n = npcForName(npcs, name);
-    if (!n) return { ok: false, reason: `No saved person is called "${String(name ?? '').trim()}".` };
-    return { ok: true, id: n.id, name: n.name, stamp: { type: 'npc_name', id: n.id, who, source: source === 'bracket' ? 'bracket' : 'flag' } };
-}
 
 function sightPlaceOf(npc, env) {
     if (!npc?.seen_at || npc.seen_at.broken) return null;
@@ -292,7 +287,7 @@ function blankFrom(rec) {
     return {
         id: rec.id, name: rec.name, line: rec.line, manner: rec.manner ?? '', voice: rec.voice ?? '',
         looks, body, outfit, castLooks: looks, base, effects: [], caches: {}, appearanceHow: 'base', appearanceKey: '',
-        unknownAs: rec.unknownAs ?? '', rel: clone(rec.rel ?? {}),
+        unknownAs: rec.unknownAs ?? '', aliases: Array.isArray(rec.aliases) ? rec.aliases.filter(a => typeof a === 'string' && a.trim()) : [], rel: clone(rec.rel ?? {}),
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
@@ -426,7 +421,7 @@ function applyStamp(state, s, index, elapsed = null) {
         n.disposition[who] = { value, reason: str(s.reason, 240) ?? '' };
         return;
     }
-    if (s.type === 'npc_name') { relUp(n, str(s.who, 40) || PLAYER, 'named', index, s.source === 'bracket' ? 'name bracket' : 'name flag'); return; }
+    if (s.type === 'npc_name') { relUp(n, str(s.who, 40) || PLAYER, 'named', index, s.source === 'bracket' ? 'name bracket' : s.source === 'tracker' ? 'heard in dialogue' : 'name flag'); return; }
     if (s.type === 'npc_rel') { // the player's edit: the only way back
         const who = str(s.who, 40) || PLAYER;
         if (REL_STATES.includes(s.state)) n.rel[who] = { state: s.state, at: index, by: 'player edit' };
@@ -711,7 +706,7 @@ function publicNpc(n) {
         appearanceHow: n.appearanceHow ?? 'base', appearanceKey: n.appearanceKey ?? '',
         looksHow: n.looksHow ?? 'base', looksKey: n.looksKey ?? '',
         liveOps: (n.liveOps ?? []).map(o => ({ owner: o.owner, lasts: o.lasts ?? null, start: o.start, intent: o.committed?.intent || o.intent || '', fields: o.committed?.fields || '' })),
-        unknownAs: n.unknownAs ?? '', rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
+        unknownAs: n.unknownAs ?? '', aliases: [...(n.aliases ?? [])], rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
         schedule: n.schedule.map(e => ({ ...e })),
@@ -1044,17 +1039,9 @@ function dispositionLine(n) {
 
 const LOOK_BRACKET_RE = /\[\s*look\b/i;
 
-/**
- * Whether actor `who` (the player unless given) knows NPC n's name after message `index`, and why. Per actor, never per
- * party. Known when their relationship record (rel) says 'named' (remembered through [remember], an npc_name stamp from
- * [ws_flag: name | Name], [name] or /ws-name, or the player's /ws-know edit), or the card has no unknownAs (nothing
- * else to call them). Never inferred from chat text.
- */
+/** Whether actor `who` knows NPC n's name, and why: the name portal's `knows` (names.mjs). */
 export function nameKnown(n, chat = [], index = -1, who = PLAYER) {
-    const r = relOf(n, who);
-    if (r.state === 'named') return { known: true, reason: `known: ${r.by}` };
-    if (!n?.unknownAs) return { known: true, reason: 'known: no unknownAs on the card' };
-    return { known: false, reason: `not known: shown as "${n.unknownAs}"` };
+    return knows(n, who);
 }
 
 /** The lore requests in this scene up to `index` that name no place (e.g. [lore] Hesk or [ws_flag: lore | Hesk]): their asked names. */
@@ -1222,32 +1209,15 @@ export function takeFoundFlags(text) {
     return { names, text: cleaned };
 }
 
-const ARTICLE = /^(?:the|a|an) /;
-const bareName = s => normName(s).replace(ARTICLE, '');
-/**
- * The saved person a name means: exact name, id, or unknownAs ("the landlady", with or without "the") first, then a
- * name contained either way, or the words inside an unknownAs ("landlady"). Null when none or several: no match
- * rather than the wrong person.
- */
+/** The saved person a name, alias, unknownAs, handle or id means: the name portal's `findPerson` (names.mjs). */
 export function npcForName(npcs, name) {
-    const key = normName(name), bare = bareName(name);
-    if (!key) return null;
-    const list = [...(npcs ?? [])];
-    const exact = list.filter(n => normName(n.name) === key || n.id === key || n.id === String(name ?? '').trim() || (n.unknownAs && bareName(n.unknownAs) === bare));
-    if (exact.length === 1) return exact[0];
-    if (exact.length > 1) return null;
-    const loose = list.filter(n => nameIn(name, n.name) || nameIn(n.name, name) || (n.unknownAs && bare && !ARTICLE.test(`${bare} `) && nameIn(n.unknownAs, bare)));
-    return loose.length === 1 ? loose[0] : null;
+    return findPerson(name, npcs);
 }
 
 /** Names the narrator flagged on message m (the shown swipe). */
 /** The saved person a tag or tool call means: its id when that id is saved, else a saved person by that name; null when neither. */
 export function npcTarget(npcs, idOrName) {
-    const key = String(idOrName ?? '').trim();
-    if (!key) return null;
-    const list = [...(npcs ?? [])];
-    if (list.some(n => n.id === key)) return key;
-    return npcForName(list, key.replace(/_/g, ' '))?.id ?? null;
+    return findPerson(idOrName, npcs)?.id ?? null;
 }
 export const flagsOn = m => (m?.extra?.[NPC_FLAG_KEY] ?? []).filter(f => (f?.swipe ?? 0) === (m?.swipe_id ?? 0)).flatMap(f => f.names ?? []);
 
@@ -1370,7 +1340,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_leave') return `${who} leaves`;
     if (s.type === 'npc_staying') return `${who} is staying`;
     if (s.type === 'npc_create') return `${who} remembered`;
-    if (s.type === 'npc_name') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} learned ${who}'s name`;
+    if (s.type === 'npc_name') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} learned ${who}'s name${s.override ? ` (player override: ${s.override})` : ''}`;
     if (s.type === 'npc_rel') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} set ${who} to ${REL_TEXT[s.state] ?? s.state}`;
     if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
