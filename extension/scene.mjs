@@ -9,7 +9,7 @@ import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesO
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
-import { capFirst, configureNames, findPerson, judgeLearn, maskText, shownName } from './names.mjs';
+import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -55,7 +55,7 @@ export function loreBits(loc) {
         lore_fed: fed.length ? P('narration.lore_block', { lore: fed.map(c => `- ${c.name}: ${c.text}`).join('\n') }) : '',
     };
 }
-/** People here, with every field the after-reply tracker may change. Not the narrator prompt. */
+/** People here, with every field the after-reply tracker may change, as the model may see them: the shown name and the opaque handle. Not the narrator prompt. */
 export function listedPeople(chat, id, loc) {
     const pack = castPack();
     if (!pack?.npcs?.length || !chat?.length) return [];
@@ -64,7 +64,7 @@ export function listedPeople(chat, id, loc) {
         return presentAt(chat, id, pack.npcs, env).map(p => {
             const stance = p.disposition?.[PLAYER];
             return {
-                id: p.id, name: p.name, looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
+                id: handleOf(p.id), name: shownName(p), looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
                 unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false,
                 facts: [...(p.facts ?? [])], memory: [...(p.memory ?? [])],
                 stance: stance?.value || '', stanceReason: stance?.reason || '',
@@ -125,7 +125,7 @@ function castPack() {
     return base && livePlaces && livePlaces.key === liveKey() ? livePlaces.pack : base;
 }
 // The name portal reads the chat (handle salt) and the map's place names through these.
-configureNames({ salt: () => ctx().getCurrentChatId?.() ?? ctx().chatId ?? '', places: () => castPack()?.names ?? [] });
+configureNames({ salt: () => ctx().getCurrentChatId?.() ?? ctx().chatId ?? '', places: () => castPack()?.names ?? [], people: () => peopleNow() });
 function chatRelocate(chat) {
     const out = {};
     for (const m of chat ?? []) for (const p of m?.extra?.[PATCH_KEY] ?? []) {
@@ -355,16 +355,16 @@ const DISPO_OPTS = [
 ];
 async function askDisposition(person, said) {
     await ensurePrompts();
-    const prompt = P('npc.disposition', { name: person.name, line: person.line, party: partyText(), said: String(said ?? '').slice(0, 800), options: optionLines(DISPO_OPTS) });
+    const prompt = P('npc.disposition', { name: shownName(person), line: maskForModel(person.line), party: partyText(), said: String(said ?? '').slice(0, 800), options: optionLines(DISPO_OPTS) });
     const hit = await askValid('disposition', prompt, pickKey(DISPO_OPTS));
     return hit?.key ?? 'indifferent';
 }
 async function askWho(loc, said, present) {
     await ensurePrompts();
-    const opts = [...present.map(p => ({ key: p.id, label: p.name })), { key: 'nobody', label: 'nobody in particular' }];
+    const opts = [...present.map(p => ({ key: handleOf(p.id), label: shownName(p) })), { key: 'nobody', label: 'nobody in particular' }];
     const prompt = P('npc.who', { party: partyText(), place: displayName(loc), said: String(said ?? '').slice(0, 800), options: optionLines(opts) });
     const hit = await askValid('who', prompt, pickKey(opts));
-    return hit?.key && hit.key !== 'nobody' ? hit.key : null;
+    return hit?.key && hit.key !== 'nobody' ? present.find(p => handleOf(p.id) === hit.key)?.id ?? null : null;
 }
 /** Before the narrator speaks: sighting stamps, a first attitude, and who is in focus. One pick-one, one retry, then indifferent. */
 async function prepareNpcs(userMsg) {

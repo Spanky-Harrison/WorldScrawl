@@ -19,7 +19,7 @@ import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
-import { capFirst, findPerson, shownName } from './names.mjs';
+import { capFirst, findPerson, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, areaRewrite } from './arearewrite.mjs';
 import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
@@ -510,7 +510,8 @@ async function runTracker(id) {
         const weather = placeWeatherNow(loc)?.line ?? '';
         const people = listedPeople(chat, id, loc);
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
-        const scrap = trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people), engineLines });
+        // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
+        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id });
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg) return;

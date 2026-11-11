@@ -3,6 +3,7 @@
 import { FOUND_KEY } from './npc.mjs';
 import { appearanceScope, classifyAppearanceReply, looksInputKey } from './npceffects.mjs';
 import { render as P } from './shared.mjs';
+import { maskForModel } from './names.mjs';
 
 async function model() {
     return import('./dig.mjs');
@@ -125,7 +126,7 @@ async function askFields(name, baseline, ops, timeout) {
         try {
             const { gen, baseReply } = await model();
             raw = await gen('appearance compose', {
-                prompt: P('npc.appearance_rebuild', { name: name || 'them', fields: 'body, outfit', base, intents }),
+                prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: 'body, outfit', base, intents })),
                 systemPrompt: P('npc.appearance_rebuild_system', { reply: baseReply('json') }),
                 responseLength: 500,
             }, { retry: attempt > 0, note: false, timeout });
@@ -150,7 +151,7 @@ async function askLooks(name, body, outfit, timeout) {
         try {
             const { gen, baseReply } = await model();
             raw = await gen('looks summary', {
-                prompt: P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') }),
+                prompt: maskForModel(P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') })),
                 systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
                 responseLength: 120,
             }, { retry: attempt > 0, note: false, timeout });
