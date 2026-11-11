@@ -16,7 +16,7 @@ import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
 import { expiryView, failedFor, isPlaceExpiry, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, discardRemember, exportNpc, keepRemember, npcBefore, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, retryRemember, settleNpc } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { decideNpc } from './owners.mjs';
 import { reviewFields } from './replay.mjs';
@@ -189,42 +189,17 @@ async function waitFacts(chat, loc) {
     return lines.join('\n');
 }
 
+/** The descriptor adapters this extension draws with: an older plugin without one of them shows the update line. */
+const CARD_ADAPTERS = ['placeReview', 'personReview', 'personKept', 'personExpiry', 'placeExpiry', 'rememberReview'];
 /** A notice button (the shared card button): decides locks the row on the first click and redraws the cards after. */
 const cardHooks = { onError: err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }, after: () => renderPatchCards() };
 function cardButton(label, onClick, title = '', decides = false) { return cardLib().cardButton(document, label, onClick, title, decides, cardHooks); }
 const markPending = el => cardLib().markPending(el);
-const lockRow = (row, text) => cardLib().lockRow(row, text);
 /** Draw a shared card; its clicks go through the action layer with the ticket taken now. */
 function drawCard(desc, type, ticket) { return cardLib().renderCard(document, desc, (id, a) => runCardAction(type, id, ticket, a), cardHooks); }
 /** Notice text, then ONE right-aligned button row at the end. */
 const rowOf = (...buttons) => cardLib().noticeRow(document, buttons.flat().filter(Boolean));
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
-/** The proposed card on a Remember notice: what Approve will save. Invented details are marked. */
-function rememberProposalEl(got) {
-    const box = document.createElement('div');
-    box.className = 'worldscrawl_remember_proposal';
-    box.style.cssText = 'margin:3px 0 3px 1em;font-size:0.92em;';
-    const head = document.createElement('div');
-    head.className = 'worldscrawl_remember_head';
-    head.textContent = `${got.name}${got.unknownAs ? ` (shown as "${got.unknownAs}" until the name is learned)` : ''}: ${got.line}${got.looks ? ` — ${got.looks}` : ''}`;
-    box.append(head);
-    const rows = [['Manner', got.manner], ['Speech', got.voice], ['Body', got.body], ['Wearing', got.outfit], ['History', got.history],
-        ['Starts', got.disposition ? `${got.disposition.value}${got.disposition.reason ? ` (${got.disposition.reason})` : ''}` : ''], ['Facts', (got.facts ?? []).join('; ')]].filter(([, v]) => v);
-    if (rows.length || got.invented?.length) {
-        const det = document.createElement('details');
-        det.className = 'worldscrawl_remember_details';
-        const sum = document.createElement('summary'); sum.textContent = 'Details'; det.append(sum);
-        det.addEventListener('click', e => e.stopPropagation());
-        for (const [k, v] of rows) { const r = document.createElement('div'); r.textContent = `${k}: ${v}`; det.append(r); }
-        if (got.invented?.length) {
-            const v = document.createElement('div'); v.className = 'worldscrawl_invented';
-            v.textContent = `Made up to fill gaps (not in the story): ${got.invented.map(x => `⚠ ${x}`).join('; ')}`;
-            det.append(v);
-        }
-        box.append(det);
-    }
-    return box;
-}
 /** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
 /** A lasting character change the model asked for: nothing changes until Approve (Edit, then Approve, changes the words). */
 function pendingNpcCard(msg, s, who) {
@@ -275,6 +250,16 @@ function personCardEl(msg, s, who) {
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
 }
 
+/** The Remember card: Preparing… (the prefetch), failed (Check again), or the proposed person with Edit for every field. */
+function rememberEl(msg, id, remember) {
+    const key = `${id}|remember`, saving = isDecided(msg, remember.nid);
+    const prop = remember.proposal?.name === remember.name ? remember.proposal : null;
+    if (!prop && !saving) queueMicrotask(() => prefetchRemember(id));
+    const phase = prop?.got ? 'review' : prop?.failed ? 'failed' : 'working';
+    const editing = phase === 'review' && !saving && !!editLib()?.editorOpen(key);
+    const desc = C.rememberReview({ key, name: remember.name, suggested: !!remember.suggested, phase, saving, got: prop?.got ?? null, editing });
+    return drawCard(desc, 'remember', ticketFor('remember', { id, msg, card: remember }));
+}
 /** A kept person (appearance or base text) change: the shared card; Edit opens the same Body/Outfit editor as its review. */
 function personKeptEl(msg, id, s, who) {
     const key = `${s.identity.owner}|npcedit`, editing = !!editLib()?.editorOpen(key);
@@ -353,13 +338,13 @@ export function renderPatchCards() {
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
         const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id) : [];
-        const placeGone = isPlaceExpiry(msg) && C?.placeExpiry ? expiryView(ch, id) : null;
+        const placeGone = isPlaceExpiry(msg) ? expiryView(ch, id) : null;
         if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
         const line = t => { const d = document.createElement('div'); d.textContent = t; return d; };
-        if (!cardLib() || !C?.placeReview) { // a missing or older plugin: one line, never the old cards
+        if (!cardLib() || CARD_ADAPTERS.some(a => typeof C?.[a] !== 'function')) { // a missing or older plugin: one line, never the old cards
             const u = line(UPDATE_LINE); u.className = 'worldscrawl_update_plugin'; card.append(u);
             (el.querySelector('.mes_block') ?? el).appendChild(card);
             continue;
@@ -414,29 +399,7 @@ export function renderPatchCards() {
                 cardButton('Discard', () => discardWait(id), 'No time passes', true)));
             card.append(d);
         }
-        if (rememberCard) {
-            const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_remembercard');
-            d.append(line(remember.suggested ? `Remember ${remember.name}? They have come up a few times.` : `Remember ${remember.name}?`));
-            const nameInp = document.createElement('input');
-            nameInp.type = 'text'; nameInp.value = remember.name; nameInp.className = 'text_pole worldscrawl_remember_name';
-            nameInp.style.cssText = 'width:10em;display:inline-block;margin:0 4px;padding:1px 4px;';
-            nameInp.addEventListener('click', e => e.stopPropagation());
-            const lineInp = document.createElement('input');
-            lineInp.type = 'text'; lineInp.placeholder = 'one sentence (optional)'; lineInp.className = 'text_pole worldscrawl_remember_line';
-            lineInp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
-            lineInp.addEventListener('click', e => e.stopPropagation());
-            const decided = isDecided(msg, remember.nid);
-            const prop = remember.proposal?.name === remember.name ? remember.proposal : null;
-            if (!prop && !decided) queueMicrotask(() => prefetchRemember(id));
-            if (prop?.got) d.append(rememberProposalEl(prop.got));
-            else if (prop?.failed) { const f = line('Could not prepare the card. '); f.className = 'worldscrawl_remember_failed'; f.append(cardButton('Retry', () => once(`remember-retry:${id}`, () => retryRemember(id)), 'Ask the model again', true)); d.append(f); }
-            else { const w = line(decided ? 'Saving…' : 'Preparing…'); w.className = 'worldscrawl_remember_preparing'; w.style.opacity = '0.75'; d.append(w); }
-            d.append(fieldsOf(nameInp, lineInp), rowOf(cardButton('Approve', () => keepRemember(id), prop?.got ? `Save ${prop.got.name} as shown` : `Remember ${remember.name} (saves the card as soon as it is ready)`, true),
-                cardButton('Adjust', () => keepRemember(id, { name: nameInp.value, line: lineInp.value }), 'Approve with the name and the sentence in the boxes', true),
-                cardButton('Discard', () => discardRemember(id), 'Not this scene. You can be asked again after the scene changes.', true)));
-            if (isDecided(msg, remember.nid)) lockRow(d.querySelector('.worldscrawl_notice_row')); // still saving (redrawn mid-save)
-            card.append(d);
-        }
+        if (rememberCard) card.append(rememberEl(msg, id, remember));
         for (const p of expired) card.append(expiredPersonEl(msg, id, p));
         if (placeGone) card.append(expiredPlaceEl(msg, id, placeGone));
         for (const [, dd] of resolved) { const r = line(resolvedText(dd)); r.className = 'worldscrawl_notice worldscrawl_resolved'; card.append(r); }

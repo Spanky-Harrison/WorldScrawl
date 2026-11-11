@@ -12,7 +12,7 @@ import { renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, unmergeFlag } from './discovery.mjs';
 import { isPlaceExpiry, keepExpiryEdit, keptForGood, openEditor, openForms } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
-import { applyFacts, editExpiryRevert, editKeptAppearance, settleNpc } from './scene.mjs';
+import { REMEMBER_KEY, applyFacts, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
 
 /** Actions that ask the model or write a decision: each must carry its card's ticket. */
@@ -30,6 +30,12 @@ const TICKETS = {
         const rev = s.decisionRev ?? 1, token = s.candidate?.token ?? null, swipe = swipeOf(msg);
         return { type: 'person', msg, s, who, rev, token, identity: s.identity, key: `${s.identity?.owner}|npcedit`,
             still: () => (msg.extra?.[NPC_KEY] ?? []).includes(s) && (s.decisionRev ?? 1) === rev && swipeOf(msg) === swipe && (s.candidate?.token ?? null) === token };
+    },
+    /** A Remember card: current while it is the same card, still in review on the same swipe, showing the same proposal. */
+    remember({ id, msg, card }) {
+        const swipe = swipeOf(msg), proposal = card.proposal ?? null;
+        return { type: 'remember', id, msg, card, proposal, key: `${id}|remember`,
+            still: () => ctx().chat?.[id] === msg && msg.extra?.[REMEMBER_KEY] === card && card.status === 'review' && swipeOf(msg) === swipe && (card.proposal ?? null) === proposal };
     },
     /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
     expiry({ id, msg, key, kind, person = null, got = null }) {
@@ -158,8 +164,31 @@ const expiry = {
     }),
 };
 
+// ---- the Remember card
+const remember = {
+    again: t => once(`remember-retry:${t.id}`, async () => { E()?.closeCardEditor(t.key); await retryRemember(t.id); }),
+    edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
+    close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
+    // Rewrite with this: the Change note, and every field the player typed stays exactly; the model fills only the rest.
+    rewrite: t => once(`remember-retry:${t.id}`, async () => {
+        const v = E()?.editorValues(t.key) ?? { intent: '', fields: {}, dirty: [] };
+        const keep = Object.fromEntries(v.dirty.filter(k => k !== '_intent').map(k => [k, v.fields[k]]));
+        E()?.closeCardEditor(t.key);
+        await retryRemember(t.id, { hint: String(v.intent ?? '').trim(), keep });
+    }),
+    approve: async t => {
+        if (!E()?.editorOpen(t.key)) return keepRemember(t.id);
+        const v = E().editorValues(t.key);
+        const built = t.proposal?.got ? rememberWith(t.proposal.got, v.fields, v.dirty) : { error: 'The card is not ready yet.' };
+        if (built.error) { toastr.warning(`WorldScrawl: ${built.error}`); return { ok: false, error: built.error }; }
+        E().closeCardEditor(t.key);
+        return keepRemember(t.id, { card: built.got });
+    },
+    discard: t => { E()?.closeCardEditor(t.key); return discardRemember(t.id); },
+};
+
 /** The handlers: the only per-type card code that acts. */
-export const HANDLERS = { place, person, expiry };
+export const HANDLERS = { place, person, expiry, remember };
 
 /**
  * Run a card action. Refuses an action the type does not have, an async action without a ticket, and any action whose

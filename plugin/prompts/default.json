@@ -133,7 +133,9 @@
     "fields": "Which appearance fields to rewrite this call: looks, body, and/or outfit (comma-separated).",
     "intents": "Active appearance intents that touch those fields, oldest first (intent text and which fields each touches).",
     "rewrite": "How deeply a map change rewrites existing descriptions, notes and exit texts: the 'Map changes: light touch' or 'Map changes: full rewrite' piece (filled in by the game), or empty.",
-    "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game)."
+    "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game).",
+    "hint": "The player's Change note on the Remember card, or (none)",
+    "kept": "The fields the player typed on the Remember card, one \"- Field: text\" line each, or (none)"
   },
   "prompts": [
     {
@@ -1882,6 +1884,22 @@
           "name": "story"
         }
       ]
+    },
+    {
+      "id": "npc.remember_again",
+      "title": "People: remembering again with the player's edits",
+      "description": "Step 2, only on the Remember card's Rewrite with this: added after the remember question. The game keeps the fields the player typed exactly, whatever the answer says.",
+      "group": "npc",
+      "locked": "It is added to the remember question, whose JSON answer the game reads.",
+      "placeholders": [
+        {
+          "name": "hint"
+        },
+        {
+          "name": "kept"
+        }
+      ],
+      "text": "The player's note on the last card: {{hint}}\nThe player wrote these parts of the card; keep them exactly and fit the rest to them:\n{{kept}}"
     }
   ]
 }

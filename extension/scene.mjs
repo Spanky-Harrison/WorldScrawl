@@ -2,7 +2,7 @@ import { appearanceScope } from './npceffects.mjs';
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { messageActivity } from './activity.mjs';
 import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once } from './notices.mjs';
-import { render as P } from './shared.mjs';
+import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames, npcForName, nameStampFor, judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, renderNpcTokens, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
@@ -391,70 +391,99 @@ async function offerRemember(msg, name) {
     await ctx().saveChat?.();
     renderPatchCards();
 }
+/** Approve on the Remember card. `edited` = {card}: the card exactly as the player typed it (Approve edited). */
 async function keepRemember(id, edited = null) {
     const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
     if (!card || card.status !== 'review') return;
     const nid = noticeIdOf(card, 'remember');
     return once(nid, async () => {
-        if (!markDecided(msg, nid, edited ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: `remember ${edited?.name?.trim() || card.name}` })) return; // decided once: a second Approve is a no-op
+        if (!markDecided(msg, nid, edited ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: `remember ${edited?.card?.name || card.name}` })) return; // decided once: a second Approve is a no-op
         try { await keepRememberNow(c, msg, card, id, edited); } catch (e) { unmarkDecided(msg, nid); renderPatchCards(); throw e; }
     });
 }
+/**
+ * The Remember card's editor values over a parsed card: `changed` keys take the typed text, the rest stay. Made-up (⚠)
+ * marks go only from the fields the player changed. {got} or {error}.
+ */
+function rememberWith(got, values = {}, changed = []) {
+    const keys = changed.filter(k => k !== '_intent' && C.REMEMBER_FIELDS.some(([f]) => f === k));
+    const v = { ...C.rememberValues(got), ...Object.fromEntries(keys.map(k => [k, String(values[k] ?? '')])) };
+    let disposition = got.disposition ?? null;
+    if (keys.includes('starts')) {
+        const m = /^\s*([A-Za-z]+)\s*(?:[—:\-–]\s*([\s\S]*))?$/.exec(v.starts);
+        const value = m ? Npc.matchEnum(m[1], Npc.DISPOSITIONS) : null;
+        if (v.starts.trim() && !value) return { error: `Starts: one of ${Npc.DISPOSITIONS.join(', ')}, then an optional reason.` };
+        disposition = value ? { value, reason: String(m[2] ?? '').trim() } : null;
+    }
+    const out = readRememberAnswer({ name: v.name, unknownAs: got.unknownAs ?? '', personality: { summary: v.line, manner: v.manner, speech: v.voice }, appearance: { summary: v.looks, body: v.body, outfit: v.outfit },
+        history: v.history, facts: v.facts.split('\n').map(x => x.trim()).filter(Boolean), invented: C.inventedAfter(got, keys), disposition });
+    if (!out) return { error: 'A remembered person needs a name and a line.' };
+    if (!disposition) delete out.disposition;
+    return { got: out };
+}
 const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
 /** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
-async function askRemember(id, name, { prefetch = false } = {}) {
+async function askRemember(id, name, { prefetch = false, hint = '', keep = null } = {}) {
     const chat = ctx().chat ?? [];
     const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
     const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
     const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
-    const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' });
+    const kept = Object.entries(keep ?? {}).filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => `- ${C.REMEMBER_FIELDS.find(([f]) => f === k)?.[1] ?? k}: ${String(v).trim()}`);
+    const again = hint || kept.length ? `\n\n${P('npc.remember_again', { hint: hint || '(none)', kept: kept.join('\n') || '(none)' })}` : '';
+    const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' }) + again;
     const kind = prefetch ? 'remember (prefetch)' : 'remember';
     let got = null;
     for (let t = 0; t < 2 && !got; t++) {
         try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, retry: t > 0 }))); } catch { got = null; }
         if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
     }
+    if (got && keep) got = rememberWith(got, keep, Object.keys(keep)).got ?? got; // what the player typed stays exactly
     return got;
 }
 // Prefetch: the remember call starts when the card first shows (once per card id). The answer is cached on the card
 // (msg.extra, per swipe) so a redraw never calls again; Approve uses it, or awaits the call still in flight.
 const rememberFlights = new Map(); // card nid -> promise of the parsed card (or null)
-function prefetchRemember(id) {
+function prefetchRemember(id, ask = {}) {
     const msg = ctx().chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
     if (!card || card.status !== 'review') return null;
     card.nid = card.nid || newNoticeId('remember');
     if (card.proposal?.name === card.name && card.proposal.got) return Promise.resolve(card.proposal.got);
     if (rememberFlights.has(card.nid)) return rememberFlights.get(card.nid);
-    if (card.proposal?.failed && card.proposal.name === card.name) return null; // failed: wait for Retry
-    const name = card.name;
-    const p = askRemember(id, name, { prefetch: true }).catch(() => null).then(got => {
+    if (card.proposal?.failed && card.proposal.name === card.name) return null; // failed: wait for Check again
+    const name = card.name, gen = card.gen ?? 0;
+    const p = askRemember(id, name, { prefetch: true, ...ask }).catch(() => null).then(got => {
+        if ((card.gen ?? 0) !== gen) return got; // a newer Check again replaced this call
         card.proposal = got ? { name, got } : { name, failed: true };
         syncSwipeExtra(msg);
         ctx().saveChat?.();
         renderPatchCards();
         return got;
-    }).finally(() => rememberFlights.delete(card.nid));
+    }).finally(() => { if (rememberFlights.get(card.nid) === p) rememberFlights.delete(card.nid); });
     rememberFlights.set(card.nid, p);
     return p;
 }
-function retryRemember(id) {
+/** Check again (and Rewrite with this: a Change note, and the fields the player typed, which stay exactly). */
+function retryRemember(id, { hint = '', keep = null } = {}) {
     const card = ctx().chat?.[id]?.extra?.[REMEMBER_KEY];
-    if (card?.proposal?.failed) delete card.proposal;
-    prefetchRemember(id);
+    if (!card || card.status !== 'review') return null;
+    if (String(keep?.name ?? '').trim()) card.name = String(keep.name).trim();
+    delete card.proposal;
+    card.gen = (card.gen ?? 0) + 1;
+    rememberFlights.delete(card.nid);
+    const p = prefetchRemember(id, { hint, keep: keep && Object.keys(keep).length ? keep : null });
     renderPatchCards();
+    return p;
 }
 async function keepRememberNow(c, msg, card, id, edited) {
     const chat = c.chat ?? [];
-    const name = edited?.name?.trim() || card.name;
-    const blank = REMEMBER_BLANK;
-    let got = edited?.line ? { ...blank, name, line: edited.line.trim() } : null;
-    if (!got && name === card.name) {
+    const name = card.name;
+    let got = edited?.card ?? null;
+    if (!got) {
         if (card.proposal?.name === name && card.proposal.got) got = card.proposal.got; // prefetched: instant
         else if (rememberFlights.has(card.nid)) got = await rememberFlights.get(card.nid); // in flight: never a second call
     }
     if (!got) got = await askRemember(id, name);
-    if (!got) got = { ...blank, name, line: 'Met in this scene.' };
-    else if (edited?.name?.trim() && name !== got.name) got = { ...got, name };
+    if (!got) got = { ...REMEMBER_BLANK, name, line: 'Met in this scene.' };
     const taken = new Set(knownNpcNames(chat));
     const newId = freeId(got.name, taken);
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
@@ -923,4 +952,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
