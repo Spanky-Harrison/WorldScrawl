@@ -4,11 +4,14 @@
 // seeded with the base plus lasting changes (not a temporary transformation). Places are always picked on the map.
 // io: { load() -> GET /cast, outline() -> POST /edit/outline, save(npc, original, originalFile), del({id, file}),
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
-//       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses) }
+//       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses),
+//       decideNpc({identity, decisionRev, action, card, ref, seen, values, to}) -> {ok, error, stale} (a Changes card click, run by the chat's card handler) }
 import { permanentProblem, liveSchedule } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
-import { renderPersonDiff } from './diffview.mjs';
+import { stampCard } from './castdata.mjs';
+import { renderCard } from './card.mjs';
+import { openCardEditor, closeCardEditor, editorOpen, editorValues } from './cardedit.mjs';
 
 export function castPanel(doc, io) {
     const $ = (tag, attrs = {}, ...kids) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v); } e.append(...kids.flat().filter(x => x !== null && x !== undefined && x !== false)); return e; };
@@ -196,26 +199,33 @@ export function castPanel(doc, io) {
         return [why.length ? $('b', {}, 'Right now') : null, why.length ? $('table', { class: 'resolved cast-why' }, ...why.map(([k, v]) => $('tr', { 'data-row': k }, $('th', {}, k), $('td', {}, v)))) : null,
             $('b', {}, 'In this chat'), sourcedTable(chat, { cls: 'cast-inchat' }), permanentBox(r)].filter(Boolean);
     }
+    // Changes: the same cards as the chat (plugin/shared/cards.mjs), collapsed to their title until opened.
+    const openCards = new Set();
     function changesPane(r) {
         if (!r.play) return [$('p', { class: 'muted' }, 'Open a chat to see what changed.')];
-        const st = stampRows(r.play);
-        const act = (x, action, extra = {}) => io.decideNpc?.({ identity: x.identity, decisionRev: x.decisionRev, action, payload: action === 'approve' ? { token: x.candidateToken } : extra });
-        const controls = x => {
-            if (!x.identity || x.type === 'npc_appearance_cache') return [];
-            const proposal = (x.type === 'npc_appearance' || x.type === 'npc_baseline') && x.candidate;
-            const review = proposal && x.candidate === 'review';
-            const again = proposal && (x.candidate === 'failed' || x.candidate === 'working');
-            return [' ',
-                proposal ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, again ? 'retry' : 'edit', again ? {} : { scope: x.scopeLevel || 'light' }) }, 'Check again') : null,
-                (proposal && x.scopeLevel && x.candidate !== 'working') ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'edit', { scope: x.scopeLevel === 'heavy' ? 'light' : 'heavy' }) }, x.scopeLevel === 'heavy' ? 'Make it a light touch' : 'Make it a full rewrite') : null,
-                (review || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'approve') }, 'Approve') : null,
-                (proposal || (x.type === 'npc_fact' && x.pending)) ? $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'discard') }, 'Discard') : null,
-                proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, x.off ? 'on' : 'off') }, x.off ? 'Turn on' : 'Turn off'),
-                proposal ? null : $('button', { type: 'button', class: 'crumb', onclick: () => act(x, 'undo') }, 'Undo')];
+        const who = r.name || r.id || '';
+        const cards = (r.play.stamps ?? []).map(x => ({ x, c: stampCard(x, { who, play: r.play }) })).filter(o => o.c);
+        const act = async (x, c, id, a) => {
+            const key = c.desc.key;
+            if (id === 'edit') { openCards.add(key); openCardEditor(key); drawDetail(); return; }
+            if (id === 'close') { closeCardEditor(key); drawDetail(); return; }
+            const values = editorOpen(key) ? editorValues(key) : null;
+            const res = await io.decideNpc?.({ identity: x.identity, decisionRev: x.decisionRev ?? 1, action: id, card: c.type, ref: c.ref, seen: c.seen, ...(values ? { values } : {}), ...(a?.to ? { to: a.to } : {}) });
+            if (res?.ok) closeCardEditor(key);
+            msg.textContent = res?.stale ? 'That change moved on since this card was drawn; it shows what it is now.' : res && res.ok === false && res.error ? res.error : '';
+            if (!res || res.ok || res.stale) drawDetail();
         };
-        return [st.length ? $('ul', { class: 'cast-stamps' }, ...st.map(x => $('li', { class: x.off ? 'off' : '', 'data-type': x.type },
-            $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: () => io.showMessage?.(x.msg) }, `#${x.msg}`), ' ', x.text, x.off ? ' (turned off)' : '', ...controls(x), x.diffs ? renderPersonDiff(doc, { title: r.name || r.id || '', rows: x.diffs }) : null)))
-            : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'), permanentBox(r)].filter(Boolean);
+        const cardEl = ({ x }) => {
+            const c = stampCard(x, { who, play: r.play, editing: editorOpen(`gui|${x.identity?.owner ?? x.owner ?? ''}|${x.msg}|${x.index}`) });
+            const det = $('details', { class: 'cast-card', 'data-type': x.type, 'data-card': c.desc.key });
+            if (openCards.has(c.desc.key)) det.open = true;
+            det.addEventListener('toggle', () => { if (det.open) openCards.add(c.desc.key); else openCards.delete(c.desc.key); });
+            const head = [c.desc.title, ...(c.desc.summary ?? [])].filter(Boolean).join(' — ');
+            det.append($('summary', { class: 'cast-card-sum' }, $('button', { type: 'button', class: 'linkish cast-msglink', 'data-msg': x.msg, title: 'Show this message in SillyTavern', onclick: e => { e.preventDefault(); e.stopPropagation(); io.showMessage?.(x.msg); } }, `#${x.msg}`), ' ', head),
+                renderCard(doc, { ...c.desc, title: '', summary: [] }, (id, a) => act(x, c, id, a))); // the title line is the summary above
+            return det;
+        };
+        return [cards.length ? $('div', { class: 'cast-stamps' }, ...cards.map(cardEl)) : $('p', { class: 'muted' }, 'Nothing has changed for them in this chat.'), permanentBox(r)].filter(Boolean);
     }
     function warnPane(r) {
         return r.problems?.length ? [$('ul', { class: 'warnings' }, ...r.problems.map(p => $('li', {}, p)))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];

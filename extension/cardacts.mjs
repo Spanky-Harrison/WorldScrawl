@@ -5,7 +5,7 @@
 // candidate's token/epoch/revision).
 import { once } from './notices.mjs';
 import { editLib } from './cardlib.mjs';
-import { NPC_KEY, foundEditOk, npcAt } from './npc.mjs';
+import { NPC_KEY, foundEditOk, npcAt, stampSig } from './npc.mjs';
 import { normName } from './shared.mjs';
 import { decideNpc } from './owners.mjs';
 import { currentLocation } from './doors.mjs';
@@ -22,6 +22,9 @@ import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
 export const ASYNC_ACTIONS = new Set(['again', 'scope', 'rewrite', 'approve', 'save']);
 const swipeOf = m => m?.swipe_id ?? 0;
 const E = () => editLib();
+/** The card's editor: the chat card's open editor, or the values a map-window card sent with its click. */
+const vals = t => t.values ?? E()?.editorValues(t.key) ?? { intent: '', fields: {}, dirty: [] };
+const isOpen = t => (t.values ? true : !!E()?.editorOpen(t.key));
 
 const stampTicket = (type, id, msg, s, key) => {
     const swipe = swipeOf(msg), rev = s.decisionRev ?? 1, off = s.off === true, sig = JSON.stringify([s.text, s.note, s.reason, s.line, s.place, s.pending]);
@@ -96,7 +99,7 @@ const place = {
     close: t => { closePlace(t); renderPatchCards(); },
     scope: (t, a) => switchRewrite(t, a.to),
     'extra:newroom': t => unmergeFlag(t.id),
-    rewrite: t => { const note = String(E()?.editorValues(t.key).intent ?? '').trim(); closePlace(t); return once(`flag-retry:${t.id}`, () => analyzeFlag(t.id, { note })); },
+    rewrite: t => { const note = String(vals(t).intent ?? '').trim(); closePlace(t); return once(`flag-retry:${t.id}`, () => analyzeFlag(t.id, { note })); },
     approve: async t => { await keepFlag(t.id); if (t.f.status === 'kept') E()?.closeCardEditor(t.key); },
     discard: t => { closePlace(t); return discardFlag(t.id); },
 };
@@ -123,12 +126,12 @@ const person = {
     edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
     scope: (t, a) => personScope(t, a.to),
-    rewrite: t => { const intent = String(E()?.editorValues(t.key).intent ?? '').trim() || t.s.candidate?.intent; E()?.closeCardEditor(t.key); return askAgain(t, 'own-edit', { intent }); },
+    rewrite: t => { const intent = String(vals(t).intent ?? '').trim() || t.s.candidate?.intent; E()?.closeCardEditor(t.key); return askAgain(t, 'own-edit', { intent }); },
     approve: t => once(`own-ok:${t.identity?.owner}`, async () => {
-        const open = E()?.editorOpen(t.key);
+        const open = isOpen(t);
         let edited = null;
         if (open) {
-            const v = E().editorValues(t.key).fields;
+            const v = vals(t).fields;
             edited = { lasting: {}, live: {} };
             for (const [k, val] of Object.entries(v)) { const [part, field] = k.split('.'); if (edited[part]) edited[part][field] = val; }
         }
@@ -145,7 +148,7 @@ const person = {
     }),
     // A kept change: Approve edited saves the typed Body/Outfit (no model call), or asks again for an edited Change line.
     save: t => once(`own-save:${t.identity?.owner}`, async () => {
-        const s = t.s, v = E()?.editorValues(t.key) ?? { intent: '', fields: {}, dirty: [] }, dirty = new Set(v.dirty);
+        const s = t.s, v = vals(t) ?? { intent: '', fields: {}, dirty: [] }, dirty = new Set(v.dirty);
         let res;
         if (s.type === 'npc_baseline' || s.committed?.kind === 'baseline') {
             const field = s.committed?.field || 'body', text = String(v.fields[field] ?? '').trim();
@@ -175,14 +178,14 @@ const expiry = {
     },
     close: t => { openForms.delete(t.key); E()?.closeCardEditor(t.key); renderPatchCards(); },
     save: t => once(`expiry-ok:${t.key}`, async () => {
-        const note = String(E()?.editorValues(t.key).intent ?? '').trim();
+        const note = String(vals(t).intent ?? '').trim();
         if (t.kind === 'place') {
             const res = await keepExpiryEdit(t.id, t.key, note, t.still);
             if (res?.ok) E()?.closeCardEditor(t.key);
             else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
             return res;
         }
-        const v = E()?.editorValues(t.key).fields ?? {};
+        const v = vals(t).fields ?? {};
         const res = await editExpiryRevert(chat().indexOf(t.msg), t.person.id, { body: v.body, outfit: v.outfit });
         if (res?.ok) E()?.closeCardEditor(t.key);
         else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
@@ -198,14 +201,14 @@ const remember = {
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
     // Rewrite with this: the Change note, and every field the player typed stays exactly; the model fills only the rest.
     rewrite: t => once(`remember-retry:${t.id}`, async () => {
-        const v = E()?.editorValues(t.key) ?? { intent: '', fields: {}, dirty: [] };
+        const v = vals(t) ?? { intent: '', fields: {}, dirty: [] };
         const keep = Object.fromEntries(v.dirty.filter(k => k !== '_intent').map(k => [k, v.fields[k]]));
         E()?.closeCardEditor(t.key);
         await retryRemember(t.id, { hint: String(v.intent ?? '').trim(), keep });
     }),
     approve: async t => {
-        if (!E()?.editorOpen(t.key)) return keepRemember(t.id);
-        const v = E().editorValues(t.key);
+        if (!isOpen(t)) return keepRemember(t.id);
+        const v = vals(t);
         const built = t.proposal?.got ? rememberWith(t.proposal.got, v.fields, v.dirty) : { error: 'The card is not ready yet.' };
         if (built.error) { toastr.warning(`WorldScrawl: ${built.error}`); return { ok: false, error: built.error }; }
         E().closeCardEditor(t.key);
@@ -222,7 +225,7 @@ const placeKept = {
     save: t => once(`map-save:${t.key}`, async () => {
         const form = openForms.get(t.key);
         if (!form) return { ok: false };
-        const note = String(E()?.editorValues(t.key).intent ?? '').trim();
+        const note = String(vals(t).intent ?? '').trim();
         const r = await saveKeptEdit(t.id, t.p.id, form, { note: note !== String(t.p.note ?? '') ? note : '', still: t.still });
         if (r?.ok) E()?.closeCardEditor(t.key);
         return r;
@@ -269,7 +272,7 @@ const personNote = {
     edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
     save: t => once(`npc-save:${t.key}`, async () => {
-        const v = E()?.editorValues(t.key) ?? { fields: {}, dirty: [] };
+        const v = vals(t) ?? { fields: {}, dirty: [] };
         if (!v.dirty.length) { E()?.closeCardEditor(t.key); renderPatchCards(); return { ok: true, same: true }; }
         const ed = noteEdit(t.s, v);
         if (ed.error) { toastr.warning(`WorldScrawl: ${ed.error}`); return { ok: false, error: ed.error }; }
@@ -281,8 +284,8 @@ const personNote = {
     // A pending lasting fact: Approve (edited) adds it for good with the words in the box; Discard drops it.
     approve: t => once(`npc-ok:${t.key}`, async () => {
         const s = t.s;
-        if (E()?.editorOpen(t.key)) {
-            const v = E().editorValues(t.key), k = NOTE_KEYS[s.type] ?? 'text', text = String(v.fields[k] ?? '').trim();
+        if (isOpen(t)) {
+            const v = vals(t), k = NOTE_KEYS[s.type] ?? 'text', text = String(v.fields[k] ?? '').trim();
             if (text) s[k] = text;
             E().closeCardEditor(t.key);
         }
@@ -314,7 +317,7 @@ const found = {
     edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
     save: t => once(`found-save:${t.key}`, async () => {
-        const s = t.s, typed = String(E()?.editorValues(t.key).fields.place ?? '').trim();
+        const s = t.s, typed = String(vals(t).fields.place ?? '').trim();
         await refreshLivePlaces();
         const loc = await currentLocation();
         if (!t.still()) { renderPatchCards(); return { ok: false, stale: true }; }
@@ -338,7 +341,7 @@ const wait = {
     edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
     approve: async t => {
-        const typed = E()?.editorOpen?.(t.key) ? String(E()?.editorValues(t.key).fields.amount ?? '').trim() : '';
+        const typed = isOpen(t) ? String(vals(t).fields.amount ?? '').trim() : '';
         const r = await keepWait(t.id, typed || null);
         if (!r) E()?.closeCardEditor(t.key);
         return r;
@@ -363,4 +366,25 @@ export async function runCardAction(type, id, ticket, action = {}) {
     if (ASYNC_ACTIONS.has(id) && typeof ticket?.still !== 'function') return { ok: false, error: 'no ticket' };
     if (ticket?.still && !ticket.still()) { renderPatchCards(); return { ok: false, stale: true }; }
     return h(ticket, action);
+}
+
+/**
+ * A click on a map-window card (cast Changes): the same handler as the chat card, with the GUI's editor values.
+ * d: {card ('person'|'personNote'|'found'), action, ref: {msg, index, owner}, seen: {rev, sig}, values, to}. A card drawn
+ * before the stamp changed (another revision, edited, turned off, a new candidate) is stale and writes nothing.
+ */
+export async function runGuiCardAction(d) {
+    const ch = ctx().chat ?? [], id = Number(d?.ref?.msg), msg = ch[id];
+    const s = (msg?.extra?.[NPC_KEY] ?? [])[Number(d?.ref?.index)];
+    if (!s || (s.identity?.owner ?? s.owner ?? '') !== (d.ref?.owner ?? '')) { broadcastMapState(); return { ok: false, stale: true, error: 'That change is no longer there.' }; }
+    if ((d.seen?.rev ?? null) !== (s.decisionRev ?? 1) || d.seen?.sig !== stampSig(s)) { broadcastMapState(); return { ok: false, stale: true, error: 'That change moved on since the card was drawn.' }; }
+    const type = d.card;
+    if (!['person', 'personNote', 'found'].includes(type)) return { ok: false, error: `${type} cards are not in the map window` };
+    const who = npcAt(ch, id, castPack()?.npcs ?? [], s.id)?.name || s.name || s.id;
+    const key = `gui|${s.identity?.owner ?? s.owner ?? ''}`;
+    const t = TICKETS[type](type === 'person' ? { msg, s, who } : { id, msg, s, key });
+    if (d.values) t.values = { intent: String(d.values.intent ?? ''), fields: d.values.fields ?? {}, dirty: Array.isArray(d.values.dirty) ? d.values.dirty : [] };
+    const res = await runCardAction(type, String(d.action ?? ''), t, d.to ? { to: d.to } : {});
+    broadcastMapState();
+    return res ?? { ok: true };
 }
