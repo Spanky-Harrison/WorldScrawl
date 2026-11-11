@@ -8,7 +8,8 @@
 import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
-import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, noticeRow, lockRow, markPending, NOTICE_CSS, resolvedText } from './notices.mjs';
+import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once, resolvedText } from './notices.mjs';
+import { cardLib } from './cardlib.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
 import { render as P, setPrompts, hasPrompts, sharedError, slug } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
@@ -758,7 +759,7 @@ const openCarriers = new WeakSet();
 (function carrierCss() {
     if (typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
     const st = document.createElement('style'); st.id = 'worldscrawl_carrier_css';
-    st.textContent = `${NOTICE_CSS}
+    st.textContent = `${cardLib()?.CARD_CSS ?? ''}
 #chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;overflow:hidden;font-size:0.82em;}
 #chat .mes.worldscrawl_carrier_mes .mes_text,#chat .mes.worldscrawl_carrier_mes .avatar,#chat .mes.worldscrawl_carrier_mes .mesIDDisplay,#chat .mes.worldscrawl_carrier_mes .mes_timer,#chat .mes.worldscrawl_carrier_mes .tokenCounterDisplay{display:none;}
 #chat .mes.worldscrawl_carrier_mes .worldscrawl_patchcard{margin-top:0!important;padding:2px 6px!important;font-size:1em!important;}
