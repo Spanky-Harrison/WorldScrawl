@@ -70,13 +70,20 @@
     const reqs2 = await (await fetch(`${FAKE}/__requests`)).json();
     check('bad move returns valid directions', JSON.stringify(reqs2[reqs2.length - 1].messages).includes('valid_directions'));
 
-    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - each waits on a Keep / Adjust / Discard card.
+    // Narrator wait: dedicated ws_wait tool, the [ws_wait: ...] tag, and the ws_flag alias - each waits on an Edit / Approve / Discard card (Edit opens the amount).
     const waits = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_wait).filter(Boolean));
     const waitCards = () => page.evaluate(() => SillyTavern.getContext().chat.map(m => m?.extra?.worldscrawl_waitcard).filter(Boolean));
     const cardClick = (label, amount) => page.evaluate(async ({ label, amount }) => {
-        const card = [...document.querySelectorAll('.worldscrawl_waitcard')].pop(); if (!card) return false;
-        if (amount != null) card.querySelector('.worldscrawl_wait_amount').value = amount;
-        const b = [...card.querySelectorAll('.menu_button, button, div')].find(x => x.textContent.trim() === label); if (!b) return false;
+        const last = () => [...document.querySelectorAll('.worldscrawl_waitcard')].pop();
+        const btn = (c, t) => [...c.querySelectorAll('.worldscrawl_card_btn')].find(x => x.textContent.trim() === t);
+        let card = last(); if (!card) return false;
+        if (amount != null) {
+            if (card.querySelector('.worldscrawl_wait_amount')) return false; // no always-open Amount box
+            btn(card, 'Edit')?.click(); await new Promise(r => setTimeout(r, 200)); card = last();
+            const box = card?.querySelector('.worldscrawl_wait_amount'); if (!box) return false;
+            box.value = amount; box.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const b = btn(card, label); if (!b) return false;
         b.click(); await new Promise(r => setTimeout(r, 800)); return true; }, { label, amount });
     check('ws_npc tool lists disposition with its values and a reason', (() => { const t = (reqs[0].tools ?? []).find(x => (x.function?.name ?? x.name) === 'ws_npc'); const ps = (t?.function ?? t)?.parameters?.properties ?? {}; return /disposition/.test(ps.action?.description ?? '') && JSON.stringify(ps.value?.enum) === JSON.stringify(['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful']) && !!ps.reason; })(), JSON.stringify((reqs[0].tools ?? []).map(x => x.function?.name ?? x.name)));
     check('ws_wait tool sent to model', JSON.stringify(reqs[0].tools ?? []).includes('ws_wait'));
@@ -95,7 +102,7 @@
     check('[ws_wait] tag: a card with the amount', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 1, JSON.stringify(await waitCards()));
     check('[ws_wait] tag reason shows on the card', /Why: sleeping on the bench/.test(await page.evaluate(() => document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')));
     check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
-    check('Adjust stamps the edited amount (6h sleep) with its reason', await cardClick('Adjust', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600 && ws[1].reason === 'sleeping on the bench', JSON.stringify(ws));
+    check('Edit → Approve edited stamps the typed amount (6h sleep) with its reason', await cardClick('Approve edited', '6h') && (ws = await waits()).length === 2 && ws[1].sleep && ws[1].seconds === 6 * 3600 && ws[1].reason === 'sleeping on the bench', JSON.stringify(ws));
     await queue([{ tool_calls: [{ name: 'ws_flag', arguments: { action: 'wait', note: '1h' } }] }, { content: 'An hour passes.' }]);
     await send('I wait an hour.');
     check('ws_flag wait alias: a card', (await waitCards()).length === 1 && (await waits()).length === 2);

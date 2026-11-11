@@ -13,7 +13,7 @@ const scene = await import('../../extension/scene.mjs');
 const { renderPatchCards } = await import('../../extension/waits.mjs');
 const { applyTrackerResult } = await import('../../extension/discovery.mjs');
 const { readTrackerAnswer } = await import('../../extension/tracker.mjs');
-const { NPC_KEY, npcAt } = await import('../../extension/npc.mjs');
+const { NPC_KEY, NPC_WARN_KEY, npcAt } = await import('../../extension/npc.mjs');
 const patchesExt = await import('../../extension/patches.mjs');
 patchesExt.useDiffLib(await import('../../plugin/ui/diffview.mjs'));
 patchesExt.useFormLib(await import('../../plugin/ui/patchform.mjs'));
@@ -846,4 +846,144 @@ test('note stale: an edit from a card drawn before the note was edited elsewhere
     ok.click();
     await flush(30);
     assert.equal(s.note, 'she promised the cellar');
+});
+
+// ---- S5: status cards
+const { APPEAR_KEY } = await import('../../extension/scene.mjs');
+function flagged(f) {
+    const c = boot([
+        { is_user: true, mes: 'I kick the stool over.', swipe_id: 0, extra: { worldscrawl_move: { to: TAVERN } } },
+        { is_user: false, mes: 'The stool splinters the floorboards near the bar.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [FLAG]: { swipe: 0, start: 0, loc: TAVERN, ...f } } },
+    ], []);
+    return { c };
+}
+const statusEl = doc => doc.querySelector('.worldscrawl_flagstatus');
+
+test('flag status cards: each status has its fixed buttons ("Check again", "Dismiss" only on info), and the range picker with Check again', () => {
+    for (const [status, state, want] of [['user', 'info', ['Dismiss']], ['working', 'working', []], ['nothing', 'info', ['Check again', 'Dismiss']], ['cant', 'failed', ['Check again', 'Discard']], ['error', 'failed', ['Check again', 'Discard']], ['weird', 'failed', ['Check again', 'Discard']]]) {
+        flagged({ status, error: 'x' });
+        const el = statusEl(draw());
+        assert.equal(el.dataset.state, state, status);
+        assert.deepEqual(btns(el), want, status);
+        assert.ok(el.querySelector(`.worldscrawl_flag_${status}`), status);
+        assert.equal(!!el.querySelector('.worldscrawl_start'), want.includes('Check again'), `${status}: range picker`);
+        assert.equal(el.querySelectorAll('.worldscrawl_card_btn').some(b => b.textContent === 'Retry'), false);
+    }
+});
+
+test('flag status: Check again re-reads the story into a proposal; Dismiss closes the notice; a stale card does nothing', async () => {
+    let { c } = flagged({ status: 'nothing' });
+    const calls = model({ rooms: `{"rooms":["${TAVERN}"]}`, patch: JSON.stringify({ ops: [{ op: 'set_description', loc: TAVERN, text: BOARDS }] }) });
+    byText(statusEl(draw()), 'Check again').click();
+    for (let i = 0; i < 100 && c.chat[1].extra[FLAG]?.status !== 'review'; i++) await flush(10);
+    assert.equal(c.chat[1].extra[FLAG].status, 'review');
+    assert.ok(calls.length > 0);
+    assert.ok(draw().querySelector('.worldscrawl_flagreview'), 'now the review card');
+
+    ({ c } = flagged({ status: 'user' }));
+    byText(statusEl(draw()), 'Dismiss').click();
+    await flush(30);
+    assert.ok(!c.chat[1].extra[FLAG] || c.chat[1].extra[FLAG].status === 'discarded', JSON.stringify(c.chat[1].extra[FLAG]));
+    assert.equal(statusEl(draw()), null);
+
+    ({ c } = flagged({ status: 'cant', error: 'no' }));
+    const stale = model({});
+    const b = byText(statusEl(draw()), 'Check again');
+    const newer = { swipe: 0, start: 0, loc: TAVERN, status: 'error', error: 'newer' };
+    c.chat[1].extra[FLAG] = newer;
+    b.click();
+    await flush(40);
+    assert.equal(stale.length, 0, 'no model call');
+    assert.equal(c.chat[1].extra[FLAG], newer, 'the stale click wrote nothing');
+});
+
+/** A narrator wait proposed on message 1. */
+function waiting(seconds = 7200, label = '2h') {
+    const c = boot([{ is_user: true, mes: 'I sit.', extra: {} }, { is_user: false, mes: 'Hours pass.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: {} }], []);
+    ext.proposeWait(c.chat[1], { seconds, sleep: false, label, reason: 'a long meal' });
+    return { c };
+}
+const waitCardEl = doc => doc.querySelector('.worldscrawl_waitcard');
+
+test('wait card: no Amount box until Edit; panel "Time passes"; Edit → Approve edited lets the typed amount pass', async () => {
+    const { c } = waiting();
+    let doc = draw();
+    let el = waitCardEl(doc);
+    assert.ok(el.className.includes('worldscrawl_card_wait') && el.className.includes('worldscrawl_pending'));
+    assert.deepEqual(btns(el), ['Edit', 'Approve', 'Discard'], 'no Adjust');
+    assert.equal(el.querySelector('.worldscrawl_wait_amount'), null, 'no always-open Amount box');
+    assert.match(el.querySelector('.worldscrawl_wait_reason').textContent, /Why: a long meal/);
+    assert.match(el.querySelector('.worldscrawl_diff').textContent, /Time passes/);
+    byText(el, 'Edit').click();
+    doc = draw();
+    el = waitCardEl(doc);
+    assert.deepEqual(btns(el), ['Close editor', 'Approve edited', 'Discard']);
+    const box = el.querySelector('.worldscrawl_wait_amount');
+    assert.equal(box.value, '2h');
+    box.value = '6h'; box.dispatchEvent({ type: 'input' });
+    byText(el, 'Approve edited').click();
+    await flush(80);
+    assert.equal(c.chat[1].extra.worldscrawl_wait?.seconds, 6 * 3600);
+    assert.equal(c.chat[1].extra.worldscrawl_waitcard, undefined);
+    doc = draw();
+    assert.equal(waitCardEl(doc), null);
+    assert.match(doc.querySelector('.worldscrawl_resolved').textContent, /✓ Approved \(edited\): .*6h/);
+});
+
+test('wait card: Approve lets the proposed amount pass; Discard lets none; a stale card does nothing', async () => {
+    let { c } = waiting();
+    byText(waitCardEl(draw()), 'Approve').click();
+    await flush(80);
+    assert.equal(c.chat[1].extra.worldscrawl_wait?.seconds, 7200);
+    assert.match(draw().querySelector('.worldscrawl_resolved').textContent, /✓ Approved:/);
+
+    ({ c } = waiting());
+    byText(waitCardEl(draw()), 'Discard').click();
+    await flush(40);
+    assert.equal(c.chat[1].extra.worldscrawl_wait, undefined);
+    assert.match(draw().querySelector('.worldscrawl_resolved').textContent, /✓ Discarded/);
+
+    ({ c } = waiting());
+    const b = byText(waitCardEl(draw()), 'Approve');
+    ext.proposeWait(c.chat[1], { seconds: 3600, sleep: false, label: '1h', reason: 'newer' }); // a newer card replaced it
+    b.click();
+    await flush(60);
+    assert.equal(c.chat[1].extra.worldscrawl_wait, undefined, 'the stale Approve let no time pass');
+    assert.equal(c.chat[1].extra.worldscrawl_waitcard.label, '1h');
+});
+
+test('appearance job: working has no buttons; failed has Check again, which asks again; a stale card does nothing', async () => {
+    const w = C.appearJob({ key: 'k', name: 'Hesk', status: 'working' });
+    assert.equal(w.state, 'working');
+    assert.deepEqual(w.actions, [], 'working: no buttons (a working job with no call in flight is shown as failed)');
+    assert.equal(w.title, 'Appearance rebuild for Hesk: working…');
+    const job = (more = {}) => ({ id: 'hesk', key: 'body', name: 'Hesk', status: 'failed', reason: 'the model timed out.', ...more });
+    const c = boot([{ is_user: false, mes: 'Hesk is here.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { [APPEAR_KEY]: { swipe: 0, jobs: [job()] } } }]);
+    let el = draw([0]).querySelector('.worldscrawl_appearpending');
+    assert.equal(el.dataset.state, 'failed');
+    assert.match(el.querySelector('.worldscrawl_remember_failed').textContent, /Appearance rebuild for Hesk failed\. the model timed out\./);
+    assert.deepEqual(btns(el), ['Check again']);
+    // Stale: the job was retried elsewhere (a new job) after the card was drawn.
+    const b = byText(el, 'Check again');
+    const newer = job({ token: 't2', reason: 'again' });
+    c.chat[0].extra[APPEAR_KEY] = { swipe: 0, jobs: [newer] };
+    b.click();
+    await flush(40);
+    assert.deepEqual(c.chat[0].extra[APPEAR_KEY].jobs, [newer], 'nothing cleared');
+    byText(draw([0]).querySelector('.worldscrawl_appearpending'), 'Check again').click();
+    await flush(60);
+    assert.equal((c.chat[0].extra[APPEAR_KEY]?.jobs ?? []).some(j => j.status === 'failed' && j.reason === 'again'), false, 'cleared and asked again');
+});
+
+test('resolved and warning lines are drawn by the shared card', () => {
+    const c = boot([{ is_user: false, mes: 'x', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_decided: { remember_a: { action: 'approve', swipe: 0, text: 'remembered Maren' } }, [NPC_WARN_KEY]: [{ swipe: 0, text: 'a person update did not land' }] } }]);
+    const doc = draw([0]);
+    const r = doc.querySelector('.worldscrawl_resolved');
+    assert.ok(r.className.includes('worldscrawl_card'));
+    assert.equal(r.textContent, '✓ Approved: remembered Maren');
+    const w = doc.querySelector('.worldscrawl_npcwarn');
+    assert.ok(w.className.includes('worldscrawl_card'));
+    assert.equal(w.textContent, '⚠ a person update did not land');
+    assert.equal(btns(r).length + btns(w).length, 0);
+    void c;
 });

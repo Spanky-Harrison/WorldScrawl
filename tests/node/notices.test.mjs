@@ -2,7 +2,8 @@ import { extSource } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DECIDED_KEY, newNoticeId, noticeIdOf, isDecided, markDecided, unmarkDecided, once, resolvedText, decisionOf } from '../../extension/notices.mjs';
+import { DECIDED_KEY, newNoticeId, noticeIdOf, isDecided, markDecided, unmarkDecided, once, decisionOf } from '../../extension/notices.mjs';
+const { resolvedText } = await import('../../plugin/shared/cards.mjs');
 import { messageActivity } from '../../extension/activity.mjs';
 
 test('notice ids are stable once assigned and unique per card', () => {
@@ -45,6 +46,7 @@ test('in-flight guard: re-entrant calls while one runs are ignored', async () =>
 test('resolved text and the activity log show the decision', () => {
     assert.equal(resolvedText({ action: 'approve', text: 'remembered Maren' }), '✓ Approved: remembered Maren');
     assert.equal(resolvedText({ action: 'discard' }), '✓ Discarded');
+    assert.equal(resolvedText({ action: 'adjust', text: '6h passed' }), '✓ Approved (edited): 6h passed');
     const msg = { mes: 'x', extra: { [DECIDED_KEY]: { remember_abc: { action: 'approve', swipe: 0, text: 'remembered Maren' } } } };
     const e = messageActivity(msg, 0).find(x => x.label === 'remember notice answered');
     assert.ok(e && e.status === 'approve' && /Maren/.test(e.text), JSON.stringify(messageActivity(msg, 0)));

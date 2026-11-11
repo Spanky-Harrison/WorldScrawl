@@ -58,14 +58,14 @@
         return { id, status: f?.status, error: f?.error, ops: f?.proposal?.ops, summary: f?.proposal?.summary, card };
     }, [wsMod, UPST]); };
     const cant = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ cant: 'The hallway now floats above the town.' }) }]);
-    check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /Can't show this on the map: The hallway now floats/.test(cant.card) && /Retry/.test(cant.card), JSON.stringify(cant));
+    check("change call: a \"can't express this\" answer is shown plainly, no forced edit", cant.status === 'cant' && /floats above the town/.test(cant.error) && !cant.ops && /Can't show this on the map: The hallway now floats/.test(cant.card) && /Check again/.test(cant.card), JSON.stringify(cant));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, cant.id); await settle(1500);
     // A manual flag never ends silently: an empty {"ops": []} reply, an unreadable answer, a model error.
     const empty = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [] }) }]);
-    check('manual flag: an empty {"ops": []} reply shows "no map change found" with Retry', empty.status === 'nothing' && /No map change found/.test(empty.card) && /Retry/.test(empty.card), JSON.stringify(empty));
+    check('manual flag: an empty {"ops": []} reply shows "no map change found" with Check again', empty.status === 'nothing' && /No map change found/.test(empty.card) && /Check again/.test(empty.card), JSON.stringify(empty));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, empty.id); await settle(1500);
     const junk = await changeFlag([{ content: 'I cannot help with portals.' }]);
-    check('manual flag: an unreadable answer shows an error in the bar with Retry', junk.status === 'error' && /Map change failed: .*not JSON/.test(junk.card) && /Retry/.test(junk.card), JSON.stringify(junk));
+    check('manual flag: an unreadable answer shows an error in the bar with Check again', junk.status === 'error' && /Map change failed: .*not JSON/.test(junk.card) && /Check again/.test(junk.card), JSON.stringify(junk));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, junk.id); await settle(1500);
     await queue([]);
     const dbg = await page.evaluate(async ([mod, UPST]) => {
@@ -84,7 +84,7 @@
     }, [wsMod, UPST]);
     await page.evaluate(() => SillyTavern.getContext().reloadCurrentChat()); await settle(2000); // the pushed message gets its block
     dbg.card = await page.evaluate(id => document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '', dbg.id);
-    check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Retry|Approve/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
+    check('manual flag: with the fake model out of answers it still ends visibly, and Debug logs the call', !dbg.threw && dbg.status !== 'working' && /🗺/.test(dbg.card) && /Check again|Approve/.test(dbg.card) && dbg.seen.some(x => /map edit call/.test(x)), JSON.stringify(dbg));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, dbg.id); await settle(1500);
     const mk = (n, d) => ({ op: 'create_place', id: 'bogus', name: n, description: `A ${n.toLowerCase()} made by magic.`, exits: [{ to: UPST, direction: 'hallway', return_direction: d }] });
     const hubR = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [mk('Crystal Room', 'crystal arch'), mk('Ember Room', 'ember arch'), mk('Tide Room', 'tide arch')] }) }]);

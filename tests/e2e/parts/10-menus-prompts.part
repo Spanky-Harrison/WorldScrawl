@@ -165,7 +165,7 @@
             rowLast: !!row && card.lastElementChild === row, allInRow: btns.length > 0 && btns.every(b => row?.contains(b)), right: row ? getComputedStyle(row).justifyContent : '',
             labels: btns.map(b => b.textContent) };
     });
-    check('notices: the Remember card waits on you, with one right-aligned button row at the end (Approve / Adjust / Discard)', look.pending && look.rowLast && look.allInRow && look.right === 'flex-end' && look.labels.join('|') === 'Approve|Adjust|Discard', JSON.stringify(look));
+    check('notices: the Remember card waits on you, with one right-aligned button row at the end (Check again / Edit / Approve / Discard)', look.pending && look.rowLast && look.allInRow && look.right === 'flex-end' && look.labels.join('|') === 'Check again|Edit|Approve|Discard', JSON.stringify(look));
     await page.locator('.worldscrawl_remembercard').last().scrollIntoViewIfNeeded();
     await page.locator('.worldscrawl_remembercard').last().screenshot({ path: process.env.E2E_SHOTS ? `${process.env.E2E_SHOTS}/notice-pending.png` : `${process.env.E2E_TMP ?? '/tmp'}/notice-pending.png` }).catch(() => {});
     const approveBtn = page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ });

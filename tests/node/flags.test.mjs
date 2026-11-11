@@ -68,30 +68,35 @@ test('discoveries are kept at once (no Keep / Discard card)', () => {
 const ext = await import('../../extension/index.js');
 const pl = await import('../../plugin/shared/patches.mjs');
 
-test('cant reply: a "can\'t show this on the map" note with Retry', () => {
+const C = await import('../../plugin/shared/cards.mjs');
+const labels = f => C.placeStatus({ key: 'k', status: f.status, text: ext.flagStatusText(f, 1) });
+test('cant reply: a "can\'t show this on the map" note with Check again', () => {
     const ans = pl.readChangeAnswer(ext.parseJsonAnswer('{"cant": "a mind dimension is not a place on the map"}'));
-    const v = ext.flagCardView({ status: 'cant', error: ans.cant, start: 3 }, 5);
-    assert.equal(v.text, "🗺 Can't show this on the map: a mind dimension is not a place on the map");
-    assert.deepEqual(v.buttons, ['Retry', 'Dismiss']);
+    const f = { status: 'cant', error: ans.cant, start: 3 };
+    assert.equal(ext.flagStatusText(f, 5), "🗺 Can't show this on the map: a mind dimension is not a place on the map");
+    const d = labels(f);
+    assert.equal(d.state, 'failed');
+    assert.deepEqual(d.actions.map(a => a.id), ['again', 'discard']);
 });
-test('empty ops reply: "no map change found" with Retry', () => {
+test('empty ops reply: "no map change found" with Check again (an info notice)', () => {
     assert.deepEqual(pl.readChangeAnswer({ ops: [] }), { nothing: true });
-    const v = ext.flagCardView({ status: 'nothing', start: 3 }, 5);
-    assert.match(v.text, /No map change found in messages #3–#5/);
-    assert.ok(v.buttons.includes('Retry'));
+    assert.match(ext.flagStatusText({ status: 'nothing', start: 3 }, 5), /No map change found in messages #3–#5/);
+    const d = labels({ status: 'nothing', start: 3 });
+    assert.equal(d.state, 'info');
+    assert.deepEqual(d.actions.map(a => a.id), ['again', 'discard']);
 });
 test('errors and parse failures show in the bar', () => {
     assert.equal(ext.parseJsonAnswer('sorry, no'), null);
-    const v = ext.flagCardView({ status: 'error', error: 'map server answered 500', start: 0 }, 1);
-    assert.match(v.text, /Map change failed: map server answered 500/);
-    assert.ok(v.buttons.includes('Retry'));
+    assert.match(ext.flagStatusText({ status: 'error', error: 'map server answered 500', start: 0 }, 1), /Map change failed: map server answered 500/);
+    assert.deepEqual(labels({ status: 'error', start: 0 }).actions.map(a => a.id), ['again', 'discard']);
 });
 test('never an empty card: review without a proposal or an unknown state still says something', () => {
     for (const status of ['review', 'weird', undefined]) {
-        const v = ext.flagCardView({ status, start: 0 }, 1);
-        assert.ok(v && v.text.length > 3 && v.buttons.includes('Retry'), String(status));
+        const t = ext.flagStatusText({ status, start: 0 }, 1);
+        assert.ok(t.length > 3, String(status));
+        assert.ok(labels({ status }).actions.some(a => a.id === 'again'), String(status));
     }
-    assert.equal(ext.flagCardView({ status: 'review', proposal: { ops: [] }, start: 0 }, 1).buttons[0], 'review');
+    assert.equal(ext.flagStatusText({ status: 'review', proposal: { ops: [] }, start: 0 }, 1), '', 'a proposal is the review card');
 });
 test('Debug > Show map edit messages logs the map-edit call', () => {
     const seen = [], orig = console.info; console.info = (...a) => seen.push(a);

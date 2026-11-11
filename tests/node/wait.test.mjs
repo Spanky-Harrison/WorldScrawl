@@ -210,7 +210,7 @@ test('model fallback: seconds or until, checked; junk gives null', async () => {
 
 // ---- from waitcard.test.mjs
 {
-// Narrator waits (ws_wait tool, [ws_wait] tag, ws_flag wait) wait for the player on a Keep / Adjust / Discard card.
+// Narrator waits (ws_wait tool, [ws_wait] tag, ws_flag wait) wait for the player on an Edit / Approve / Discard card.
 
 
 
