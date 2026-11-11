@@ -8,7 +8,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 
 | File | Owns | Entry points |
 |---|---|---|
-| index.js | Startup (`init`), on/off and settings access, world sync and the chat-to-world link, rebuilding from the chat, look/move actions and their pending state, expiry state, the prompt interceptor (`globalThis` hook), save-world, the map channel, the change-editor tab. It keeps every mutable state variable that `init` or more than one topic writes | `init` IIFE, `isOn`, `settings`, `syncWorld`, `saveWorld`, `rebuildFromChat`, `lookAction`, `moveAction`, `PLUGIN_URL`, `MAP_URL` |
+| index.js | Startup (`init`), on/off and settings access, world sync and the chat-to-world link, rebuilding from the chat, look/move actions and their pending state, expiry state, the prompt interceptor (`globalThis` hook), save-world, the map channel. It keeps every mutable state variable that `init` or more than one topic writes | `init` IIFE, `isOn`, `settings`, `syncWorld`, `saveWorld`, `rebuildFromChat`, `lookAction`, `moveAction`, `PLUGIN_URL`, `MAP_URL` |
 | clock.mjs | Calendar, game clock, weather now, world/chat names, chat changes | `clockAt`, `gameDate`, `effectiveWorld`, `chatChanges` |
 | doors.mjs | Door and bar state: open/closed, barred, sight and sound through doors | `doorStates`, `isOpenNow`, `isBarredNow`, `viewOf` |
 | expiry.mjs | Narration when something expires (options, pick prompt, notice) | `expiryPickPrompt`, `expiredNotice`, `ensureStartStamp` |
@@ -20,7 +20,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | scene.mjs | Scene/NPC tokens fed to the narrator, lore, the found notice and its Edit (`applyFound`, `judgeFoundNow`), live places from `POST /cast/places`, appearance rebuild side-call, the people list the tracker reads (`listedPeople`) | `renderTokens`, `applyFound`, `refreshLivePlaces`, `ensureAppearanceRebuilds`, `retryAppearance`, `listedPeople` |
 | footer.mjs | Exits text and the footer shown under replies | `exitsText`, `namedNpcsAt` |
 | mapwindow.mjs | Opening the map window, theme vars, map state | `openMapWindow`, `mapState` |
-| patches.mjs | Map patches (lasting changes), the place expiry notice's before/now view and its Approve edited, and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `expiryView`, `keepExpiryEdit`, `FLAG_TAG` |
+| patches.mjs | Map patches (lasting changes), a kept change's in-card Approve edited (`saveKeptEdit`, re-stamped on its message), the place expiry notice's before/now view and its Approve edited, and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `saveKeptEdit`, `expiryView`, `keepExpiryEdit`, `FLAG_TAG` |
 | carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagCardView` |
 | discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration, feeding tracker results into the place rewrite and person apply | `onReplyForFlags`, `flagMessage`, `registerTools`, `applyTrackerResult`, `onStorySwipe` |
 | arearewrite.mjs | Light touch / full rewrite on place changes: which ops are existing text (`textTargets`), merging the rewrite answer (`mergeRewrite`) and the guard that refuses anything but text changing (`rewriteGuard`). No DOM, fetch or model calls (the call is `swapRewrite` in carriers.mjs) | `areaRewrite`, `textTargets`, `mergeRewrite`, `rewriteGuard` |
@@ -35,7 +35,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
 | notices.mjs | Card decisions (decide-once per card id) and the `once()` guard | `markDecided`, `once` |
 | cardlib.mjs | Loads the shared card and editor (plugin/ui/card.mjs, cardedit.mjs) at startup and checks their `CARD_VERSION`; a missing or older plugin gets one "update the plugin" line instead of cards | `cardLib`, `editLib`, `UPDATE_LINE`, `useCardLib` |
-| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
+| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember, kept map changes, person notes, found rows) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
 | manifest.json | SillyTavern extension manifest (entry `index.js`) | — |
 
@@ -52,7 +52,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | inspect.mjs, editctx.mjs, movenotes.mjs, weather-config.mjs, ui.mjs | Inspector data, edit-form context, move inheritance notes, weather config, static serving of plugin/ui/ (`/ui/*`) and plugin/shared/ (`/shared/*`) |
 | climates/*.json, exit_types.json, sky_types.json, wind_levels.json | Data tables |
 | config.example.json, package.json | Config template, package metadata |
-| ui/ | The map window (browser only): `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, card (the one card every review, change and notice uses: `renderCard`, button order and labels, row lock, Waiting on you frame), cardedit (the one editor: Change box, field boxes, hosted patch form, drafts that survive redraws), castdata, castpanel, changeedit, diffview, mapactions, mapdata, menus, patchform, picker, placeform, prompteditor. The extension also imports patchform, diffview, card and cardedit from `/ui/` |
+| ui/ | The map window (browser only): `app.js` (entry), `index.html`, `app.css`, and modules: activitylog, card (the one card every review, change and notice uses: `renderCard`, button order and labels, row lock, Waiting on you frame), cardedit (the one editor: Change box, field boxes, hosted patch form, drafts that survive redraws), castdata, castpanel, diffview, mapactions, mapdata, menus, patchform, picker, placeform, prompteditor. The extension also imports patchform, diffview, card and cardedit from `/ui/` |
 | shared/ | Code that runs on both sides: pure, no DOM, Node or fetch (tests/node/shared.test.mjs checks). The server imports it directly; the browser loads it from `/shared/*`. calendar (game time), weather, patches (map patches), doorbar (one-sided bars), prompts (prompt text renderer), npc (record basics both sides use: `exportRecord`, `freeId`, `nameIn`, `normName`, `NPC_ID`, `NPC_TOKEN`, schedules' place lookup), exits (`revealsDestination`), cards (card descriptors per type and the action matrix: `placeReview`, `personReview`, `ACTIONS`), ids (`slug`: the one name-to-id rule; server `slugify`, `freeId` and new room addresses use it). Ids: `SLUG` (place ids) is in patches, `NPC_ID` in npc |
 
 ## tests/

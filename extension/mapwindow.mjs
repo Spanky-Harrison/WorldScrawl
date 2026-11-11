@@ -5,9 +5,9 @@ import { removeChange } from './carriers.mjs';
 import { calendarLib, defaultWorldId, gameDate, listedWorlds, loadCalendar, placeWeatherNow, rememberWorlds, weatherLib, worldName, worldTimes } from './clock.mjs';
 import { baseReply, gen } from './dig.mjs';
 import { api, currentLocation, doorOverrides, doorStates, ensurePrompts, getStoredLocation } from './doors.mjs';
-import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
+import { MAP_URL, NOT_RUNNING, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
 import { discoveredPlaces, lastUserIndex, revealedDoors, stoodInAddresses } from './movement.mjs';
-import { changeEditMismatch, changeEditSession, liveEdit, mapCtx, opsHash, restampChange, swipeOf, toggleChange } from './patches.mjs';
+import { liveEdit, mapCtx, swipeOf, toggleChange } from './patches.mjs';
 import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit, retryAppearance, settleNpc } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
 
@@ -76,14 +76,6 @@ function openMapChannel() {
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => gen('map expand', { prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }))
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
-        }
-        if (ev.data?.type === 'change_open' || ev.data?.type === 'change_save') { // the map editor tab for one kept change
-            const d = ev.data, bad = changeEditMismatch(d.session);
-            const reply = r => ch.postMessage({ type: `${d.type}_result`, req: d.req, ...r });
-            if (bad) { if (d.type === 'change_save') toastr.warning(`WorldScrawl: edit not saved. ${bad}`); reply({ ok: false, errors: [{ i: null, error: bad }], stale: true }); }
-            else (d.type === 'change_open' ? changeEditSession(d.session) : restampChange(Number(d.session.msg), d.session.change, Array.isArray(d.ops) ? d.ops : []))
-                .then(r => reply({ ...r, ...(r.ok && d.type === 'change_save' ? { hash: opsHash((ctx().chat[Number(d.session.msg)].extra?.[PATCH_KEY] ?? []).find(x => x.id === d.session.change)?.ops) } : {}) }))
-                .catch(e => reply({ ok: false, errors: [{ i: null, error: e.message }] }));
         }
         // The cast browser: Update <name> / Export from the in-play view, a cast file saved or deleted, and a message link.
         if (ev.data?.type === 'npc_export') {

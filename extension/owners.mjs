@@ -377,7 +377,10 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
         if (stamp.type === 'npc_memory' && payload.note) stamp.note = payload.note;
         else if (stamp.type === 'npc_disposition' && payload.reason != null) stamp.reason = payload.reason;
         else if (stamp.type === 'npc_fact' && payload.text) stamp.text = payload.text;
-        else if (stamp.type === 'npc_create' && payload.line) stamp.line = payload.line;
+        else if (stamp.type === 'npc_create' && payload.card) {
+            for (const k of ['name', 'line', 'looks', 'manner', 'voice', 'body', 'outfit', 'history', 'unknownAs', 'facts']) if (payload.card[k] !== undefined) stamp[k] = payload.card[k];
+            if (payload.card.invented?.length) stamp.invented = payload.card.invented; else delete stamp.invented;
+        } else if (stamp.type === 'npc_create' && payload.line) stamp.line = payload.line;
         else if (stamp.type === 'npc_found' && payload.place) stamp.place = payload.place;
         return { ok: true, rev: stamp.decisionRev };
     }
