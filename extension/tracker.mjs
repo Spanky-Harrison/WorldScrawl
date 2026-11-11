@@ -19,9 +19,16 @@ export function shouldTrackReply(msg, chat = [], id = 0) {
     if (!msg || msg.is_user || msg.is_system) return false;
     if (msg.extra?.worldscrawl_notice || msg.extra?.worldscrawl_engine) return false;
     if (!String(msg.mes ?? '').trim()) return false;
+    if (newSwipePending(msg)) return false;
+    // A greeting (or any reply with no player line before it) is not an exchange: nothing to read.
     const user = playerBefore(chat, id);
-    if (user && /^\s*\//.test(String(user.mes ?? '')) && !user.extra?.worldscrawl_engine) return false;
+    if (!user) return false;
+    if (/^\s*\//.test(String(user.mes ?? '')) && !user.extra?.worldscrawl_engine) return false;
     return true;
+}
+/** SillyTavern points swipe_id one past the last swipe while it writes a new one; mes still holds the old text. */
+export function newSwipePending(msg) {
+    return Array.isArray(msg?.swipes) && (msg.swipe_id ?? 0) >= msg.swipes.length;
 }
 function playerBefore(chat, id) {
     for (let i = Math.min(id, chat?.length ?? 0) - 1; i >= 0; i--) {

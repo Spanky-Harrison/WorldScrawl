@@ -41,8 +41,6 @@ function addSettingsPanel() {
       <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes</label>
       <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
-      <label class="checkbox_label"><input id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes</label>
-      <small>Unused this pass. Story tools are not registered from this checkbox, and the after-reply tracker does not read it.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the wait card)</label>
       <div>Movement</div>
@@ -95,9 +93,6 @@ function addSettingsPanel() {
     const flagNpcs = document.getElementById('worldscrawl_flag_npcs');
     flagNpcs.checked = settings().flagNpcs !== false;
     flagNpcs.addEventListener('change', () => { settings().flagNpcs = flagNpcs.checked; applyTools(); applyFacts(); ctx().saveSettingsDebounced(); });
-    const reporterTools = document.getElementById('worldscrawl_reporter_tools');
-    reporterTools.checked = !!settings().reporterTools;
-    reporterTools.addEventListener('change', () => { settings().reporterTools = reporterTools.checked; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });
     document.querySelectorAll('input[name="worldscrawl_mode"]').forEach(r => {
         r.checked = r.value === settings().moveMode;
         r.addEventListener('change', () => { if (!r.checked) return; settings().moveMode = r.value; applyTools(); applyNudge(); applyFacts(); ctx().saveSettingsDebounced(); });

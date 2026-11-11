@@ -29,6 +29,11 @@ export function orderActions(actions = []) {
     return actions.filter(Boolean).map((a, i) => ({ a, i })).sort((x, y) => (ORDER.indexOf(baseOf(x.a.id)) - ORDER.indexOf(baseOf(y.a.id))) || x.i - y.i).map(x => x.a);
 }
 
+/** A double-click on a card button is never two answers. The first click answers (and the card may redraw in its
+ *  next state, with another button under the pointer: Approve becomes Turn off); the second click (detail 2 or more)
+ *  is dropped wherever it lands, so it can't press the new button. */
+export const isRepeatClick = e => (e?.detail ?? 0) > 1;
+
 /** The button row at the end of a card (right-aligned). */
 export function noticeRow(doc, buttons) {
     const row = doc.createElement('div');
@@ -70,6 +75,7 @@ export function cardButton(doc, label, onClick, title = '', decides = false, { o
     if (decides) b.dataset.decides = '1';
     b.addEventListener('click', e => {
         e.stopPropagation();
+        if (isRepeatClick(e)) return; // the tail of a double-click
         if (!decides) return onClick();
         const row = b.closest('.worldscrawl_notice_row');
         if (row && !lockRow(row)) return; // already saving

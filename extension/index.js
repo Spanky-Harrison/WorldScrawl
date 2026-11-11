@@ -36,7 +36,7 @@ export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiv
 export { doorOverrides, doorStates, barrierOf, isOpenNow, sightOf, soundOf, barStates, isBarredNow, isBarredAway, barHere, isStuck, viewOf, roomToken, doorChange, doorCandidates, openChanges, barAction, doorAction, cacheInfo, cacheKeys, ensurePrompts, getStoredLocation } from './doors.mjs';
 export { expiryOptions, expiryPickPrompt, excerptOf, expiryNarrationLine, narratedView, expiredNotice, relocationNote, ensureStartStamp } from './expiry.mjs';
 export { discoverSys, discoverPrompt, existingDiscovery, unmergeFlag, flagMessage, onReplyForFlags, onStorySwipe, applyTrackerResult, BADTAG_TITLE, markUnreadTags, digFailedBefore } from './discovery.mjs';
-export { shouldTrackReply, readTrackerAnswer, gateTracker, trackerPrompt, trackerSys, trackerScrap, trackerPeopleLines, dropTrackerMarks, playerLineBefore, TRACKER_SOURCE } from './tracker.mjs';
+export { shouldTrackReply, newSwipePending, readTrackerAnswer, gateTracker, trackerPrompt, trackerSys, trackerScrap, trackerPeopleLines, dropTrackerMarks, playerLineBefore, TRACKER_SOURCE } from './tracker.mjs';
 export { trimAnswer, parseChoice, normKey, keyFor, matchKey, optionLines, pickKey, stepsTaken, syncDoors, applyReveals, sameWord, sameLabel, sameAsDirection, exitLabel, destLabel, collidingNames, exitLabels, placeLabel, displayName, previousAddress, findPath, matchCandidates, namedInText, alreadyText, whoMoves, partyMembers, partyText, moveNote, narrate, STAY, ELSEWHERE, UNCLEAR, OPEN, BREAK_RE, cleanAnswer, parseIntentAnswer, parseYesNo } from './movement.mjs';
 export { baseReply, digSys, DIG_TRIES, pickSys, COMPASS, closeName, duplicatePlace, mergeDuplicates, NEW_PLACE, digOptions, digPrompt, readDigAnswer, namedPlace, digWordFrom } from './dig.mjs';
 export { LOOK, OPEN_DOOR, CLOSE_DOOR, NEW_DOOR, DOOR_OPEN_RE, DOOR_CLOSE_RE, NO_EXIT, AROUND, WINDOW_WORD_RE, offerWindow, lookOptions, lookTargetPrompt, DOOR_LOOK, closedDoorPrompt, roomOptions, viewPickPrompt, doorOptions, doorPickPrompt, DIG_FAILED_NOTICE, travelSys, travelYesNoPrompt, intentSys, intentPrompt } from './looking.mjs';
@@ -51,7 +51,7 @@ export { modelWait, planWait, MIN_NARRATOR_WAIT, narratorWaitAction, waitAmount,
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';
 const DEFAULT_NUDGE = 'The world map is tracked by tools. Before describing where the characters are or where they can go, call ws_look. Whenever the characters travel through an exit, call ws_move with that exit\'s direction, then describe the new location from the tool result. Do not invent locations or exits that the tools did not return.';
-const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, proactiveDiscovery: false, flagTags: true, flagNpcs: true, reporterTools: false, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
+const DEFAULTS = { serverUrl: '', nudge: DEFAULT_NUDGE, showExits: true, autoKeep: false, autoKeepWaits: false, narrateExpiries: true, proactiveDiscovery: false, flagTags: true, flagNpcs: true, moveMode: 'typed', whoMoves: '{{user}}', world: '', enableNewChats: false, showEditMessages: false };
 export const OFF_NOTICE = 'WorldScrawl is turned off.';
 const ENABLED_KEY = 'worldscrawl_enabled'; // in chat_metadata: this chat's on/off (saved with the chat, not rolled back by swipes)
 /** Does this chat already have anything WorldScrawl stamped on it? */
@@ -86,9 +86,6 @@ let pendingLocation = null;
 export function settings() {
     const all = ctx().extensionSettings;
     const saved = all[MODULE] ?? {};
-    // Reporter tools used to register with "Model moves with map tools". Keep them for those saves.
-    // A saved reporterTools value (including off) is left alone.
-    if (saved.reporterTools == null && saved.moveMode === 'tools') saved.reporterTools = true;
     all[MODULE] = Object.assign({}, DEFAULTS, saved);
     return all[MODULE];
 }
