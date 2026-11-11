@@ -230,16 +230,15 @@
     check('round trip on → walk → off → on keeps the party on the Green (never relocated by a toggle)', owo.s0 === 'riverton:green/green' && owo.off === 'larkspur:green/green', JSON.stringify(owo));
     check('off → walk to the Green → on: the move redirects the party forward to the Green in Riverton (map follows)', owo.on === 'riverton:green/green' && owoMap === 'riverton:green/green', JSON.stringify([owo, owoMap]));
     await page.evaluate(async n0 => { const c = SillyTavern.getContext(); await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); }, rv0.n0); await settle(1500);
-    // /ws-reveal: stamps places as been-there (map + /ws-known + /ws-go use it); "off" and deleting the message undo it.
+    // /ws-reveal: a per-chat Reveal map switch, read when used (map + /ws-known + /ws-go); nothing stamped, "off" is exactly as before.
     const rvl = await page.evaluate(async () => {
         const c = SillyTavern.getContext(), m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'), n0 = c.chat.length;
         const known0 = await m.knownText();
         const t = await c.executeSlashCommandsWithOptions('/ws-reveal all'); await new Promise(r => setTimeout(r, 800));
-        const msg = c.chat[c.chat.length - 1], all = msg.extra?.worldscrawl_reveal?.addresses ?? [];
+        const sw = c.chatMetadata?.worldscrawl_reveal_map ?? null;
         const known1 = await m.knownText();
         await c.executeSlashCommandsWithOptions('/ws-reveal off'); await new Promise(r => setTimeout(r, 500));
         const known2 = await m.knownText();
-        await c.executeSlashCommandsWithOptions(`/cut ${n0}-${c.chat.length - 1}`); await new Promise(r => setTimeout(r, 800));
-        return { pipe: t.pipe, n: all.length, kind: msg.extra?.worldscrawl_notice_kind, b0: known0.split('. Seen')[0].split(',').length, b1: known1.split('. Seen')[0].split(',').length, b2: known2.split('. Seen')[0].split(',').length };
+        return { pipe: t.pipe, added: c.chat.length - n0, what: sw?.what, off: !('worldscrawl_reveal_map' in (c.chatMetadata ?? {})), same: known2 === known0, b0: known0.split('. Seen')[0].split(',').length, b1: known1.split('. Seen')[0].split(',').length };
     });
-    check('/ws-reveal all: one stamped message; every place counts as been-there; off undoes it', rvl.kind === 'reveal' && rvl.n > 10 && rvl.b1 >= rvl.n && rvl.b1 > rvl.b0 && rvl.b2 === rvl.b0 && /revealed/.test(rvl.pipe ?? ''), JSON.stringify(rvl));
+    check('/ws-reveal all: a switch, nothing stamped; every place counts as been-there; off is exactly as before', rvl.added === 0 && rvl.what === 'all' && rvl.b1 > 10 && rvl.b1 > rvl.b0 && rvl.off && rvl.same && /Reveal map is on/.test(rvl.pipe ?? ''), JSON.stringify(rvl));
