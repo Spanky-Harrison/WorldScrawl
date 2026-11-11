@@ -798,56 +798,62 @@ test('the map channel saves, mirrors the swipe, and both surfaces redraw', async
     assert.ok(panel.el.querySelectorAll('button').some(b => b.textContent === 'Turn off'));
 });
 
-test('inline Edit fills the layer text, and a failed or late edit leaves the committed owner', async () => {
+test('kept change Edit: the review card\'s Body editor; Approve edited saves typed text, and a failed or late Change edit leaves the committed owner', async () => {
     const { c, prompts } = boot();
     const o = commit(appearance({ intent: 'taller', fields: 'body', layer: { body: 'original edit' }, owner: 'ed1' }));
     c.chat = [msg([o])];
     const doc = makeDoc();
     globalThis.document = doc;
     renderPatchCards();
-    byText(doc, '.worldscrawl_card_btn', 'Edit').click();
-    const boxes = doc.querySelectorAll('input');
-    const layer = boxes.find(b => b.placeholder === 'Layer body');
-    assert.ok(layer);
-    assert.equal(layer.value, 'original edit');
-    layer.value = 'a cropped frame';
-    byText(doc, '.worldscrawl_card_btn', 'Save').click();
+    const row = doc.querySelector('.worldscrawl_npcchange');
+    assert.deepEqual(buttons(row), ['Edit', 'Turn off', 'Undo']);
+    byText(row, '.worldscrawl_card_btn', 'Edit').click();
     await flush();
-    assert.equal(o.committed.layer.body, 'original edit');
-    assert.equal(o.candidate.phase, 'review');
-    assert.equal(o.candidate.layer.body, 'a cropped frame');
-    assert.equal(o.candidate.lastingPreview.body, 'a cropped frame');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    const open = doc.querySelector('.worldscrawl_npcchange');
+    assert.deepEqual(buttons(open), ['Close editor', 'Approve edited', 'Turn off', 'Undo']);
+    assert.equal(open.querySelectorAll('input').some(b => /Layer/.test(b.placeholder ?? '')), false, 'no layer boxes');
+    const boxes = open.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(boxes.map(b => [b.dataset.field, b.value]), [['body', 'original edit']]);
+    boxes[0].value = 'a cropped frame';
+    boxes[0].dispatchEvent({ type: 'input' });
+    byText(open, '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush();
+    assert.equal(o.candidate, null);
+    assert.equal(o.committed.layer.body, 'a cropped frame');
+    assert.equal(o.committed.edited, true);
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0, 'typed text needs no rewrite call');
     renderPatchCards();
-    assert.match(doc.textContent, /a cropped frame/);
-    assert.doesNotMatch(doc.querySelector('.worldscrawl_npcpending')?.textContent ?? '', /^Preparing/);
+    assert.match(doc.querySelector('.worldscrawl_npcchange').textContent, /Character changed here/);
 
-    o.candidate = null;
-    o.decisionRev = 1;
+    // An edited Change line alone asks again; a failed answer leaves the committed text.
     prompts.length = 0;
     c.generateRaw = async () => 'not json';
-    renderPatchCards();
     byText(doc, '.worldscrawl_card_btn', 'Edit').click();
-    doc.querySelectorAll('input').find(b => b.placeholder === 'Layer body').value = '';
-    byText(doc, '.worldscrawl_card_btn', 'Save').click();
     await flush();
-    assert.equal(o.committed.layer.body, 'original edit');
+    const intent = doc.querySelector('.worldscrawl_npc_intent');
+    intent.value = 'much taller';
+    intent.dispatchEvent({ type: 'input' });
+    byText(doc, '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush();
+    assert.equal(o.committed.layer.body, 'a cropped frame');
     assert.equal(o.candidate.phase, 'failed');
 
     o.candidate = null;
-    o.decisionRev = 1;
     let release;
     c.generateRaw = () => new Promise(r => { release = r; });
     renderPatchCards();
     byText(doc, '.worldscrawl_card_btn', 'Edit').click();
-    doc.querySelectorAll('input').find(b => b.placeholder === 'Layer body').value = '';
-    byText(doc, '.worldscrawl_card_btn', 'Save').click();
+    await flush();
+    const again = doc.querySelector('.worldscrawl_npc_intent');
+    again.value = 'taller still';
+    again.dispatchEvent({ type: 'input' });
+    byText(doc, '.worldscrawl_card_btn', 'Approve edited').click();
     await flush();
     const dropped = await scene.settleNpc(c.chat, o.identity, o.decisionRev, 'discard', {});
     release('{"body":"late crop","outfit":"wool"}');
     await flush();
     assert.equal(dropped.ok, true);
-    assert.equal(o.committed.layer.body, 'original edit');
+    assert.equal(o.committed.layer.body, 'a cropped frame');
     assert.equal(JSON.stringify(c.chat[0].extra.worldscrawl_compose ?? {}).includes('late crop'), false);
 });
 
@@ -1436,8 +1442,10 @@ test('the expiry notice Edit: Body/Outfit boxes like the person card, Approve ed
     renderPatchCards();
     const box = doc.querySelector('.worldscrawl_npcexpired');
     assert.ok(box);
-    assert.match(box.textContent, /Body now: sturdy/);
-    assert.match(box.textContent, /Outfit now: wool/);
+    assert.match(box.querySelector('.worldscrawl_card_summary').textContent, /Hesk: "turned into a gnoll" ran out/);
+    const panel = box.querySelector('.worldscrawl_diff').textContent;
+    assert.match(panel, /a furred gnoll/, 'before: while it lasted');
+    assert.match(panel, /sturdy/, 'now');
     assert.deepEqual(buttons(box), ['Edit']);
     byText(box, '.worldscrawl_card_btn', 'Edit').click();
     await flush();
@@ -1469,15 +1477,103 @@ test('the expiry notice Edit: Body/Outfit boxes like the person card, Approve ed
     assert.equal(now.outfit, 'wool');
     renderPatchCards();
     assert.equal(doc.querySelector('.worldscrawl_npcexpired').querySelectorAll('.worldscrawl_card_btn').length, 0, 'the notice Edit gives way to the change row');
-    const row = doc.querySelector('.worldscrawl_npcchange');
-    assert.ok(buttons(row).includes('Turn off') && buttons(row).includes('Undo'));
-    byText(row, '.worldscrawl_card_btn', 'Undo').click();
+    const rowOf = () => [...doc.querySelectorAll('.worldscrawl_npcchange')].find(r => /as you wrote it/.test(r.textContent));
+    let row = rowOf();
+    assert.deepEqual(buttons(row), ['Edit', 'Turn off', 'Undo']);
+    // The kept change's Edit opens the same Body/Outfit editor (same classes) as the notice's.
+    byText(row, '.worldscrawl_card_btn', 'Edit').click();
     await flush();
-    assert.equal(npcAt(c.chat, c.chat.length - 1, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body, 'sturdy');
+    row = rowOf();
+    const again = row.querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(again.map(t => [t.dataset.field, t.value]), [['body', 'sturdy, with a few coarse gnoll hairs still clinging to her forearms']]);
+    assert.ok(row.querySelector('.worldscrawl_card_editor'), 'the shared editor');
+    assert.deepEqual(buttons(row), ['Close editor', 'Approve edited', 'Turn off', 'Undo']);
+    byText(row, '.worldscrawl_card_btn', 'Close editor').click();
+    await flush();
+    const nowBody = () => npcAt(c.chat, c.chat.length - 1, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body;
+    byText(rowOf(), '.worldscrawl_card_btn', 'Turn off').click();
+    await flush();
+    assert.equal(o.off, true);
+    assert.equal(nowBody(), 'sturdy');
+    assert.deepEqual(buttons(rowOf()), ['Turn on', 'Undo']);
+    byText(rowOf(), '.worldscrawl_card_btn', 'Turn on').click();
+    await flush();
+    assert.equal(o.off, false);
+    assert.equal(nowBody(), 'sturdy, with a few coarse gnoll hairs still clinging to her forearms');
+    byText(rowOf(), '.worldscrawl_card_btn', 'Undo').click();
+    await flush();
+    assert.equal(nowBody(), 'sturdy');
     // Same text as now refuses instead of saving a no-op.
     const res = await scene.editExpiryRevert(at, 'hesk', { body: 'sturdy', outfit: 'wool' });
     assert.equal(res.ok, false);
     assert.match(res.error, /same as now/);
+});
+
+test('person expiry stale: a notice deleted or swiped after the card was drawn saves nothing', async () => {
+    const { c, prompts } = bootAt('16:20');
+    await gnollFor1h(c, prompts);
+    const user = userMsg('[wait] 2h');
+    c.chat.push(user);
+    await bracketIntent(user, parseBracket(user.mes));
+    await scene.postPersonExpiryNotices();
+    const at = c.chat.length - 1, notice = c.chat[at];
+    const doc = makeDoc();
+    globalThis.document = doc;
+    doc.querySelector('.mes').setAttribute('mesid', String(at));
+    renderPatchCards();
+    byText(doc.querySelector('.worldscrawl_npcexpired'), '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const typeIn = () => { const ta = doc.querySelector('.worldscrawl_npcexpired').querySelectorAll('.worldscrawl_npc_text')[0]; ta.value = 'sturdy, freckled'; ta.dispatchEvent({ type: 'input' }); };
+    typeIn();
+    const expiryEdits = () => c.chat.flatMap(m => m?.extra?.[NPC_KEY] ?? []).filter(s => s.source === 'expiry_edit');
+    // Swiped: the card was drawn on swipe 0.
+    let ok = byText(doc.querySelector('.worldscrawl_npcexpired'), '.worldscrawl_card_btn', 'Approve edited');
+    notice.swipe_id = 1;
+    ok.click();
+    await flush();
+    assert.equal(expiryEdits().length, 0, 'a swiped notice saves nothing');
+    notice.swipe_id = 0;
+    renderPatchCards();
+    typeIn();
+    // Deleted.
+    ok = byText(doc.querySelector('.worldscrawl_npcexpired'), '.worldscrawl_card_btn', 'Approve edited');
+    c.chat.splice(at, 1);
+    ok.click();
+    await flush();
+    assert.equal(expiryEdits().length, 0, 'a deleted notice saves nothing');
+    assert.equal((notice.extra[NPC_KEY] ?? []).length, 0);
+});
+
+test('a kept temporary change: Edit → Approve edited saves the typed for-now text and keeps its duration; a stale kept card does nothing', async () => {
+    const { c, prompts } = bootAt('16:20');
+    const o = await gnollFor1h(c, prompts);
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    const rowOf = () => doc.querySelector('.worldscrawl_npcchange');
+    byText(rowOf(), '.worldscrawl_card_btn', 'Edit').click();
+    await flush();
+    const tas = rowOf().querySelectorAll('.worldscrawl_npc_text');
+    assert.deepEqual(tas.map(t => [t.dataset.part, t.dataset.field, t.value]), [['live', 'body', 'a furred gnoll']]);
+    tas[0].value = 'a grey-furred gnoll';
+    tas[0].dispatchEvent({ type: 'input' });
+    const before = prompts.length;
+    byText(rowOf(), '.worldscrawl_card_btn', 'Approve edited').click();
+    await flush();
+    assert.equal(o.candidate, null);
+    assert.equal(o.committed.layer.body, 'a grey-furred gnoll');
+    assert.equal(o.lasts, 60, 'still lasts an hour');
+    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, prompts.slice(0, before).filter(p => /Rewrite body/.test(p)).length, 'no rewrite call');
+    assert.equal(npcAt(c.chat, 0, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body, 'a grey-furred gnoll');
+    // Stale: the card was drawn, then the change was turned off elsewhere (the map); its Undo does nothing.
+    renderPatchCards();
+    const undo = byText(rowOf(), '.worldscrawl_card_btn', 'Undo');
+    const off = await scene.settleNpc(c.chat, o.identity, o.decisionRev, 'off', {});
+    assert.equal(off.ok, true);
+    undo.click();
+    await flush();
+    assert.ok((c.chat[0].extra[NPC_KEY] ?? []).includes(o), 'the stale Undo removed nothing');
+    assert.equal(o.off, true);
 });
 
 test('re-timing a kept wait rechecks person expiries too, and a temporary fact that runs out is named in the wait line', async () => {
