@@ -66,7 +66,7 @@ export function reviewFields(c, { all = false } = {}) {
         const b = before?.[field] || '', a = after?.[field] || '';
         const changed = !!before?.unresolved || b !== a;
         if (!changed && !all) return;
-        out.push({ field, label: `${name}${suffix}${before?.unresolved ? ' (before unresolved)' : ''}`, before: b, after: a, changed });
+        out.push({ field, part: after === c.livePreview ? 'live' : 'lasting', label: `${name}${suffix}${before?.unresolved ? ' (before unresolved)' : ''}`, before: b, after: a, changed });
     };
     const lastingChanges = ['body', 'outfit'].some(f => lb.unresolved || (lb[f] || '') !== (c.lastingPreview[f] || ''));
     const liveChanges = !sameKey && ['body', 'outfit'].some(f => vb.unresolved || (vb[f] || '') !== (c.livePreview[f] || ''));

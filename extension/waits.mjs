@@ -261,15 +261,6 @@ function pendingNpcCard(msg, s, who) {
     return d;
 }
 
-/** The text boxes Edit shows: the result this change writes (lasting, or for now when it wears off), plus for now when a temporary change sits on top. */
-function editRows(c) {
-    if (!c?.lastingPreview || !c?.livePreview) return [];
-    const temp = c.proposedLasts > 0, both = !temp && c.liveKey !== c.lastingKey;
-    const rows = [];
-    if (!temp) for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) rows.push({ part: 'lasting', field, label: `${name}${both ? ' (lasting)' : ''}` });
-    if (temp || both) for (const [field, name] of [['body', 'Body'], ['outfit', 'Outfit']]) rows.push({ part: 'live', field, label: `${name} (for now)` });
-    return rows;
-}
 /** The review card for a person's appearance change: the shared card (summary list, red/green panel, one row). */
 function personCardEl(msg, s, who) {
     const key = `${s.identity?.owner}|npcedit`;
@@ -277,8 +268,8 @@ function personCardEl(msg, s, who) {
     const rows = phase === 'review' && c.lastingPreview && c.livePreview ? reviewFields(c) : [];
     const scoped = !!c && c.kind !== 'baseline' && s.kind !== 'baseline';
     const editing = !!editLib()?.editorOpen(key);
-    // The proposed text itself, editable like the place editor's fields; Approve edited keeps exactly this.
-    const fields = editing && phase === 'review' ? editRows(c).map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: (r.part === 'live' ? c.livePreview : c.lastingPreview)?.[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
+    // The editor edits exactly the panel's changed rows (a body-only change edits only Body); Approve edited keeps this text.
+    const fields = editing && phase === 'review' ? rows.map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: (r.part === 'live' ? c.livePreview : c.lastingPreview)?.[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
     const desc = C.personReview({ key, who, phase, summary: phase === 'review' ? reviewSummary(c, who, rows) : [], panelRows: phase === 'review' ? reviewFields(c, { all: true }) : [],
         scoped, heavy: scoped && c.scope === 'heavy', why: c?.why ?? '', clockError: c?.clockError ?? '', editing, intent: c?.intent ?? '', fields });
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
