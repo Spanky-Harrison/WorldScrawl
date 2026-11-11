@@ -7,9 +7,25 @@
 export const REWRITE_NOT_JUDGED = 'not judged, so the default';
 export const REWRITE_SET_BY_YOU = 'set by you';
 
-/** 'full' for clear full-rewrite words, else 'light' (like the person card's scope). */
+const FULL_WORDS = /^\s*(full|heavy|rewrite|re-write|transform|major|big|complete)/i;
+const LIGHT_WORDS = /^\s*(light|minor|small|slight|minimal|partial|touch)/i;
+/** 'full' for clear full-rewrite words, 'light' for clear light-touch words, else '' (not judged: "medium", "yes", ""). */
 export function areaRewrite(v) {
-    return /^\s*(full|heavy|rewrite|re-write|transform|major|big|complete)/i.test(String(v ?? '')) ? 'full' : 'light';
+    const t = String(v ?? '');
+    return FULL_WORDS.test(t) ? 'full' : LIGHT_WORDS.test(t) ? 'light' : '';
+}
+/** A why that leads with the pick ("full: the inn burned", "Light touch - one wall"): the word(s) and what separates them. */
+const WHY_LEAD = /^\s*(full rewrite|full|heavy|complete|major|light touch|light|minor|slight)\b[\s:;,.\-\u2013\u2014]*/i;
+/**
+ * The tracker's light touch / full rewrite pick: from `rewrite` when it is a clear word, else from a why that leads with
+ * one. A leading word that gives the pick is taken out of the why. {rewrite: 'light'|'full'|'' (not judged), why}.
+ */
+export function judgeRewrite(rewrite, why) {
+    const w = String(why ?? '').trim();
+    const r = areaRewrite(rewrite), m = WHY_LEAD.exec(w), lead = m ? areaRewrite(m[1]) : '';
+    const rest = m ? w.slice(m[0].length).trim() : w;
+    if (r) return { rewrite: r, why: lead === r ? rest : w }; // "full" + "Full: remade" reads "Full rewrite: remade"; a why naming the other pick stays as given
+    return lead ? { rewrite: lead, why: rest } : { rewrite: '', why: w };
 }
 
 const isObj = v => v != null && typeof v === 'object' && !Array.isArray(v);

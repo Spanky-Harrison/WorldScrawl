@@ -2,7 +2,7 @@
 // This pass is one question. It reads the latest exchange plus the live fields it may change, not earlier chat.
 import { render as P } from './shared.mjs';
 import { FOUND_KEY, NPC_KEY, NPC_WARN_KEY } from './npc.mjs';
-import { areaRewrite } from './arearewrite.mjs';
+import { judgeRewrite } from './arearewrite.mjs';
 
 export const TRACKER_SOURCE = 'tracker';
 const FLAG_KEY = 'worldscrawl_flag';
@@ -57,8 +57,7 @@ export function trackerPeopleLines(people) {
         const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
         const unnamed = p.nameKnown === false && bare(p.unknownAs);
         return [
-            `${p.name || p.id} [${p.id || p.name}]`, // name-ok: listedPeople gives the shown name and handle
-            ...(unnamed ? [`Name not yet known to the player: they know this person only as "${bare(p.unknownAs)}"`] : []),
+            `${p.name || p.id} [${p.id || p.name}]${unnamed ? ' (name not yet known)' : ''}`, // name-ok: listedPeople gives the shown name and handle
             `Looks: ${textOf(p.looks)}`,
             `Body: ${textOf(p.body)}`,
             `Outfit: ${textOf(p.outfit)}`,
@@ -93,11 +92,11 @@ export function readPlace(p) {
     if (!note) return null;
     const kind = String(p.kind ?? 'change').toLowerCase() === 'discover' ? 'discover' : 'change';
     const hint = String(p.hint ?? p.where ?? '').trim();
-    // Light touch or full rewrite (not "scope": a change's scope is which rooms). Kept only when given; why only with it.
-    const given = String(p.rewrite ?? '').trim();
-    const why = given ? String(p.why ?? p.rewrite_reason ?? '').trim() : '';
+    // Light touch or full rewrite (not "scope": a change's scope is which rooms): from rewrite, else from a why that leads
+    // with the word. Kept only when judged; why only with it. `raw` is the tracker's place object as given, for diagnosis.
+    const j = judgeRewrite(p.rewrite, p.why ?? p.rewrite_reason);
     return { changed: true, kind, note: note.slice(0, 200), ...(hint ? { hint: hint.slice(0, 80) } : {}),
-        ...(given ? { rewrite: areaRewrite(given) } : {}), ...(why ? { why: why.slice(0, 200) } : {}) };
+        ...(j.rewrite ? { rewrite: j.rewrite } : {}), ...(j.rewrite && j.why ? { why: j.why.slice(0, 200) } : {}), raw: p };
 }
 function readWait(w) {
     if (!w || typeof w !== 'object' || Array.isArray(w)) return null;
