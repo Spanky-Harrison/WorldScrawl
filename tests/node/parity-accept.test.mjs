@@ -1023,7 +1023,8 @@ test('the person card is laid out like the place card: summary list, framed Remo
 // ---- fix/npc-five: tracker scope, full rewrite prompt, direct text edit, learned names, finding by alias.
 const { readTrackerAnswer, trackerPeopleLines } = await import('../../extension/tracker.mjs');
 const { applyTrackerResult } = await import('../../extension/discovery.mjs');
-const { nameKnown, npcForName, FOUND_KEY } = await import('../../extension/npc.mjs');
+const { FOUND_KEY } = await import('../../extension/npc.mjs');
+const { findPerson, knows } = await import('../../extension/names.mjs');
 const { bracketIntent, parseBracket } = await import('../../extension/brackets.mjs');
 const LANDLADY = { ...HESK, unknownAs: 'the landlady' };
 const promptText = id => PROMPTS.prompts.find(e => e.id === id).text;
@@ -1168,15 +1169,15 @@ test('the tracker is told who is not known by name; its name item for someone no
     assert.doesNotMatch(lines.split('\n')[1], /not yet known/);
     assert.match(promptText('npc.tracker'), /not yet known by name has their name said in this exchange[^\n]*"action": "name"/);
     c.chat = [msg([])];
-    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
     // She is not in the scene and nobody said her name in dialogue: the portal refuses the learn (names.test.mjs has the rest).
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "name", "name": "Hesk"}]}'));
     assert.equal((c.chat[0].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_name'), false);
-    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
     // By the shown name with no name heard: still nothing.
     c.chat = [msg([])];
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "the landlady", "action": "name"}]}'));
-    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
 });
 
 test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matches nobody', async () => {
@@ -1199,12 +1200,12 @@ test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matche
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"action": "found", "name": "the landlady"}]}'));
     assert.equal(c.chat[0].extra[FOUND_KEY].at(-1).id, 'hesk');
     const guards = [{ id: 'g1', name: 'Bors', unknownAs: 'the old guard' }, { id: 'g2', name: 'Ulf', unknownAs: 'the gate guard' }];
-    assert.equal(npcForName(guards, 'guard'), null, 'two people fit: no match');
-    assert.equal(npcForName(guards, 'the gate guard').id, 'g2', 'an exact shown name still wins');
-    assert.equal(npcForName([...guards, { id: 'g3', name: 'Guard', unknownAs: '' }, { id: 'g4', name: 'Ivo', unknownAs: 'the guard' }], 'guard'), null, 'a name and another person\'s shown name tie: no match');
-    assert.equal(npcForName([LANDLADY], "the landlady's daughter"), null, 'a longer description is not her');
-    assert.equal(npcForName([LANDLADY], 'the'), null);
-    assert.equal(npcForName([LANDLADY], 'Hesk').id, 'hesk');
+    assert.equal(findPerson('guard', guards), null, 'two people fit: no match');
+    assert.equal(findPerson('the gate guard', guards).id, 'g2', 'an exact shown name still wins');
+    assert.equal(findPerson('guard', [...guards, { id: 'g3', name: 'Guard', unknownAs: '' }, { id: 'g4', name: 'Ivo', unknownAs: 'the guard' }]), null, 'a name and another person\'s shown name tie: no match');
+    assert.equal(findPerson("the landlady's daughter", [LANDLADY]), null, 'a longer description is not her');
+    assert.equal(findPerson('the', [LANDLADY]), null);
+    assert.equal(findPerson('Hesk', [LANDLADY]).id, 'hesk');
 });
 
 // ---- fix/expiry-notices: person expiries get a notice, reach the narrator, the tracker and a wait's summary;

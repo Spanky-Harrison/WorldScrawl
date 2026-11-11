@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exportRecord, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, nameKnown, narratorView, npcForName, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore, renderNpcTokens } from '../../extension/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, narratorView, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore } from '../../extension/npc.mjs';
+import { findPerson, knows, maskText } from '../../extension/names.mjs';
 import { castNameWarnings, loadCast, writeCastNpc, saveCastNpc, tidyRecord } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath, makeWorld } from './helpers.mjs';
 import { chatStamps, formFromPlay, formFromRecord, recordFromForm, liveSchedule, permanentProblem, CHAT_ONLY_ROOM } from '../../plugin/ui/castdata.mjs';
@@ -477,23 +478,23 @@ test('name knowledge: per actor, from stamps only, never from chat text', () => 
     const gated = npcSlices([h], {}, { gate: p => `GATE(${p.id})` }).npcs_present;
     assert.match(gated, /^the landlady \[p[0-9a-z]+\]: GATE\(hesk\)/, 'the gated line follows an unknown person');
     assert.doesNotMatch(s, /ws_flag/);
-    assert.equal(nameKnown(tam, [], 0).reason, 'known: no unknownAs on the card');
+    assert.equal(knows(tam).reason, 'known: no unknownAs on the card');
     const flaggedChat = [bot('Hesk glares.', { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Hesk'] }] })];
     const flagged = framesOf(flaggedChat, 0, [rec()])[0].get('hesk');
-    assert.equal(nameKnown(flagged, flaggedChat, 0).known, false, 'an npc flag means met, not named (#95 name tools name them)');
+    assert.equal(knows(flagged).known, false, 'an npc flag means met, not named (#95 name tools name them)');
     assert.equal(flagged.rel.player.state, 'met');
-    assert.equal(nameKnown(flagged, flaggedChat, 0, 'tam').known, false, 'a flag is the player\'s, not everyone\'s');
+    assert.equal(knows(flagged, 'tam').known, false, 'a flag is the player\'s, not everyone\'s');
     const named = [bot('"I\'m Hesk," she says.', { [NPC_KEY]: [{ type: 'npc_name', id: 'hesk', who: 'player', source: 'flag', swipe: 0 }] })];
     const folded = framesOf(named, 0, [rec()])[0].get('hesk');
-    assert.deepEqual(nameKnown(folded, named, 0), { known: true, reason: 'known: name flag' });
-    assert.equal(nameKnown(folded, named, 0, 'tam').known, false);
+    assert.deepEqual(knows(folded), { known: true, reason: 'known: name flag' });
+    assert.equal(knows(folded, 'tam').known, false);
     const made = framesOf([bot('x', { [NPC_KEY]: [{ type: 'npc_create', id: 'maren', name: 'Maren', line: 'a grinder', unknownAs: 'the grinder', swipe: 0 }] })], 0, [])[0].get('maren');
-    assert.equal(nameKnown(made, [], 0).reason, 'known: remembered');
+    assert.equal(knows(made).reason, 'known: remembered');
     const t = takeNameFlags('She nods. [ws_flag: name | Hesk]');
     assert.deepEqual(t, { names: ['Hesk'], text: 'She nods.' });
-    assert.equal(npcForName([rec(), tam], 'hesk').id, 'hesk');
-    assert.equal(npcForName([rec(), tam], 'Tam').id, 'tam');
-    assert.equal(npcForName([rec(), tam], 'Nobody'), null);
+    assert.equal(findPerson('hesk', [rec(), tam]).id, 'hesk');
+    assert.equal(findPerson('Tam', [rec(), tam]).id, 'tam');
+    assert.equal(findPerson('Nobody', [rec(), tam]), null);
 });
 
 test('inspector: each listed person shows tier, reason and name state', () => {
@@ -703,7 +704,7 @@ test('requests stick for the scene at that place and stop when the place changes
 });
 test('{{npc:id}} renders as the cast name; unknown ids show bare and warn', () => {
     const seen = [];
-    assert.equal(renderNpcTokens('Run by {{npc:hesk}} and {{npc:nobody}}.', [{ id: 'hesk', name: 'Hesk' }], id => seen.push(id)), 'Run by Hesk and nobody.');
+    assert.equal(maskText('Run by {{npc:hesk}} and {{npc:nobody}}.', [{ id: 'hesk', name: 'Hesk' }], { onUnknown: id => seen.push(id) }), 'Run by Hesk and nobody.');
     assert.deepEqual(seen, ['nobody']);
 });
 

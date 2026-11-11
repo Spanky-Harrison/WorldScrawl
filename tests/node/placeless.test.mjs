@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveNear, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, FOUND_KEY, absentAt, comingsAndGoings, foundEditOk, framesOf, judgeFound, nameKnown, nearPhrase, npcWhy, offMapReport, offmapAbsentLine, presentAt, scheduleAt, whoAt, withinNear } from '../../extension/npc.mjs';
+import { NPC_KEY, FOUND_KEY, absentAt, comingsAndGoings, foundEditOk, framesOf, judgeFound, nearPhrase, npcWhy, offMapReport, offmapAbsentLine, presentAt, scheduleAt, whoAt, withinNear } from '../../extension/npc.mjs';
+import { knows } from '../../extension/names.mjs';
 import { liveSchedule } from '../../plugin/ui/castdata.mjs';
 import { loadCast, saveCastNpc } from '../../plugin/cast.mjs';
 import { load_world } from '../../plugin/world.mjs';
@@ -187,7 +188,7 @@ test('[name] records a per-actor name stamp, and the activity log shows the brac
     const n = validateRecord({ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', line: 'The landlady.', schedule: [{ place: BAR, activity: 'pouring drinks' }] }, { file: 'hesk.json', places: rooms });
     const stamp = { type: 'npc_name', id: 'hesk', who: 'player', source: 'bracket', swipe: 0 };
     const chat = [msg('I [name] Hesk', { worldscrawl_bracket: { verb: 'name', target: 'Hesk', status: 'ok' }, [NPC_KEY]: [stamp] })];
-    assert.equal(nameKnown(framesOf(chat, 0, [n])[0].get('hesk'), chat, 0).reason, 'known: name bracket');
+    assert.equal(knows(framesOf(chat, 0, [n])[0].get('hesk')).reason, 'known: name bracket');
     const act = messageActivity(chat[0], 0);
     const bracket = act.find(e => e.kind === 'bracket');
     assert.equal(bracket.label, '[name]');

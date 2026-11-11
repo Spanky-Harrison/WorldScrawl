@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NPC_KEY, framesOf, parseNpcTag, lastsMinutes, lastsText, expiryOf, npcTarget, npcPlayState } from '../../extension/npc.mjs';
+import { NPC_KEY, framesOf, parseNpcTag, lastsMinutes, lastsText, expiryOf, npcPlayState } from '../../extension/npc.mjs';
+import { findPerson } from '../../extension/names.mjs';
 import { expiryText, stampRows } from '../../plugin/ui/castdata.mjs';
 
 const bot = (stamps = []) => ({ mes: 'x', is_user: false, swipe_id: 0, extra: stamps.length ? { [NPC_KEY]: stamps.map(s => ({ swipe: 0, ...s })) } : {} });
@@ -62,8 +63,8 @@ test('lasts: npcPlayState carries pending and expiry on fact stamps', () => {
 
 test('flag target: an id or a saved name; unknown is null', () => {
     const npcs = [{ id: 'hesk', name: 'Hesk' }, { id: 'marta-ferris', name: 'Marta Ferris' }];
-    assert.equal(npcTarget(npcs, 'hesk'), 'hesk');
-    assert.equal(npcTarget(npcs, 'Marta Ferris'), 'marta-ferris');
-    assert.equal(npcTarget(npcs, 'nobody'), null);
-    assert.equal(npcTarget(npcs, ''), null);
+    assert.equal((findPerson('hesk', npcs)?.id ?? null), 'hesk');
+    assert.equal((findPerson('Marta Ferris', npcs)?.id ?? null), 'marta-ferris');
+    assert.equal((findPerson('nobody', npcs)?.id ?? null), null);
+    assert.equal((findPerson('', npcs)?.id ?? null), null);
 });
