@@ -28,7 +28,7 @@ How things look and behave on screen, plus naming and code style. Engine rules a
 
 ## Naming and ids
 - Ids are lowercase with no apostrophes, made by the one `slug` rule in `plugin/shared/ids.mjs`.
-- Memories and the inspector always use an NPC's real name. What the model sees goes through the name portal (`extension/names.mjs`): a person the player has not learned the name of is their unknownAs, masked once at the prompt choke point. Never build a model-facing line from `.name`; use `shownName` / `labelOf`.
+- Memories and the inspector always use an NPC's real name. What the model sees goes through the name portal (`extension/names.mjs`): a person the player has not learned the name of is their unknownAs, masked once at the prompt choke point. Never build a model-facing line from `.name`; use `shownName` / `labelOf`. A test scans the prompt-building modules for a person's `.name`; a line that is not model-facing (inspector, inbound matching, place names) carries `// name-ok: <reason>`.
 
 ## Code
 - One topic per module, small files. `extension/index.js` is the hub; new logic goes in a topic module, not in index.js.

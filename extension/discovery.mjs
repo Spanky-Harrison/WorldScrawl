@@ -182,7 +182,7 @@ async function analyzeDiscovery(id) {
         const k = r0.body;
         if (!k.expandable) { f.status = 'error'; f.error = `${k.name} can't have new rooms (it is marked "expandable": false).`; return; }
         const exits = k.exits.map(x => `${x.direction} -> ${x.to}${x.description ? `: ${x.description}` : ''}`).join('\n') || 'none';
-        const near = k.neighbors.map(n => `${n.name} (${n.address}): ${clip(n.description, 300)}`).join('\n') || 'none';
+        const near = k.neighbors.map(n => `${n.name} (${n.address}): ${clip(n.description, 300)}`).join('\n') || 'none'; // name-ok: place names
         const story = clip(storyText(chat, f.start, id), 4000);
         // Places nearby that are not connected here yet: the door may lead to one of them instead of a new room.
         const linked = new Set([k.location, ...k.neighbors.map(n => n.address), ...k.exits.map(x => x.to)]);
@@ -195,7 +195,7 @@ async function analyzeDiscovery(id) {
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
             let ex = existingDiscovery(a, existing, k.location);
             if (ex?.error) { err = ex.error; continue; }
-            const dup = !ex && typeof a.name === 'string' ? duplicatePlace(a.name, [...nearAll, ...k.neighbors.map(n => ({ address: n.address, name: n.name, steps: 1 }))], { not: [k.location] }) : null;
+            const dup = !ex && typeof a.name === 'string' ? duplicatePlace(a.name, [...nearAll, ...k.neighbors.map(n => ({ address: n.address, name: n.name, steps: 1 }))], { not: [k.location] }) : null; // name-ok: place names
             if (dup && linked.has(dup.address)) { f.status = 'nothing'; f.error = `${dup.name} is already connected here, so no new room was added`; return; }
             if (dup) { const o = existing.find(e => e.room.address === dup.address); if (o) { ex = existingDiscovery({ ...a, existing: o.key }, existing, k.location); if (ex?.error) ex = null; else console.log(`[WorldScrawl] discovery: "${a.name}" is ${dup.name}, already on the map: connecting it`); } }
             // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
@@ -428,8 +428,8 @@ async function applyPersonStamps(id, stamped) {
     syncSwipeExtra(msg);
     await c.saveChat?.();
     for (const row of toFill) {
-        const filled = await fillCandidate(c.chat, row.owner.identity, { baseline: row.pin, name: row.name, elapsed: clock.elapsed }).catch(e => { console.warn('[WorldScrawl] appearance fill', e); return null; });
-        if (filled?.ok) dropNoopProposal(c.chat, row.owner.identity, id, row.name);
+        const filled = await fillCandidate(c.chat, row.owner.identity, { baseline: row.pin, name: row.name, elapsed: clock.elapsed }).catch(e => { console.warn('[WorldScrawl] appearance fill', e); return null; }); // name-ok: masked in the owners prompt builder
+        if (filled?.ok) dropNoopProposal(c.chat, row.owner.identity, id, row.name); // name-ok: inspector note
     }
     syncSwipeExtra(msg);
     await c.saveChat?.();
@@ -453,9 +453,9 @@ function dropNoopProposal(chat, identity, at, name) {
 function trackerPayloads(people) {
     const stamps = [], found = [], names = [];
     for (const p of people ?? []) {
-        if (p.action === 'found') { found.push(p.name || p.id); continue; }
-        if (p.action === 'name') { names.push({ id: p.id, name: p.name || '' }); continue; }
-        const stamp = toolNpcStamp({ ...p, id: p.id || p.name });
+        if (p.action === 'found') { found.push(p.name || p.id); continue; } // name-ok: inbound (tracker answer)
+        if (p.action === 'name') { names.push({ id: p.id, name: p.name || '' }); continue; } // name-ok: inbound (tracker answer)
+        const stamp = toolNpcStamp({ ...p, id: p.id || p.name }); // name-ok: inbound (tracker answer)
         if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
     }
     return { stamps, found, names };
@@ -469,7 +469,7 @@ async function applyLearnedNames(id, learned, source) {
         if (!row?.id) { noteCall(id, { kind: 'name learn', status: 'skipped', reason: `${source}: the name item named nobody (no id)` }); continue; }
         if (done.has(row.id)) continue;
         done.add(row.id);
-        await learnName(msg, { target: row.id, heard: row.name, source });
+        await learnName(msg, { target: row.id, heard: row.name, source }); // name-ok: inbound (what was heard)
     }
     await c.saveChat?.();
 }

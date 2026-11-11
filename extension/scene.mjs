@@ -9,7 +9,7 @@ import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesO
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
-import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, shownName } from './names.mjs';
+import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -190,13 +190,13 @@ function loreChain(loc) {
         }
     } catch { /* no clock yet */ }
     for (const r of loreRequests(chat)) if (r.level === 'elsewhere' && r.address) want.add(r.address);
-    for (const s of stubs) if (want.has(s.id)) base.push({ level: 'elsewhere', id: s.id, name: s.name, text: s.lore });
+    for (const s of stubs) if (want.has(s.id)) base.push({ level: 'elsewhere', id: s.id, name: s.name, text: s.lore }); // name-ok: a stub place
     return base;
 }
 function matchStubLore(place) {
     const key = normName(place);
     if (!key) return null;
-    return (castPack()?.elsewhere ?? []).find(s => !s.shadowed && s.lore && (normName(s.name) === key || s.id === key.replace(/ /g, '_') || nameIn(place, s.name))) ?? null;
+    return (castPack()?.elsewhere ?? []).find(s => !s.shadowed && s.lore && (normName(s.name) === key || s.id === key.replace(/ /g, '_') || nameIn(place, s.name))) ?? null; // name-ok: a stub place
 }
 function addNpcStamp(msg, stamp) {
     msg.extra = msg.extra ?? {};
@@ -239,16 +239,16 @@ async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
     const ui = (() => { for (let i = at - 1; i >= 0; i--) if (chat[i]?.is_user) return i; return -1; })();
     const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
     const story = msg.is_user ? '' : msg.mes ?? '';
-    const j = judgeLearn({ person, present, heard: heard || (player ? person.name : ''), said: msg.is_user ? msg.mes ?? '' : said, story });
+    const j = judgeLearn({ person, present, heard: heard || (player ? person.name : ''), said: msg.is_user ? msg.mes ?? '' : said, story }); // name-ok: the player's own [name]
     if (!j.ok && !player) {
         noteCall(at, { kind: 'name learn', status: 'skipped', reason: `${source}: ${j.reason}` });
-        return { ok: false, reason: j.reason, id: person.id, name: person.name };
+        return { ok: false, reason: j.reason, id: person.id, name: person.name }; // name-ok: result for the inspector
     }
     const swipe = swipeOf(msg);
     msg.extra = msg.extra ?? {};
     msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && s.source === source && (s.swipe ?? 0) === swipe && s.id === person.id));
     addNpcStamp(msg, { type: 'npc_name', id: person.id, who: PLAYER, source, ...(j.ok ? {} : { override: j.reason }) });
-    return { ok: true, reason: j.ok ? j.reason : `player override: ${j.reason}`, id: person.id, name: person.name };
+    return { ok: true, reason: j.ok ? j.reason : `player override: ${j.reason}`, id: person.id, name: person.name }; // name-ok: result for the inspector
 }
 /** [name] /ws-name: the player's own name learn (always lands; see learnName). */
 async function learnNameOn(msg, name) {
@@ -275,7 +275,7 @@ async function setRelOn(msg, arg) {
     addNpcStamp(msg, { type: 'npc_rel', id: n.id, who: PLAYER, state });
     syncSwipeExtra(msg);
     await ctx().saveChat?.();
-    return { ok: true, name: n.name, state };
+    return { ok: true, name: n.name, state }; // name-ok: result for the inspector
 }
 /** Judge a found name against the room the party is in right now (for the tool's answer, before the reply is stamped). */
 async function judgeFoundNow(name) {
@@ -310,7 +310,7 @@ async function applyFound(msg, names, source) {
         const n = findPerson(nm, folded);
         if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '' }); continue; }
         const j = judgeFound(n, env.clock(at), env.playerAt(at), env);
-        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, source, where: j.where ?? '', place: j.place ?? '' });
+        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
         if (j.ok) addNpcStamp(msg, { type: 'npc_found', id: n.id, where: j.where ?? '', place: j.place, source });
     }
     msg.extra[FOUND_KEY] = [...prev, ...decisions];
@@ -320,8 +320,11 @@ async function applyFound(msg, names, source) {
     try { broadcastMapState(); } catch { /* map window may not be open */ }
     return decisions;
 }
+// The gated name lines this pass put in the facts block, as rendered: the one place a real name may be (the leak check skips them).
+let gateLines = [];
 /** People-here text for the narrator. Empty when nobody saved is in the scene, so turns without them stay as they were. */
 function npcPromptBits(loc) {
+    gateLines = [];
     const pack = castPack();
     const chat = ctx().chat ?? [];
     if (!pack?.npcs?.length || !chat.length || !calendarLib) return {};
@@ -340,7 +343,7 @@ function npcPromptBits(loc) {
         const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
         const focus = stored && stored.depth ? stored : focusRules(said, present);
         const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
-        const gate = p => P('narration.name_gate', { shown: shownName(p), name: `{{npc!:${p.id}}}` });
+        const gate = p => { gateLines.push(P('narration.name_gate', { shown: shownName(p), name: p.name })); return P('narration.name_gate', { shown: shownName(p), name: `{{npc!:${p.id}}}` }); }; // name-ok: the gated line itself
         const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc, gate });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
@@ -392,7 +395,7 @@ async function prepareNpcs(userMsg) {
         const seeking = /\b(find|seek|where is|look for|ask after|ask about)\b/i.test(said);
         if (now) for (const n of now.values()) {
             const oneOff = n.seen_at && !(n.schedule ?? []).some(e => !e.broken);
-            if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day });
+            if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day }); // name-ok: inbound match (the player's words)
             const check = sightCheck(n, clock, here, env, { appearances: n.appearances, seeks: n.seeks, useRoll: true });
             if (check.present && check.needsStamp) addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: check.place, day: clock.day, hour: clock.hour });
         }
@@ -416,10 +419,10 @@ async function prepareNpcs(userMsg) {
 }
 function knownNpcNames(chat) {
     const pack = castPack();
-    const names = [...(pack?.names ?? []), ...(pack?.npcs ?? []).flatMap(n => [n.name, n.id])];
+    const names = [...(pack?.names ?? []), ...(pack?.npcs ?? []).flatMap(n => [n.name, n.id])]; // name-ok: inbound match
     const frames = framesOf(chat, chat.length - 1, pack?.npcs ?? []);
     const end = frames[frames.length - 1];
-    if (end) for (const n of end.values()) names.push(n.name, n.id);
+    if (end) for (const n of end.values()) names.push(n.name, n.id); // name-ok: inbound match
     return names;
 }
 async function offerRemember(msg, name) {
@@ -611,7 +614,7 @@ function mapActivity(chat, here) {
         const rolls = [];
         if (env && frames?.[i] && !m.is_user) for (const n of frames[i].values()) {
             if (!n.seen_at) continue;
-            try { const w = npcWhy(n, i, env); const g = w.sighting; if (g?.active && g.roll != null) rolls.push({ kind: 'roll', label: `${n.name} sighting${g.sought ? ' (by name)' : ''}`, roll: g.used, chance: g.now, seekRoll: g.seekRoll, present: g.wouldShow }); } catch { /* skip */ }
+            try { const w = npcWhy(n, i, env); const g = w.sighting; if (g?.active && g.roll != null) rolls.push({ kind: 'roll', label: `${n.name} sighting${g.sought ? ' (by name)' : ''}`, roll: g.used, chance: g.now, seekRoll: g.seekRoll, present: g.wouldShow }); } catch { /* skip */ } // name-ok: inspector
         }
         out.push({ msg: i, who: m.is_user ? 'you' : m.is_system ? 'system' : m.name ?? 'narrator', snippet: String(m.mes ?? '').slice(0, 80), entries: messageActivity(m, i, { chatId, extra: rolls }) });
     }
@@ -756,7 +759,17 @@ async function applyFacts() {
         if (gone) text = `${text}\n${gone}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     // The prompt choke point: every person name in the block goes through the portal (the gated name line renders here).
-    try { const people = peopleNow(); text = maskText(text, people); reminder = maskText(reminder, people); } catch (e) { console.warn('[WorldScrawl] name mask:', e.message); }
+    try {
+        const people = peopleNow();
+        text = maskText(text, people); reminder = maskText(reminder, people);
+        // The check: an unknown person's name or alias left in the block (outside the gated lines) is a leak. Never blocks the turn.
+        const leaks = nameLeaks(gateLines.reduce((t, g) => t.split(g).join(''), `${text}\n${reminder}`), people);
+        if (leaks.length) {
+            const reason = `the narrator's facts block names ${leaks.map(l => `"${l.name}"`).join(', ')} before the player learned it`;
+            console.warn(`[WorldScrawl] name leak: ${reason}`);
+            noteCall(undefined, { kind: 'name leak', status: 'failed', reason });
+        }
+    } catch (e) { console.warn('[WorldScrawl] name mask:', e.message); }
     c.setExtensionPrompt(FACTS_KEY, text, 1 /* IN_CHAT */, 1, false, 0 /* SYSTEM */);
     // Small models weigh the last lines most: on a move/travel turn, repeat where the turn ends after the player's message.
     c.setExtensionPrompt(REMINDER_KEY, reminder, 1 /* IN_CHAT */, 0, false, 0 /* SYSTEM */);
@@ -947,7 +960,7 @@ async function ensureAppearanceRebuilds(msgId, { ids = null, timeout = APPEARANC
     for (const npc of targets) {
         const pin = npc.pinned || { body: npc.base?.body ?? '', outfit: npc.base?.outfit ?? '' };
         if (npc.appearanceHow === 'pending' || npc.looksHow === 'pending') {
-            const wrote = await recompose(chat, { npc: npc.id, at: msgId, baseline: pin, name: npc.name, elapsed, timeout });
+            const wrote = await recompose(chat, { npc: npc.id, at: msgId, baseline: pin, name: npc.name, elapsed, timeout }); // name-ok: masked in the owners prompt builder
             if (wrote?.msg) syncSwipeExtra(wrote.msg);
         }
     }

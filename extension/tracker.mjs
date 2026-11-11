@@ -57,7 +57,7 @@ export function trackerPeopleLines(people) {
         const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
         const unnamed = p.nameKnown === false && bare(p.unknownAs);
         return [
-            `${p.name || p.id} [${p.id || p.name}]`,
+            `${p.name || p.id} [${p.id || p.name}]`, // name-ok: listedPeople gives the shown name and handle
             ...(unnamed ? [`Name not yet known to the player: they know this person only as "${bare(p.unknownAs)}"`] : []),
             `Looks: ${textOf(p.looks)}`,
             `Body: ${textOf(p.body)}`,
@@ -112,7 +112,7 @@ function readPerson(p) {
     if (!p || typeof p !== 'object') return null;
     const action = String(p.action ?? p.type ?? '').toLowerCase().trim();
     const id = String(p.id ?? p.who ?? '').trim();
-    const name = String(p.name ?? '').trim();
+    const name = String(p.name ?? '').trim(); // name-ok: inbound (tracker answer)
     if (!action) return null;
     if (action === 'found' || action === 'name') {
         const who = name || id;
