@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NPC_KEY, NPC_FLAG_KEY, framesOf, nameKnown, npcSlices, relOf, relLine, parseRelArg, stampSummary } from '../../extension/npc.mjs';
+import { NPC_KEY, NPC_FLAG_KEY, framesOf, npcSlices, relOf, relLine, parseRelArg, stampSummary } from '../../extension/npc.mjs';
+import { knows } from '../../extension/names.mjs';
 import { relText, playSummary, whyRows } from '../../plugin/ui/castdata.mjs';
 
 const bot = (stamps = [], extra = {}) => ({ mes: 'x', is_user: false, swipe_id: 0, extra: { ...(stamps.length ? { [NPC_KEY]: stamps.map(s => ({ swipe: 0, ...s })) } : {}), ...extra } });
@@ -23,10 +24,10 @@ test('rel: the #95 name tools write named; automatic changes never go back; only
     const named = [bot([{ type: 'npc_name', id: 'hesk', who: 'player', source: 'bracket' }]), bot([{ type: 'npc_memory', id: 'hesk', note: 'Joe paid.' }])];
     const h = fold(named);
     assert.deepEqual(h.rel.player, { state: 'named', at: 0, by: 'name bracket' });
-    assert.deepEqual(nameKnown(h, named, 1), { known: true, reason: 'known: name bracket' });
+    assert.deepEqual(knows(h), { known: true, reason: 'known: name bracket' });
     named.push(bot([{ type: 'npc_rel', id: 'hesk', who: 'player', state: 'met' }]));
     assert.deepEqual(fold(named).rel.player, { state: 'met', at: 2, by: 'player edit' });
-    assert.equal(nameKnown(fold(named), named, 2).known, false);
+    assert.equal(knows(fold(named)).known, false);
     named.push(bot([{ type: 'npc_rel', id: 'hesk', state: 'bogus' }]));
     assert.equal(fold(named).rel.player.state, 'met', 'unknown state ignored');
     assert.match(stampSummary({ type: 'npc_rel', id: 'hesk', state: 'unmet' }, 'Hesk'), /The player set Hesk to hasn't met/);

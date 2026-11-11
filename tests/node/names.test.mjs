@@ -320,3 +320,49 @@ test('canary side calls: first-meeting disposition and the appearance rebuild ne
     for (const r of rebuild) assert.deepEqual(leaks(engineOnly(r)), [], r.prompt);
     assert.ok(rebuild.some(r => /the landlady/i.test(r.prompt)));
 });
+
+// ---- The guard (S4): the choke-point check on every injected block, and the .name scan hint.
+const peopleNow = () => scene.peopleNow();
+const blockLeaks = blocks => Object.entries(blocks).flatMap(([k, t]) => N.nameLeaks(t.replace(GATE, ''), peopleNow()).map(l => `${k}: ${l.name}`));
+
+test('canary guard: no injected block names her before she is learned, in any of the narrator scenes', async () => {
+    for (const card of [CANARY_CARD, ASLEEP_CARD]) {
+        const { c, blocks } = boot({ card });
+        const m = say(c, '[lore] The Drowned Rat');
+        await bracketIntent(m, parseBracket(m.mes));
+        await scene.applyFacts();
+        assert.ok(Object.keys(blocks).length, 'blocks were injected');
+        assert.deepEqual(blockLeaks(blocks), []);
+        assert.equal(callNotes(c.chat.at(-1)).some(n => n.kind === 'name leak'), false);
+    }
+});
+
+test('canary guard: a name left in the block after masking is logged as a name leak, and the turn goes on', async () => {
+    const { c, blocks } = boot({ card: ASLEEP_CARD });
+    const m = say(c, '[lore] The Drowned Rat');
+    await bracketIntent(m, parseBracket(m.mes));
+    // An author misusing the portal's own escape in lore: the only way past the mask.
+    const { currentLocation } = await import('../../extension/doors.mjs');
+    const entry = scene.loreChain(await currentLocation())[0], text = entry.text;
+    entry.text += ' Ask for {{npc!:hesk}} at the bar.';
+    try {
+        await scene.applyFacts();
+        const f = blocks[ext.FACTS_KEY ?? 'worldscrawl_facts'] ?? '';
+        assert.match(f, new RegExp(`Ask for ${CANARY} at the bar`), 'the check never blocks the turn');
+        const note = callNotes(c.chat.at(-1)).find(n => n.kind === 'name leak');
+        assert.ok(note, 'noted in the model-call log');
+        assert.match(note.reason, new RegExp(`"${CANARY}"`));
+    } finally { entry.text = text; }
+});
+
+test('guard hint: prompt-building modules never read a person\'s .name without a name-ok reason', () => {
+    const files = ['extension/npc.mjs', 'extension/scene.mjs', 'extension/brackets.mjs', 'extension/discovery.mjs', 'extension/tracker.mjs', 'extension/owners.mjs', 'extension/npcexpiry.mjs', 'extension/expiry.mjs', 'plugin/shared/npc.mjs'];
+    const re = /\b(n|npc|p|who|now|live|person|row|s)\.name\b/;
+    const bad = [];
+    for (const f of files) fs.readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8').split('\n').forEach((l, i) => {
+        if (/\/\/ name-ok: \S/.test(l)) return;
+        const code = l.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, '').replace(/\/\*.*?\*\//g, '');
+        if (re.test(code)) bad.push(`${f}:${i + 1}: ${l.trim().slice(0, 120)}`);
+    });
+    assert.deepEqual(bad, [], 'use shownName / labelOf for model text, or add // name-ok: <reason>');
+});
