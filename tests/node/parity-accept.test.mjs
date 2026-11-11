@@ -1291,7 +1291,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     assert.equal(live.body, 'sturdy', 'the engine reverted her');
     // E: the wait's "ran out" line, from the real waitFacts.
     const wf = await waitFacts(c.chat, ROOM);
-    assert.match(wf, /these temporary changes ran out and are gone now: the temporary change "turned into a gnoll" on Hesk \(known to You only as "the landlady"\)\./);
+    assert.match(wf, /these temporary changes ran out and are gone now: the temporary change "turned into a gnoll" on the landlady\./, 'the narrator gets what the player knows her as');
     assert.match(wf, /Describe the people as they are now/);
     // A: one notice, like a place expiry's [Engine: ...] line, never twice.
     const posted = await scene.postPersonExpiryNotices();
@@ -1308,7 +1308,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     const text = facts.at(-1);
     assert.match(text, /Engine note \(already applied; this is the same person, not someone new\)/);
     // The facts block goes through the name portal: she is not named there.
-    assert.match(text, /the landlady \(known to You only as "the landlady"\): the temporary change "turned into a gnoll" ran out and is gone/);
+    assert.match(text, /- The landlady: the temporary change "turned into a gnoll" ran out and is gone/);
     assert.doesNotMatch(text, /Hesk/);
     assert.match(text, /What they look like now: Looks: copper braids Body: sturdy Outfit: wool/);
     // C: the story narrates her turning back; the tracker hears it already happened, and its proposal is dropped.
@@ -1321,7 +1321,8 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     });
     await onStorySwipe(at);
     const trackerPrompt = prompts.find(p => /Reply with JSON only:\n\{"place"/.test(p));
-    assert.ok(trackerPrompt.includes('Already done by the game (not new changes; do not report them):\nHesk [hesk]: The temporary change "turned into a gnoll" on Hesk (known to You only as "the landlady") ran out; the game already changed them back. The Body and Outfit listed above are the result.'), trackerPrompt);
+    assert.match(trackerPrompt, /Already done by the game \(not new changes; do not report them\):\nThe landlady \[p[0-9a-z]+\]: The temporary change "turned into a gnoll" on the landlady ran out; the game already changed them back\. The Body and Outfit listed above are the result\./);
+    assert.doesNotMatch(trackerPrompt.split('\n\nPlayer:')[0], /Hesk|\[hesk\]/, 'the engine part; the story is the story');
     assert.ok(prompts.some(p => /turned back into a woman \[body\]/.test(p)), 'the proposal really went through the fill');
     assert.match(trackerPrompt, /Do not report an appearance change, or a fact, that only describes something under "Already done by the game"/);
     assert.equal((reply.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_appearance'), false, 'the no-op proposal is not left Waiting on you');
@@ -1518,7 +1519,7 @@ test('re-timing a kept wait rechecks person expiries too, and a temporary fact t
     c.chat.push(userMsg('[wait] 2h'));
     await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
     const wf = await waitFacts(c.chat, ROOM);
-    assert.match(wf, /ran out and are gone now: [^\n]*the temporary change "turned into a gnoll" on Hesk[^\n]*; the temporary detail "has a split lip" on Hesk/);
+    assert.match(wf, /ran out and are gone now: [^\n]*the temporary change "turned into a gnoll" on the landlady[^\n]*; the temporary detail "has a split lip" on the landlady/);
 });
 
 // ---- S6: the cast Changes tab shows the chat's cards; a click runs the chat card's handler over the map channel

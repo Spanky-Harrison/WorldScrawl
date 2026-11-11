@@ -279,3 +279,44 @@ test('canary narrator: the ws_npc tool takes her handle (detail answers masked; 
     await onReplyForFlags(id);
     assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_fact' && s.id === 'hesk'), 'stored under the cast id');
 });
+
+// ---- Side calls (S3): every model call but the narrator's sees the same view; the story and player line are theirs.
+const engineOnly = (call, ...theirs) => theirs.reduce((t, x) => t.split(x).join(''), `${call.sys}\n${call.prompt}`);
+
+test('canary side calls: the tracker lists her as "the landlady [handle]"; after [name], by name', async () => {
+    const { c, calls } = boot();
+    say(c, 'I nod to the woman at the bar.');
+    let id = reply(c, 'The landlady wipes a mug and says nothing.');
+    await onReplyForFlags(id);
+    let t = calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt));
+    assert.ok(t, 'the tracker ran');
+    assert.match(t.prompt, new RegExp(`the landlady \\[${handle()}\\]`));
+    assert.deepEqual(leaks(t.prompt), [], 'not her name, alias, or cast id; her memory and demeanor are masked');
+    const m = say(c, `I [name] ${CANARY}`);
+    await bracketIntent(m, parseBracket(m.mes));
+    calls.length = 0;
+    id = reply(c, 'She nods.');
+    await onReplyForFlags(id);
+    t = calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt));
+    assert.match(t.prompt, new RegExp(`${CANARY} \\[${handle()}\\]`));
+});
+
+test('canary side calls: first-meeting disposition and the appearance rebuild never see her name', async () => {
+    const { c, calls, tools } = boot();
+    const said = 'I wave at everyone in the room.';
+    const user = say(c, said);
+    await scene.prepareNpcs(user);
+    const dispo = calls.find(x => /friendly/.test(x.prompt) && /indifferent/.test(x.prompt));
+    assert.ok(dispo, 'the disposition question ran');
+    assert.match(dispo.prompt, /the landlady/i);
+    assert.deepEqual(leaks(engineOnly(dispo, said)), []);
+    calls.length = 0;
+    const { registerTools } = await import('../../extension/discovery.mjs');
+    registerTools(new Set(['ws_npc']));
+    const id = reply(c, `Her braids turn white. [ws_npc: appearance | ${handle()} | hair turned white | looks,body | 1 hour]`);
+    await onReplyForFlags(id);
+    const rebuild = calls.filter(x => /body/i.test(x.prompt) && !/Reply with JSON only:\n\{"place"/.test(x.prompt));
+    assert.ok(rebuild.length, 'the appearance rebuild ran');
+    for (const r of rebuild) assert.deepEqual(leaks(engineOnly(r)), [], r.prompt);
+    assert.ok(rebuild.some(r => /the landlady/i.test(r.prompt)));
+});
