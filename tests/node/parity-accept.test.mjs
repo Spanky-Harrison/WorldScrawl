@@ -1160,7 +1160,7 @@ test('Approve edited with text identical to now refuses instead of committing a 
     assert.equal(next.committed, null);
 });
 
-test('the tracker is told who is not known by name, and its real name answer stamps the learned name', async () => {
+test('the tracker is told who is not known by name; its name item for someone not in the scene stamps nothing', async () => {
     const { c } = boot();
     rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY] }] });
     const lines = trackerPeopleLines([{ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', nameKnown: false }, { id: 'tam', name: 'Tam', nameKnown: true }]);
@@ -1169,13 +1169,14 @@ test('the tracker is told who is not known by name, and its real name answer sta
     assert.match(promptText('npc.tracker'), /not yet known by name has their name said in this exchange[^\n]*"action": "name"/);
     c.chat = [msg([])];
     assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    // She is not in the scene and nobody said her name in dialogue: the portal refuses the learn (names.test.mjs has the rest).
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "name", "name": "Hesk"}]}'));
-    assert.ok(c.chat[0].extra[NPC_KEY].some(s => s.type === 'npc_name' && s.id === 'hesk'));
-    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, true);
-    // By the shown name, as the tracker might write it.
+    assert.equal((c.chat[0].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_name'), false);
+    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
+    // By the shown name with no name heard: still nothing.
     c.chat = [msg([])];
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "the landlady", "action": "name"}]}'));
-    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, true);
+    assert.equal(nameKnown(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
 });
 
 test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matches nobody', async () => {
