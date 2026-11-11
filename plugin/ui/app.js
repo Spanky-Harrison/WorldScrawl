@@ -8,7 +8,11 @@ import { buildMenu, openToolView, choose, guardViewButtons } from './menus.mjs';
 import { activityView } from './activitylog.mjs';
 import { promptEditor } from './prompteditor.mjs';
 import { actionsFor, openAction } from './mapactions.mjs';
-import { renderDiff, renderMoves, moveGroups } from './diffview.mjs';
+import { renderDiff } from './diffview.mjs';
+import { renderCard } from './card.mjs';
+import { closeCardEditor, editorValues } from './cardedit.mjs';
+import { buildPatchForm } from './patchform.mjs';
+import * as C from '../shared/cards.mjs';
 import { pickSearch, pickValid, pathOf } from './picker.mjs';
 import { castPanel } from './castpanel.mjs';
 import { markersByPlace, markersAt } from './castdata.mjs';
@@ -171,7 +175,7 @@ async function toggleFromInspector(c) {
     if (!r.ok && r.error) setStatus(r.error);
     return r;
 }
-const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length, x.off ? 1 : 0])) + `|${st.now ?? ''}` : ''; };
+const sigOf = st => { const p = patchesOf(st); return p.length ? JSON.stringify(p.map(x => [x.id, x._msg, x.ops?.length, x.off ? 1 : 0, x.edited ?? ''])) + `|${st.now ?? ''}` : ''; };
 async function postJson(url, body) {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await csrfToken() }, body: JSON.stringify(body) });
     if (!r.ok) { // a 400 carries {detail: {error, clash?}}: keep it for the wizards' rename prompts
@@ -196,6 +200,7 @@ async function aiText(st, { field, kind, name, area, rooms = [], text = '' }) {
     await loadPrompts(API); // the selected profile may have changed since the window opened
     return sendExpand(expandPrompt(c, { field, text, name, kind }));
 }
+const inspectForms = new Map(), inspectOpen = new Set(); // the inspector's open map forms and opened change cards, by card key
 let curState = null; // the latest state message (its changes go with inspector requests)
 async function worldIndex(world, version, st = curState) {
     const key = `${world}|${version}|${sigOf(st)}`;
@@ -299,18 +304,58 @@ async function renderInspector(side, target, ctx) {
         }
         return [tbl, ...extra];
     };
+    // Changes: the chat's kept-change card (plugin/shared/cards.mjs), collapsed to its title. Opening "Show change"
+    // fetches its before/after; Edit opens the same map form + Change: box, and Approve edited re-stamps it in the chat.
     const changesPane = () => changes.length ? [$('p', { class: 'muted' }, d.kind === 'world' ? 'Every map change stamped on this chat, in order. Turn one off to take it off the map for now, or delete its message to undo it.' : 'Map changes from this chat that touch this. Turn one off to take it off the map for now, or delete its message to undo it.'),
-        $('ul', { class: 'warnings' }, ...changes.map(c => {
-            const li = $('li', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}`, ...(c.off ? { style: 'opacity:.6' } : {}) }, $('b', {}, c.msg === null || c.msg === undefined ? 'Patch' : `Message #${c.msg}`), changeText(c));
-            if (Object.keys(c.relocate ?? {}).length) li.append(...renderMoves(document, moveGroups({ ops: c.ops ?? [], relocate: c.relocate, inherit: c.inherit ?? {}, names: c.names ?? {} }).groups));
-            if (c.inactive) { li.classList.add('inactive'); li.style.opacity = '.6'; li.append($('div', { class: 'inactive-note muted' }, c.inactive)); }
-            else if (c.failed) li.append($('div', { class: 'cant-apply', style: 'color:#e55' }, `can't apply: ${c.failed}`));
-            if (live && c.msg !== null && c.msg !== undefined && c.id && !c.inactive) li.append(' ', $('button', { class: 'crumb togglechange', title: c.off ? 'Put this change back on the map' : 'Take this change off the map for now (it stays on its message)', onclick: () => toggleFromInspector(c) }, c.off ? 'Turn on' : 'Turn off'),
-                ' ', $('button', { class: 'crumb removechange', title: 'Remove this change (it leaves its message)', onclick: () => removeFromInspector(c) }, 'Undo'));
-            else if (live && c.msg !== null && c.msg !== undefined && c.id) li.append(' ', $('button', { class: 'crumb removechange', title: 'Remove this change (it leaves its message)', onclick: () => removeFromInspector(c) }, 'Undo'));
-            return li;
-        }))]
+        $('div', { class: 'inspect-changes' }, ...changes.map(c => inspectCard(c)))]
         : [$('p', { class: 'muted' }, 'No map changes from this chat touch this.')];
+    const S0 = () => (state?.chatId && state.chatId === st?.chatId ? state : st);
+    const atChange = c => { const all = S0()?.changes ?? [], i = all.findIndex(x => x.id === c.id); return { changes: i >= 0 ? all.slice(0, i) : all, now: S0()?.now ?? null }; };
+    const iq = () => (S0()?.world ? `?world=${encodeURIComponent(S0().world)}` : '');
+    const previewOf = (ops, c) => postJson(`${API}/patch/preview${iq()}`, { patch: { ops }, ...atChange(c) });
+    const inspectCard = c => {
+        const key = `insp|${c.msg}|${c.id}`, hasMsg = c.msg !== null && c.msg !== undefined && !!c.id, form = inspectForms.get(key);
+        const what = changeText(c);
+        const desc = C.placeKept({ key, state: c.off ? 'off' : 'kept', what, editing: !!form && !c.off, intent: c.note ?? '', preview: form?.lastPreview ?? null, inactive: c.inactive ?? '', cantApply: c.failed && !c.inactive ? c.failed : '' });
+        if (!live || !hasMsg) desc.actions = [];
+        if (desc.editor) desc.editor.formEl = form.el;
+        else {
+            const show = $('details', { class: 'worldscrawl_change_show' }, $('summary', {}, 'Show change'));
+            const box = $('div', { class: 'worldscrawl_diff' }); show.append(box);
+            show.addEventListener('toggle', () => { if (show.open && !box.childNodes.length) previewOf(c.ops ?? [], c).then(pv => box.replaceChildren(renderDiff(document, pv)), e => { box.textContent = `Could not show this change: ${e.message}`; }); });
+            desc.extras = [show];
+        }
+        const card = renderCard(document, { ...desc, title: '' }, (id) => inspectAct(c, key, id));
+        if (form && card._panel) form.onLive = ops => previewOf(ops, c).then(pv => { form.lastPreview = pv; card._panel.replaceChildren(renderDiff(document, pv)); }, e => { card._panel.style.opacity = '0.5'; form.setErrors([{ i: null, error: e.message }]); });
+        if (form && card._panel && !form.lastPreview) form.onLive(form.getOps());
+        const det = $('details', { class: `change${c.off ? ' off' : ''}${c.failed ? ' failed' : ''}${c.inactive ? ' inactive' : ''}`, 'data-change': key }, $('summary', {}, $('b', {}, hasMsg ? `Message #${c.msg}` : 'Patch'), ' ', desc.title), card);
+        if (form || inspectOpen.has(key)) det.open = true;
+        det.addEventListener('toggle', () => { if (det.open) inspectOpen.add(key); else inspectOpen.delete(key); });
+        return det;
+    };
+    const inspectAct = async (c, key, id) => {
+        if (id === 'edit') {
+            let idx = { addresses: [], names: {}, areaNames: {} };
+            try { idx = await postJson(`${API}/inspect/index${iq()}`, { changes: S0()?.changes ?? [], now: S0()?.now ?? null }); } catch { /* plain boxes then */ }
+            const rooms = idx.addresses ?? [], areas = [...new Set(rooms.flatMap(a => { const ar = a.split('/')[0]; return [ar, ar.split(':')[0]]; }))];
+            let form = null;
+            form = buildPatchForm(document, { ops: c.ops ?? [], rooms, areas, names: idx.names ?? {}, areaNames: idx.areaNames ?? {}, context: { loc: d.kind === 'room' ? ctx.room?.address ?? '' : '' }, onChange: o => form?.onLive?.(o) });
+            closeCardEditor(key); inspectForms.set(key, form); inspectOpen.add(key); show(tab);
+            return;
+        }
+        if (id === 'close') { inspectForms.delete(key); closeCardEditor(key); show(tab); return; }
+        if (id === 'save') {
+            const form = inspectForms.get(key); if (!form) return;
+            const r = await askST('change_restamp', { chatId: S0()?.chatId, msg: c.msg, id: c.id, ops: form.getOps(), note: String(editorValues(key).intent ?? '').trim(), sig: JSON.stringify(c.ops ?? []), off: c.off === true });
+            if (!r) { setStatus('No answer from SillyTavern. Is the chat open in a tab?'); return; }
+            if (r.stale) { inspectForms.delete(key); closeCardEditor(key); setStatus('That change moved on since this card was drawn; nothing was saved.'); return; }
+            if (!r.ok) { form.setErrors(r.errors ?? []); return; }
+            inspectForms.delete(key); closeCardEditor(key); setStatus('Change updated.');
+            return;
+        }
+        if (id === 'off' || id === 'on') return toggleFromInspector(c);
+        if (id === 'undo') return removeFromInspector(c);
+    };
     const warnPane = () => d.warnings.length ? [$('ul', { class: 'warnings' }, ...d.warnings.map(w => $('li', {}, w.message.replace(/^world: /, ''))))] : [$('p', { class: 'muted' }, 'No loader warnings for this.')];
     const live = !!(st?.on && st.chatId && !st.editorOnly);
     const editLabel = { room: 'Edit place', exit: 'Edit place', subregion: 'Edit subregion', region: 'Edit region' }[d.kind] ?? 'Edit';
@@ -614,7 +659,7 @@ function createMapWindow(win) {
         chatAt: () => (state?.on ? { msg: state.last_msg, swipe: state.last_swipe ?? null } : null),
         chatEdit: async (id, stamps, at) => (state?.chatId && at ? askST('npc_chat_edit', { chatId: state.chatId, id, stamps, msg: at.msg, swipe: at.swipe }) : { ok: false, error: 'Open the chat in SillyTavern first.' }),
         retryAppearance: job => { if (state?.chatId && job) channel.postMessage({ type: 'appearance_retry', chatId: state.chatId, id: job.id, msg: job.msg, key: job.key || '' }); },
-        decideNpc: spec => { if (state?.chatId && spec?.identity) channel.postMessage({ type: 'npc_decide', chatId: state.chatId, ...spec }); },
+        decideNpc: async spec => (state?.chatId && spec?.identity ? (await askST('npc_decide', { chatId: state.chatId, ...spec })) ?? { ok: false, error: 'No answer from SillyTavern. Is the chat open in a tab?' } : { ok: false, error: 'Open the chat in SillyTavern first.' }),
         highlight: (addrs, now) => { castHl = { addrs, now }; paintHl(); },
     });
     let castHl = { addrs: [], now: null };

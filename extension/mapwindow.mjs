@@ -5,9 +5,10 @@ import { removeChange } from './carriers.mjs';
 import { calendarLib, defaultWorldId, gameDate, listedWorlds, loadCalendar, placeWeatherNow, rememberWorlds, weatherLib, worldName, worldTimes } from './clock.mjs';
 import { baseReply, gen } from './dig.mjs';
 import { api, currentLocation, doorOverrides, doorStates, ensurePrompts, getStoredLocation } from './doors.mjs';
-import { MAP_URL, NOT_RUNNING, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
+import { MAP_URL, NOT_RUNNING, PATCH_KEY, PLUGIN_URL, WAIT_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion, refreshSaveName, revealPlaces, settings, syncWorld, waitCommand } from './index.js';
 import { discoveredPlaces, lastUserIndex, revealedDoors, stoodInAddresses } from './movement.mjs';
-import { liveEdit, mapCtx, swipeOf, toggleChange } from './patches.mjs';
+import { liveEdit, mapCtx, restampChange, swipeOf, toggleChange } from './patches.mjs';
+import { runGuiCardAction } from './cardacts.mjs';
 import { exportNpc, mapActivity, mapInspect, mapNpcs, npcChatEdit, retryAppearance, settleNpc } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
 
@@ -65,6 +66,17 @@ function openMapChannel() {
                 .then(r => ch.postMessage({ type: 'toggle_result', req: d.req, ...r }))
                 .catch(e => ch.postMessage({ type: 'toggle_result', req: d.req, ok: false, error: e.message }));
         }
+        if (ev.data?.type === 'change_restamp') { // the inspector's Approve edited on a kept change: re-stamp it on its message
+            const c = ctx(), d = ev.data;
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) {
+                const msg = c.chat?.[Number(d.msg)], p = (msg?.extra?.[PATCH_KEY] ?? []).find(x => x.id === d.id);
+                // Current while the change is still on its message, unedited and on/off as the inspector drew it.
+                const still = () => c.chat?.[Number(d.msg)] === msg && !!p && (msg.extra?.[PATCH_KEY] ?? []).includes(p) && JSON.stringify(p.ops ?? []) === d.sig && (p.off === true) === (d.off === true);
+                (still() ? restampChange(Number(d.msg), String(d.id ?? ''), Array.isArray(d.ops) ? d.ops : [], { note: d.note, still }) : Promise.resolve({ ok: false, stale: true }))
+                    .then(r => { if (r?.stale) broadcastMapState(); ch.postMessage({ type: 'change_restamp_result', req: d.req, ...r }); })
+                    .catch(e => ch.postMessage({ type: 'change_restamp_result', req: d.req, ok: false, errors: [{ i: null, error: e.message }] }));
+            }
+        }
         if (ev.data?.type === 'remove_change') { // the inspector's Undo of one change
             const c = ctx(), d = ev.data;
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) removeChange(Number(d.msg), String(d.id ?? ''), { choice: d.choice })
@@ -88,7 +100,7 @@ function openMapChannel() {
             const d = ev.data;
             const c = ctx();
             if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) {
-                settleNpc(c.chat ?? [], d.identity, d.decisionRev, d.action, d.payload ?? {}).then(res => {
+                (d.card ? runGuiCardAction(d) : settleNpc(c.chat ?? [], d.identity, d.decisionRev, d.action, d.payload ?? {})).then(res => {
                     ch.postMessage({ type: 'npc_decide_result', req: d.req, ...res });
                 }).catch(e => ch.postMessage({ type: 'npc_decide_result', req: d.req, ok: false, error: e.message }));
             }

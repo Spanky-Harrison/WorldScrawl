@@ -2,6 +2,7 @@
 // filters, the editor form <-> cast record, inline validation, the in-play view's rows, and the map's NPC markers.
 // The server validates again on save (plugin/npc.mjs validateRecord); these checks are for showing problems inline.
 import { NPC_ID, authorRecord } from '../shared/npc.mjs';
+import * as C from '../shared/cards.mjs';
 export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
 export const IMPORTANCE = ['low', 'normal', 'high'];
 const HM = /^(\d{1,2}):(\d{2})$/;
@@ -492,4 +493,51 @@ export function liveSchedule(rec, play) {
     if (play?.following) rows.unshift({ place: '', activity: `following ${play.following.who === 'player' ? 'you' : play.following.who}`, where: '', near: '', from: '', to: '', importance: '', src: 'chat', notes: ['this chat (overrides the schedule)'], current: true });
     else if (play?.held?.place && play?.why?.held?.active !== false) rows.unshift({ place: play.held.place, activity: 'staying here', where: '', near: '', from: '', to: '', importance: '', src: 'chat', notes: ['this chat (overrides the schedule)'], current: true });
     return rows;
+}
+
+// ---- The cast Changes tab: one shared card per stamp (the same adapters as the chat cards).
+const NOTE_FIELD = { npc_fact: ['text', 'Fact'], npc_memory: ['note', 'Memory'], npc_disposition: ['reason', 'Why'] };
+const APPEARANCE = new Set(['npc_appearance', 'npc_baseline']);
+/**
+ * The card for one npcPlayState stamp row x, or null (a row with no card). o: {who, editing, play (the person's
+ * play state, for editor seeds)}. Returns {type ('person'|'personNote'|'found'), desc, ref, seen}: ref finds the stamp
+ * in the chat, seen is what the card was drawn from (a click from an older card is stale).
+ */
+export function stampCard(x, { who = '', editing = false, play = null } = {}) {
+    if (!x || x.type === 'npc_appearance_cache' || x.type === 'npc_decline') return null;
+    const owner = x.identity?.owner ?? x.owner ?? '';
+    const key = `gui|${owner}|${x.msg}|${x.index}`;
+    const ref = { msg: x.msg, index: x.index, owner }, seen = { rev: x.decisionRev ?? 1, sig: x.sig };
+    const text = `${x.summary ?? ''}${expiryText(x.expiry)}`;
+    const lastingRec = play?.lasting ?? play ?? {};
+    if (APPEARANCE.has(x.type) && x.candidate) {
+        const rows = Array.isArray(x.diffs) ? x.diffs : [];
+        const fields = editing && x.candidate === 'review' ? rows.filter(r => r.changed).map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: r.after ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
+        const scoped = !!x.scopeLevel;
+        return { type: 'person', ref, seen, desc: C.personReview({ key, who, phase: x.candidate, summary: x.candidate === 'review' ? [text] : [], panelRows: rows,
+            scoped, heavy: x.scopeLevel === 'heavy', why: String(x.scope ?? '').replace(/^(full rewrite|light touch):? ?/, ''), editing, intent: x.intent ?? '', fields }) };
+    }
+    if (APPEARANCE.has(x.type)) {
+        if (!x.identity) return null;
+        const base = !!x.baseField;
+        const label = f => (f === 'outfit' ? 'Outfit' : 'Body');
+        const fs = base ? [x.baseField] : String(x.fields || 'body,outfit').split(',').map(f => f.trim()).filter(f => f === 'body' || f === 'outfit');
+        const seed = f => (base || x.lasting ? lastingRec[f] : play?.[f]) ?? '';
+        const fields = editing ? (fs.length ? fs : ['body', 'outfit']).map(f => ({ key: f, label: label(f), value: seed(f), cls: 'worldscrawl_npc_text', data: { part: x.lasting || base ? 'lasting' : 'live', field: f } })) : [];
+        return { type: 'person', ref, seen, desc: C.personKept({ key, state: x.off ? 'off' : 'kept', text: x.off ? `Character change turned off: ${text}` : `Character changed here: ${text}`, editing, intent: x.intent ?? '', hasIntent: !base, fields }) };
+    }
+    if (x.type === 'npc_found') {
+        const title = `${x.where ? `${who}'s "${x.where}" is now ${x.placeName || x.place}` : `${who} is now placed in ${x.placeName || x.place}`}, for the rest of this chat.`;
+        return { type: 'found', ref, seen, desc: C.foundKept({ key, state: x.off ? 'off' : 'kept', title, editing: editing && !x.off, place: x.place ?? '' }) };
+    }
+    const pending = x.pending && !x.off;
+    let fields = [], rows = [];
+    if (x.type === 'npc_create' && editing) {
+        const v = C.rememberValues(play ?? {});
+        fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` }));
+    } else if (NOTE_FIELD[x.type] && editing) { const [k, label] = NOTE_FIELD[x.type]; fields = [{ key: k, label, value: x[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
+    if (pending) rows = [{ field: 'text', label: 'Fact', before: '', after: x.text ?? '' }];
+    const title = pending ? `Lasting change for ${who}: ${x.text}` : x.off ? `Character change turned off: ${text}` : `Character changed here: ${text}`;
+    const editable = !x.off && (pending || x.type === 'npc_create' || !!NOTE_FIELD[x.type]);
+    return { type: 'personNote', ref, seen, desc: C.personNote({ key, state: pending ? 'review' : x.off ? 'off' : 'kept', title, who, editing: editing && editable, editable, fields: x.off ? [] : fields, rows, tag: 'person' }) };
 }

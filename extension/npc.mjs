@@ -741,6 +741,13 @@ export function expiryOf(s, i, end, env) {
     return { lasts, until, over: Number.isFinite(now) && now >= start + lasts * 60 };
 }
 
+/** What a card about a stamp was drawn from: a click from a card drawn before any of this changed is stale. */
+export function stampSig(s) {
+    const t = JSON.stringify([s?.decisionRev ?? 1, s?.off === true, s?.text, s?.note, s?.reason, s?.line, s?.place, s?.pending, s?.candidate?.token ?? null, s?.candidate?.phase ?? null]);
+    let h = 0x811c9dc5; // FNV-1a: a short tag, so every stamp in the map broadcast stays small
+    for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36);
+}
 /**
  * Where everyone stands at the end of the chat, for the map's cast browser: the folded NPC, where they are and why,
  * whether they are in the player's scene, and every stamp about them (with its message index). `cast` is the cast list.
@@ -760,8 +767,8 @@ export function npcPlayState(chat, cast, env) {
     chat.forEach((msg, i) => {
         const swipe = msg.swipe_id ?? null;
         const list = msg?.extra?.[NPC_KEY];
-        if (Array.isArray(list)) for (const s of list) {
-            if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) continue;
+        if (Array.isArray(list)) list.forEach((s, index) => {
+            if (!s || typeof s !== 'object' || typeof s.id !== 'string' || (swipe != null && s.swipe != null && s.swipe !== swipe)) return;
             if (!stamps.has(s.id)) stamps.set(s.id, []);
             const extra = {};
             if (s.type === 'npc_fact') { extra.field = s.field ?? 'fact'; extra.text = typeof s.text === 'string' ? s.text : ''; }
@@ -773,16 +780,17 @@ export function npcPlayState(chat, cast, env) {
                 extra.decisionRev = s.decisionRev ?? 1;
                 extra.candidate = s.candidate ? s.candidate.phase : '';
                 extra.candidateToken = s.candidate?.token || '';
+                if (s.type === 'npc_baseline' || s.committed?.kind === 'baseline') extra.baseField = s.committed?.field || 'body';
                 if (s.candidate?.phase === 'review') extra.diffs = reviewFields(s.candidate, { all: true });
                 const sc = s.candidate ?? s.committed;
                 if (sc && sc.kind !== 'baseline' && s.kind !== 'baseline') extra.scopeLevel = sc.scope === 'heavy' ? 'heavy' : 'light', extra.scope = `${sc.scope === 'heavy' ? 'full rewrite' : 'light touch'}${sc.why ? `: ${sc.why}` : ''}`;
             }
-            else if (s.type === 'npc_appearance_cache') continue;
+            else if (s.type === 'npc_appearance_cache') return;
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
-            else if (s.type === 'npc_disposition') extra.value = s.value ?? '';
+            else if (s.type === 'npc_disposition') { extra.value = s.value ?? ''; extra.reason = typeof s.reason === 'string' ? s.reason : ''; }
             else if (s.type === 'npc_schedule') extra.count = Array.isArray(s.schedule) ? s.schedule.length : 0;
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}) });
-        }
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}), index, sig: stampSig(s) });
+        });
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
             if (!f || (swipe != null && f.swipe != null && f.swipe !== swipe)) continue;
