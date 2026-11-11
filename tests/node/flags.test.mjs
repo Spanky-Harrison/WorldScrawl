@@ -186,7 +186,7 @@ const hesk = validateRecord({
 const loc = { address: 'r', name: 'Common Room', description: 'Smoky.', exits: [], views: [] };
 const people = { npcs_present: 'Hesk [hesk]: landlady. Looks: copper braids.', npc_focus: '' };
 const ctx = () => SillyTavern.getContext();
-const saveSettings = () => { const s = ext.settings(); return { moveMode: s.moveMode, reporterTools: s.reporterTools, flagNpcs: s.flagNpcs, flagTags: s.flagTags }; };
+const saveSettings = () => { const s = ext.settings(); return { moveMode: s.moveMode, flagNpcs: s.flagNpcs, flagTags: s.flagTags }; };
 let saved;
 const registered = () => {
     const names = [];
@@ -198,38 +198,25 @@ const registered = () => {
     return names;
 };
 
-test('reporter tools are a checkbox, not a movement radio', () => {
-    assert.match(src, /id="worldscrawl_reporter_tools" type="checkbox"> Let the narrator use tools to report changes/);
+test('no reporter-tools checkbox or setting: the after-reply tracker reports changes', () => {
+    assert.doesNotMatch(src, /worldscrawl_reporter_tools|reporterTools/);
     assert.match(src, /id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes/);
-    assert.match(src, /reporterTools: false/);
     assert.match(src, /flagNpcs: true/);
     assert.doesNotMatch(src, /name="worldscrawl_mode" value="reporter/);
-});
-
-test('an existing model-moves save keeps reporter tools; a typed save and an explicit off do not', () => {
     ctx().extensionSettings.worldscrawl = { moveMode: 'tools', flagTags: true };
-    const migrated = ext.settings();
-    assert.equal(migrated.reporterTools, true);
-    assert.equal(migrated.flagNpcs, true);
-    assert.equal(migrated.moveMode, 'tools');
-    ctx().extensionSettings.worldscrawl = { moveMode: 'typed' };
-    const typed = ext.settings();
-    assert.equal(typed.reporterTools, false);
-    assert.equal(typed.flagNpcs, true);
-    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: false };
-    assert.equal(ext.settings().reporterTools, false);
+    assert.equal('reporterTools' in ext.settings(), false, 'an old model-moves save gains nothing');
 });
 
 test('story tools are not registered; movement tools still follow the movement radio', () => {
-    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: true }), []);
-    assert.deepEqual(toolsToRegister({ moveMode: 'typed', reporterTools: true, flagNpcs: false }), []);
-    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: false }), ['ws_look', 'ws_move']);
-    assert.deepEqual(toolsToRegister({ moveMode: 'tools', reporterTools: true, flagNpcs: true }), ['ws_look', 'ws_move']);
-    ctx().extensionSettings.worldscrawl = { moveMode: 'typed', reporterTools: true, flagNpcs: true, flagTags: true };
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', flagNpcs: true }), []);
+    assert.deepEqual(toolsToRegister({ moveMode: 'typed', flagNpcs: false }), []);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools' }), ['ws_look', 'ws_move']);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools', flagNpcs: true }), ['ws_look', 'ws_move']);
+    ctx().extensionSettings.worldscrawl = { moveMode: 'typed', flagNpcs: true, flagTags: true };
     assert.deepEqual(registered(), []);
-    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: true, flagNpcs: false };
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', flagNpcs: false };
     assert.deepEqual(registered(), ['ws_look', 'ws_move']);
-    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', reporterTools: false, flagNpcs: true };
+    ctx().extensionSettings.worldscrawl = { moveMode: 'tools', flagNpcs: true };
     assert.deepEqual(registered(), ['ws_look', 'ws_move']);
 });
 
@@ -269,7 +256,6 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
     c.generateRaw = async () => { rebuilds++; return '{}'; };
     const s = ext.settings();
     s.flagNpcs = false;
-    s.reporterTools = true;
     s.moveMode = 'typed';
     const reply = async (mes, toolStamps = []) => {
         rebuilds = 0;
@@ -339,6 +325,9 @@ test('the tracker reads one exchange into place, people, and wait, and skips wha
     assert.equal(ext.shouldTrackReply(reply, [{ is_user: true, mes: '/ws-help' }], 1), false);
     assert.equal(ext.shouldTrackReply({ is_user: false, is_system: true, mes: 'edit' }, [], 0), false);
     assert.equal(ext.shouldTrackReply({ is_user: false, mes: '   ' }, [], 0), false);
+    assert.equal(ext.shouldTrackReply(reply, [], 0), false, 'a greeting has no player line before it');
+    assert.equal(ext.shouldTrackReply({ ...reply, swipes: ['You look around.'], swipe_id: 1 }, [{ is_user: true, mes: '...' }], 1), false, 'a swipe still being written');
+    assert.equal(ext.newSwipePending({ mes: 'x', swipes: ['x', 'y'], swipe_id: 1 }), false);
     const prompt = ext.trackerPrompt({ scrap: 'This place: Hall\nWeather (known; not a reason to rewrite this place): Fog.\nPeople here:\nHesk [hesk]. Looks: copper braids.', player: 'I look around.', story: 'You look around.' });
     assert.match(prompt, /Fog/);
     assert.match(prompt, /does not rewrite the room/);
