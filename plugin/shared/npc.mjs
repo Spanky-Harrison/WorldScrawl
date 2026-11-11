@@ -95,11 +95,6 @@ export function resolveNear(near, index = null) {
     return { kind: 'text', text: raw, warn: /\s/.test(raw) ? 'note' : 'typo' };
 }
 
-/** How the narrator is told to refer to p: the name, or unknownAs with the real name for consistency only. */
-export function label(p) {
-    if (p.known?.known === false && p.unknownAs) return `${p.unknownAs} [${p.id}] (the player does not know this person's name yet; it is ${p.name}. Do not have the player's character use it until it is learned.)`;
-    return `${p.name} (${p.id})`;
-}
 
 /** A clean cast file from a played NPC (base fields plus facts, memory and disposition). Following stays in the chat. */
 export function exportRecord(npc) {

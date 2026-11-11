@@ -35,7 +35,7 @@ How WorldScrawl is supposed to work. Process rules are in [CONTRIBUTING.md](CONT
 ## Model calls
 - Pick-one model calls return text labels, never numbers. They share one base prompt and a lenient reader.
 - Context comes in tiers: present, then engaged, then topical. Place lore is fed only when it's topical; sensory descriptions come on moves and looks.
-- NPCs in lore are written as `{{tokens}}`, resolved to what the PC knows.
+- NPCs in lore are written as `{{tokens}}`, resolved to what the PC knows. Every person name the model sees goes through the name portal.
 
 ## Token budget
 - Keep prompt text lean and send detail only when it's needed.
