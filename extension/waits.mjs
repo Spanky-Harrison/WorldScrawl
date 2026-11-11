@@ -4,21 +4,19 @@ import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once, res
 import { render as P, cards as C } from './shared.mjs';
 import { UPDATE_LINE, cardLib, editLib } from './cardlib.mjs';
 import { runCardAction, ticketFor } from './cardacts.mjs';
-import { normName } from './shared.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, foundEditOk, reviewSummary, stampSummary } from './npc.mjs';
-import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, removeFromCard, rewritingOf, suggestStart } from './carriers.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
+import { analyzeFlag, clip, flagCardView, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
 import { textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
-import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra, undoFlag } from './discovery.mjs';
+import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
-import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, editChangeInTab, hooks, isOn, openCarriers, settings } from './index.js';
+import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { expiryView, failedFor, isPlaceExpiry, liveDiff, openEditor, openForms, patchesOn, refreshChangeStatus, saveKeptEdit, swipeOf, toggleFromCard } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, npcEnv, personExpiriesIn, postPersonExpiryNotices, prefetchRemember, refreshLivePlaces, settleNpc } from './scene.mjs';
+import { drawDiff, expiryView, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, personExpiriesIn, postPersonExpiryNotices, prefetchRemember } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
-import { decideNpc } from './owners.mjs';
 import { reviewFields } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
@@ -200,42 +198,6 @@ function drawCard(desc, type, ticket) { return cardLib().renderCard(document, de
 /** Notice text, then ONE right-aligned button row at the end. */
 const rowOf = (...buttons) => cardLib().noticeRow(document, buttons.flat().filter(Boolean));
 const fieldsOf = (...els) => { const f = document.createElement('div'); f.className = 'worldscrawl_notice_fields'; f.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;'; f.append(...els.filter(Boolean)); return f; };
-/** Flag buttons on messages and the Keep / Discard cards (DOM only; never in message text). */
-/** A lasting character change the model asked for: nothing changes until Approve (Edit, then Approve, changes the words). */
-function pendingNpcCard(msg, s, who) {
-    const d = markPending(document.createElement('div')); d.classList.add('worldscrawl_npcpending');
-    const isApp = s.type === 'npc_appearance';
-    const label = isApp ? `Lasting appearance for ${who}: ${s.intent}` : `Lasting change for ${who}: ${s.text}`;
-    const t = document.createElement('div'); t.textContent = label; d.append(t);
-    const inp = document.createElement('input');
-    inp.type = 'text'; inp.value = isApp ? (s.intent ?? '') : (s.text ?? ''); inp.className = 'text_pole';
-    inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
-    inp.addEventListener('click', e => e.stopPropagation());
-    const done = () => { syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState(); }; // the map's cast panel follows the decision
-    if (isApp) {
-        const mid = (ctx().chat ?? []).indexOf(msg);
-        const live = mid >= 0 ? npcAt(ctx().chat ?? [], mid, castPack()?.npcs ?? [], s.id) : null;
-        if (live) for (const [k, label] of [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing']]) {
-            const row = document.createElement('div');
-            row.className = 'worldscrawl_appeardiff';
-            row.textContent = `${label} now: ${live[k] || '—'}`;
-            d.append(row);
-        }
-    }
-    d.append(fieldsOf(inp), rowOf(
-        cardButton('Approve', () => {
-            if (isApp) {
-                const next = inp.value.trim() || s.intent;
-                if (next !== s.intent) s.by = 'player';
-                s.intent = next;
-            } else s.text = inp.value.trim() || s.text;
-            delete s.pending; done();
-            if (isApp) return;
-        }, `Add this to ${who} for good (with the words in the box)`, true),
-        cardButton('Discard', () => { msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s); if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY]; done(); }, 'Do not change this person', true)));
-    return d;
-}
-
 /** The review card for a person's appearance change: the shared card (summary list, red/green panel, one row). */
 function personCardEl(msg, s, who) {
     const key = `${s.identity?.owner}|npcedit`;
@@ -250,6 +212,59 @@ function personCardEl(msg, s, who) {
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
 }
 
+/** "Show change" under a kept map change: collapsed; opening it fetches the change's before/after once and draws it. */
+const openShows = new WeakSet();
+function showChangeEl(id, p) {
+    const ch = ctx().chat ?? [];
+    const det = document.createElement('details'); det.className = 'worldscrawl_change_show';
+    const sum = document.createElement('summary'); sum.textContent = 'Show change'; det.append(sum);
+    const box = document.createElement('div'); box.className = 'worldscrawl_diff'; det.append(box);
+    const load = () => previewOps(p.ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) })
+        .then(r => (r.ok ? drawDiff(box, r.preview) : (box.textContent = `Could not show this change: ${r.errors?.[0]?.error ?? 'preview failed'}`)), e => { box.textContent = `Could not show this change: ${e?.message || e}`; });
+    if (openShows.has(p)) { det.open = true; load(); }
+    det.addEventListener('toggle', () => { if (det.open) { openShows.add(p); if (!box.childNodes.length) load(); } else openShows.delete(p); });
+    return det;
+}
+/** A kept (or turned off) map change: the shared card; Edit opens the same map form + Change: as the review card. */
+function placeKeptEl(msg, id, p) {
+    const ch = ctx().chat ?? [];
+    const key = `${id}|${p.id}`, form = openForms.get(key), bad = failedFor(id, p.id);
+    const desc = C.placeKept({ key, state: p.off === true ? 'off' : 'kept', what: (p.summary ?? []).join('; ') || p.note, editing: !!form && p.off !== true,
+        intent: p.note ?? '', preview: form?.lastPreview ?? null, inactive: bad?.inactive ?? '', cantApply: bad && !bad.inactive ? bad.error : '' });
+    if (desc.editor) desc.editor.formEl = form.el;
+    else desc.extras = [showChangeEl(id, p)];
+    const rc = drawCard(desc, 'placeKept', ticketFor('placeKept', { id, msg, p }));
+    if (desc.editor && rc._panel) {
+        form.diffBox = rc._panel; form.onLive = ops => liveDiff(rc._panel, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
+        if (!form.lastPreview) form.onLive(form.getOps());
+    }
+    return rc;
+}
+const NOTE_FIELD = { npc_fact: ['text', 'Fact'], npc_memory: ['note', 'Memory'], npc_disposition: ['reason', 'Why'] };
+/** A person note (and a pending lasting fact): the shared card; Edit opens its text (a remembered person: every field). */
+function personNoteEl(msg, id, s, who) {
+    const key = `${id}|note|${s.identity?.owner || s.type}|${s.id || ''}|${(msg.extra?.[NPC_KEY] ?? []).indexOf(s)}`;
+    const editing = !s.off && !!editLib()?.editorOpen(key);
+    const pending = s.pending === true && !s.off;
+    let fields = [], rows = [], invented = '';
+    if (s.type === 'npc_create') {
+        if (editing) { const v = C.rememberValues(s); fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` })); }
+        if (!s.off) rows = [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']].filter(([k]) => s[k]).map(([k, label]) => ({ field: k, label, before: '', after: s[k] }));
+        if (!s.off && s.invented?.length) invented = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it here (Edit) before you export.`;
+    } else if (NOTE_FIELD[s.type] && editing) { const [k, label] = NOTE_FIELD[s.type]; fields = [{ key: k, label, value: s[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
+    if (pending) rows = [{ field: 'text', label: 'Fact', before: '', after: s.text ?? '' }];
+    const title = pending ? `Lasting change for ${who}: ${s.text}` : s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`;
+    const desc = C.personNote({ key, state: pending ? 'review' : s.off ? 'off' : 'kept', title, who, editing, editable: !s.off && (pending || s.type === 'npc_create' || !!NOTE_FIELD[s.type]), fields: s.off ? [] : fields, rows, tag: s.type === 'npc_create' ? 'new person' : 'person', invented });
+    return drawCard(desc, 'personNote', ticketFor('personNote', { id, msg, s, key }));
+}
+/** A person found at a place: the shared card; Edit opens the room box. */
+function foundEl(msg, id, s, who, foundNotes) {
+    const key = `${id}|found|${s.id}|${s.where || ''}`, editing = !s.off && !!editLib()?.editorOpen(key);
+    const label = a => castPack()?.labels?.[a] || a;
+    const note = foundNotes.find(x => x.ok && x.id === s.id && (x.where ?? '') === (s.where ?? ''));
+    const title = `${s.where ? `${who}'s "${s.where}" is now ${label(s.place)}, for the rest of this chat.` : `${who} is now placed in ${label(s.place)}, for the rest of this chat.`}${note?.reason ? ` ${note.reason}` : ''}`;
+    return drawCard(C.foundKept({ key, state: s.off ? 'off' : 'kept', title, editing, place: s.place ?? '' }), 'found', ticketFor('found', { id, msg, s, key }));
+}
 /** The Remember card: Preparing… (the prefetch), failed (Check again), or the proposed person with Edit for every field. */
 function rememberEl(msg, id, remember) {
     const key = `${id}|remember`, saving = isDecided(msg, remember.nid);
@@ -431,91 +446,9 @@ export function renderPatchCards() {
             if (s.type === 'npc_appearance_cache' || !stampSummary(s, who)) continue;
             if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.candidate && !s.off) { card.append(personCardEl(msg, s, who)); continue; }
             if ((s.type === 'npc_appearance' || s.type === 'npc_baseline') && s.identity?.owner && s.committed) { card.append(personKeptEl(msg, id, s, who)); continue; }
-            if (s.pending && !s.off) { card.append(pendingNpcCard(msg, s, who)); continue; }
-            const d = line(s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`);
-            d.className = 'worldscrawl_npcchange';
-            if (s.type === 'npc_create' && !s.off && (s.looks || s.body || s.outfit || s.history || s.invented?.length)) {
-                const more = document.createElement('div');
-                more.className = 'worldscrawl_npccreate_more';
-                more.style.cssText = 'font-size:0.9em;opacity:0.85;margin:2px 0 2px 1em;';
-                for (const [k, label] of [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']]) if (s[k]) { const a = document.createElement('div'); a.textContent = `${label}: ${s[k]}`; more.append(a); }
-                if (s.invented?.length) { const v = document.createElement('div'); v.className = 'worldscrawl_invented'; v.textContent = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it in the map's cast panel (In this chat) before you export.`; more.append(v); }
-                d._more = more;
-            }
-            if (s.off) d.style.opacity = '0.6';
-            const nrow = rowOf(); const fields = fieldsOf(); d.append(nrow);
-            const textKey = s.type === 'npc_memory' ? 'note' : s.type === 'npc_disposition' ? 'reason' : 'text';
-            if (!s.off && (s.type === 'npc_fact' || s.type === 'npc_memory' || s.type === 'npc_disposition' || s.type === 'npc_create')) {
-                nrow.append(cardButton('Edit', () => {
-                    const inp = document.createElement('input');
-                    inp.type = 'text';
-                    inp.value = s.type === 'npc_create' ? (s.line ?? '') : (s[textKey] ?? '');
-                    inp.className = 'text_pole';
-                    inp.style.cssText = 'width:16em;display:inline-block;margin:0 4px;padding:1px 4px;';
-                    inp.addEventListener('click', e => e.stopPropagation());
-                    const save = cardButton('Save', async () => {
-                        if (s.type === 'npc_create') { s.line = inp.value.trim() || s.line; if (s.name) npcNames.set(s.id, s.name); }
-                        const ident = s.identity;
-                        const chat = ctx().chat ?? [];
-                        if (ident) {
-                            const payload = s.type === 'npc_memory' ? { note: inp.value.trim() } : s.type === 'npc_disposition' ? { reason: inp.value.trim() } : s.type === 'npc_create' ? { line: inp.value.trim() } : { text: inp.value.trim() };
-                            decideNpc(chat, ident, s.decisionRev ?? 1, 'edit', payload);
-                        } else if (s.type === 'npc_create') s.line = inp.value.trim() || s.line;
-                        else s[textKey] = inp.value.trim();
-                        syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
-                    });
-                    fields.append(inp, save); d.insertBefore(fields, nrow);
-                }, 'Edit this note'));
-            }
-            const stampKey = `${id}:${s.identity?.owner || s.type}:${s.id || ''}`;
-            const act = (action, payload) => once(`npc-${action}:${stampKey}`, async () => {
-                const chat = ctx().chat ?? [];
-                const res = s.identity ? await settleNpc(chat, s.identity, s.decisionRev ?? 1, action, { ...payload, elapsed: npcClock(chat, Math.max(0, chat.length - 1)).elapsed }) : { ok: false };
-                if (!res.ok && !s.identity && action === 'undo') {
-                    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(x => x !== s);
-                    if (!msg.extra[NPC_KEY].length) delete msg.extra[NPC_KEY];
-                } else if (!res.ok && !s.identity && (action === 'off' || action === 'on')) s.off = action === 'off';
-                syncSwipeExtra(msg); ctx().saveChat?.(); applyFacts(); renderPatchCards(); broadcastMapState();
-                return res;
-            });
-            nrow.append(cardButton(s.off ? 'Turn on' : 'Turn off', () => act(s.off ? 'on' : 'off', {}), s.off ? 'Use this note again' : 'Keep the note here but stop using it', true));
-            nrow.append(cardButton('Undo', () => act('undo', {}), 'Remove this note (deleting the message does the same)', true));
-            card.append(d);
-            if (d._more) card.append(d._more);
+            card.append(personNoteEl(msg, id, s, who));
         }
-        const placeLabelOf = a => castPack()?.labels?.[a] || a;
-        for (const s of npcStamps) {
-            if (s.type !== 'npc_found') continue;
-            const who = npcNames.get(s.id) || s.id;
-            const note = foundNotes.find(x => x.ok && x.id === s.id && (x.where ?? '') === (s.where ?? ''));
-            const d = line(`${s.where ? `${who}'s "${s.where}" is now ${placeLabelOf(s.place)}, for the rest of this chat.` : `${who} is now placed in ${placeLabelOf(s.place)}, for the rest of this chat.`}${note?.reason ? ` ${note.reason}` : ''}`);
-            d.className = 'worldscrawl_found';
-            const nrow = rowOf();
-            const fields = fieldsOf();
-            nrow.append(cardButton('Edit', () => {
-                const inp = document.createElement('input');
-                inp.type = 'text'; inp.value = s.place ?? ''; inp.className = 'text_pole worldscrawl_found_place';
-                inp.style.cssText = 'width:18em;display:inline-block;margin:0 4px;padding:1px 4px;';
-                inp.addEventListener('click', e => e.stopPropagation());
-                const save = cardButton('Save', async () => {
-                    await refreshLivePlaces();
-                    const loc = await currentLocation();
-                    const env = npcEnv(ctx().chat ?? [], loc);
-                    const n = npcAt(ctx().chat ?? [], id, castPack()?.npcs ?? [], s.id);
-                    const typed = inp.value.trim(), pk = castPack();
-                    // By address, or by a room's name on the live map (the first one within the where-label's near).
-                    const cands = pk?.places?.has(typed) ? [typed] : [...(pk?.places ?? [])].filter(a => normName(pk.labels?.[a] ?? '') === normName(typed));
-                    const tries = (cands.length ? cands : [typed]).map(a => foundEditOk(n, s.where ?? '', a, env));
-                    const j = tries.find(t => t.ok) ?? tries[0];
-                    if (!j.ok) { toastr.warning(`WorldScrawl: ${j.reason}`); return; }
-                    s.place = j.place;
-                    syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState();
-                });
-                fields.replaceChildren(inp, save); d.insertBefore(fields, nrow);
-            }, 'Change the room this where-label resolves to'), cardButton(s.off ? 'Turn on' : 'Turn off', () => once(`found-off:${id}:${s.id}:${s.where || ''}`, () => settleNpc(ctx().chat ?? [], s.identity, s.decisionRev ?? 1, s.off ? 'on' : 'off', {}).then(() => { syncSwipeExtra(msg); return applyFacts(); }).then(() => { renderPatchCards(); broadcastMapState(); })), s.off ? 'Use this find again' : 'Stop using this find', true), cardButton('Undo', () => once(`found-undo:${id}:${s.id}:${s.where || ''}`, () => settleNpc(ctx().chat ?? [], s.identity, s.decisionRev ?? 1, 'undo', {}).then(() => { syncSwipeExtra(msg); return applyFacts(); }).then(() => { renderPatchCards(); broadcastMapState(); })), 'Remove this find (deleting the message does the same)', true));
-            d.append(nrow);
-            card.append(d);
-        }
+        for (const s of npcStamps) if (s.type === 'npc_found') card.append(foundEl(msg, id, s, npcNames.get(s.id) || s.id, foundNotes));
         for (const fnd of foundNotes) if (!fnd.ok) {
             const d = line(`Couldn't find ${fnd.name || 'them'}: ${fnd.reason}`);
             d.className = 'worldscrawl_found_rejected';
@@ -532,31 +465,7 @@ export function renderPatchCards() {
             const sum = document.createElement('summary'); sum.textContent = `🗺 ${msg.mes}`; det.append(sum);
             card.append(det); box = det;
         }
-        for (const p of kept) {
-            const what = (p.summary ?? []).join('; ') || p.note;
-            if (p.off === true) {
-                const d = line(`🗺 Map change turned off: ${what}`);
-                d.className = 'worldscrawl_change_off'; d.style.opacity = '0.6';
-                d.append(rowOf(cardButton('Turn on', () => once(`map-on:${id}:${p.id}`, () => toggleFromCard(id, p.id)), 'Put this change back on the map', true)));
-                box.append(d);
-                continue;
-            }
-            const d = line(`🗺 Map changed here: ${what}`);
-            const key = `${id}|${p.id}`, form = openForms.get(key);
-            d.append(rowOf(form ? cardButton('Close editor', () => { openForms.delete(key); renderPatchCards(); }) : cardButton('Edit', () => editChangeInTab(id, p, () => openEditor(key, p.ops)), 'Change this kept change in the map editor (a new tab); it stays on this message'),
-                ...(failedFor(id, p.id)?.inactive ? [] : [cardButton('Turn off', () => once(`map-off:${id}:${p.id}`, () => toggleFromCard(id, p.id)), 'Take this change off the map for now (it stays here; turn it on again any time)', true)]),
-                cardButton('Undo', () => once(`map-undo:${id}:${p.id}`, () => { if (isCarrier(msg)) removeFromCard(id, p.id); else { if (f) f.patch = p.id; else { msg.extra[FLAG_KEY] = { patch: p.id }; } undoFlag(id); } }), 'Remove this change (deleting the message does the same)', true)));
-            box.append(d);
-            const bad = failedFor(id, p.id);
-            if (bad?.inactive) { const w = line(bad.inactive); w.className = 'worldscrawl_inactive'; w.style.opacity = '.6'; box.append(w); }
-            else if (bad) { const w = line(`⚠ can't apply: ${bad.error}`); w.className = 'worldscrawl_cant_apply'; w.style.color = '#e55'; box.append(w); }
-            if (form) {
-                const diffBox = document.createElement('div'); diffBox.className = 'worldscrawl_diff';
-                form.onLive = ops => liveDiff(diffBox, ops, { changes: chatChanges(ch.slice(0, id)), now: chatElapsed(ch.slice(0, id + 1)) }, form);
-                box.append(form.el, diffBox, cardButton('Save change', () => saveKeptEdit(id, p.id, form)));
-                form.onLive(form.getOps());
-            }
-        }
+        for (const p of kept) box.append(placeKeptEl(msg, id, p));
         if (!card.childNodes.length) continue;
         (el.querySelector('.mes_block') ?? el).appendChild(card);
     }

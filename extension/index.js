@@ -28,7 +28,7 @@ import { DIG_FAILED_NOTICE, parseIntent } from './looking.mjs';
 import { mapState, openMapChannel, openMapWindow } from './mapwindow.mjs';
 import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
-import { changeEditUrl, mapCtx } from './patches.mjs';
+import { mapCtx } from './patches.mjs';
 import { applyFacts, applyFound, learnNameOn, offerRemember, postPersonExpiryNotices, prepareNpcs, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
@@ -45,7 +45,7 @@ export { renderTokens, fedLore, loreBits, refreshLivePlaces, flaggedInScene } fr
 export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
 export { revealsDestination } from './shared.mjs';
 export { themeVars, mapState, expandSys, openMapWindow, openWorldFolder } from './mapwindow.mjs';
-export { flagHint, flagToolText, flagActionText, waitHint, patchesOn, previewOps, restampChange, opsHash, changeEditUrl, changeEditMismatch, changeDependents, toggleChange, liveEdit } from './patches.mjs';
+export { flagHint, flagToolText, flagActionText, waitHint, patchesOn, previewOps, restampChange, changeDependents, toggleChange, liveEdit } from './patches.mjs';
 export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagCardView, USER_FLAG_NOTE, replyAfter, SCENE_KEY, sceneOverrides, setSceneOverride, proactiveDiscovery } from './carriers.mjs';
 export { modelWait, planWait, MIN_NARRATOR_WAIT, narratorWaitAction, waitAmount, proposeWait, keepWait, waitExpiryDelta, editKeptWait, discardWait, waitNote, renderPatchCards } from './waits.mjs';
 export { setPrompts, P as render };
@@ -726,11 +726,6 @@ export function broadcastMapState() {
     broadcastTimer = setTimeout(async () => {
         try { mapChannel ??= openMapChannel(); mapChannel.postMessage(await mapState()); } catch (e) { console.warn('[WorldScrawl] map broadcast failed', e); }
     }, 150);
-}
-export function editChangeInTab(id, p, fallback = () => {}) {
-    try { mapChannel ??= openMapChannel(); } catch {}
-    const w = typeof window !== 'undefined' ? window.open(changeEditUrl(id, p), '_blank') : null;
-    if (!w) { toastr.warning('WorldScrawl: the browser blocked the editor tab, so it opens here instead.'); fallback(); }
 }
 /** /ws-wait and /ws-sleep (and the map's Wait button): post a stamped message, then let the narrator describe it. */
 export async function waitCommand(args, sleep = false) {

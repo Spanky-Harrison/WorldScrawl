@@ -1,11 +1,11 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { render as P, patches as patchShared } from './shared.mjs';
 import { carrierLine, clip, isCarrier, patchLib, proactiveDiscovery, snapCarriers } from './carriers.mjs';
-import { chatChanges, chatElapsed, defaultWorldId } from './clock.mjs';
+import { chatChanges, chatElapsed } from './clock.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api } from './doors.mjs';
 import { exitsCache, renderAllExits } from './footer.mjs';
-import { MAP_URL, PATCH_KEY, activeWorld, baseUrl, broadcastMapState, ctx, isOn, mapVersion } from './index.js';
+import { PATCH_KEY, baseUrl, broadcastMapState, ctx, isOn, mapVersion } from './index.js';
 import { rememberToggle } from './expiry.mjs';
 import { applyFacts } from './scene.mjs';
 import { cardButton, renderPatchCards } from './waits.mjs';
@@ -125,21 +125,25 @@ async function openEditor(key, ops, context = {}) {
     renderPatchCards();
 }
 /** Re-stamp a kept change with edited ops (same message, same id); the rest of the chat's changes must still fit. */
-async function saveKeptEdit(id, pid, form) {
-    const r = await restampChange(id, pid, form.getOps());
-    if (!r.ok) { form.setErrors(r.errors); return; }
+async function saveKeptEdit(id, pid, form, { note, still } = {}) {
+    const r = await restampChange(id, pid, form.getOps(), { note, still });
+    if (r.stale) { renderPatchCards(); return r; }
+    if (!r.ok) { form.setErrors(r.errors); return r; }
     openForms.delete(`${id}|${pid}`);
     renderPatchCards();
+    return r;
 }
-/** {ok, summary} or {ok:false, errors}. Shared by the in-chat editor and the map editor tab. */
-export async function restampChange(id, pid, ops) {
+/** {ok, summary} or {ok:false, errors} ({stale} when `still()` failed after the preview): the kept card's Approve edited. */
+export async function restampChange(id, pid, ops, { note, still } = {}) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], p = (msg?.extra?.[PATCH_KEY] ?? []).find(x => x.id === pid);
     if (!p) return { ok: false, errors: [{ i: null, error: 'That change is no longer on its message.' }] };
+    if (!ops.length) return { ok: false, errors: [{ i: null, error: 'Nothing to keep: add a change, or press Undo to remove it.' }] };
     const before = chatChanges(chat.slice(0, id));
     const r = await previewOps(ops, { changes: before, now: chatElapsed(chat.slice(0, id + 1)) });
+    if (still && !still()) return { ok: false, stale: true }; // the change moved while the preview ran: write nothing
     if (!r.ok) return { ok: false, errors: r.errors };
-    const old = { ops: p.ops, summary: p.summary, relocate: p.relocate, inherit: p.inherit, names: p.names, edited: p.edited };
-    Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, edited: Date.now() });
+    const old = { ops: p.ops, summary: p.summary, relocate: p.relocate, inherit: p.inherit, names: p.names, edited: p.edited, note: p.note };
+    Object.assign(p, { ops: r.preview.ops ?? ops, summary: r.preview.summary, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, edited: Date.now(), ...(String(note ?? '').trim() ? { note: clip(String(note).trim(), 200) } : {}) });
     const all = await api('/inspect/index', { method: 'POST', body: JSON.stringify(mapCtx()) });
     if (!all.ok) {
         Object.assign(p, old);
@@ -156,30 +160,6 @@ export async function restampChange(id, pid, ops) {
     return { ok: true, summary: p.summary ?? [] };
 }
 
-// ---- Edit in the map editor tab: Edit on a "Map changed here" bar opens plugin/ui/?edit=... in a new tab. The URL names
-// the chat, message, swipe, change id and a hash of the change's ops; the tab asks this tab for the change ('change_open')
-// and posts the edited ops back ('change_save'). Both are only answered when all of these still match.
-export const opsHash = ops => { let h = 5381; for (const ch of JSON.stringify(ops ?? [])) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(36); };
-const currentChatId = () => { const c = ctx(); return c.chatId ?? c.getCurrentChatId?.() ?? null; };
-export const changeEditUrl = (id, p, chat = ctx().chat ?? [], chatId = currentChatId()) =>
-    `${MAP_URL}?${new URLSearchParams({ edit: '1', chat: String(chatId ?? ''), msg: String(id), swipe: String(chat[id]?.swipe_id ?? 0), change: String(p.id), hash: opsHash(p.ops) })}`;
-/** Why an edit session no longer fits this chat ('' = it does). */
-export function changeEditMismatch(d, chat = ctx().chat ?? [], chatId = currentChatId()) {
-    if (!d || String(d.chat ?? '') !== String(chatId ?? '')) return 'That chat is not the one open in SillyTavern now.';
-    const msg = chat[Number(d.msg)];
-    if (!msg) return 'That message is no longer in the chat.';
-    if (String(msg.swipe_id ?? 0) !== String(d.swipe ?? 0)) return 'That message is showing a different swipe now.';
-    const p = patchesOn(msg).find(x => x.id === d.change) ?? (msg.extra?.[PATCH_KEY] ?? []).find(x => x.id === d.change);
-    if (!p) return 'That change is no longer on its message.';
-    if (opsHash(p.ops) !== d.hash) return 'That change was edited since this editor opened. Close this tab and press Edit again.';
-    return '';
-}
-async function changeEditSession(d) {
-    const chat = ctx().chat ?? [], id = Number(d.msg), msg = chat[id];
-    const p = (msg.extra?.[PATCH_KEY] ?? []).find(x => x.id === d.change);
-    const before = chatChanges(chat.slice(0, id));
-    return { ok: true, ops: p.ops, summary: p.summary ?? [], note: p.note ?? '', before, with: [...before, { ...p, _msg: id }], now: chatElapsed(chat.slice(0, id + 1)), world: activeWorld || defaultWorldId || '', mes: String(msg.mes ?? '').slice(0, 300) };
-}
 /** Which kept changes can't apply any more (a change they built on was turned off): [{msg, id, error}], refreshed in the background. */
 let changeStatus = { key: null, failed: [], busy: null };
 const failedFor = (mi, pid) => changeStatus.failed.find(f => f.msg === mi && f.id === pid);
@@ -358,4 +338,4 @@ export async function keepExpiryEdit(id, key, note = '', still = () => true) {
     return { ok: true, patch: p };
 }
 
-export { FLAG_TAG, RANGE_CAP, changeEditSession, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };
+export { FLAG_TAG, RANGE_CAP, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };

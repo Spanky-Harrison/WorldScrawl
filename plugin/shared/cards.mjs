@@ -196,3 +196,65 @@ export function rememberReview(v) {
         actions: within('remember', phase, actions),
     };
 }
+
+/**
+ * A kept (or turned off) map change. v: {key, state ('kept'|'off'), what, editing, intent, preview (while editing),
+ * inactive, cantApply}. Edit opens the same in-card editor as the review card (map form + Change:).
+ */
+export function placeKept(v) {
+    const state = v.state === 'off' ? 'off' : 'kept';
+    const notes = [];
+    if (v.inactive) notes.push({ text: v.inactive, tone: 'muted', cls: 'worldscrawl_inactive' });
+    else if (v.cantApply) notes.push({ text: `⚠ can't apply: ${v.cantApply}`, tone: 'error', cls: 'worldscrawl_cant_apply' });
+    const actions = state === 'off'
+        ? [act('on', 'Put this change back on the map', true), act('undo', 'Remove this change (deleting the message does the same)', true)]
+        : [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change this kept change here; it stays on this message'),
+            v.editing ? act('save', 'Put the edited change on the map in place of this one', true) : null,
+            v.inactive ? null : act('off', 'Take this change off the map for now (it stays here; turn it on again any time)', true),
+            act('undo', 'Remove this change (deleting the message does the same)', true)];
+    return {
+        key: v.key, type: 'place', state, pending: false, cls: state === 'off' ? 'worldscrawl_change_off' : 'worldscrawl_change_kept',
+        title: state === 'off' ? `🗺 Map change turned off: ${v.what}` : `🗺 Map changed here: ${v.what}`, summary: [], notes,
+        panel: v.editing ? { type: 'place', preview: v.preview ?? null } : null,
+        editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_flag_intent' }, fields: [], form: 'patch' } : null,
+        actions: within('place', state, actions),
+    };
+}
+
+/**
+ * A person note (fact, memory, disposition, a remembered person, and the automatic rows: follow, name, schedule…).
+ * v: {key, state ('review' for a pending lasting fact | 'kept' | 'off'), title, editing, editable, fields: [{key, label, value, kind}]
+ * (the editor's boxes), rows (a panel, e.g. a remembered person's), tag, invented}.
+ */
+export function personNote(v) {
+    const state = v.state === 'review' ? 'review' : v.state === 'off' ? 'off' : 'kept';
+    const editable = v.editable ?? (v.fields ?? []).length > 0;
+    const notes = v.invented ? [{ text: v.invented, tone: 'warn', cls: 'worldscrawl_invented' }] : [];
+    const actions = state === 'review'
+        ? [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change the words before approving'), act('approve', v.editing ? 'Add this to them for good, exactly as typed' : 'Add this to them for good', true), act('discard', 'Do not change this person', true)]
+        : state === 'off'
+            ? [act('on', 'Use this note again', true), act('undo', 'Remove this note (deleting the message does the same)', true)]
+            : [editable ? (v.editing ? act('close', 'Forget the edits') : act('edit', 'Edit this note')) : null, editable && v.editing ? act('save', 'Keep the note exactly as typed', true) : null,
+                act('off', 'Keep the note here but stop using it', true), act('undo', 'Remove this note (deleting the message does the same)', true)];
+    return {
+        key: v.key, type: 'fact', state, pending: state === 'review', cls: state === 'review' ? 'worldscrawl_npcpending' : 'worldscrawl_npcchange',
+        title: v.title, summary: [], notes,
+        panel: v.rows?.length ? { type: 'fields', title: v.who ?? '', tag: v.tag ?? 'person', rows: v.rows } : null,
+        editor: v.editing && editable ? { key: v.key, intent: null, fields: v.fields } : null,
+        actions: within('fact', state, actions),
+    };
+}
+
+/** A person found at a place ("her 'the bar' is now …"). v: {key, state, title, editing, place}. */
+export function foundKept(v) {
+    const state = v.state === 'off' ? 'off' : 'kept';
+    const actions = state === 'off'
+        ? [act('on', 'Use this find again', true), act('undo', 'Remove this find (deleting the message does the same)', true)]
+        : [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change the room this where-label resolves to'), v.editing ? act('save', 'Use the room in the box', true) : null,
+            act('off', 'Stop using this find', true), act('undo', 'Remove this find (deleting the message does the same)', true)];
+    return {
+        key: v.key, type: 'found', state, pending: false, cls: 'worldscrawl_found', title: v.title, summary: [], notes: [], panel: null,
+        editor: v.editing ? { key: v.key, intent: null, fields: [{ key: 'place', label: 'Room', value: v.place ?? '', kind: 'place', cls: 'worldscrawl_found_place', placeholder: 'a room address or its name' }] } : null,
+        actions: within('found', state, actions),
+    };
+}
