@@ -257,9 +257,8 @@ test('the reply carries the stamp; the context line stays as the fallback', () =
 test('the map the last narrator reply saw: later Turn off reverted, its room and clock', () => {
     const chat = [
         { mes: 'hi', extra: { worldscrawl_location: 'inn/upstairs' } },
-        { mes: 'go', is_user: true, extra: { worldscrawl_patches: [{ id: 'p1', type: 'patch', ops: [] }] } },
+        { mes: 'go', is_user: true, extra: { worldscrawl_patches: [{ id: 'p1', type: 'patch', ops: [], off: true, narrated: { at: 2, off: false } }] } },
         { mes: 'You enter.', extra: { worldscrawl_location: 'inn/guest_room_1' } },
-        { mes: '[Engine: turned off]', is_system: true, extra: { worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[1, 'p1']], worldscrawl_notice_on: false } },
     ];
     const v = ext.narratedView(chat);
     assert.equal(v.index, 2); assert.equal(v.address, 'inn/guest_room_1');
@@ -341,33 +340,16 @@ test('turning a change on or off adds no chat row; aftermath still describes the
     } finally { restore(); }
 });
 
-test('an old toggle notice still reverts the view; deleting it does not change the patch', async () => {
-    const { c, added, restore } = useMap();
-    try {
-        const p = { type: 'patch', id: 'p1', swipe: 0, off: true, ops: [{ op: 'set_name', loc: SQUARE, text: 'Fair Square' }] };
-        const notice = { is_system: true, mes: 'Map edit: turned off the change from #0', extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[0, 'p1']], worldscrawl_notice_on: false } };
-        const chat = [
-            { is_user: true, mes: 'rename', extra: { worldscrawl_patches: [p] } },
-            { mes: 'The square has a new name.', extra: { worldscrawl_location: SQUARE } },
-            notice,
-        ];
-        assert.equal(ext.narratedView(chat).changes[0].off, false);
-        chat.pop();
-        assert.equal(p.off, true);
-        assert.equal(ext.narratedView(chat).changes[0].off, true, 'without the notice or a narrated bit, the view follows the patch');
-        chat.push(notice);
-        c.chat = chat;
-        const n = chat.length;
-        const r = await ext.toggleChange(0, 'p1');
-        assert.equal(r.ok, true);
-        assert.equal(r.off, false);
-        assert.equal(chat.length, n);
-        assert.equal(added.length, 0);
-        assert.equal(p.off, undefined);
-        assert.deepEqual(p.narrated, { at: 1, off: false });
-        chat.pop();
-        assert.equal(p.off, undefined);
-        assert.equal(ext.narratedView(chat).changes[0].off, false);
-    } finally { restore(); }
+test('an old toggle notice is not read: the view follows the change\'s own narrated bit', () => {
+    const p = { type: 'patch', id: 'p1', swipe: 0, off: true, ops: [{ op: 'set_name', loc: SQUARE, text: 'Fair Square' }] };
+    const notice = { is_system: true, mes: 'Map edit: turned off the change from #0', extra: { worldscrawl_notice: true, worldscrawl_notice_kind: 'toggle', worldscrawl_notice_changes: [[0, 'p1']], worldscrawl_notice_on: false } };
+    const chat = [
+        { is_user: true, mes: 'rename', extra: { worldscrawl_patches: [p] } },
+        { mes: 'The square has a new name.', extra: { worldscrawl_location: SQUARE } },
+        notice,
+    ];
+    assert.equal(ext.narratedView(chat).changes[0].off, true, 'no narrated bit: the view follows the patch, whatever the notice says');
+    p.narrated = { at: 1, off: false };
+    assert.equal(ext.narratedView(chat).changes[0].off, false, 'the narrated bit reverts the later Turn off');
 });
 }
