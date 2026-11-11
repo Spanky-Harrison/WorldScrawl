@@ -23,6 +23,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | patches.mjs | Map patches (lasting changes) and the `FLAG_TAG` / `ws_flag` wait hint | `previewOps`, `toggleChange`, `FLAG_TAG` |
 | carriers.mjs | Carrier messages for changes, patch library, edit calls, flag cards | `snapCarriers`, `restoreCarriers`, `flagCardView` |
 | discovery.mjs | Discovery prompts, `ws_flag` handling on replies, tool registration, feeding tracker results into the place rewrite and person apply | `onReplyForFlags`, `flagMessage`, `registerTools`, `applyTrackerResult`, `onStorySwipe` |
+| arearewrite.mjs | Light touch / full rewrite on place changes: which ops are existing text (`textTargets`), merging the rewrite answer (`mergeRewrite`) and the guard that refuses anything but text changing (`rewriteGuard`). No DOM, fetch or model calls (the call is `swapRewrite` in carriers.mjs) | `areaRewrite`, `textTargets`, `mergeRewrite`, `rewriteGuard` |
 | tracker.mjs | After-reply tracker: the question, the answer reader, flag gates, and dropping a swipe's tracker stamps. No DOM or fetch | `shouldTrackReply`, `readTrackerAnswer`, `gateTracker`, `trackerPrompt`, `dropTrackerMarks` |
 | waits.mjs | Waits: model and player waits, Approve/Discard, patch cards, lasting NPC changes waiting for Approve, appearance-rebuild Retry | `planWait`, `proposeWait`, `renderPatchCards` |
 | settings.mjs | The settings panel | `addSettingsPanel` |
