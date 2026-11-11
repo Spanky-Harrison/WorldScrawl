@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { clientDir, RIVERTON, TAVERN } from './helpers.mjs';
+import { clientDir, RIVERTON, SQUARE, TAVERN } from './helpers.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 const ext = await import('../../extension/index.js');
@@ -206,7 +206,7 @@ test('stale results: an action from a card drawn before the change moved writes 
     await flush(60);
     assert.equal(o.committed ?? null, null, 'the stale Approve committed nothing');
     // The layer refuses an async action with no ticket, for every type.
-    for (const type of Object.keys(acts.HANDLERS)) assert.equal((await acts.runCardAction(type, 'approve', null)).error, 'no ticket');
+    for (const [type, h] of Object.entries(acts.HANDLERS)) for (const a of Object.keys(h).filter(a => acts.ASYNC_ACTIONS.has(a))) assert.equal((await acts.runCardAction(type, a, null)).error, 'no ticket', `${type} ${a}`);
     // Person: a card drawn on one swipe, clicked after a swipe.
     const p2 = await personProposal('pc4');
     doc = draw([0]);
@@ -373,4 +373,96 @@ test('stale: a person Check again from a card drawn before the change was decide
     assert.equal(JSON.stringify(o.committed), committed);
     assert.equal(o.candidate, null);
     assert.equal(calls.filter(p => /Rewrite body/.test(p)).length, 0);
+});
+
+// ---- S2: the place expiry notice (a temporary room ran out under the party)
+const { postExpiredNotice } = await import('../../extension/expiry.mjs');
+const { chatChanges } = await import('../../extension/clock.mjs');
+const LANE = 'riverton:streets/market_lane', BOOTH = 'riverton:streets/stall';
+const STALL_OPS = [{ op: 'create_place', area: 'riverton:streets', id: 'stall', name: 'Pop-up Stall', description: 'Canvas and crates.', lasts: '1h',
+    exits: [{ direction: 'stall', to: SQUARE, return_direction: 'square' }, { direction: 'lane', to: LANE, return_direction: 'stall' }] }];
+/** A pop-up stall made at message 1 for an hour, two hours pass, and the real expiry notice is posted on message 3. */
+async function stallGone() {
+    const c = boot([
+        { is_user: true, mes: 'I duck into the stall.', swipe_id: 0, extra: { worldscrawl_move: { to: SQUARE } } },
+        { is_user: false, mes: 'A pop-up stall stands here for the fair.', swipe_id: 0, swipe_info: [{ extra: {} }],
+            extra: { worldscrawl_patches: [{ type: 'patch', id: 'stall', note: 'a pop-up stall for the fair', at: 0, swipe: 0, ops: STALL_OPS, summary: ['Pop-up Stall: new room'] }] } },
+        { is_user: true, mes: '[wait] 2h', swipe_id: 0, extra: { worldscrawl_wait: { seconds: 7200 } } },
+    ], []);
+    model({});
+    await postExpiredNotice(BOOTH, SQUARE, 'square');
+    assert.equal(c.chat.length, 4);
+    assert.equal(c.chat[3].extra.worldscrawl_notice_expired, true);
+    return { c };
+}
+const placeGone = doc => doc.querySelector('.worldscrawl_placeexpired');
+
+test('place expiry: the card shows the room while it lasted next to now; Edit → Approve edited stamps a kept change on the notice; deleting the notice removes it', async () => {
+    const { c } = await stallGone();
+    let doc = draw([0, 1, 2, 3]);
+    assert.match(placeGone(doc).textContent, /Working out what changed/);
+    await flush(60);
+    let card = placeGone(doc);
+    assert.equal(card.dataset.state, 'info');
+    assert.match(card.querySelector('.worldscrawl_card_summary').textContent, /Pop-up Stall ran out/);
+    const panel = card.querySelector('.worldscrawl_diff');
+    assert.ok(panel, 'the before/now panel');
+    assert.match(panel.textContent, /Pop-up Stall/);
+    assert.match(panel.textContent, /Canvas and crates\./, 'before: the temporary room');
+    assert.deepEqual(btns(card), ['Edit']);
+    byText(card, 'Edit').click();
+    await flush(60);
+    card = placeGone(doc);
+    assert.deepEqual(btns(card), ['Close editor', 'Approve edited']);
+    assert.ok(card.querySelector('.worldscrawl_card_editor .wspf'), 'the map form in the shared editor');
+    const intent = card.querySelector('.worldscrawl_card_editor .worldscrawl_flag_intent');
+    assert.equal(intent.value, 'a pop-up stall for the fair');
+    intent.value = 'the stall stays for good';
+    intent.dispatchEvent({ type: 'input' });
+    byText(card, 'Approve edited').click();
+    await flush(60);
+    const kept = c.chat[3].extra.worldscrawl_patches ?? [];
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].source, 'expiry_edit');
+    assert.equal(kept[0].note, 'the stall stays for good');
+    assert.equal(kept[0].ops[0].op, 'create_place');
+    assert.equal('lasts' in kept[0].ops[0], false, 'kept for good');
+    doc = draw([0, 1, 2, 3]);
+    assert.deepEqual(btns(placeGone(doc)), [], 'the card gives way to the kept change');
+    assert.ok(doc.querySelectorAll('.mes')[3].textContent.includes('Map changed here'));
+    assert.ok(chatChanges(c.chat).some(p => p.source === 'expiry_edit'));
+    // Deleting the notice takes the kept change with it.
+    c.chat.splice(3, 1);
+    assert.equal(chatChanges(c.chat).some(p => p.source === 'expiry_edit'), false);
+});
+
+test('place expiry stale: a notice deleted before the click, or during the save, writes nothing', async () => {
+    let { c } = await stallGone();
+    let doc = draw([0, 1, 2, 3]);
+    await flush(60);
+    byText(placeGone(doc), 'Edit').click();
+    await flush(60);
+    const notice = c.chat[3];
+    const ok = byText(placeGone(doc), 'Approve edited');
+    c.chat.splice(3, 1);
+    ok.click();
+    await flush(60);
+    assert.equal(notice.extra.worldscrawl_patches ?? null, null, 'deleted before the click');
+    patchesExt.openForms.clear();
+
+    ({ c } = await stallGone());
+    doc = draw([0, 1, 2, 3]);
+    await flush(60);
+    byText(placeGone(doc), 'Edit').click();
+    await flush(60);
+    const n2 = c.chat[3];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => { if (/patch\/preview/.test(String(url)) && c.chat[3] === n2) c.chat.splice(3, 1); return real(url, opts); };
+    try {
+        byText(placeGone(doc), 'Approve edited').click();
+        await flush(80);
+    } finally { globalThis.fetch = real; }
+    assert.equal(c.chat.length, 3, 'the notice went mid-save');
+    assert.equal(n2.extra.worldscrawl_patches ?? null, null, 'deleted during the save');
+    patchesExt.openForms.clear();
 });
