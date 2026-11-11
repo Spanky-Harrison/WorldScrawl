@@ -1165,9 +1165,14 @@ test('the tracker is told who is not known by name; its name item for someone no
     const { c } = boot();
     rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY] }] });
     const lines = trackerPeopleLines([{ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', nameKnown: false }, { id: 'tam', name: 'Tam', nameKnown: true }]);
-    assert.match(lines, /^Hesk \[hesk\]\. Name not yet known to the player: they know this person only as "the landlady"\./);
+    assert.match(lines, /^Hesk \[hesk\] \(name not yet known\)\. Looks: /);
+    assert.doesNotMatch(lines, /they know this person only as/, 'the shown name is the line\'s own name: no second "known only as" line');
     assert.doesNotMatch(lines.split('\n')[1], /not yet known/);
-    assert.match(promptText('npc.tracker'), /not yet known by name has their name said in this exchange[^\n]*"action": "name"/);
+    const tp = promptText('npc.tracker');
+    assert.match(tp, /listed above as \(name not yet known\) has their name said in this exchange[^\n]*"action": "name"/);
+    assert.match(tp, /with id set to the handle in \[brackets\] after their name/);
+    assert.match(tp, /Call people by the names they have above and in the exchange \(never "the stranger", never a bracketed handle\)/);
+    assert.doesNotMatch(tp, /real name/i);
     c.chat = [msg([])];
     assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
     // She is not in the scene and nobody said her name in dialogue: the portal refuses the learn (names.test.mjs has the rest).
