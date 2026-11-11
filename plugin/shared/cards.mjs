@@ -8,7 +8,8 @@ export const ACTIONS = {
     // A person change whose rewrite failed keeps Edit and the scope switch: the Change box is how it is asked again.
     person: { working: ['again', 'discard'], review: ['again', 'edit', 'close', 'scope', 'rewrite', 'approve', 'discard'], failed: ['again', 'edit', 'close', 'scope', 'rewrite', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'], info: [] },
     expiry: { info: ['edit', 'close', 'save'] },
-    remember: { working: ['discard'], review: ['again', 'edit', 'close', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'] },
+    // Approve while it is still preparing saves the card as soon as it is ready (the call in flight, never a second one).
+    remember: { working: ['approve', 'discard'], review: ['again', 'edit', 'close', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'] },
     fact: { review: ['edit', 'close', 'approve', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
     found: { kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
     wait: { review: ['edit', 'close', 'approve', 'discard'] },
@@ -133,5 +134,65 @@ export function placeExpiry(v) {
         panel: v.preview ? { type: 'place', preview: v.preview } : null,
         editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_flag_intent' }, fields: [], form: 'patch' } : null,
         actions: within('expiry', 'info', actions),
+    };
+}
+
+/** The Remember card's fields, in order: [key, label, kind]. `starts` is the disposition ("friendly — why"). */
+export const REMEMBER_FIELDS = [['name', 'Name', 'text'], ['line', 'Line', 'text'], ['looks', 'Looks', 'textarea'], ['manner', 'Manner', 'textarea'], ['voice', 'Speech', 'textarea'],
+    ['body', 'Body', 'textarea'], ['outfit', 'Wearing', 'textarea'], ['history', 'History', 'textarea'], ['starts', 'Starts', 'text'], ['facts', 'Facts', 'list']];
+/** A parsed remember answer as editor text: {name, line, …, starts, facts (one per line)}. */
+export function rememberValues(got = {}) {
+    const d = got.disposition;
+    return { name: got.name ?? '', line: got.line ?? '', looks: got.looks ?? '', manner: got.manner ?? '', voice: got.voice ?? '', body: got.body ?? '', outfit: got.outfit ?? '',
+        history: got.history ?? '', starts: d?.value ? `${d.value}${d.reason ? ` — ${d.reason}` : ''}` : '', facts: (got.facts ?? []).join('\n') };
+}
+const lc = t => String(t ?? '').toLowerCase();
+/** Which fields hold each made-up detail (by its words appearing there): {fields: {key: [details]}, loose: [details in no field]}. */
+export function inventedFields(got = {}) {
+    const vals = rememberValues(got), fields = {}, loose = [];
+    for (const x of got.invented ?? []) {
+        const at = REMEMBER_FIELDS.map(([k]) => k).filter(k => k !== 'name' && lc(vals[k]).includes(lc(x).trim()));
+        if (!at.length) loose.push(x);
+        for (const k of at) (fields[k] ??= []).push(x);
+    }
+    return { fields, loose };
+}
+/** The made-up details left after the player changed `changed` fields: a changed field's marks go, the rest stay. */
+export function inventedAfter(got = {}, changed = []) {
+    const { fields } = inventedFields(got), gone = new Set(changed.flatMap(k => fields[k] ?? []));
+    return (got.invented ?? []).filter(x => !gone.has(x));
+}
+
+/**
+ * The Remember card. v: {key, name, suggested, phase ('working'|'review'|'failed'), saving, got, editing, values, intent}.
+ * The panel is a new person (empty befores); made-up details are marked ⚠ on their fields.
+ */
+export function rememberReview(v) {
+    const phase = v.saving ? 'working' : v.phase || 'working', got = v.got;
+    const notes = [];
+    if (v.saving) notes.push({ text: 'Saving…', tone: 'muted', cls: 'worldscrawl_remember_preparing' });
+    else if (phase === 'working') notes.push({ text: 'Preparing…', tone: 'muted', cls: 'worldscrawl_remember_preparing' });
+    else if (phase === 'failed') notes.push({ text: 'Could not prepare the card.', tone: 'error', cls: 'worldscrawl_remember_failed' });
+    let summary = [], panel = null;
+    if (phase === 'review' && got) {
+        summary = [`New person: ${got.name} — ${got.line}`, ...(got.unknownAs ? [`Shown as "${got.unknownAs}" until the name is learned`] : [])];
+        const vals = rememberValues(got), inv = inventedFields(got);
+        panel = { type: 'fields', title: got.name, tag: 'new person', rows: REMEMBER_FIELDS.filter(([k]) => k !== 'name').map(([k, label]) => ({ field: k, label: `${label}${inv.fields[k] ? ` ⚠ made up: ${inv.fields[k].join('; ')}` : ''}`, before: '', after: vals[k] })) };
+        if (got.invented?.length) notes.push({ text: `Made up to fill gaps (not in the story): ${got.invented.map(x => `⚠ ${x}`).join('; ')}`, tone: 'warn', cls: 'worldscrawl_invented' });
+    }
+    const actions = [];
+    if (phase === 'review' || phase === 'failed') actions.push(act('again', 'Ask the model again', true));
+    if (phase === 'review') actions.push(v.editing ? act('close', 'Forget the edits') : act('edit', 'Change any part of this card before saving it'));
+    if (phase === 'review' && v.editing) actions.push(act('rewrite', 'Ask again with the Change note: every field you typed stays as you typed it, the model fills only the rest', true));
+    if (phase !== 'failed') actions.push(act('approve', phase === 'working' ? `Remember ${v.name} (saves the card as soon as it is ready)` : v.editing ? 'Save the card exactly as typed in the boxes' : `Save ${got?.name ?? v.name} as shown`, true));
+    actions.push(act('discard', 'Not this scene. You can be asked again after the scene changes.', true));
+    const vals = v.values ?? rememberValues(got ?? {});
+    return {
+        key: v.key, type: 'remember', state: phase, pending: true, cls: 'worldscrawl_remembercard', locked: !!v.saving,
+        title: v.suggested ? `Remember ${v.name}? They have come up a few times.` : `Remember ${v.name}?`,
+        summary, notes, panel,
+        editor: v.editing && phase === 'review' ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_remember_intent', title: 'A note for Rewrite with this, e.g. "older, and she runs the ferry"' },
+            fields: REMEMBER_FIELDS.map(([k, label, kind]) => ({ key: k, label, value: vals[k] ?? '', kind, cls: `worldscrawl_remember_${k}`, ...(k === 'starts' ? { placeholder: 'hostile, unfriendly, indifferent, friendly or helpful — why' } : {}) })) } : null,
+        actions: within('remember', phase, actions),
     };
 }

@@ -35,7 +35,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | words.mjs | Pure word checks and tag parsing (`LOOK_RE`, `MOVE_RE`, `WAIT_TAG`) | — |
 | notices.mjs | Card decisions (decide-once per card id) and the `once()` guard | `markDecided`, `once` |
 | cardlib.mjs | Loads the shared card and editor (plugin/ui/card.mjs, cardedit.mjs) at startup and checks their `CARD_VERSION`; a missing or older plugin gets one "update the plugin" line instead of cards | `cardLib`, `editLib`, `UPDATE_LINE`, `useCardLib` |
-| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
+| cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember) and the ticket (stale) check every async action passes | `runCardAction`, `ticketFor`, `HANDLERS` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
 | manifest.json | SillyTavern extension manifest (entry `index.js`) | — |
 
