@@ -16,7 +16,7 @@ import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, 
 import { lastUserIndex, partyText } from './movement.mjs';
 import { drawDiff, expiryView, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, personExpiriesIn, postPersonExpiryNotices, prefetchRemember } from './scene.mjs';
-import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
+import { NPC_EXPIRED_KIND, changeLabel, modelChangeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
@@ -183,7 +183,7 @@ async function waitFacts(chat, loc) {
     if (w0?.line && w1?.line && w0.line !== w1.line) lines.push(`Before the wait: ${w0.line} Describe how the weather has changed.`);
     const lib = await loadPatchLib();
     const gone = expiredAll(chat, lib, who)(chatChanges(chat), before, after);
-    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => g.note).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
+    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => (g.person ? modelChangeLabel(g.person) : g.note)).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
     return lines.join('\n');
 }
 

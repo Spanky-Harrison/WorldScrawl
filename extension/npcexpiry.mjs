@@ -3,6 +3,7 @@
 // The engine drops an elapsed one from the replay by itself; this module names it, so the narrator,
 // the tracker, the chat notice and a wait's summary all hear about it once.
 import { NPC_KEY, lastsMinutes, nameKnown } from './npc.mjs';
+import { capFirst, handleOf, shownName } from './names.mjs';
 import { isOwnerStamp } from './replay.mjs';
 
 export const NPC_EXPIRED_KIND = 'npc_expired';
@@ -67,12 +68,14 @@ export function describeExpiries(items, person, party) {
     return (items ?? []).flatMap(it => {
         const n = person(it.id);
         if (!n) return [];
-        return [{ ...it, name: n.name || it.id, who: whoText(n, party), looks: n.looks || '', body: n.body || '', outfit: n.outfit || '' }];
+        return [{ ...it, name: n.name || it.id, who: whoText(n, party), shown: shownName(n), handle: handleOf(n.id || it.id), looks: n.looks || '', body: n.body || '', outfit: n.outfit || '' }];
     });
 }
 
 /** "the temporary change "turned into a gnoll" on Hesk": one item, for lists (a wait's summary, the tracker). */
 export const changeLabel = it => `the temporary ${it.kind === 'fact' ? 'detail' : 'change'} "${it.what}" on ${it.who || it.name || it.id}`;
+/** changeLabel as the model may see it: the shown name ("the landlady"), never the real one before it is learned. */
+export const modelChangeLabel = it => changeLabel({ ...it, who: it.shown || it.who });
 
 /** The chat notice text, worded like a place expiry's "[Engine: ...]" line. */
 export function expiryNoticeText(items) {
@@ -84,9 +87,10 @@ export function expiryNoticeText(items) {
 export function expiryNarratorNote(items, party = 'the player') {
     if (!items?.length) return '';
     const lines = items.map(it => {
-        if (it.kind === 'fact') return `- ${it.who}: "${it.what}" was temporary and no longer holds.`;
+        const who = capFirst(it.shown || it.who);
+        if (it.kind === 'fact') return `- ${who}: "${it.what}" was temporary and no longer holds.`;
         const now = [it.looks && `Looks: ${it.looks}`, it.body && `Body: ${it.body}`, it.outfit && `Outfit: ${it.outfit}`].filter(Boolean).join(' ');
-        return `- ${it.who}: the temporary change "${it.what}" ran out and is gone; they are back to how they looked before it.${now ? ` What they look like now: ${now}` : ''}`;
+        return `- ${who}: the temporary change "${it.what}" ran out and is gone; they are back to how they looked before it.${now ? ` What they look like now: ${now}` : ''}`;
     });
     return `Engine note (already applied; this is the same person, not someone new): while time passed, these temporary changes to people ran out:\n${lines.join('\n')}\nIf ${party} can see them, describe them as they are now.`;
 }
@@ -94,7 +98,7 @@ export function expiryNarratorNote(items, party = 'the player') {
 /** The tracker's list of what the engine already did, so a story that narrates it is not reported again. */
 export function trackerExpiryLines(items) {
     if (!items?.length) return '(none)';
-    return items.map(it => `${it.name} [${it.id}]: ${changeLabel(it).replace(/^the/, 'The')} ran out; the game already changed them back. The Body and Outfit listed above are the result.`).join('\n');
+    return items.map(it => `${capFirst(it.shown || it.name)} [${it.handle || it.id}]: ${modelChangeLabel(it).replace(/^the/, 'The')} ran out; the game already changed them back. The Body and Outfit listed above are the result.`).join('\n');
 }
 
 /** Keys of the expiries a notice in this chat already announced. */

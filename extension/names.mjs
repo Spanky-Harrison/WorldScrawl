@@ -9,9 +9,9 @@ import { npc } from './shared.mjs';
 const { nameIn, normName } = npc;
 export const PLAYER = 'player';
 
-// The wiring index.js gives the portal: the chat's Reveal names switch, the handle salt (the chat), and the map's
-// place names (left untouched by masking: "Hesk's Room" is a place, not a person).
-let wiring = { reveal: () => false, salt: () => '', places: () => [] };
+// The wiring scene.mjs gives the portal: the chat's Reveal names switch, the handle salt (the chat), the map's
+// place names (left untouched by masking: "Hesk's Room" is a place, not a person), and the cast as it is now (people).
+let wiring = { reveal: () => false, salt: () => '', places: () => [], people: () => [] };
 export function configureNames(w = {}) { wiring = { ...wiring, ...w }; }
 const safe = (f, d) => { try { return f() ?? d; } catch { return d; } };
 export const revealNames = () => !!safe(wiring.reveal, false);
@@ -150,6 +150,9 @@ export function maskText(text, people, { onUnknown = null, keepGate = false } = 
     }
     return out.replace(/\u0001(\d+)\u0001/g, (_all, i) => tokens[Number(i)] ?? '');
 }
+
+/** maskText against everyone in the cast as they are now: for engine-built side-call text (never story or player text). */
+export const maskForModel = (text, opts = {}) => maskText(text, safe(wiring.people, []), opts);
 
 /** Unknown people whose real name or alias is in `text` (engine blocks only; the choke-point check). */
 export function nameLeaks(text, people) {
