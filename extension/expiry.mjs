@@ -33,25 +33,15 @@ function lastStory(chat) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) { const m = chat[i]; if (m && !m.is_user && !m.is_system) return i; }
     return -1;
 }
-/** The off/on value an old toggle notice recorded for this change after the last story reply, if one is still in the chat. */
-function noticeOff(chat, L, msgIndex, id) {
-    for (let j = L + 1; j < (chat?.length ?? 0); j++) {
-        const x = chat[j]?.extra;
-        if (x?.worldscrawl_notice_kind !== 'toggle') continue;
-        if ((x.worldscrawl_notice_changes ?? []).some(([mi, pid]) => mi === msgIndex && pid === id)) return !!x.worldscrawl_notice_on;
-    }
-    return undefined;
-}
-/** Remember, on the patch, whether it was off at the last story reply. The first toggle after that reply wins.
- *  An older chat's toggle notice, if one is still there, supplies that same bit. Later toggles do not overwrite it. */
+/** Remember, on the patch, whether it was off at the last story reply. The first toggle after that reply wins;
+ *  later toggles do not overwrite it. */
 export function rememberToggle(chat, patch, msgIndex, id, wasOff) {
     const L = lastStory(chat);
     if (L < 0 || !patch || patch.narrated?.at === L) return;
-    const prior = noticeOff(chat, L, msgIndex, id);
-    patch.narrated = { at: L, off: prior !== undefined ? prior : !!wasOff };
+    patch.narrated = { at: L, off: !!wasOff };
 }
 /** The map as the last narrator reply saw it: changes up to it (with later Turn off / Turn on reverted), its clock and room.
- *  The reverted bit lives on the patch (`narrated`). Chats that still have a toggle notice use that notice first.
+ *  The reverted bit lives on the patch (`narrated`).
  *  Limitation: a change undone (removed) after that reply is gone from the chat, so it can't be put back here. */
 export function narratedView(chat) {
     const L = lastStory(chat);
@@ -59,25 +49,15 @@ export function narratedView(chat) {
     let address = null;
     for (let i = L; i >= 0 && !address; i--) address = playerAddress(chat[i]?.extra?.[LOC_KEY]);
     if (!address) return null;
-    const flips = new Map();
-    for (let i = L + 1; i < chat.length; i++) {
-        const x = chat[i]?.extra;
-        if (x?.worldscrawl_notice_kind === 'toggle') for (const [mi, id] of x.worldscrawl_notice_changes ?? []) if (!flips.has(`${mi}|${id}`)) flips.set(`${mi}|${id}`, !!x.worldscrawl_notice_on);
-    }
     const head = chat.slice(0, L + 1);
-    const changes = chatChanges(head).map(c => {
-        const k = `${c._msg}|${c.id}`;
-        if (flips.has(k)) return { ...c, off: flips.get(k) };
-        if (c.narrated?.at === L) return { ...c, off: !!c.narrated.off };
-        return c;
-    });
+    const changes = chatChanges(head).map(c => (c.narrated?.at === L ? { ...c, off: !!c.narrated.off } : c));
     return { index: L, address, changes, now: clockAt(L, chat) };
 }
 /** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo). */
 async function aftermathNote(chat, loc) {
     const L = lastStory(chat);
     const remembered = L >= 0 && chatChanges(chat).some(c => c?.narrated?.at === L);
-    if (!patchSig() && !chat.some(m => m?.extra?.worldscrawl_notice_kind === 'toggle') && !remembered) return '';
+    if (!patchSig() && !remembered) return '';
     const then = narratedView(chat);
     if (!then) return '';
     const r = await api('/aftermath', { method: 'POST', body: JSON.stringify({ then, address: loc.address, ...mapCtx() }) }).catch(() => null);

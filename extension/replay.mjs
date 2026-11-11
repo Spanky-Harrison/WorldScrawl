@@ -21,37 +21,6 @@ export function messageKey(msg) {
     return msg.extra[MID_KEY];
 }
 
-/** Same word diff as plugin/ui/diffview.mjs. Kept here because the extension and the map are different roots. */
-export function wordDiff(oldText, newText) {
-    const a = String(oldText ?? '').split(/(\s+)/).filter(Boolean), b = String(newText ?? '').split(/(\s+)/).filter(Boolean), n = a.length, m = b.length, w = m + 1;
-    if (n * m > 400_000) return [...(n ? [{ type: 'del', text: a.join('') }] : []), ...(m ? [{ type: 'ins', text: b.join('') }] : [])];
-    const t = new Int32Array((n + 1) * w);
-    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) t[i * w + j] = a[i] === b[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
-    const out = [], push = (type, x) => { const last = out.at(-1); if (last?.type === type) last.text += x; else out.push({ type, text: x }); };
-    let i = 0, j = 0;
-    while (i < n || j < m) {
-        if (i < n && j < m && a[i] === b[j]) { push('same', a[i]); i++; j++; }
-        else if (i < n && (j >= m || t[(i + 1) * w + j] >= t[i * w + j + 1])) push('del', a[i++]);
-        else push('ins', b[j++]);
-    }
-    return out;
-}
-
-// The chat page cannot rely on the map's diff view having loaded, so the card brings its own colors.
-export const WORDDIFF_CSS_ID = 'worldscrawl_worddiff_css';
-export const WORDDIFF_CSS = `.worldscrawl_worddiff{margin:4px 0;}
-.worldscrawl_worddiff .wsdiff-label{font-size:0.8em;opacity:0.75;margin-top:4px;}
-.worldscrawl_worddiff .wsdiff-text{white-space:normal;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,0.2);line-height:1.45;}
-.worldscrawl_worddiff .wsdiff-wdel{background:rgba(220,60,60,0.45);text-decoration:line-through;border-radius:2px;}
-.worldscrawl_worddiff .wsdiff-wins{background:rgba(60,180,80,0.45);border-radius:2px;}`;
-export function ensureWordDiffCss(doc) {
-    if (!doc?.createElement || doc.getElementById?.(WORDDIFF_CSS_ID)) return;
-    const st = doc.createElement('style');
-    st.id = WORDDIFF_CSS_ID;
-    st.textContent = WORDDIFF_CSS;
-    (doc.head ?? doc.documentElement)?.append(st);
-}
-
 /**
  * The fields an appearance review should show: only Body/Outfit that actually change.
  * A temporary change leaves the lasting result alone, so it shows as "for now" only.
@@ -74,33 +43,6 @@ export function reviewFields(c, { all = false } = {}) {
     if (lastingChanges || (all && !liveChanges)) { add('body', 'Body', lb, c.lastingPreview, lastSuffix); add('outfit', 'Outfit', lb, c.lastingPreview, lastSuffix); }
     if (liveChanges) { add('body', 'Body', vb, c.livePreview, ' (for now)'); add('outfit', 'Outfit', vb, c.livePreview, ' (for now)'); }
     return out;
-}
-
-/** Paint one field's word diff into `parent`. Read-only. */
-export function paintWordDiff(doc, parent, label, before, after) {
-    ensureWordDiffCss(doc);
-    const box = doc.createElement('div');
-    box.className = 'worldscrawl_worddiff';
-    box.setAttribute('data-field', label);
-    const cap = doc.createElement('div');
-    cap.className = 'wsdiff-label';
-    cap.textContent = label;
-    box.append(cap);
-    const line = doc.createElement('div');
-    line.className = 'wsdiff-text';
-    for (const p of wordDiff(before, after)) {
-        if (p.type === 'same') line.append(doc.createTextNode(p.text));
-        else {
-            const s = doc.createElement('span');
-            s.className = p.type === 'del' ? 'wsdiff-wdel' : 'wsdiff-wins';
-            s.setAttribute('data-mark', p.type === 'del' ? 'Removed' : 'Added');
-            s.textContent = p.text;
-            line.append(s);
-        }
-    }
-    box.append(line);
-    parent.append(box);
-    return box;
 }
 
 export function contentIdOf(committed, start, lasts) {
