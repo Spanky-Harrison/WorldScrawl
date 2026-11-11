@@ -5,15 +5,14 @@
 // candidate's token/epoch/revision).
 import { once } from './notices.mjs';
 import { editLib } from './cardlib.mjs';
-import { NPC_KEY, npcAt } from './npc.mjs';
+import { NPC_KEY } from './npc.mjs';
 import { FLAG_KEY, broadcastMapState, ctx, hooks } from './index.js';
 import { analyzeFlag, swapRewrite } from './carriers.mjs';
 import { renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, unmergeFlag } from './discovery.mjs';
 import { openEditor, openForms } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
-import { applyFacts, castPack, npcClock, settleNpc } from './scene.mjs';
-import { decideNpc, fillCandidate } from './owners.mjs';
+import { applyFacts, settleNpc } from './scene.mjs';
 
 /** Actions that ask the model or write a decision: each must carry its card's ticket. */
 export const ASYNC_ACTIONS = new Set(['again', 'scope', 'rewrite', 'approve', 'save']);
@@ -64,19 +63,25 @@ const place = {
 // ---- person (appearance) cards
 const chat = () => ctx().chat ?? [];
 async function personDone(msg, facts = false) { syncSwipeExtra(msg); await ctx().saveChat?.(); if (facts) await applyFacts(); renderPatchCards(); broadcastMapState(); }
-/** Check again, the scope switch and Rewrite with this: the same change asked again (edit, then a refill). */
+/** Check again, the scope switch and Rewrite with this: the same change asked again, through settleNpc like every
+ *  person action (the edit, then a refill from the pinned baseline at the current clock). */
 const askAgain = (t, key, over = {}) => once(`${key}:${t.identity?.owner}`, async () => {
-    const s = t.s, now = chat();
-    const elapsed = npcClock(now, Math.max(0, now.length - 1)).elapsed;
-    const edited = decideNpc(now, t.identity, t.rev, 'edit', { intent: s.candidate?.intent, layer: s.candidate?.layer, fields: s.candidate?.fields, lasts: s.candidate?.proposedLasts, scope: s.candidate?.scope, ...over });
-    if (edited?.refill) await fillCandidate(now, t.identity, { baseline: npcAt(now, now.length - 1, castPack()?.npcs ?? [], s.id)?.pinned, name: t.who, elapsed });
-    await personDone(t.msg);
+    const c = t.s.candidate;
+    const res = await settleNpc(chat(), t.identity, t.rev, 'edit', { intent: c?.intent, layer: c?.layer, fields: c?.fields, lasts: c?.proposedLasts, scope: c?.scope, ...over });
+    syncSwipeExtra(t.msg);
+    return res;
 });
+/** The person scope switch: hand-typed text in the open editor would be replaced, so ask first (then it goes). */
+async function personScope(t, to) {
+    if (handEdited(t.key) && !(await hooks.confirm(`Switch to ${to === 'heavy' ? 'a full rewrite' : 'a light touch'}? It rewrites the body and outfit again and drops the text you typed in the editor.`))) return 'cancelled';
+    E()?.closeCardEditor(t.key);
+    return askAgain(t, 'own-scope', { scope: to });
+}
 const person = {
     again: t => askAgain(t, 'own-re'),
     edit: t => { E()?.openCardEditor(t.key); renderPatchCards(); },
     close: t => { E()?.closeCardEditor(t.key); renderPatchCards(); },
-    scope: (t, a) => askAgain(t, 'own-scope', { scope: a.to }),
+    scope: (t, a) => personScope(t, a.to),
     rewrite: t => { const intent = String(E()?.editorValues(t.key).intent ?? '').trim() || t.s.candidate?.intent; E()?.closeCardEditor(t.key); return askAgain(t, 'own-edit', { intent }); },
     approve: t => once(`own-ok:${t.identity?.owner}`, async () => {
         const open = E()?.editorOpen(t.key);
