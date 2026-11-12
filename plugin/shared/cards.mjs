@@ -57,12 +57,14 @@ export function placeReview(v) {
 
 /**
  * A proposed person (appearance) change. v: {key, who, phase ('working'|'review'|'failed'), summary, panelRows, scoped,
- * heavy, why, clockError, editing, intent, fields: [{key, label, value, data}]}.
+ * heavy, why, clockError, failReason, editing, intent, fields: [{key, label, value, data}]}.
  */
 export function personReview(v) {
     const phase = v.phase || 'working';
     const notes = [];
     if (v.clockError) notes.push({ text: v.clockError, tone: 'error', cls: 'worldscrawl_clock_error' });
+    // Its rewrite failed: the reason here, not on a second (job) card.
+    if (phase === 'failed' && v.failReason) notes.push({ text: `⚠ ${v.failReason}`, tone: 'error', cls: 'worldscrawl_remember_failed' });
     if (v.scoped) notes.push({ text: `${v.heavy ? 'Full rewrite' : 'Light touch'}${v.why ? `: ${v.why}` : ''}`, tone: 'scope', cls: 'worldscrawl_scope' });
     const summary = phase === 'review' ? (v.summary?.length ? v.summary : [`${v.who}: no change to body or outfit`]) : [];
     const actions = [act('again', 'Ask again for this body and outfit', true)];
@@ -108,7 +110,7 @@ export function personKept(v) {
 function expiryJobs(key, jobs, editing) {
     const notes = [], actions = [];
     for (const j of jobs ?? []) {
-        const job = appearJob({ key, name: j.name, status: j.status, reason: j.reason ?? '', domain: j.domain });
+        const job = appearJob({ key, name: j.name, status: j.status, reason: j.reason ?? '', domain: j.domain, part: j.part });
         notes.push(job.state === 'failed' ? { text: `⚠ ${job.title}`, tone: 'error', cls: 'worldscrawl_remember_failed' } : { text: job.title, tone: 'busy', cls: 'worldscrawl_rebuilding' });
         if (!editing && !actions.length) actions.push(...job.actions); // one Check again asks again for every failed rebuild on the card
     }
@@ -116,18 +118,40 @@ function expiryJobs(key, jobs, editing) {
 }
 
 /**
- * A person's temporary change ran out (info, already applied). v: {key, who, what, rows (before = while it lasted,
- * after = now), editing, fields, edited, failed?: {reason}} (failed: the appearance rebuild after it failed). Edit opens Body/Outfit; Approve edited writes a new kept change.
+ * The collapse rule for expiry cards (people and places alike): expiries one rebuild covers are ONE card. `keysOf(item)`
+ * gives what the rebuild is for (a person: their id; a place: the texts the change wrote); items sharing any key, directly
+ * or through another item, are one group. Groups keep the order of their first item. Returns [[item, ...], ...].
+ */
+export function groupExpiries(items, keysOf) {
+    const groups = [];
+    for (const it of items ?? []) {
+        const keys = new Set(keysOf(it) ?? []);
+        const hit = groups.filter(g => [...keys].some(k => g.keys.has(k)));
+        const into = hit[0] ?? { items: [], keys: new Set() };
+        if (!hit.length) groups.push(into);
+        for (const g of hit.slice(1)) { into.items.push(...g.items); for (const k of g.keys) into.keys.add(k); groups.splice(groups.indexOf(g), 1); }
+        into.items.push(it);
+        for (const k of keys) into.keys.add(k);
+    }
+    return groups.map(g => g.items);
+}
+const ranOut = (who, whats) => whats.map(w => (who ? `${who}: "${w}" ran out` : `"${w}" ran out`));
+
+/**
+ * A person's temporary change ran out (info, already applied). v: {key, who, what (or whats: several changes one
+ * rebuild covers, one card), rows (before = while it lasted, after = now), editing, fields, edited, jobs?: [{name,
+ * status, reason, part}] (the appearance rebuild after it: working, or failed with Check again)}. Edit opens
+ * Body/Outfit; Approve edited writes a new kept change.
  */
 export function personExpiry(v) {
     const actions = v.edited ? [] : v.editing
         ? [act('close', 'Forget the edits'), act('save', `Keep ${v.who}'s body and outfit exactly as typed in the boxes`, true)]
         : [act('edit', `Change what ${v.who} went back to`)];
-    const jobs = expiryJobs(v.key, v.failed ? [{ name: v.who, status: 'failed', reason: v.failed.reason ?? '' }] : [], v.editing);
+    const jobs = expiryJobs(v.key, v.jobs ?? (v.failed ? [{ name: v.who, status: 'failed', reason: v.failed.reason ?? '' }] : []), v.editing);
     actions.unshift(...jobs.actions);
     return {
         key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_npcexpired',
-        title: '👤 A temporary change ran out:', summary: [`${v.who}: "${v.what}" ran out`], notes: jobs.notes,
+        title: '👤 A temporary change ran out:', summary: ranOut(v.who, v.whats ?? [v.what]), notes: jobs.notes,
         panel: v.rows?.length ? { type: 'fields', title: v.who, tag: 'ran out', rows: v.rows } : null,
         editor: v.editing ? { key: v.key, intent: null, fields: v.fields ?? [] } : null,
         actions: within('expiry', 'info', actions),
@@ -136,7 +160,7 @@ export function personExpiry(v) {
 
 /**
  * A temporary map change ran out: the room the party was in (the passage sealed), or a timed change to a place's text
- * (smoke filling a room). v: {key, name, what?, preview (before = with the temporary change, after = now) or null while
+ * (smoke filling a room). v: {key, name, what? (or whats: several changes to the same text, one card), preview (before = with the temporary change, after = now) or null while
  * it loads, loadError, editing, intent, edited, jobs?: [{name, status, reason}] (the place text rebuild after it:
  * working, or failed with Check again)}. Edit opens the map form and Change:; Approve edited stamps a new kept map change
  * on the notice.
@@ -150,10 +174,10 @@ export function placeExpiry(v) {
     const jobs = expiryJobs(v.key, (v.jobs ?? []).map(j => ({ ...j, domain: 'place' })), v.editing);
     notes.push(...jobs.notes);
     actions.unshift(...jobs.actions);
-    const summary = v.what ? (v.name ? `${v.name}: "${v.what}" ran out` : `"${v.what}" ran out`) : `${v.name} ran out`;
+    const whats = v.whats ?? (v.what ? [v.what] : []);
     return {
         key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_placeexpired',
-        title: '🗺 A temporary map change ran out:', summary: [summary], notes,
+        title: '🗺 A temporary map change ran out:', summary: whats.length ? ranOut(v.name, whats) : [`${v.name} ran out`], notes,
         panel: v.preview ? { type: 'place', preview: v.preview } : null,
         editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_flag_intent' }, fields: [], form: 'patch' } : null,
         actions: within('expiry', 'info', actions),
@@ -317,13 +341,20 @@ export function waitReview(v) {
     };
 }
 
+/** What a rebuild job is, for its title: never a raw id (no name: a plain generic phrase). */
+export function jobWhat(v) {
+    const name = String(v?.name ?? '').trim();
+    if (v?.domain === 'place') return name ? `Rebuild of ${name}` : 'Rebuild of a place text';
+    if (v?.part === 'looks') return name ? `Looks line for ${name}` : 'Looks line';
+    return name ? `Appearance rebuild for ${name}` : 'Appearance rebuild';
+}
 /**
- * A rebuild in flight or failed: a person's appearance, or a place text after a temporary change ran out (domain
- * 'place'). v: {key, name, status ('working'|'failed'), reason, domain?}.
+ * A rebuild in flight or failed: a person's appearance (part 'looks': its Looks line), or a place text after a
+ * temporary change ran out (domain 'place'). v: {key, name, status ('working'|'failed'), reason, domain?, part?}.
  */
 export function appearJob(v) {
     const state = v.status === 'failed' ? 'failed' : 'working';
-    const what = v.domain === 'place' ? `Rebuild of ${v.name}` : `Appearance rebuild for ${v.name}`;
+    const what = jobWhat(v);
     return {
         key: v.key, type: 'job', state, pending: state === 'failed', cls: 'worldscrawl_appearpending',
         title: state === 'failed' ? `${what} failed.${v.reason ? ` ${v.reason}` : ''}` : `${what}: working…`,

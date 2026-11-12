@@ -45,6 +45,21 @@ export function targetKeyOf(op) {
 }
 
 /**
+ * A text target as words for a card title ("the description of Common Room", "the notes of The Drowned Rat", "the "back"
+ * exit text of Common Room"). `labels`: address/area id -> name (the cast panel's place labels). Never the raw id: an
+ * unknown place reads "a place" / "an area", and an unknown target "a place text".
+ */
+export function targetLabel(target, labels = {}) {
+    const m = /^(desc|lore|exit):(.+)$/.exec(String(target ?? ''));
+    if (!m) return 'a place text';
+    const [where, dir] = m[1] === 'exit' ? m[2].split('|') : [m[2], ''];
+    const name = str(labels?.[where]);
+    if (m[1] === 'desc') return `the description of ${name || 'a place'}`;
+    if (m[1] === 'lore') return `the notes of ${name || 'an area'}`;
+    return `the ${dir ? `"${dir}" ` : ''}exit text of ${name || 'a place'}`;
+}
+
+/**
  * The texts a scope switch may rewrite: one per existing-prose op of the proposal, with the text before the change and as
  * proposed (from the preview's before/after). A room or area the patch itself creates is new-room text and is left out,
  * and so is a target two ops share (it can't be rewritten without changing which op does what).

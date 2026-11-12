@@ -30,7 +30,7 @@ import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, d
 import { revealsDestination } from './shared.mjs';
 import { mapCtx } from './patches.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
-import { applyFacts, applyFound, learnNameOn, offerRemember, postPersonExpiryNotices, prepareNpcs, setRelOn } from './scene.mjs';
+import { applyFacts, applyFound, learnNameOn, offerRemember, personExpiryTurn, prepareNpcs, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
 export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiveWorld, worldName, chatWorld, worldSeed, chatChanges, firstSentence } from './clock.mjs';
@@ -314,12 +314,15 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             if (r.kind === 'found' || r.kind === 'name') renderPatchCards();
             renderAllExits();
         }
-        if ((!type || type === 'normal') && last?.is_user) await prepareNpcs(last);
-        // Timed place text changes that ran out with this turn's time get their notice (one card each), then the texts a
-        // temporary change wrote under a later one still in force are rebuilt (shown working on that card) before the narrator reads them.
-        if ((!type || type === 'normal') && last?.is_user) await placeExpiryTurn(chat.length - 1);
-        // A person's temporary change that ran out with this turn's time gets its chat notice now (never on a swipe).
-        if ((!type || type === 'normal') && last?.is_user) await postPersonExpiryNotices().catch(e => console.warn('[WorldScrawl] expiry notice', e?.message || e));
+        if ((!type || type === 'normal') && last?.is_user) {
+            const host = chat.length - 1;
+            // A person's temporary change that ran out with this turn's time gets its chat notice first (never on a swipe),
+            // so the appearance rebuild in prepareNpcs shows working / failed on that notice's card.
+            await personExpiryTurn(host, { rebuild: false, after: () => prepareNpcs(last) });
+            // Timed place text changes that ran out get their notice, then the texts a temporary change wrote under a later
+            // one still in force are rebuilt (shown working on that card) before the narrator reads them.
+            await placeExpiryTurn(host);
+        }
         await applyFacts();
     } catch (e) { console.error('[WorldScrawl] interceptor failed', e); }
 };

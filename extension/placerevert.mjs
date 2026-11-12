@@ -3,7 +3,8 @@
 // place (chatChanges); this file asks the model for an unknown one. Same compose records, failed-job block, tries and
 // timeout as an appearance rebuild; no call when a record already matches or no later change wrote the text.
 import { render as P, patches as patchShared } from './shared.mjs';
-import { revertBase, writtenText } from './arearewrite.mjs';
+import { revertBase, targetLabel, writtenText } from './arearewrite.mjs';
+import { beginWork } from './work.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { chatChanges, placeRevertNeeds } from './clock.mjs';
 import { baseReply } from './dig.mjs';
@@ -16,13 +17,12 @@ import { askTried, clearJob, exhausted, setJob, writeCompose } from './owners.mj
 import { composeRecords, findCompose } from './replay.mjs';
 import { renderPatchCards } from './waits.mjs';
 import { mapCtx } from './patches.mjs';
+import { castPack } from './scene.mjs';
 
-/** Rebuilds in flight, by need key: {msg, swipe, job (status 'working'), done}. Live only (a reload shows none). */
+/** Rebuilds in flight, by need key: {done}, so a second ask for the same text waits for the first. Shown through work.mjs. */
 const flights = new Map();
-/** The rebuilds running now for message `msg` (its shown swipe), as working jobs: drawn like the stored ones. */
-export function placeRebuildsWorking(msg) {
-    return [...flights.values()].filter(f => f.msg === msg && f.swipe === swipeOf(msg)).map(f => f.job);
-}
+/** The plain label of a text target ("the description of Common Room"), from the map labels the cast panel uses. */
+const labelOf = need => targetLabel(need.target, castPack()?.labels ?? {});
 
 /** Same bound as an appearance rebuild. */
 export const PLACE_REVERT_TIMEOUT_MS = 45000;
@@ -42,14 +42,17 @@ async function baseOf(need, changes) {
     const { now } = mapCtx();
     const loc = need.family === 'lore' ? (getStoredLocation() ?? '') : need.where;
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ changes: revertBase(changes, need), now, location: loc, rooms: [need.where] }) });
-    if (!r.ok) throw new Error(r.body?.detail?.error ?? r.body?.detail ?? `map server answered ${r.status}`);
+    if (!r.ok) { // the server's words name places by id: they go to the console, the card says it plainly
+        console.warn('[WorldScrawl] place rebuild base', r.body?.detail?.error ?? r.body?.detail ?? r.status);
+        throw new Error(`the map could not read ${labelOf(need)} from before that change`);
+    }
     const b = r.body ?? {};
-    if (need.family === 'lore') { const a = b.areas?.[need.where]; return { text: a?.lore ?? '', label: `the notes of ${a?.name ?? need.where}` }; }
+    if (need.family === 'lore') { const a = b.areas?.[need.where]; return { text: a?.lore ?? '', label: a?.name ? `the notes of ${a.name}` : labelOf(need) }; }
     const room = b.rooms?.[need.where];
-    if (!room) throw new Error(`${need.where} is not on the map before that change`);
-    if (need.family === 'desc') return { text: room.description ?? '', label: `the description of ${room.name ?? need.where}` };
+    if (!room) throw new Error(`${castPack()?.labels?.[need.where] || 'that place'} was not on the map before that change`);
+    if (need.family === 'desc') return { text: room.description ?? '', label: room.name ? `the description of ${room.name}` : labelOf(need) };
     const ex = (room.exits ?? []).find(e => lc(e?.direction) === lc(need.direction));
-    return { text: ex?.description ?? '', label: `the "${need.direction}" exit text of ${room.name ?? need.where}` };
+    return { text: ex?.description ?? '', label: room.name ? `the "${need.direction}" exit text of ${room.name}` : labelOf(need) };
 }
 const noteOf = w => String(w.change?.summary?.[w.oi] || w.change?.note || w.op?.op || 'a change').trim();
 const lineOf = (w, n) => `${n ? `${n}. ` : '- '}${noteOf(w)}. It made the text: ${writtenText(w.op) || '(empty)'}`;
@@ -90,16 +93,16 @@ export async function ensurePlaceRebuilds(msgId, { timeout = PLACE_REVERT_TIMEOU
         if (flights.has(need.key)) { await flights.get(need.key).done; continue; }
         let base;
         try { base = await baseOf(need, changes); } catch (e) {
-            setJob(msg, swipe, { npc: need.target, domain: PART, name: need.target, key: need.key, part: PART, status: 'failed', kind: 'application', reason: e?.message || String(e) });
+            setJob(msg, swipe, { npc: need.target, domain: PART, name: labelOf(need), key: need.key, part: PART, status: 'failed', kind: 'application', reason: e?.message || String(e) });
             continue;
         }
         called++;
         let landed;
-        const flight = { msg, swipe, job: { id: need.target, npc: need.target, domain: PART, name: base.label, key: need.key, part: PART, status: 'working' }, done: new Promise(r => { landed = r; }) };
-        flights.set(need.key, flight);
-        renderPatchCards(); // never silent: the expiry card (or the job card) shows the rebuild working
+        flights.set(need.key, { done: new Promise(r => { landed = r; }) });
+        // Never silent: the expiry card that covers it (or the shared job card) shows the rebuild working.
+        const end = beginWork(msg, { id: need.target, npc: need.target, domain: PART, name: base.label, key: need.key, part: PART });
         let asked;
-        try { asked = await askRevert(need, base, msgId, timeout); } finally { flights.delete(need.key); landed(); }
+        try { asked = await askRevert(need, base, msgId, timeout); } finally { flights.delete(need.key); end(); landed(); }
         if (!asked.ok) {
             setJob(msg, swipe, { npc: need.target, domain: PART, name: base.label, key: need.key, part: PART, status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
             continue;
