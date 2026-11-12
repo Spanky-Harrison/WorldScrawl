@@ -335,17 +335,25 @@ export async function postPlaceExpiryNotices() {
     chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
     return msg;
 }
-/** One place card on an expiry notice: the vanished room (item null), or one timed change the notice names. */
-function placeExpiryAt(chat, id, item) {
-    if (!item) return expiredPatchAt(chat, id);
+/**
+ * One place card on an expiry notice: the vanished room (no items), or the timed changes the notice names that one card
+ * shows (several when they wrote the same text: the collapse rule, C.groupExpiries). `ran` is every op that ran out, in
+ * the order of the items; `patch` the first item's change.
+ */
+function placeExpiryAt(chat, id, items) {
+    if (!items?.length) return expiredPatchAt(chat, id);
     const msg = chat?.[id];
     if (msg?.extra?.worldscrawl_notice_kind !== PLACE_EXPIRED_KIND) return null;
-    const now = chatElapsed(chat.slice(0, id + 1));
-    const p = chatChanges(chat.slice(0, id)).find(c => c?.type === 'patch' && c.id === item.id && (item.msg == null || c._msg === item.msg));
-    if (!p || !Array.isArray(p.ops)) return null;
-    const ran = (item.ops ?? []).map(i => p.ops[i]).filter(Boolean);
-    if (!ran.length) return null;
-    return { patch: p, address: item.where || opWhere(ran[0]), now, ran, name: p.names?.[item.where] || '', item };
+    const now = chatElapsed(chat.slice(0, id + 1)), changes = chatChanges(chat.slice(0, id));
+    const parts = items.flatMap(item => {
+        const p = changes.find(c => c?.type === 'patch' && c.id === item.id && (item.msg == null || c._msg === item.msg));
+        const ran = Array.isArray(p?.ops) ? (item.ops ?? []).map(i => p.ops[i]).filter(Boolean) : [];
+        return ran.length ? [{ p, ran, item }] : [];
+    });
+    if (!parts.length) return null;
+    const first = parts[0], where = first.item.where || opWhere(first.ran[0]);
+    return { patch: first.p, patches: parts.map(x => x.p), address: where, now, ran: parts.flatMap(x => x.ran), name: first.p.names?.[where] || '',
+        item: first.item, items: parts.map(x => x.item), note: [...new Set(parts.map(x => x.p.note).filter(Boolean))].join('; ') };
 }
 /** The ops that ran out, kept for good: what the notice's Edit starts from. */
 export const keptForGood = ops => (ops ?? []).map(o => { const { lasts, ...rest } = o; return rest; });
@@ -353,20 +361,21 @@ const expiryViews = new WeakMap(); // notice message -> Map(card key -> {sig, pr
 /**
  * The before/now panel of a place expiry card: a preview of the chat's changes with the ran-out ops (kept for good) and
  * without them. Fetched once per card and cached (a text rebuilt since changes the key); the card redraws when it arrives.
- * `item`: one timed change of a PLACE_EXPIRED_KIND notice; none for the vanished room.
+ * `items`: the timed changes of a PLACE_EXPIRED_KIND notice one card shows (one item, or a group); none for the vanished room.
  */
-export function expiryView(chat, id, item = null) {
-    const got = placeExpiryAt(chat, id, item);
+export function expiryView(chat, id, items = null) {
+    items = items == null ? [] : Array.isArray(items) ? items : [items];
+    const got = placeExpiryAt(chat, id, items);
     if (!got) return null;
-    const msg = chat[id], ran = new Set(got.ran);
+    const msg = chat[id], ran = new Set(got.ran), own = new Set((got.patches ?? [got.patch]).map(p => `${p._msg}|${p.id}`));
     // Now: every change before the notice, with the ops that ran out taken off their change (the rest of it stays).
     const others = chatChanges(chat.slice(0, id)).flatMap(c => {
-        if (!(c._msg === got.patch._msg && c.id === got.patch.id)) return [c];
+        if (!own.has(`${c._msg}|${c.id}`)) return [c];
         const ops = (c.ops ?? []).filter(o => !ran.has(o));
         return ops.length ? [{ ...c, ops }] : [];
     });
-    const sig = `${got.patch._msg}|${got.patch.id}|${got.now}|${JSON.stringify(got.ran)}|${JSON.stringify(others.map(c => c._rebuilt ?? null))}`;
-    const views = expiryViews.get(msg) ?? new Map(), vk = item?.key ?? '';
+    const sig = `${[...own].join(',')}|${got.now}|${JSON.stringify(got.ran)}|${JSON.stringify(others.map(c => c._rebuilt ?? null))}`;
+    const views = expiryViews.get(msg) ?? new Map(), vk = (got.items ?? []).map(it => it.key).join(',');
     expiryViews.set(msg, views);
     let v = views.get(vk);
     if (!v || v.sig !== sig) {

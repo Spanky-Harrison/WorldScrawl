@@ -4,6 +4,7 @@ import { FOUND_KEY } from './npc.mjs';
 import { appearanceScope, classifyAppearanceReply, effectFields, looksInputKey } from './npceffects.mjs';
 import { render as P } from './shared.mjs';
 import { maskForModel } from './names.mjs';
+import { withWork } from './work.mjs';
 
 async function model() {
     return import('./dig.mjs');
@@ -221,18 +222,20 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     const lasting = textOf(base, lastingWith, records);
     const live = textOf(base, liveWith, records);
     let lastingBody = lasting, liveBody = live;
+    // The proposal card that asked shows the call working (job.owner), never a second card.
+    const working = key => ({ id: identity.npc, npc: identity.npc, key, part: 'fields', name: name || '', owner: stamp.owner });
     if (lasting.unresolved) {
-        const asked = await askFields(name, base, lastingWith, timeout);
+        const asked = await withWork(found.msg, working(lasting.key), () => askFields(name, base, lastingWith, timeout));
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
-        if (!asked.ok) return failCandidate(found, 'fields', lasting.key, asked);
+        if (!asked.ok) return failCandidate(found, 'fields', lasting.key, asked, name);
         lastingBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: lasting.key };
     }
     // Identical inputs (no lasts, nothing expiring): one call, the same text for both.
     if (live.unresolved && live.key === lasting.key) liveBody = { ...lastingBody, key: live.key };
     else if (live.unresolved) {
-        const asked = await askFields(name, base, liveWith, timeout);
+        const asked = await withWork(found.msg, working(live.key), () => askFields(name, base, liveWith, timeout));
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
-        if (!asked.ok) return failCandidate(found, 'fields', live.key, asked);
+        if (!asked.ok) return failCandidate(found, 'fields', live.key, asked, name);
         liveBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: live.key };
     }
     if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
@@ -260,9 +263,9 @@ function still(found, token, epoch, rev) {
     return s.candidate && s.candidate.token === token && s.candidate.epoch === epoch && s.decisionRev === rev && epochOf(found.msg) === epoch;
 }
 
-function failCandidate(found, part, key, asked) {
+function failCandidate(found, part, key, asked, name = '') {
     found.stamp.candidate.phase = 'failed';
-    setJob(found.msg, found.stamp.swipe ?? 0, { npc: found.stamp.id, key, part, status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
+    setJob(found.msg, found.stamp.swipe ?? 0, { npc: found.stamp.id, key, part, name: name || '', owner: found.stamp.owner, status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
     return { ok: false, error: asked.reason || 'failed' };
 }
 
@@ -499,9 +502,9 @@ export async function recompose(chat, { npc, at = null, baseline, name, elapsed,
         return { ok: true, key, called: false, msg };
     }
     if (exhausted(chat, npc, key, 'fields')) return { ok: false, key, error: 'failed', skipped: true, msg };
-    const asked = await askFields(name, baseline, ops, timeout);
+    const asked = await withWork(msg, { id: npc, npc, key, part: 'fields', name: name || '' }, () => askFields(name, baseline, ops, timeout));
     if (!asked.ok) {
-        setJob(msg, hostSwipe, { npc, key, part: 'fields', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
+        setJob(msg, hostSwipe, { npc, key, part: 'fields', name: name || '', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
         return { ok: false, key, error: asked.reason, msg };
     }
     writeCompose(msg, hostSwipe, { npc, kind: 'fields', key, inputsKey: key, body: asked.body, outfit: asked.outfit });
@@ -515,12 +518,12 @@ async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout, b
     const hit = findCompose(composeRecords(chat), key);
     if (hit && hit.body === body && hit.outfit === outfit && hit.looks) return;
     if (exhausted(chat, npc, key, 'looks')) return;
-    const asked = await askLooks(name, body, outfit, timeout);
+    const asked = await withWork(msg, { id: npc, npc, key, part: 'looks', name: name || '' }, () => askLooks(name, body, outfit, timeout));
     const ops = liveOps(personOps(chat, npc), elapsed);
     const now = explicitResult(baseline, ops) || findCompose(composeRecords(chat), fieldKeyOf(baseline, ops));
     if (!now || now.body !== body || now.outfit !== outfit) return;
     if (!asked.ok) {
-        setJob(msg, swipe, { npc, key, part: 'looks', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'no looks line' });
+        setJob(msg, swipe, { npc, key, part: 'looks', name: name || '', status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'no looks line' });
         return;
     }
     writeCompose(msg, swipe, { npc, kind: 'looks', key, inputsKey: key, body, outfit, looks: asked.looks });

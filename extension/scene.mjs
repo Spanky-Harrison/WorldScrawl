@@ -381,10 +381,10 @@ async function prepareNpcs(userMsg) {
     const loc = await currentLocation().catch(() => null);
     if (!loc || !calendarLib) {
         // No player location: still refresh appearance the cast viewer is showing. Sighting and disposition need a room.
-        await ensureAppearanceRebuilds(chat.length - 1).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+        await ensureAppearanceRebuilds(chat.lastIndexOf(userMsg)).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
         return;
     }
-    const index = chat.length - 1;
+    const index = chat.lastIndexOf(userMsg); // the turn's expiry notice may already follow it
     try {
         const env = npcEnv(chat, loc);
         const clock = env.clock(index);
@@ -803,6 +803,31 @@ async function postPersonExpiryNotices() {
     chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
     return msg;
 }
+/** A notice's line again, with each person as they look now (after the rebuild that followed it). */
+async function refreshPersonExpiryNotice(msg) {
+    const c = ctx(), chat = c.chat ?? [], at = chat.indexOf(msg);
+    if (at < 0 || msg.extra?.worldscrawl_notice_kind !== NPC_EXPIRED_KIND) return;
+    const cast = castPack()?.npcs ?? [];
+    const items = describeExpiries(msg.extra.worldscrawl_notice_people ?? [], id => npcAt(chat, at, cast, id, i => npcClock(chat, i)), 'you');
+    const text = expiryNoticeText(items);
+    if (!items.length || text === msg.mes) return;
+    msg.mes = text;
+    c.updateMessageBlock?.(at, msg);
+    await c.saveChat?.();
+}
+/**
+ * A turn's person expiries: the notice first, then the appearance rebuild (stored on `host`, default the latest message),
+ * so the rebuild shows working (or failed, with Check again) on the notice's card; then the notice's line is redone with
+ * how they look after it. `rebuild: false` when the caller rebuilds itself (the interceptor's prepareNpcs).
+ */
+async function personExpiryTurn(host = (ctx().chat?.length ?? 0) - 1, { rebuild = true, after = null } = {}) {
+    const notice = await postPersonExpiryNotices().catch(e => { console.warn('[WorldScrawl] expiry notice', e?.message || e); return null; });
+    if (notice) renderPatchCards();
+    if (rebuild && host >= 0) await ensureAppearanceRebuilds(host).catch(e => console.warn('[WorldScrawl] appearance rebuild', e));
+    if (after) await after();
+    if (notice) await refreshPersonExpiryNotice(notice).catch(e => console.warn('[WorldScrawl] expiry notice', e?.message || e));
+    return notice;
+}
 /**
  * The expiry notice's Edit: the player's own Body/Outfit for what the person went back to. It becomes a normal
  * lasting appearance change on the notice (owner, reviewed as typed text, approved through settleNpc), so it has
@@ -811,8 +836,10 @@ async function postPersonExpiryNotices() {
 async function editExpiryRevert(at, id, text = {}) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[at];
     if (msg?.extra?.worldscrawl_notice_kind !== NPC_EXPIRED_KIND) return { ok: false, error: 'That notice is gone.' };
-    const p = (msg.extra.worldscrawl_notice_people ?? []).find(x => x?.id === id);
+    const mine = (msg.extra.worldscrawl_notice_people ?? []).filter(x => x?.id === id && x.kind === 'appearance');
+    const p = mine[0] ?? (msg.extra.worldscrawl_notice_people ?? []).find(x => x?.id === id);
     if (!p) return { ok: false, error: 'That person is not on this notice.' };
+    const what = mine.length > 1 ? mine.map(x => `"${x.what}"`).join(' and ') : `"${p.what}"`; // one card for all of their changes (the collapse rule)
     const elapsed = npcClock(chat, at).elapsed;
     if (!Number.isFinite(elapsed)) return { ok: false, error: 'The game clock is not available yet. Try again once it has loaded.' };
     const live = npcAt(chat, at, castPack()?.npcs ?? [], id, i => npcClock(chat, i));
@@ -821,7 +848,7 @@ async function editExpiryRevert(at, id, text = {}) {
     const touched = ['body', 'outfit'].filter(f => typed[f].trim() && typed[f].trim() !== String(live[f] ?? '').trim());
     if (!touched.length) return { ok: false, error: 'The edited text is the same as now.' };
     const owner = makeOwner({
-        id, intent: `after "${p.what}" wore off: ${touched.join(' and ')} as you wrote it`, fields: touched.join(','), layer: {},
+        id, intent: `after ${what} wore off: ${touched.join(' and ')} as you wrote it`, fields: touched.join(','), layer: {},
         lasts: null, start: elapsed, chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: 'expiry_edit', why: 'text edited by you',
     });
     owner.candidate.epoch = ownerEpoch(msg);
@@ -1018,4 +1045,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
