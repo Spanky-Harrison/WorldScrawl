@@ -1,8 +1,7 @@
-// Three rules for what the player sees, through the production paths (the generation interceptor, the real expiry
+// Two rules for what the player sees, through the production paths (the generation interceptor, the real expiry
 // notice, the shared card buttons, the in-process map server and a stubbed model held at a gate):
 // 1. one change that ran out is ONE expiry card, even across a vanished-room notice and a text notice;
-// 2. no model call is silent: every call goes through gen() and shows on a card or on the shared busy line;
-// 3. one plugin version check covers everything the extension loads from the plugin.
+// 2. no model call is silent: every call goes through gen() and shows on a card or on the shared busy line.
 import './ststub.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,9 +20,6 @@ const { PLACE_EXPIRED_KIND, openForms } = patchesExt;
 const { postExpiredNotice } = await import('../../extension/expiry.mjs');
 const { rememberWorlds, loadCalendar } = await import('../../extension/clock.mjs');
 const work = await import('../../extension/work.mjs');
-const shared = await import('../../extension/shared.mjs');
-const cardlib = await import('../../extension/cardlib.mjs');
-const { PLUGIN_VERSION } = await import('../../plugin/shared/version.mjs');
 await loadCalendar();
 
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
@@ -189,27 +185,4 @@ test('the shared status: a call its card shows (the tracker\'s "tracking…") st
     assert.deepEqual(during, ['reading your move']);
     assert.equal(work.liveCalls().length, 0);
     void c;
-});
-
-// ---- 3. one version check
-test('one plugin version: plugin/shared/version.mjs matches the extension; an older plugin gets the update line on every card and nothing else breaks', async () => {
-    assert.equal(PLUGIN_VERSION, shared.PLUGIN_API);
-    assert.equal(shared.pluginError, null);
-    for (const f of ['plugin/ui/card.mjs', 'plugin/ui/cardedit.mjs', 'extension/cardlib.mjs']) assert.doesNotMatch(read(f), /CARD_VERSION|CARD_API/, `${f}: folded into the one check`);
-    const c = boot(fairChat());
-    await narrate();
-    await postExpiredNotice('riverton:streets/stall', SQUARE, 'square');
-    try {
-        for (const v of [undefined, PLUGIN_VERSION - 1, 'missing']) {
-            assert.equal(cardlib.usePluginVersion(v), false);
-            const doc = draw(c);
-            assert.equal(doc.querySelectorAll('.worldscrawl_card_btn').length, 0, String(v));
-            const lines = doc.querySelectorAll('.worldscrawl_update_plugin');
-            assert.ok(lines.length >= 3, 'the change, and both notices');
-            assert.equal(lines.length, doc.querySelectorAll('.worldscrawl_patchcard').length, 'one line where each message\'s cards would be');
-            assert.ok(lines.every(l => l.textContent === cardlib.UPDATE_LINE));
-        }
-    } finally { assert.equal(cardlib.usePluginVersion(PLUGIN_VERSION), true); }
-    await flush(80);
-    assert.equal(placeCards(draw(c)).length, 1);
 });

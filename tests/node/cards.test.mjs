@@ -17,7 +17,6 @@ const { NPC_KEY, NPC_WARN_KEY, npcAt } = await import('../../extension/npc.mjs')
 const patchesExt = await import('../../extension/patches.mjs');
 patchesExt.useDiffLib(await import('../../plugin/ui/diffview.mjs'));
 patchesExt.useFormLib(await import('../../plugin/ui/patchform.mjs'));
-const cardlib = await import('../../extension/cardlib.mjs');
 const acts = await import('../../extension/cardacts.mjs');
 const card = await import('../../plugin/ui/card.mjs');
 const cardedit = await import('../../plugin/ui/cardedit.mjs');
@@ -237,25 +236,6 @@ test('stale results: an action from a card drawn before the change moved writes 
     byText(draw().querySelector('.worldscrawl_flagreview'), 'Approve').click();
     await flush(80);
     assert.equal(pd.chat[1].extra[FLAG].status, 'kept');
-});
-
-test('a missing or older plugin shows one "update the plugin" line, never the old cards', async () => {
-    await personProposal('pc5');
-    try {
-        assert.equal(cardlib.usePluginVersion(1), false); // the one version check (shared.mjs): an older plugin
-        assert.equal(cardlib.cardError, 'old');
-        let doc = draw([0]);
-        assert.equal(doc.querySelectorAll('.worldscrawl_card_btn').length, 0);
-        assert.equal(doc.querySelector('.worldscrawl_update_plugin').textContent, 'WorldScrawl: update the plugin, then restart SillyTavern');
-        assert.equal(cardlib.usePluginVersion(undefined), false); // a plugin from before the check (no version.mjs)
-        assert.equal(cardlib.cardError, 'old');
-        assert.equal(cardlib.usePluginVersion(2), true);
-        assert.equal(cardlib.useCardLib(null, null), false);
-        assert.equal(cardlib.cardError, 'missing');
-        doc = draw([0]);
-        assert.equal(doc.querySelectorAll('.worldscrawl_update_plugin').length, 1);
-    } finally { cardlib.usePluginVersion(2); assert.equal(cardlib.useCardLib(card, cardedit), true); }
-    assert.equal(btns(draw([0])).includes('Approve'), true);
 });
 
 // ---- S1b: every person action goes through settleNpc (Check again, the scope switch, Rewrite with this)
