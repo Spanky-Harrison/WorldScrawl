@@ -1,19 +1,18 @@
 // The shared card and editor (plugin/ui/card.mjs, cardedit.mjs), loaded once at startup from the plugin at <server>/ui/,
-// so drawing cards stays synchronous and never flashes. The plugin's CARD_VERSION must match CARD_API: a missing or
-// older plugin gets one visible line where the cards would be (UPDATE_LINE), never the old inline cards.
-import { sharedUrl } from './shared.mjs';
+// so drawing cards stays synchronous and never flashes. A missing or older plugin (the one version check, shared.mjs
+// pluginError) gets one visible line where the cards would be (UPDATE_LINE), never the old inline cards.
+import { pluginError, sharedUrl, usePluginVersion as setPluginVersion } from './shared.mjs';
 
-/** The card shape this extension draws. Bump with plugin/ui/card.mjs CARD_VERSION. */
-export const CARD_API = 1;
 export const UPDATE_LINE = 'WorldScrawl: update the plugin, then restart SillyTavern';
 
-let lib = null, edit = null;
+let lib = null, edit = null, loaded = [null, null];
 /** null, or why the card code is unavailable ('missing' or 'old'). */
 export let cardError = null;
 
 function check(c, e) {
+    loaded = [c, e];
+    if (pluginError) { lib = edit = null; cardError = pluginError; return false; }
     if (!c?.renderCard || !e?.buildCardEditor) { lib = edit = null; cardError = 'missing'; return false; }
-    if (c.CARD_VERSION !== CARD_API || e.CARD_VERSION !== CARD_API) { lib = edit = null; cardError = 'old'; return false; }
     lib = c; edit = e; cardError = null;
     return true;
 }
@@ -32,3 +31,5 @@ export const cardLib = () => lib;
 export const editLib = () => edit;
 /** Tests hand in a module pair (or an old one, to see the update line). */
 export function useCardLib(c, e = edit) { return check(c, e); }
+/** Tests: act as if the plugin said `version` ('missing': not loaded), and check the cards again. */
+export function usePluginVersion(version) { setPluginVersion(version); return check(...loaded); }

@@ -518,7 +518,7 @@ async function runTracker(id) {
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
         const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
-        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id });
+        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id, shown: 'marker' }); // "tracking…"
         // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg || (msg.mes ?? '') !== story || newSwipePending(msg)) return;
         const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);

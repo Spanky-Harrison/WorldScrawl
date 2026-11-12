@@ -15,12 +15,12 @@ import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { PLACE_EXPIRED_KIND, drawDiff, expiryView, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
+import { PLACE_EXPIRED_KIND, drawDiff, expiryView, roomExpiryKeys, textExpiryKey, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, personExpiriesIn, personExpiryTurn, prefetchRemember } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel, modelChangeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
-import { onWorkChange, workingOn } from './work.mjs';
+import { busyLines, onCallChange, onWorkChange, workingOn } from './work.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -193,8 +193,6 @@ async function waitFacts(chat, loc) {
 // A call starting or ending redraws the cards (work.mjs), so a rebuild is never silent.
 onWorkChange(() => { if (typeof document !== 'undefined') renderPatchCards(); });
 
-/** The descriptor adapters this extension draws with: an older plugin without one of them shows the update line. */
-const CARD_ADAPTERS = ['placeReview', 'personReview', 'personKept', 'personExpiry', 'placeExpiry', 'rememberReview', 'placeKept', 'personNote', 'foundKept', 'placeStatus', 'waitReview', 'appearJob', 'resolvedNote', 'warnNote'];
 /** A notice button (the shared card button): decides locks the row on the first click and redraws the cards after. */
 const cardHooks = { onError: err => { console.error('[WorldScrawl] notice', err); toastr.error(`WorldScrawl: ${err?.message || err}`); }, after: () => renderPatchCards() };
 function cardButton(label, onClick, title = '', decides = false) { return cardLib().cardButton(document, label, onClick, title, decides, cardHooks); }
@@ -332,6 +330,31 @@ function proposalOf(msg, job) {
 }
 /** The place expiry notice items (timed text changes) on a notice. */
 const placeItems = m => (m?.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND ? (m.extra.worldscrawl_notice_places ?? []).filter(it => it?.id) : []);
+/**
+ * The place expiry cards of the whole chat, by the collapse rule (C.groupExpiries): timed text changes that wrote the
+ * same text on one notice share a card, and so does everything one change ran out at the same time, across notices:
+ * the vanished room it made (the passage sealing) and its text changes elsewhere. Each card shows on the first notice
+ * of its group. Returns Map(notice id -> [[entry, ...], ...]); an entry is {notice, room: true} or {notice, item}.
+ */
+function placeExpiryPlan(ch) {
+    const entries = [];
+    ch.forEach((m, i) => {
+        if (isPlaceExpiry(m)) entries.push({ notice: i, room: true, keys: roomExpiryKeys(ch, i) });
+        for (const it of placeItems(m)) entries.push({ notice: i, item: it, keys: [...(it.targets ?? []).map(t => `${i}|${t}`), textExpiryKey(it)] });
+    });
+    const plan = new Map();
+    for (const g of C.groupExpiries(entries, e => e.keys)) {
+        if (!plan.has(g[0].notice)) plan.set(g[0].notice, []);
+        plan.get(g[0].notice).push(g);
+    }
+    return plan;
+}
+/** One place expiry card's view (patches.mjs expiryView) for a plan group, shown on notice `id`. */
+function placeCardView(ch, id, group) {
+    const items = group.filter(e => e.item), rooms = group.filter(e => e.room).map(e => e.notice);
+    const got = items.length || rooms.some(r => r !== id) ? expiryView(ch, id, items.map(e => e.item), rooms) : expiryView(ch, id);
+    return got ? { ...got, textNotice: items[0]?.notice ?? id } : null;
+}
 /** Does an expiry notice item cover this rebuild job? A person's by its id; a place text's by the text it wrote. */
 const covers = (p, job) => (job.domain === 'place' ? (p.targets ?? []).includes(job.id) : p?.kind === 'appearance' && p.id === job.id);
 /** The expiry notice right after message h that names the job's person or place text, or -1. */
@@ -384,9 +407,9 @@ function expiredPlaceEl(msg, id, got) {
     const item = got.item ?? null, group = got.items ?? [];
     const key = item ? `${id}|expiry|${item.key}@${item.ends}` : `${id}|expiry`, form = openForms.get(key);
     const edited = patchesOn(msg).some(p => p.source === 'expiry_edit' && (!item || group.some(it => p.expiry === it.key)));
-    const { host, jobs } = item ? cardJobs(ch, id, group) : { host: -1, jobs: [] };
+    const { host, jobs } = item ? cardJobs(ch, got.textNotice ?? id, group) : { host: -1, jobs: [] };
     const name = castPack()?.labels?.[got.address] || got.name || got.preview?.after?.[got.address]?.name || '';
-    const desc = C.placeExpiry({ key, name, whats: item ? group.map(it => it.what ?? '') : undefined, preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.note ?? got.patch.note ?? '', edited,
+    const desc = C.placeExpiry({ key, name, room: got.room ? castPack()?.labels?.[got.roomAddress] || got.room : '', whats: item ? group.map(it => it.what ?? '') : undefined, preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.note ?? got.patch.note ?? '', edited,
         jobs: jobs.map(j => jobView(j)) });
     if (desc.editor) desc.editor.formEl = form.el;
     const failed = jobs.filter(j => j.status === 'failed');
@@ -425,6 +448,25 @@ const TRACK_TITLE = {
     tracked: 'WorldScrawl read this reply: nothing to add to the map, people or time.',
     failed: 'WorldScrawl could not read this reply for changes (see Debug > Activity log). Nothing was added.',
 };
+/**
+ * The busy line: one small line under the latest message while model calls no card shows are running ("WorldScrawl:
+ * reading your move…"). The shared status for every call (work.mjs withCall); gone when they end.
+ */
+export function drawBusy() {
+    if (typeof document === 'undefined') return;
+    for (const old of document.querySelectorAll('.worldscrawl_busymark')) old.remove();
+    const lines = busyLines();
+    const all = lines.length ? document.querySelectorAll('#chat .mes[mesid]') : [];
+    const el = all[all.length - 1];
+    if (!el) return;
+    const d = document.createElement('div');
+    d.className = 'worldscrawl_busymark';
+    d.textContent = `WorldScrawl: ${lines.join(' · ')}…`;
+    d.title = 'WorldScrawl is asking the model; this goes away when it answers.';
+    d.style.cssText = 'margin-top:2px;font-size:0.75em;opacity:0.55;text-align:right;font-style:italic;user-select:none;';
+    (el.querySelector('.mes_block') ?? el).appendChild(d);
+}
+onCallChange(drawBusy);
 /** The small tracked marker under the latest reply. A card the read put up stands in for it (trackMark gives ''). */
 function drawTrackMark(el, msg) {
     const mark = trackMark(msg);
@@ -440,6 +482,7 @@ export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
     const latest = latestReply(ch);
+    const lib = !!cardLib(), placePlan = lib ? placeExpiryPlan(ch) : null; // an old plugin: no shared code is used, only the update line
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
         el.querySelector('.worldscrawl_patchcard')?.remove();
@@ -467,14 +510,14 @@ export function renderPatchCards() {
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = jobsOf(msg).some(j => shownJob(j) && !elsewhere(ch, id, j));
         // The collapse rule (C.groupExpiries): one card per rebuild, a person's changes by person, place changes by the text they wrote.
-        const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? C.groupExpiries((msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id), p => [p.id]) : [];
-        const placeGone = (isPlaceExpiry(msg) ? [expiryView(ch, id)] : C.groupExpiries(placeItems(msg), it => it.targets ?? []).map(g => expiryView(ch, id, g))).filter(Boolean);
+        const expired = !lib ? (msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? msg.extra.worldscrawl_notice_people ?? [] : []) : msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? C.groupExpiries((msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id), p => [p.id]) : [];
+        const placeGone = !lib ? (isPlaceExpiry(msg) || placeItems(msg).length ? [true] : []) : (placePlan.get(id) ?? []).map(g => placeCardView(ch, id, g)).filter(Boolean);
         if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
         const line = t => { const d = document.createElement('div'); d.textContent = t; return d; };
-        if (!cardLib() || CARD_ADAPTERS.some(a => typeof C?.[a] !== 'function')) { // a missing or older plugin: one line, never the old cards
+        if (!lib) { // a missing or older plugin (the one version check, shared.mjs): one line, never the old cards
             const u = line(UPDATE_LINE); u.className = 'worldscrawl_update_plugin'; card.append(u);
             (el.querySelector('.mes_block') ?? el).appendChild(card);
             continue;
@@ -554,6 +597,7 @@ export function renderPatchCards() {
         if (!card.childNodes.length) continue;
         (el.querySelector('.mes_block') ?? el).appendChild(card);
     }
+    drawBusy();
 }
 
 export { cardButton, noteShortWait, stampWait, waitAsk, waitFacts };

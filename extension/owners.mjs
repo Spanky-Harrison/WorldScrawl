@@ -141,7 +141,7 @@ export async function askTried(kind, args, { timeout = FILL_TIMEOUT_MS, timeoutR
         let raw;
         try {
             const { gen } = await model();
-            raw = await gen(kind, args, { retry: attempt > 0, note, timeout, at });
+            raw = await gen(kind, args, { retry: attempt > 0, note, timeout, at, shown: 'card' }); // its rebuild shows on a card (withWork / beginWork)
         } catch (e) {
             if (e?.code === 'timeout') { last = { kind: 'timeout', reason: timeoutReason }; continue; }
             last = { kind: 'application', reason: e?.message || String(e) }; continue;

@@ -160,7 +160,8 @@ export function personExpiry(v) {
 
 /**
  * A temporary map change ran out: the room the party was in (the passage sealed), or a timed change to a place's text
- * (smoke filling a room). v: {key, name, what? (or whats: several changes to the same text, one card), preview (before = with the temporary change, after = now) or null while
+ * (smoke filling a room), or both when one change made the room and rewrote text elsewhere (room: the room's name; one
+ * card for the whole change). v: {key, name, room?, what? (or whats: several changes to the same text, one card), preview (before = with the temporary change, after = now) or null while
  * it loads, loadError, editing, intent, edited, jobs?: [{name, status, reason}] (the place text rebuild after it:
  * working, or failed with Check again)}. Edit opens the map form and Change:; Approve edited stamps a new kept map change
  * on the notice.
@@ -177,7 +178,7 @@ export function placeExpiry(v) {
     const whats = v.whats ?? (v.what ? [v.what] : []);
     return {
         key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_placeexpired',
-        title: '🗺 A temporary map change ran out:', summary: whats.length ? ranOut(v.name, whats) : [`${v.name} ran out`], notes,
+        title: '🗺 A temporary map change ran out:', summary: whats.length ? [...(v.room ? [`${v.room} ran out`] : []), ...ranOut(v.name, whats)] : [`${v.name} ran out`], notes,
         panel: v.preview ? { type: 'place', preview: v.preview } : null,
         editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_flag_intent' }, fields: [], form: 'patch' } : null,
         actions: within('expiry', 'info', actions),
