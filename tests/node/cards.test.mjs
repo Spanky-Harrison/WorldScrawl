@@ -242,16 +242,19 @@ test('stale results: an action from a card drawn before the change moved writes 
 test('a missing or older plugin shows one "update the plugin" line, never the old cards', async () => {
     await personProposal('pc5');
     try {
-        assert.equal(cardlib.useCardLib({ ...card, CARD_VERSION: 0 }, cardedit), false);
+        assert.equal(cardlib.usePluginVersion(1), false); // the one version check (shared.mjs): an older plugin
         assert.equal(cardlib.cardError, 'old');
         let doc = draw([0]);
         assert.equal(doc.querySelectorAll('.worldscrawl_card_btn').length, 0);
         assert.equal(doc.querySelector('.worldscrawl_update_plugin').textContent, 'WorldScrawl: update the plugin, then restart SillyTavern');
+        assert.equal(cardlib.usePluginVersion(undefined), false); // a plugin from before the check (no version.mjs)
+        assert.equal(cardlib.cardError, 'old');
+        assert.equal(cardlib.usePluginVersion(2), true);
         assert.equal(cardlib.useCardLib(null, null), false);
         assert.equal(cardlib.cardError, 'missing');
         doc = draw([0]);
         assert.equal(doc.querySelectorAll('.worldscrawl_update_plugin').length, 1);
-    } finally { assert.equal(cardlib.useCardLib(card, cardedit), true); }
+    } finally { cardlib.usePluginVersion(2); assert.equal(cardlib.useCardLib(card, cardedit), true); }
     assert.equal(btns(draw([0])).includes('Approve'), true);
 });
 
