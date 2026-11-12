@@ -2,6 +2,8 @@
 import { render as P, patches as patchShared } from './shared.mjs';
 import { carrierLine, clip, isCarrier, patchLib, proactiveDiscovery, snapCarriers } from './carriers.mjs';
 import { chatChanges, chatElapsed } from './clock.mjs';
+import { targetKeyOf } from './arearewrite.mjs';
+import { expiryKey, expiryWindow, noticedExpiries } from './npcexpiry.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api } from './doors.mjs';
 import { exitsCache, renderAllExits } from './footer.mjs';
@@ -273,9 +275,15 @@ export async function liveEdit(ops, note = '', { separate = false } = {}) {
 globalThis.worldscrawlLiveEdit = liveEdit;
 
 
-// ---- The place expiry notice ("the passage seals behind you"): the temporary change that ran out under the party.
+// ---- Place expiry notices. Two kinds share one card (C.placeExpiry): the vanished temporary room the party was in
+// ("the passage seals behind you", kind 'missing' + expired), and a temporary text change that ran out (kind
+// PLACE_EXPIRED_KIND: smoke in a room, a scorched door), posted like a person's expiry notice, one card per change.
 export const isPlaceExpiry = m => m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired === true;
+export const PLACE_EXPIRED_KIND = 'place_expired';
+/** Any notice that carries place expiry cards (the vanished room, or timed text changes that ran out). */
+export const isPlaceExpiryNotice = m => isPlaceExpiry(m) || m?.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND;
 const touches = (o, address) => o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address);
+const opWhere = o => String(o?.loc ?? o?.area ?? o?.into ?? '');
 /** The change whose temporary op ran out under the party: the server resolver's pick (the latest one touching that room). */
 export function expiredPatchAt(chat, id) {
     const msg = chat?.[id];
@@ -288,28 +296,88 @@ export function expiredPatchAt(chat, id) {
     const made = ran.find(o => o.op === 'create_place' && touches(o, address));
     return { patch: p, address, now, ran, name: made?.name || p.names?.[address] || p.note || address };
 }
+/**
+ * Timed place text changes (an op with "lasts" that rewrites a description, area notes or an exit text) that run out
+ * after game time `before` and by `after`: one item per change and end time, in the order they end:
+ * [{key, ends, id, msg, ops: [op index], what, where, targets}]. A turned-off change never runs out.
+ */
+export function placeExpiriesBetween(chat, before, after) {
+    if (typeof patchShared.expiredBetween !== 'function' || !Number.isFinite(after)) return [];
+    const changes = chatChanges(chat, { raw: true }), items = new Map();
+    for (const g of patchShared.expiredBetween(changes, before, after)) {
+        const c = changes.find(x => x?.type === 'patch' && x.id === g.patch && x.ops?.includes(g.op));
+        if (!c || c.off === true) continue;
+        const target = targetKeyOf(g.op);
+        if (!target) continue;
+        const k = `place:${c._msg}:${c.id}@${g.ends}`;
+        const it = items.get(k) ?? { key: `place:${c._msg}:${c.id}`, ends: g.ends, id: c.id, msg: c._msg, ops: [], notes: [], where: opWhere(g.op), targets: [] };
+        it.ops.push(c.ops.indexOf(g.op)); it.targets.push(target);
+        if (g.note && !it.notes.includes(g.note)) it.notes.push(g.note);
+        items.set(k, it);
+    }
+    return [...items.values()].map(({ notes, ...it }) => ({ ...it, what: clip(notes.join('; ') || 'a change to this place', 160) })).sort((a, b) => a.ends - b.ends);
+}
+/** The chat notice line for timed place changes that ran out (never in the prompt). */
+export const placeExpiryNoticeText = items => `[Engine: ${(items ?? []).map(it => `The temporary change "${it.what}" ran out.`).join(' ')}]`;
+/**
+ * One notice for the timed place text changes that ran out and are not announced yet, right after the latest message
+ * (like postPersonExpiryNotices). Returns the notice or null.
+ */
+export async function postPlaceExpiryNotices() {
+    const c = ctx(), chat = c.chat ?? [];
+    if (!isOn() || !chat.length || typeof patchShared.expiredBetween !== 'function') return null;
+    const end = chat.length - 1, seen = noticedExpiries(chat);
+    const { before, after } = expiryWindow(chat, end, i => chatElapsed(chat.slice(0, i + 1)));
+    const items = placeExpiriesBetween(chat.slice(0, end + 1), before, after).filter(it => !seen.has(expiryKey(it)));
+    if (!items.length) return null;
+    const msg = { name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(), mes: placeExpiryNoticeText(items),
+        extra: { worldscrawl_notice: true, worldscrawl_notice_kind: PLACE_EXPIRED_KIND, worldscrawl_notice_places: items } };
+    chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
+    return msg;
+}
+/** One place card on an expiry notice: the vanished room (item null), or one timed change the notice names. */
+function placeExpiryAt(chat, id, item) {
+    if (!item) return expiredPatchAt(chat, id);
+    const msg = chat?.[id];
+    if (msg?.extra?.worldscrawl_notice_kind !== PLACE_EXPIRED_KIND) return null;
+    const now = chatElapsed(chat.slice(0, id + 1));
+    const p = chatChanges(chat.slice(0, id)).find(c => c?.type === 'patch' && c.id === item.id && (item.msg == null || c._msg === item.msg));
+    if (!p || !Array.isArray(p.ops)) return null;
+    const ran = (item.ops ?? []).map(i => p.ops[i]).filter(Boolean);
+    if (!ran.length) return null;
+    return { patch: p, address: item.where || opWhere(ran[0]), now, ran, name: p.names?.[item.where] || '', item };
+}
 /** The ops that ran out, kept for good: what the notice's Edit starts from. */
 export const keptForGood = ops => (ops ?? []).map(o => { const { lasts, ...rest } = o; return rest; });
-const expiryViews = new WeakMap(); // notice message -> {sig, preview, error}
+const expiryViews = new WeakMap(); // notice message -> Map(card key -> {sig, preview, error})
 /**
  * The before/now panel of a place expiry card: a preview of the chat's changes with the ran-out ops (kept for good) and
- * without them. Fetched once per notice and cached; the card redraws when it arrives.
+ * without them. Fetched once per card and cached (a text rebuilt since changes the key); the card redraws when it arrives.
+ * `item`: one timed change of a PLACE_EXPIRED_KIND notice; none for the vanished room.
  */
-export function expiryView(chat, id) {
-    const got = expiredPatchAt(chat, id);
+export function expiryView(chat, id, item = null) {
+    const got = placeExpiryAt(chat, id, item);
     if (!got) return null;
-    const msg = chat[id], sig = `${got.patch._msg}|${got.patch.id}|${got.now}|${JSON.stringify(got.ran)}`;
-    let v = expiryViews.get(msg);
+    const msg = chat[id], ran = new Set(got.ran);
+    // Now: every change before the notice, with the ops that ran out taken off their change (the rest of it stays).
+    const others = chatChanges(chat.slice(0, id)).flatMap(c => {
+        if (!(c._msg === got.patch._msg && c.id === got.patch.id)) return [c];
+        const ops = (c.ops ?? []).filter(o => !ran.has(o));
+        return ops.length ? [{ ...c, ops }] : [];
+    });
+    const sig = `${got.patch._msg}|${got.patch.id}|${got.now}|${JSON.stringify(got.ran)}|${JSON.stringify(others.map(c => c._rebuilt ?? null))}`;
+    const views = expiryViews.get(msg) ?? new Map(), vk = item?.key ?? '';
+    expiryViews.set(msg, views);
+    let v = views.get(vk);
     if (!v || v.sig !== sig) {
         v = { sig, preview: null, error: '' };
-        expiryViews.set(msg, v);
-        const others = chatChanges(chat.slice(0, id)).filter(c => !(c._msg === got.patch._msg && c.id === got.patch.id));
+        views.set(vk, v);
         previewOps(keptForGood(got.ran), { changes: others, now: got.now }).then(r => {
-            if (expiryViews.get(msg) !== v) return;
+            if (views.get(vk) !== v) return;
             if (r.ok) v.preview = { before: r.preview.after ?? {}, after: r.preview.before ?? {}, ops: [], relocate: {}, inherit: {}, names: r.preview.names ?? {} };
             else v.error = `Could not show what changed: ${r.errors?.[0]?.error ?? 'preview failed'}`;
             renderPatchCards();
-        }, e => { if (expiryViews.get(msg) === v) { v.error = `Could not show what changed: ${e?.message || e}`; renderPatchCards(); } });
+        }, e => { if (views.get(vk) === v) { v.error = `Could not show what changed: ${e?.message || e}`; renderPatchCards(); } });
     }
     return { ...got, preview: v.preview, error: v.error };
 }
@@ -317,9 +385,9 @@ export function expiryView(chat, id) {
  * Approve edited on a place expiry card: the form's ops become a new kept map change on the notice (from here on;
  * deleting the notice removes it). `still()` is the card's ticket: a notice deleted or swiped mid-save writes nothing.
  */
-export async function keepExpiryEdit(id, key, note = '', still = () => true) {
+export async function keepExpiryEdit(id, key, note = '', still = () => true, item = null) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id], form = openForms.get(key);
-    if (!isPlaceExpiry(msg) || !form) return { ok: false, error: 'That notice is gone.' };
+    if (!isPlaceExpiryNotice(msg) || !form) return { ok: false, error: 'That notice is gone.' };
     const ops = form.getOps();
     if (!ops.length) { form.setErrors([{ i: null, error: 'Nothing to keep: add a change, or press Close editor.' }]); return { ok: false }; }
     const now = chatElapsed(chat.slice(0, id + 1));
@@ -327,7 +395,7 @@ export async function keepExpiryEdit(id, key, note = '', still = () => true) {
     if (!still()) { renderPatchCards(); return { ok: false, stale: true }; }
     if (!r.ok) { form.setErrors(r.errors); return { ok: false, errors: r.errors }; }
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: clip(note, 200) || clip(r.preview.summary?.[0] ?? 'map edit', 120), at: now,
-        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: swipeOf(msg), source: 'expiry_edit' };
+        ops: r.preview.ops ?? ops, relocate: r.preview.relocate ?? {}, inherit: r.preview.inherit ?? {}, names: r.preview.names ?? {}, summary: r.preview.summary, range: null, swipe: swipeOf(msg), source: 'expiry_edit', ...(item?.key ? { expiry: item.key } : {}) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
     syncSwipeExtra(msg);
     openForms.delete(key);

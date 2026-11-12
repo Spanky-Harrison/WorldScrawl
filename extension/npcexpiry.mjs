@@ -101,10 +101,13 @@ export function trackerExpiryLines(items) {
     return items.map(it => `${capFirst(it.shown || it.name)} [${it.handle || it.id}]: ${modelChangeLabel(it).replace(/^the/, 'The')} ran out; the game already changed them back. The Body and Outfit listed above are the result.`).join('\n');
 }
 
-/** Keys of the expiries a notice in this chat already announced. */
+/** Keys of the expiries a notice in this chat already announced (people, and timed place changes: patches.mjs). */
 export function noticedExpiries(chat) {
     const out = new Set();
-    for (const m of chat ?? []) if (m?.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND) for (const p of m.extra.worldscrawl_notice_people ?? []) if (p?.key) out.add(`${p.key}@${p.ends}`);
+    for (const m of chat ?? []) {
+        const list = m?.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? m.extra.worldscrawl_notice_people : m?.extra?.worldscrawl_notice_kind === 'place_expired' ? m.extra.worldscrawl_notice_places : null;
+        for (const p of list ?? []) if (p?.key) out.add(`${p.key}@${p.ends}`);
+    }
     return out;
 }
 export const expiryKey = it => `${it.key}@${it.ends}`;

@@ -29,7 +29,7 @@ import { mapState, openMapChannel, openMapWindow } from './mapwindow.mjs';
 import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, doorInfo, engineMove, engineTravel, goAction, matchCandidates, moveNote, narrate, partyText, pickKey, stamp, stoodInAddresses, syncDoors } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
 import { mapCtx } from './patches.mjs';
-import { ensurePlaceRebuilds } from './placerevert.mjs';
+import { placeExpiryTurn } from './placerevert.mjs';
 import { applyFacts, applyFound, learnNameOn, offerRemember, postPersonExpiryNotices, prepareNpcs, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
@@ -315,8 +315,9 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             renderAllExits();
         }
         if ((!type || type === 'normal') && last?.is_user) await prepareNpcs(last);
-        // Place texts a temporary change wrote under a later one still in force: rebuilt before the narrator reads them.
-        if ((!type || type === 'normal') && last?.is_user) await ensurePlaceRebuilds(chat.length - 1).catch(e => console.warn('[WorldScrawl] place rebuild', e?.message || e));
+        // Timed place text changes that ran out with this turn's time get their notice (one card each), then the texts a
+        // temporary change wrote under a later one still in force are rebuilt (shown working on that card) before the narrator reads them.
+        if ((!type || type === 'normal') && last?.is_user) await placeExpiryTurn(chat.length - 1);
         // A person's temporary change that ran out with this turn's time gets its chat notice now (never on a swipe).
         if ((!type || type === 'normal') && last?.is_user) await postPersonExpiryNotices().catch(e => console.warn('[WorldScrawl] expiry notice', e?.message || e));
         await applyFacts();

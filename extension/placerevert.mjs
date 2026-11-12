@@ -17,6 +17,13 @@ import { composeRecords, findCompose } from './replay.mjs';
 import { renderPatchCards } from './waits.mjs';
 import { mapCtx } from './patches.mjs';
 
+/** Rebuilds in flight, by need key: {msg, swipe, job (status 'working'), done}. Live only (a reload shows none). */
+const flights = new Map();
+/** The rebuilds running now for message `msg` (its shown swipe), as working jobs: drawn like the stored ones. */
+export function placeRebuildsWorking(msg) {
+    return [...flights.values()].filter(f => f.msg === msg && f.swipe === swipeOf(msg)).map(f => f.job);
+}
+
 /** Same bound as an appearance rebuild. */
 export const PLACE_REVERT_TIMEOUT_MS = 45000;
 const PART = 'place';
@@ -79,13 +86,20 @@ export async function ensurePlaceRebuilds(msgId, { timeout = PLACE_REVERT_TIMEOU
     const changes = chatChanges(chat, { raw: true }), swipe = swipeOf(msg);
     let called = 0;
     for (const need of needs) {
+        // The same text already being rebuilt (a wait kept, then the player sends): wait for that call, never a second one.
+        if (flights.has(need.key)) { await flights.get(need.key).done; continue; }
         let base;
         try { base = await baseOf(need, changes); } catch (e) {
             setJob(msg, swipe, { npc: need.target, domain: PART, name: need.target, key: need.key, part: PART, status: 'failed', kind: 'application', reason: e?.message || String(e) });
             continue;
         }
         called++;
-        const asked = await askRevert(need, base, msgId, timeout);
+        let landed;
+        const flight = { msg, swipe, job: { id: need.target, npc: need.target, domain: PART, name: base.label, key: need.key, part: PART, status: 'working' }, done: new Promise(r => { landed = r; }) };
+        flights.set(need.key, flight);
+        renderPatchCards(); // never silent: the expiry card (or the job card) shows the rebuild working
+        let asked;
+        try { asked = await askRevert(need, base, msgId, timeout); } finally { flights.delete(need.key); landed(); }
         if (!asked.ok) {
             setJob(msg, swipe, { npc: need.target, domain: PART, name: base.label, key: need.key, part: PART, status: 'failed', kind: asked.kind || 'malformed', reason: asked.reason || 'the answer was not usable' });
             continue;
@@ -112,4 +126,17 @@ export function retryPlaceRebuild(msgId, target, key) {
         await applyFacts();
         return { ok: true };
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
+}
+
+/**
+ * A turn's place expiries: the notice for timed place text changes that ran out (one card each), posted first so the
+ * rebuild that follows shows on it while it works; then the rebuild, stored on the message before the notice (`host`,
+ * default the latest message), the one the card's Check again asks on.
+ */
+export async function placeExpiryTurn(host = (ctx().chat?.length ?? 0) - 1) {
+    const { postPlaceExpiryNotices } = await import('./patches.mjs');
+    const posted = await postPlaceExpiryNotices().catch(e => { console.warn('[WorldScrawl] place expiry notice', e?.message || e); return null; });
+    if (posted) renderPatchCards();
+    if (host < 0) return { called: 0 };
+    return ensurePlaceRebuilds(host).catch(e => { console.warn('[WorldScrawl] place rebuild', e?.message || e); return { called: 0 }; });
 }

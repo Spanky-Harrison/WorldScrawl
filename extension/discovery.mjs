@@ -346,7 +346,7 @@ async function applyProposedWait(id, w, source = '') {
         noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` });
         stampWait(msg, w);
         if (source) { msg.extra[WAIT_KEY].source = source; msg.extra[WAIT_KEY].swipe = swipeOf(msg); }
-        await c.saveChat?.(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState();
+        await c.saveChat?.(); await (await import('./placerevert.mjs')).placeExpiryTurn(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState();
     } else {
         noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `proposed; why: ${w.reason || '(no reason given)'}` });
         proposeWait(msg, w);
