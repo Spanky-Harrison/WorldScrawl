@@ -21,7 +21,7 @@ import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { capFirst, findPerson, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
-import { TRACKER_SOURCE, bumpTracker, dropTrackerMarks, gateTracker, newSwipePending, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
+import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
 /** Movement tools follow moveMode. ws_flag, ws_wait, and ws_npc are not narrator tools; the after-reply tracker reports changes. */
@@ -313,6 +313,7 @@ function syncSwipeExtra(msg) {
     if (msg.extra.worldscrawl_compose) si.extra.worldscrawl_compose = msg.extra.worldscrawl_compose; else delete si.extra.worldscrawl_compose;
     if (msg.extra.worldscrawl_npc_baseline) si.extra.worldscrawl_npc_baseline = msg.extra.worldscrawl_npc_baseline;
     if (msg.extra.worldscrawl_mid) si.extra.worldscrawl_mid = msg.extra.worldscrawl_mid;
+    if (msg.extra[TRACKED_KEY]) si.extra[TRACKED_KEY] = msg.extra[TRACKED_KEY]; else delete si.extra[TRACKED_KEY];
 }
 async function undoFlag(id) {
     const c = ctx(), msg = c.chat?.[id], f = msg?.extra?.[FLAG_KEY];
@@ -502,12 +503,15 @@ async function runTracker(id) {
     if (!shouldTrackReply(msg, chat, id)) return;
     const genNo = bumpTracker(msg);
     const swipe = swipeOf(msg), story = msg.mes ?? '';
+    let status = null; // what the marker ends on (null: skipped or stale, nothing shown for this read)
     try {
         await ensurePrompts();
         let loc = null;
         try { loc = await currentLocation(); } catch { loc = null; }
         // Without the place and the cards, a look or an entrance is too easy to mistake for a change.
         if (!loc?.name && !loc?.address) { noteCall(id, { kind: 'tracker', status: 'skipped', reason: 'place unavailable' }); return; }
+        markTracking(msg, genNo);
+        renderPatchCards();
         const weather = placeWeatherNow(loc)?.line ?? '';
         const people = listedPeople(chat, id, loc);
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
@@ -521,9 +525,15 @@ async function runTracker(id) {
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
         await applyTrackerResult(id, parsed);
+        if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = hasTrackerCard(msg) ? 'carded' : 'tracked';
     } catch (e) {
         console.warn('[WorldScrawl] tracker', e?.message || e);
         noteCall(id, { kind: 'tracker', status: 'failed', reason: e?.message || String(e) });
+        if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = 'failed';
+    } finally {
+        markTracked(msg, genNo, status);
+        if (status) { syncSwipeExtra(msg); try { await ctx().saveChat?.(); } catch (e) { console.warn('[WorldScrawl] save', e?.message || e); } }
+        renderPatchCards();
     }
 }
 /** A swipe drops the tracker stamps of the story just left, then reads the swipe now showing. A swipe that is still

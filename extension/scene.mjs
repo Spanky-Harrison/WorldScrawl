@@ -1010,6 +1010,10 @@ function retryAppearance(msgId, npcId, key) {
         else for (const j of appearJobs(msg).filter(j => j.id === npcId)) clearAppearJob(msg, npcId, j.key);
         syncSwipeExtra(msg);
         await ensureAppearanceRebuilds(msgId, { ids: [npcId] });
+        // The narrator reads the rebuilt look from the next prompt on: refresh its facts and the cards now.
+        await ctx().saveChat?.();
+        await applyFacts();
+        renderPatchCards();
         return { ok: true };
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }

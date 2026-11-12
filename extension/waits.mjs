@@ -1,4 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
+import { trackMark } from './tracker.mjs';
 import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
 import { render as P, cards as C } from './shared.mjs';
@@ -296,8 +297,22 @@ function personKeptEl(msg, id, s, who) {
  * Under a person-expiry notice: the shared expiry card. The panel is how they looked while it lasted next to now;
  * Edit opens the Body/Outfit editor, and Approve edited saves the typed text as a lasting change on this notice.
  */
+/** Expiry notices sit right after the player message whose turn ran the change out (postPersonExpiryNotices). */
+const isNotice = m => !!(m?.is_system && m.extra?.worldscrawl_notice);
+/** The player message an expiry notice belongs to: the rebuild that turn ran is stored there. */
+function noticeHost(ch, id) { let h = id - 1; while (h >= 0 && isNotice(ch[h])) h--; return h; }
+/** The person expiry notice right after message h that names person `npc`, or -1. */
+function coveringNotice(ch, h, npc) {
+    for (let i = h + 1; i < ch.length && isNotice(ch[i]); i++)
+        if (ch[i].extra.worldscrawl_notice_kind === NPC_EXPIRED_KIND && (ch[i].extra.worldscrawl_notice_people ?? []).some(p => p?.kind === 'appearance' && p.id === npc)) return i;
+    return -1;
+}
+/** A person's failed appearance rebuild shows on the expiry notice that covers it (with Check again), not as a second card. */
+const coveredJob = (ch, id, job) => job.status === 'failed' && job.domain !== 'place' && coveringNotice(ch, id, job.id) >= 0;
 function expiredPersonEl(msg, id, p) {
     const chat = ctx().chat ?? [];
+    const host = noticeHost(chat, id);
+    const job = host >= 0 && coveringNotice(chat, host, p.id) === id ? appearJobs(chat[host]).find(j => j.id === p.id && j.status === 'failed' && j.domain !== 'place') : null;
     const now = npcAt(chat, id, castPack()?.npcs ?? [], p.id, i => npcClock(chat, i));
     const before = npcBefore(chat, id, p.id, Number(p.ends));
     const key = `${msg.extra?.worldscrawl_mid || id}|npcexpired|${p.id}`;
@@ -306,7 +321,8 @@ function expiredPersonEl(msg, id, p) {
     const editing = !edited && !!now && !!editLib()?.editorOpen(key);
     const fields = editing ? rows.map(r => ({ key: r.field, label: r.label, value: now[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: 'lasting', field: r.field } })) : [];
     const who = p.name || p.id;
-    return drawCard(C.personExpiry({ key, who, what: p.what ?? '', rows, editing, fields, edited: edited || !now }), 'expiry', ticketFor('expiry', { id, msg, key, kind: 'person', person: p }));
+    return drawCard(C.personExpiry({ key, who, what: p.what ?? '', rows, editing, fields, edited: edited || !now, ...(job ? { failed: { reason: job.reason ?? '' } } : {}) }), 'expiry',
+        ticketFor('expiry', { id, msg, key, kind: 'person', person: p, ...(job ? { host, job } : {}) }));
 }
 
 /** Under a place-expiry notice: the shared expiry card (before = with the temporary change, now = without it). */
@@ -340,13 +356,38 @@ function waitEl(msg, id, wc) {
     const { before, after } = waitTimes(id, wc);
     return drawCard(C.waitReview({ key, label: wc.label, amount: wc.amount, reason: wc.reason ?? '', before, after: after ? `${after} (${wc.label})` : '', editing }), 'wait', ticketFor('wait', { id, msg }));
 }
+/** The latest story reply (not the player's line, not an engine notice). */
+function latestReply(ch) {
+    for (let i = ch.length - 1; i >= 0; i--) { const m = ch[i]; if (m && !m.is_user && !m.is_system && !m.extra?.worldscrawl_notice) return i; }
+    return -1;
+}
+const TRACK_TEXT = { tracking: 'tracking…', tracked: 'tracked', failed: 'tracking failed' };
+const TRACK_TITLE = {
+    tracking: 'WorldScrawl is reading this reply for map, people and time changes.',
+    tracked: 'WorldScrawl read this reply: nothing to add to the map, people or time.',
+    failed: 'WorldScrawl could not read this reply for changes (see Debug > Activity log). Nothing was added.',
+};
+/** The small tracked marker under the latest reply. A card the read put up stands in for it (trackMark gives ''). */
+function drawTrackMark(el, msg) {
+    const mark = trackMark(msg);
+    if (!mark) return;
+    const d = document.createElement('div');
+    d.className = `worldscrawl_trackmark worldscrawl_trackmark_${mark}`;
+    d.textContent = TRACK_TEXT[mark];
+    d.title = TRACK_TITLE[mark];
+    d.style.cssText = 'margin-top:2px;font-size:0.75em;opacity:0.55;text-align:right;font-style:italic;user-select:none;';
+    (el.querySelector('.mes_block') ?? el).appendChild(d);
+}
 export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
+    const latest = latestReply(ch);
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
         el.querySelector('.worldscrawl_patchcard')?.remove();
+        el.querySelector('.worldscrawl_trackmark')?.remove();
         if (!msg) continue;
+        if (id === latest && isOn()) drawTrackMark(el, msg);
         if (abandonStuckAppearance(msg)) { syncSwipeExtra(msg); ctx().saveChat?.(); }
         const bar = el.querySelector('.extraMesButtons') ?? el.querySelector('.mes_buttons');
         if (bar && !bar.querySelector('.worldscrawl_flag_btn') && !msg.is_system && isOn()) {
@@ -366,7 +407,7 @@ export function renderPatchCards() {
         const npcWarns = (msg.extra?.[NPC_WARN_KEY] ?? []).filter(w => w && (w.swipe ?? 0) === swipeOf(msg));
         const placeWarn = f && (f.swipe ?? 0) === swipeOf(msg) && f.personWarning ? f.personWarning : '';
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
-        const appearPending = appearJobs(msg).some(j => j.status === 'working' || j.status === 'failed');
+        const appearPending = appearJobs(msg).some(j => (j.status === 'working' || j.status === 'failed') && !coveredJob(ch, id, j));
         const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id) : [];
         const placeGone = isPlaceExpiry(msg) ? expiryView(ch, id) : null;
         if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone) continue;
@@ -423,7 +464,7 @@ export function renderPatchCards() {
         for (const w of npcWarns) card.append(drawCard(C.warnNote(w.text), 'warn', null));
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
-        for (const job of appearJobs(msg)) if (job.status === 'working' || job.status === 'failed')
+        for (const job of appearJobs(msg)) if ((job.status === 'working' || job.status === 'failed') && !coveredJob(ch, id, job))
             card.append(drawCard(C.appearJob({ key: `${id}|job|${job.id}|${job.key}`, name: job.name || job.id, status: job.status, reason: job.reason ?? '', domain: job.domain }), 'job', ticketFor('job', { id, msg, job })));
         let exported = new Set();
         for (const s of npcStamps) {

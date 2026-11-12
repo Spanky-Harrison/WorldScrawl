@@ -183,6 +183,7 @@ function stripExtra(extra) {
     if (extra[FLAG_KEY]?.source === TRACKER_SOURCE) delete extra[FLAG_KEY];
     if (extra[WAIT_KEY]?.source === TRACKER_SOURCE) delete extra[WAIT_KEY];
     if (extra[WAITCARD_KEY]?.source === TRACKER_SOURCE) delete extra[WAITCARD_KEY];
+    delete extra[TRACKED_KEY]; // the read starts over
 }
 /** Remove tracker-written stamps from this message and every swipe copy. Pasted tags are left alone. */
 export function dropTrackerMarks(msg) {
@@ -199,3 +200,35 @@ export function bumpTracker(msg) {
     return n;
 }
 export const trackerGen = msg => gens.get(msg) ?? 0;
+
+// ---- the tracked marker: a small line under the latest story reply saying the after-reply read is running or found
+// nothing to add. The finished state is stored per swipe (survives a reload); "tracking…" is live only (a reload
+// ends the read, so a stored "tracking…" would never finish).
+export const TRACKED_KEY = 'worldscrawl_tracked';
+const running = new WeakMap(); // msg -> {swipe, gen}
+const swipeAt = m => m?.swipe_id ?? 0;
+/** The read started on this swipe (gen: bumpTracker's number for it). */
+export function markTracking(msg, gen) { running.set(msg, { swipe: swipeAt(msg), gen }); }
+/** The read ended: 'tracked' (nothing to add), 'carded' (it put up a card, which stands in for the marker), 'failed',
+ *  or null (stale or skipped: nothing stored). Only the read that is still current may end the live state. */
+export function markTracked(msg, gen, status) {
+    const r = running.get(msg);
+    if (r && r.gen === gen) running.delete(msg);
+    if (!status || !msg) return;
+    msg.extra = msg.extra ?? {};
+    msg.extra[TRACKED_KEY] = { swipe: swipeAt(msg), status };
+}
+/** Did this read leave anything on the message (a card or a stamp the player sees)? */
+export function hasTrackerCard(msg) {
+    const e = msg?.extra ?? {}, swipe = swipeAt(msg), mine = x => x?.source === TRACKER_SOURCE && (x.swipe ?? 0) === swipe;
+    return [NPC_KEY, NPC_WARN_KEY, PATCH_KEY, FOUND_KEY].some(k => (Array.isArray(e[k]) ? e[k] : []).some(mine))
+        || [FLAG_KEY, WAIT_KEY, WAITCARD_KEY].some(k => mine(e[k]));
+}
+/** What the marker says for this message now: 'tracking' | 'tracked' | 'failed' | '' (nothing). */
+export function trackMark(msg) {
+    const r = running.get(msg);
+    if (r && r.swipe === swipeAt(msg)) return 'tracking';
+    const t = msg?.extra?.[TRACKED_KEY];
+    if (!t || (t.swipe ?? 0) !== swipeAt(msg)) return '';
+    return t.status === 'tracked' || t.status === 'failed' ? t.status : '';
+}
