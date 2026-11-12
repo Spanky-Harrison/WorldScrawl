@@ -1,7 +1,7 @@
 // One dispatcher for NPC decisions. Appearance uses committed + candidate.
 // Other types keep their own stamp fields. Composition jobs are not owners.
 import { FOUND_KEY } from './npc.mjs';
-import { appearanceScope, classifyAppearanceReply, looksInputKey } from './npceffects.mjs';
+import { appearanceScope, classifyAppearanceReply, effectFields, looksInputKey } from './npceffects.mjs';
 import { render as P } from './shared.mjs';
 import { maskForModel } from './names.mjs';
 
@@ -111,7 +111,27 @@ function exhausted(chat, npc, key, part) {
     return false;
 }
 
+const BODY_OUTFIT = ['body', 'outfit'];
+/** The fields an op writes: a baseline replaces its one field; an appearance op the body/outfit it names. */
+function opFields(op) {
+    const c = op?.committed ?? {};
+    if (c.kind === 'baseline') return BODY_OUTFIT.includes(c.field) ? [c.field] : [];
+    return effectFields(c.fields || 'body,outfit').filter(f => BODY_OUTFIT.includes(f));
+}
+/**
+ * What one compose call asks for: only the fields the ops name (a field no op touches stays the base), and the
+ * light-only edit prompt when no appearance op is a full rewrite. Any full rewrite keeps the mixed rewrite prompt.
+ */
+export function composePlan(ops) {
+    const list = ops ?? [];
+    const named = new Set(list.flatMap(opFields));
+    const fields = BODY_OUTFIT.filter(f => named.has(f));
+    const heavy = list.some(o => (o.committed?.kind ?? 'appearance') !== 'baseline' && appearanceScope(o.committed?.scope) === 'heavy');
+    return { fields: fields.length ? fields : BODY_OUTFIT.slice(), system: heavy ? 'npc.appearance_rebuild_system' : 'npc.appearance_edit_light_system' };
+}
+
 async function askFields(name, baseline, ops, timeout) {
+    const plan = composePlan(ops);
     const intents = (ops ?? []).map((o, i) => {
         const c = o.committed ?? {};
         if (c.kind === 'baseline') return `${i + 1}. replace ${c.field} with the player's text: ${c.text}`;
@@ -119,27 +139,28 @@ async function askFields(name, baseline, ops, timeout) {
         const how = appearanceScope(c.scope) === 'heavy' ? ' (full rewrite)' : ' (light touch)';
         return `${i + 1}. ${c.intent || 'change'} [${c.fields || 'body,outfit'}]${how}${layer}`;
     }).join('\n') || '(none)';
-    const base = `- body: ${baseline.body || '(empty)'}\n- outfit: ${baseline.outfit || '(empty)'}`;
+    const base = plan.fields.map(f => `- ${f}: ${baseline[f] || '(empty)'}`).join('\n');
     let last = { kind: 'malformed', reason: 'no answer' };
     for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
         let raw;
         try {
             const { gen, baseReply } = await model();
             raw = await gen('appearance compose', {
-                prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: 'body, outfit', base, intents })),
-                systemPrompt: P('npc.appearance_rebuild_system', { reply: baseReply('json') }),
+                prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: plan.fields.join(', '), base, intents })),
+                systemPrompt: P(plan.system, { reply: baseReply('json') }),
                 responseLength: 500,
             }, { retry: attempt > 0, note: false, timeout });
         } catch (e) {
             if (e?.code === 'timeout') { last = { kind: 'timeout', reason: 'the rewrite did not answer in time' }; continue; }
             last = { kind: 'application', reason: e?.message || String(e) }; continue;
         }
-        const classified = classifyAppearanceReply(raw, ['body', 'outfit']);
+        const classified = classifyAppearanceReply(raw, plan.fields);
         if (classified.kind !== 'ok') { last = classified; continue; }
-        const body = classified.answer?.body;
-        const outfit = classified.answer?.outfit;
-        if (!body || !outfit) { last = { kind: 'partial', reason: 'the answer did not cover every field' }; continue; }
-        return { ok: true, body, outfit };
+        // A field that was not asked for stays the base, whatever the answer says.
+        const out = {};
+        for (const f of BODY_OUTFIT) out[f] = plan.fields.includes(f) ? classified.answer?.[f] : (baseline[f] ?? '');
+        if (plan.fields.some(f => !out[f])) { last = { kind: 'partial', reason: 'the answer did not cover every field' }; continue; }
+        return { ok: true, body: out.body, outfit: out.outfit };
     }
     return { ok: false, ...last };
 }
@@ -202,7 +223,9 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
         if (!asked.ok) return failCandidate(found, 'fields', lasting.key, asked);
         lastingBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: lasting.key };
     }
-    if (live.unresolved) {
+    // Identical inputs (no lasts, nothing expiring): one call, the same text for both.
+    if (live.unresolved && live.key === lasting.key) liveBody = { ...lastingBody, key: live.key };
+    else if (live.unresolved) {
         const asked = await askFields(name, base, liveWith, timeout);
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
         if (!asked.ok) return failCandidate(found, 'fields', live.key, asked);
