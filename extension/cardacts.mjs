@@ -69,11 +69,14 @@ const TICKETS = {
         return { type: 'job', id, msg, job, key: `${id}|job|${job.id}|${job.key}`, still: () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe && appearJobs(msg).some(same) };
     },
     /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
-    expiry({ id, msg, key, kind, person = null, got = null }) {
+    expiry({ id, msg, key, kind, person = null, got = null, host = null, job = null }) {
         const swipe = swipeOf(msg);
         const here = () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe;
-        return { type: 'expiry', id, msg, key, kind, person, got,
-            still: kind === 'person' ? () => here() && msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND : () => here() && isPlaceExpiry(msg) };
+        // With a failed rebuild on it (Check again): also current only while that job is still failed on its message.
+        const hostMsg = host != null ? ctx().chat?.[host] : null;
+        const failing = () => !job || (ctx().chat?.[host] === hostMsg && appearJobs(hostMsg).some(j => j.id === job.id && j.key === job.key && j.status === 'failed'));
+        return { type: 'expiry', id, msg, key, kind, person, got, host, job,
+            still: kind === 'person' ? () => here() && msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND && failing() : () => here() && isPlaceExpiry(msg) };
     },
 };
 /** The ticket for a card of `type`, taken as it is drawn. */
@@ -173,6 +176,8 @@ const person = {
 
 // ---- expiry notices (a person's or a place's temporary change ran out)
 const expiry = {
+    // A failed rebuild of what it went back to: the job card's Check again, on the message the rebuild ran on.
+    again: t => againJob(t.host, t.job),
     edit: t => {
         if (t.kind === 'person') { E()?.openCardEditor(t.key); renderPatchCards(); return; }
         return openEditor(t.key, keptForGood(t.got?.ran), { loc: t.got?.address ?? '' });
@@ -350,8 +355,9 @@ const wait = {
     discard: t => { E()?.closeCardEditor(t.key); return discardWait(t.id); },
 };
 // ---- a rebuild job (a person's appearance, or a place text after a temporary change ran out): Check again asks again
+const againJob = (id, j) => (j.domain === 'place' ? retryPlaceRebuild(id, j.id, j.key) : retryAppearance(id, j.id, j.key));
 const job = {
-    again: t => (t.job.domain === 'place' ? retryPlaceRebuild(t.id, t.job.id, t.job.key) : retryAppearance(t.id, t.job.id, t.job.key)),
+    again: t => againJob(t.id, t.job),
 };
 
 /** The handlers: the only per-type card code that acts. */

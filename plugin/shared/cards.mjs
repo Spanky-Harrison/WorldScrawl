@@ -7,7 +7,8 @@ export const ACTIONS = {
     place: { working: ['again', 'discard'], review: ['again', 'edit', 'close', 'scope', 'extra:newroom', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'], info: ['again', 'discard'] },
     // A person change whose rewrite failed keeps Edit and the scope switch: the Change box is how it is asked again.
     person: { working: ['again', 'discard'], review: ['again', 'edit', 'close', 'scope', 'rewrite', 'approve', 'discard'], failed: ['again', 'edit', 'close', 'scope', 'rewrite', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'], info: [] },
-    expiry: { info: ['edit', 'close', 'save'] },
+    // A failed rebuild for what the change went back to adds the job card's Check again (the same action and handler).
+    expiry: { info: ['again', 'edit', 'close', 'save'] },
     // Approve while it is still preparing saves the card as soon as it is ready (the call in flight, never a second one).
     remember: { working: ['approve', 'discard'], review: ['again', 'edit', 'close', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'] },
     fact: { review: ['edit', 'close', 'approve', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
@@ -102,15 +103,22 @@ export function personKept(v) {
 
 /**
  * A person's temporary change ran out (info, already applied). v: {key, who, what, rows (before = while it lasted,
- * after = now), editing, fields, edited}. Edit opens Body/Outfit; Approve edited writes a new kept change.
+ * after = now), editing, fields, edited, failed?: {reason}} (failed: the appearance rebuild after it failed). Edit opens Body/Outfit; Approve edited writes a new kept change.
  */
 export function personExpiry(v) {
     const actions = v.edited ? [] : v.editing
         ? [act('close', 'Forget the edits'), act('save', `Keep ${v.who}'s body and outfit exactly as typed in the boxes`, true)]
         : [act('edit', `Change what ${v.who} went back to`)];
+    // The rebuild of what they went back to failed: the job card's line and Check again, here instead of a second card.
+    const notes = [];
+    if (v.failed) {
+        const job = appearJob({ key: v.key, name: v.who, status: 'failed', reason: v.failed.reason ?? '' });
+        notes.push({ text: `⚠ ${job.title}`, tone: 'error', cls: 'worldscrawl_remember_failed' });
+        if (!v.editing) actions.unshift(...job.actions);
+    }
     return {
         key: v.key, type: 'expiry', state: 'info', pending: false, cls: 'worldscrawl_npcexpired',
-        title: '👤 A temporary change ran out:', summary: [`${v.who}: "${v.what}" ran out`], notes: [],
+        title: '👤 A temporary change ran out:', summary: [`${v.who}: "${v.what}" ran out`], notes,
         panel: v.rows?.length ? { type: 'fields', title: v.who, tag: 'ran out', rows: v.rows } : null,
         editor: v.editing ? { key: v.key, intent: null, fields: v.fields ?? [] } : null,
         actions: within('expiry', 'info', actions),
