@@ -148,12 +148,81 @@ export function mergeRewrite(oldOps, targets, answerOps) {
         }
         if (r.op === 'update_area' && str(r.name) && str(r.name) !== str(old.name)) return { error: `the answer renamed ${t.where}` };
         if (r.op === 'set_exit') for (const [k, v] of Object.entries(r.fields ?? {})) if (k !== 'description' && !same(v, old.fields?.[k])) return { error: `the answer changed the exit's "${k}"` };
-        const next = String(text).trim();
-        if (old.op === 'set_exit') ops[t.i] = { ...old, fields: { ...old.fields, description: next } };
-        else if (old.op === 'update_area') ops[t.i] = { ...old, lore: next };
-        else if (old.op === 'append_description') ops[t.i] = { ...old, op: 'set_description', text: next };
-        else if (old.op === 'append_lore') ops[t.i] = { ...old, op: 'set_lore', text: next };
-        else ops[t.i] = { ...old, text: next };
+        ops[t.i] = withText(old, String(text).trim());
     }
     return { ops, rewritten: [...done] };
+}
+/** The op with its text replaced by `next` (an appended text comes back whole, as a set_*). Structure is untouched. */
+export function withText(old, next) {
+    if (old.op === 'set_exit') return { ...old, fields: { ...old.fields, description: next } };
+    if (old.op === 'update_area') return { ...old, lore: next };
+    if (old.op === 'append_description') return { ...old, op: 'set_description', text: next };
+    if (old.op === 'append_lore') return { ...old, op: 'set_lore', text: next };
+    return { ...old, text: next };
+}
+
+// ---- Reverting a temporary change that later changes wrote on top of (the place twin of people's recompose).
+// A temporary op D (its "lasts" ran out, or its change was turned off) wrote a text; a later change still in force
+// wrote the same text while D was there, so its text carries D's content. Plain replay would keep that content for
+// good. revertNeeds finds those texts; the extension asks the model once per need (placerevert.mjs), stores the
+// result as a compose record keyed by the writers, and applyRevertRecords puts it in place of the last overlapping
+// writer's text. A text no later change touched needs nothing: the replay already drops D.
+
+/** The text an op writes ('' for none). */
+export const writtenText = op => str(textOfAnswer(op ?? {}));
+const PLACE_KEY = 'place:';
+/**
+ * Texts that need a rebuild at game time `now`. `lib` is plugin/shared/patches.mjs ({opActive, parseLasts}).
+ * Returns [{target, key, family, where, direction, first: {ci, oi}, slot: {ci, oi}, dropped: [writer], active: [writer]}],
+ * a writer being {ci, oi, op, change}. key covers the target and every writer up to the slot (change, op, on/off, text),
+ * so the same still-active set finds the same record and any edit, toggle or new writer asks again.
+ */
+export function revertNeeds(changes, now, lib, hashOf) {
+    const writers = new Map();
+    (changes ?? []).forEach((c, ci) => {
+        if (c?.type !== 'patch' || !Array.isArray(c.ops)) return;
+        c.ops.forEach((op, oi) => {
+            const target = targetKeyOf(op);
+            if (!target) return;
+            const off = c.off === true, active = !off && lib.opActive(op, c, now);
+            let end = Infinity;
+            if (!off && !active) { try { end = Number(c.at) + lib.parseLasts(op.lasts); } catch { end = Infinity; } }
+            writers.set(target, [...(writers.get(target) ?? []), { ci, oi, op, change: c, active, end, at: Number(c.at) }]);
+        });
+    });
+    const out = [];
+    for (const [target, list] of writers) {
+        let first = -1, openEnd = -Infinity, slot = -1;
+        list.forEach((w, j) => {
+            if (!w.active) { if (first < 0) first = j; openEnd = Math.max(openEnd, w.end); return; }
+            if (first >= 0 && !(Number.isFinite(w.at) && w.at >= openEnd)) slot = j; // made while a dropped writer was still in force
+        });
+        if (slot < 0) continue;
+        const upto = list.slice(0, slot + 1);
+        const key = PLACE_KEY + hashOf(JSON.stringify({ target, w: upto.map(w => [w.change.id ?? null, w.change._msg ?? null, w.oi, w.active, writtenText(w.op)]) }));
+        const op = list[slot].op, fam = FAMILY[op.op];
+        out.push({ target, key, family: fam, where: str(fam === 'lore' ? op.area : op.loc), direction: fam === 'exit' ? str(op.direction) : '',
+            first: { ci: list[first].ci, oi: list[first].oi }, slot: { ci: list[slot].ci, oi: list[slot].oi },
+            dropped: list.slice(first, slot).filter(w => !w.active), active: list.slice(first + 1, slot + 1).filter(w => w.active) });
+    }
+    return out;
+}
+/** The changes with each need that has a record (findCompose by key) using the record's text at its slot. Clones. */
+export function applyRevertRecords(changes, needs, find) {
+    if (!needs?.length) return changes;
+    const out = changes.slice();
+    for (const n of needs) {
+        const rec = find(n.key);
+        if (!rec || typeof rec.text !== 'string' || !rec.text.trim()) continue;
+        const c = out[n.slot.ci];
+        const ops = c.ops.slice();
+        ops[n.slot.oi] = withText(ops[n.slot.oi], rec.text.trim());
+        out[n.slot.ci] = { ...c, ops, _rebuilt: [...(c._rebuilt ?? []), n.key] };
+    }
+    return out;
+}
+/** The changes the base text is read from: everything before the first dropped writer. */
+export function revertBase(changes, need) {
+    const { ci, oi } = need.first, c = changes[ci];
+    return [...changes.slice(0, ci), ...(oi > 0 ? [{ ...c, ops: c.ops.slice(0, oi) }] : [])];
 }

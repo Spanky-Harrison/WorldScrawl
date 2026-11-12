@@ -45,7 +45,7 @@ function patchSig() {
     let ps = chatChanges(chat).filter(c => c.type === 'patch' && c.off !== true);
     if (patchLib && ps.length) ps = patchLib.activeChanges(ps, chatElapsed(chat));
     if (!ps.length) return '';
-    const s = JSON.stringify(ps.map(p => [p.id, p._msg, p.ops.length]));
+    const s = JSON.stringify(ps.map(p => [p.id, p._msg, p.ops.length, ...(p._rebuilt ?? [])])); // a rebuilt text (placerevert.mjs) is a new room text
     let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return `p${h.toString(36)}|`;
 }
@@ -211,6 +211,8 @@ export async function toggleChange(mi, pid, { choice } = {}) {
     const also = [...new Set(others.map(d => d.msg))].filter(i => i !== mi);
     await c.saveChat?.();
     exitsCache.clear();
+    // Turning a change off can leave a later change's text resting on it: rebuild that before the narrator reads it.
+    await (await import('./placerevert.mjs')).ensurePlaceRebuilds(chat.length - 1).catch(e => console.warn('[WorldScrawl] place rebuild', e?.message || e));
     await applyFacts();
     await renderAllExits();
     renderPatchCards();

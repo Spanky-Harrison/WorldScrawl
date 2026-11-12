@@ -294,15 +294,19 @@ export function waitReview(v) {
     };
 }
 
-/** An appearance rebuild in flight or failed. v: {key, name, status ('working'|'failed'), reason}. */
+/**
+ * A rebuild in flight or failed: a person's appearance, or a place text after a temporary change ran out (domain
+ * 'place'). v: {key, name, status ('working'|'failed'), reason, domain?}.
+ */
 export function appearJob(v) {
     const state = v.status === 'failed' ? 'failed' : 'working';
+    const what = v.domain === 'place' ? `Rebuild of ${v.name}` : `Appearance rebuild for ${v.name}`;
     return {
         key: v.key, type: 'job', state, pending: state === 'failed', cls: 'worldscrawl_appearpending',
-        title: state === 'failed' ? `Appearance rebuild for ${v.name} failed.${v.reason ? ` ${v.reason}` : ''}` : `Appearance rebuild for ${v.name}: working…`,
+        title: state === 'failed' ? `${what} failed.${v.reason ? ` ${v.reason}` : ''}` : `${what}: working…`,
         titleCls: state === 'failed' ? 'worldscrawl_remember_failed' : '',
         summary: [], notes: [], panel: null, editor: null,
-        actions: within('job', state, state === 'failed' ? [act('again', 'Ask the model again to rewrite the appearance', true)] : []),
+        actions: within('job', state, state === 'failed' ? [act('again', v.domain === 'place' ? 'Ask the model again to rebuild the text' : 'Ask the model again to rewrite the appearance', true)] : []),
     };
 }
 

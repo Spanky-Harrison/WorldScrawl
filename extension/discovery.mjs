@@ -287,7 +287,7 @@ async function keepFlag(id, { quiet = false } = {}) {
     }
     if (!markDecided(msg, noticeIdOf(f, 'flag'), form ? 'adjust' : 'approve', { swipe: swipeOf(msg), text: clip((f.proposal.summary ?? []).join('; '), 160) })) return; // already decided
     const p = { type: 'patch', id: `p_${Date.now().toString(36)}`, note: f.note || clip(f.proposal.summary[0], 120), at: chatElapsed(chat.slice(0, id + 1)),
-        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg), ...(f.source ? { source: f.source } : {}) };
+        ops: f.proposal.ops, relocate: f.proposal.relocate ?? {}, inherit: f.proposal.inherit ?? {}, names: f.proposal.names ?? {}, summary: f.proposal.summary, range: { start: f.start, end: id }, swipe: swipeOf(msg), ...(f.source ? { source: f.source } : {}), ...(f.rewrite ? { rewrite: f.rewrite } : {}) };
     msg.extra[PATCH_KEY] = [...(msg.extra[PATCH_KEY] ?? []), p];
     syncSwipeExtra(msg);
     f.status = 'kept'; f.patch = p.id;

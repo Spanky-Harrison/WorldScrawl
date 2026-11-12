@@ -130,6 +130,28 @@ export function composePlan(ops) {
     return { fields: fields.length ? fields : BODY_OUTFIT.slice(), system: heavy ? 'npc.appearance_rebuild_system' : 'npc.appearance_edit_light_system' };
 }
 
+/**
+ * One model side call with the appearance tries and timeout (shared with the place revert rebuild, placerevert.mjs).
+ * read(raw) -> {ok: true, ...} or {kind, reason}; returns the first ok read, else {ok: false, kind, reason} of the last try.
+ */
+export async function askTried(kind, args, { timeout = FILL_TIMEOUT_MS, timeoutReason = 'the rewrite did not answer in time', read, note = false, at } = {}) {
+    let last = { kind: 'malformed', reason: 'no answer' };
+    for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
+        let raw;
+        try {
+            const { gen } = await model();
+            raw = await gen(kind, args, { retry: attempt > 0, note, timeout, at });
+        } catch (e) {
+            if (e?.code === 'timeout') { last = { kind: 'timeout', reason: timeoutReason }; continue; }
+            last = { kind: 'application', reason: e?.message || String(e) }; continue;
+        }
+        const r = read(raw);
+        if (r?.ok) return r;
+        last = r ?? last;
+    }
+    return { ok: false, ...last };
+}
+
 async function askFields(name, baseline, ops, timeout) {
     const plan = composePlan(ops);
     const intents = (ops ?? []).map((o, i) => {
@@ -140,51 +162,33 @@ async function askFields(name, baseline, ops, timeout) {
         return `${i + 1}. ${c.intent || 'change'} [${c.fields || 'body,outfit'}]${how}${layer}`;
     }).join('\n') || '(none)';
     const base = plan.fields.map(f => `- ${f}: ${baseline[f] || '(empty)'}`).join('\n');
-    let last = { kind: 'malformed', reason: 'no answer' };
-    for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
-        let raw;
-        try {
-            const { gen, baseReply } = await model();
-            raw = await gen('appearance compose', {
-                prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: plan.fields.join(', '), base, intents })),
-                systemPrompt: P(plan.system, { reply: baseReply('json') }),
-                responseLength: 500,
-            }, { retry: attempt > 0, note: false, timeout });
-        } catch (e) {
-            if (e?.code === 'timeout') { last = { kind: 'timeout', reason: 'the rewrite did not answer in time' }; continue; }
-            last = { kind: 'application', reason: e?.message || String(e) }; continue;
-        }
+    const { baseReply } = await model();
+    return askTried('appearance compose', {
+        prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: plan.fields.join(', '), base, intents })),
+        systemPrompt: P(plan.system, { reply: baseReply('json') }),
+        responseLength: 500,
+    }, { timeout, read: raw => {
         const classified = classifyAppearanceReply(raw, plan.fields);
-        if (classified.kind !== 'ok') { last = classified; continue; }
+        if (classified.kind !== 'ok') return classified;
         // A field that was not asked for stays the base, whatever the answer says.
         const out = {};
         for (const f of BODY_OUTFIT) out[f] = plan.fields.includes(f) ? classified.answer?.[f] : (baseline[f] ?? '');
-        if (plan.fields.some(f => !out[f])) { last = { kind: 'partial', reason: 'the answer did not cover every field' }; continue; }
+        if (plan.fields.some(f => !out[f])) return { kind: 'partial', reason: 'the answer did not cover every field' };
         return { ok: true, body: out.body, outfit: out.outfit };
-    }
-    return { ok: false, ...last };
+    } });
 }
 
 async function askLooks(name, body, outfit, timeout) {
-    let last = { kind: 'malformed', reason: 'no answer' };
-    for (let attempt = 0; attempt < APPEARANCE_TRIES; attempt++) {
-        let raw;
-        try {
-            const { gen, baseReply } = await model();
-            raw = await gen('looks summary', {
-                prompt: maskForModel(P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') })),
-                systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
-                responseLength: 120,
-            }, { retry: attempt > 0, note: false, timeout });
-        } catch (e) {
-            if (e?.code === 'timeout') { last = { kind: 'timeout', reason: 'the summary did not answer in time' }; continue; }
-            last = { kind: 'application', reason: e?.message || String(e) }; continue;
-        }
+    const { baseReply } = await model();
+    return askTried('looks summary', {
+        prompt: maskForModel(P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') })),
+        systemPrompt: P('npc.looks_summary_system', { reply: baseReply('json') }),
+        responseLength: 120,
+    }, { timeout, timeoutReason: 'the summary did not answer in time', read: raw => {
         const classified = classifyAppearanceReply(raw, ['looks']);
-        if (classified.kind !== 'ok' || !classified.answer?.looks) { last = classified.kind === 'ok' ? { kind: 'partial', reason: 'no looks line' } : classified; continue; }
+        if (classified.kind !== 'ok' || !classified.answer?.looks) return classified.kind === 'ok' ? { kind: 'partial', reason: 'no looks line' } : classified;
         return { ok: true, looks: classified.answer.looks };
-    }
-    return { ok: false, ...last };
+    } });
 }
 
 function textOf(baseline, ops, records) {
@@ -523,4 +527,4 @@ async function ensureLooks(chat, msg, swipe, npc, name, body, outfit, timeout, b
     clearJob(msg, swipe, npc, key, 'looks');
 }
 
-export { personOps, askFields, askLooks };
+export { personOps, askFields, askLooks, writeCompose, setJob, clearJob, exhausted };

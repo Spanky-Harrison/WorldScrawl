@@ -46,7 +46,7 @@
     {
       "id": "change",
       "title": "Map changes",
-      "flow": "Runs when a message is flagged as changing the map: the flag button, the narrator's ws_flag tool or [ws_flag: …] tag, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else."
+      "flow": "Runs when a message is flagged as changing the map: the flag button, the narrator's ws_flag tool or [ws_flag: …] tag, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
     },
     {
       "id": "discover",
@@ -136,7 +136,11 @@
     "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game).",
     "hint": "The player's Change note on the Remember card, or (none)",
     "kept": "The fields the player typed on the Remember card, one \"- Field: text\" line each, or (none)",
-    "shown": "what the player knows a person as: their name once learned, else their unknownAs (e.g. the landlady)"
+    "shown": "what the player knows a person as: their name once learned, else their unknownAs (e.g. the landlady)",
+    "revert_text": "which place text is rebuilt, e.g. \"the description of Common Room\" or \"the \\\"north\\\" exit text of Hall\"",
+    "revert_before": "that text as it read before the temporary change that ran out",
+    "revert_ended": "the temporary change(s) that ran out or were turned off: their note and the text they wrote",
+    "revert_kept": "the later changes still in force, in order: their note and the text each wrote"
   },
   "prompts": [
     {
@@ -1523,6 +1527,50 @@
         }
       ],
       "text": "Story:\n{{story}}\n\n{{what}}\nThe texts this change rewrites:\n{{targets}}\n\n{{rewrite}}Write the ops JSON."
+    },
+    {
+      "id": "change.revert_system",
+      "title": "Map changes: rebuild a text after a change ran out (system prompt)",
+      "description": "Alongside Map changes: when a temporary map change runs out (or is turned off) and a later change still in force had rewritten the same description, notes or exit text on top of it, this system prompt asks for that text again from what it was before the temporary change plus the changes still in force. Only then; no call when no later change wrote the same text, or the same changes were already rebuilt. {{rewrite}} is the light touch or full rewrite piece (full when a change still in force was kept as a full rewrite); {{style}} is the Writing style entry 'Map changes: how descriptions are written'. {{reply}} is the shared base line pick.base_json.",
+      "group": "change",
+      "locked": "The game reads a JSON object with one text string and puts it in place of the later change's text.",
+      "placeholders": [
+        {
+          "name": "rewrite",
+          "generated": true
+        },
+        {
+          "name": "style",
+          "generated": true
+        },
+        {
+          "name": "reply",
+          "generated": true
+        }
+      ],
+      "text": "You rewrite one text of a place on a role-play map (a room description, an area's notes, or an exit text). A temporary change to it has ended, but a later change that still holds was written on top of it. Write the text as it is now: the text from before the temporary change, with every change that still holds, and nothing left of the change that ended (unless a change that still holds keeps a visible trace of it).\n{{rewrite}}\n{{style}}\n{{reply}}: {\"text\":\"the whole text\"}. No other keys."
+    },
+    {
+      "id": "change.revert",
+      "title": "Map changes: rebuild a text after a change ran out",
+      "description": "Alongside Map changes: the text, what it was before the temporary change, the change that ended, and the changes still in force, in order. The answer replaces the text the latest of them wrote; the plain replay stays if it fails.",
+      "group": "change",
+      "locked": "The game reads the JSON text and keeps it only for this exact set of changes.",
+      "placeholders": [
+        {
+          "name": "revert_text"
+        },
+        {
+          "name": "revert_before"
+        },
+        {
+          "name": "revert_ended"
+        },
+        {
+          "name": "revert_kept"
+        }
+      ],
+      "text": "Text: {{revert_text}}\n\nBefore the temporary change it read:\n{{revert_before}}\n\nEnded (leave this out):\n{{revert_ended}}\n\nStill in force, in order (keep all of these):\n{{revert_kept}}"
     },
     {
       "id": "discover.system",
