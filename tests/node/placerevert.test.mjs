@@ -170,10 +170,12 @@ test('(d) a failed rebuild: the narrator goes ahead with the plain replay, the c
     c.chat.push(ai('Nothing happens.'), user('I wait.', 60));
     await narrate();
     assert.equal(m.calls.length, 2);
-    c.chat.splice(4, 2);
+    c.chat.splice(-2);
     const doc = draw(c);
-    const text = doc.querySelectorAll('.worldscrawl_card_title').map(x => x.textContent).join(' | ');
-    assert.ok(text.includes('Rebuild of the description of Common Room failed.'), text);
+    // The failure is on the smoke's expiry notice (placeexpiry.test.mjs covers that card), not a second card.
+    const card = doc.querySelector('.worldscrawl_placeexpired');
+    assert.ok(card.textContent.includes('Rebuild of the description of Common Room failed.'), card.textContent);
+    assert.equal(doc.querySelector('.worldscrawl_appearpending'), null);
     fail = false;
     byText(doc, 'Check again').click();
     for (let i = 0; i < 50 && m.calls.length < 3; i++) await flush(10);
