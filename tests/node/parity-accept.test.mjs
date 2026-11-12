@@ -371,7 +371,7 @@ test('malformed, refusal, truncated, partial, empty, and timeout store no fields
         ['malformed', 'hello there'],
         ['refusal', 'I cannot rewrite that'],
         ['truncated', '{"body":"cut"'],
-        ['partial', '{"body":"only a body"}'],
+        ['partial', '{"outfit":"only an outfit"}'], // body was asked; outfit alone is not the asked field
         ['empty', ''],
     ];
     for (const [kind, raw] of cases) {
