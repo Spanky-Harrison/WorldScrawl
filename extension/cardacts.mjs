@@ -14,7 +14,7 @@ import { analyzeFlag, isCarrier, removeFromCard, swapRewrite } from './carriers.
 import { discardWait, keepWait, renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
 import { retryPlaceRebuild } from './placerevert.mjs';
-import { isPlaceExpiry, keepExpiryEdit, keptForGood, openEditor, openForms, saveKeptEdit, toggleFromCard } from './patches.mjs';
+import { isPlaceExpiryNotice, keepExpiryEdit, keptForGood, openEditor, openForms, saveKeptEdit, toggleFromCard } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
 import { REMEMBER_KEY, appearJobs, applyFacts, castPack, npcClock, npcEnv, refreshLivePlaces, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryAppearance, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
@@ -69,14 +69,15 @@ const TICKETS = {
         return { type: 'job', id, msg, job, key: `${id}|job|${job.id}|${job.key}`, still: () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe && appearJobs(msg).some(same) };
     },
     /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
-    expiry({ id, msg, key, kind, person = null, got = null, host = null, job = null }) {
+    expiry({ id, msg, key, kind, person = null, got = null, host = null, job = null, jobs = null }) {
         const swipe = swipeOf(msg);
         const here = () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe;
-        // With a failed rebuild on it (Check again): also current only while that job is still failed on its message.
+        // With failed rebuilds on it (Check again): also current only while those jobs are still failed on their message.
+        const list = jobs ?? (job ? [job] : []);
         const hostMsg = host != null ? ctx().chat?.[host] : null;
-        const failing = () => !job || (ctx().chat?.[host] === hostMsg && appearJobs(hostMsg).some(j => j.id === job.id && j.key === job.key && j.status === 'failed'));
-        return { type: 'expiry', id, msg, key, kind, person, got, host, job,
-            still: kind === 'person' ? () => here() && msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND && failing() : () => here() && isPlaceExpiry(msg) };
+        const failing = () => !list.length || (ctx().chat?.[host] === hostMsg && list.some(f => appearJobs(hostMsg).some(j => j.id === f.id && j.key === f.key && j.status === 'failed')));
+        return { type: 'expiry', id, msg, key, kind, person, got, host, job, jobs: list,
+            still: kind === 'person' ? () => here() && msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND && failing() : () => here() && isPlaceExpiryNotice(msg) && failing() };
     },
 };
 /** The ticket for a card of `type`, taken as it is drawn. */
@@ -177,7 +178,8 @@ const person = {
 // ---- expiry notices (a person's or a place's temporary change ran out)
 const expiry = {
     // A failed rebuild of what it went back to: the job card's Check again, on the message the rebuild ran on.
-    again: t => againJob(t.host, t.job),
+    // Several failed place texts on one card: one Check again asks again for each, one after another.
+    again: async t => { let r = null; for (const j of t.jobs) r = await againJob(t.host, j); return r; },
     edit: t => {
         if (t.kind === 'person') { E()?.openCardEditor(t.key); renderPatchCards(); return; }
         return openEditor(t.key, keptForGood(t.got?.ran), { loc: t.got?.address ?? '' });
@@ -186,7 +188,7 @@ const expiry = {
     save: t => once(`expiry-ok:${t.key}`, async () => {
         const note = String(vals(t).intent ?? '').trim();
         if (t.kind === 'place') {
-            const res = await keepExpiryEdit(t.id, t.key, note, t.still);
+            const res = await keepExpiryEdit(t.id, t.key, note, t.still, t.got?.item ?? null);
             if (res?.ok) E()?.closeCardEditor(t.key);
             else if (res?.error) toastr.warning(`WorldScrawl: ${res.error}`);
             return res;

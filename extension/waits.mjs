@@ -15,10 +15,11 @@ import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, hooks, isOn, openCarriers, settings } from './index.js';
 import { lastUserIndex, partyText } from './movement.mjs';
-import { drawDiff, expiryView, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
+import { PLACE_EXPIRED_KIND, drawDiff, expiryView, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, personExpiriesIn, postPersonExpiryNotices, prefetchRemember } from './scene.mjs';
 import { NPC_EXPIRED_KIND, changeLabel, modelChangeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
+import { placeExpiryTurn, placeRebuildsWorking } from './placerevert.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -114,7 +115,7 @@ async function keepWaitNow(c, msg, p, nid, amount) {
     if (p.swipe != null) msg.extra[WAIT_KEY].swipe = p.swipe;
     delete msg.extra[WAITCARD_KEY];
     renderPatchCards();
-    await c.saveChat?.(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    await c.saveChat?.(); await placeExpiryTurn(); await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     return '';
 }
 /** Which temporary changes a re-timed wait now runs past (crossed) or no longer reaches (uncrossed), keyed by change and op. */
@@ -141,7 +142,7 @@ export async function editKeptWait(id, amount) {
     const start = chatElapsed(chat.slice(0, id + 1)) - old.seconds;
     const delta = waitExpiryDelta(chatChanges(chat), start, old.seconds, w.seconds, expiredAll(chat, lib));
     stampWait(msg, w);
-    await c.saveChat?.(); if (delta.crossed.length) await postPersonExpiryNotices(); await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
+    await c.saveChat?.(); if (delta.crossed.length) { await placeExpiryTurn(); await postPersonExpiryNotices(); } await applyFacts(); renderAllExits(); broadcastMapState(); renderPatchCards();
     if (delta.crossed.length) toastr.info(`WorldScrawl: now runs out during the wait: ${delta.crossed.map(g => g.note).join('; ')}`);
     if (delta.uncrossed.length) toastr.info(`WorldScrawl: still in place after the shorter wait: ${delta.uncrossed.map(g => g.note).join('; ')}`);
     return delta;
@@ -301,18 +302,36 @@ function personKeptEl(msg, id, s, who) {
 const isNotice = m => !!(m?.is_system && m.extra?.worldscrawl_notice);
 /** The player message an expiry notice belongs to: the rebuild that turn ran is stored there. */
 function noticeHost(ch, id) { let h = id - 1; while (h >= 0 && isNotice(ch[h])) h--; return h; }
-/** The person expiry notice right after message h that names person `npc`, or -1. */
-function coveringNotice(ch, h, npc) {
-    for (let i = h + 1; i < ch.length && isNotice(ch[i]); i++)
-        if (ch[i].extra.worldscrawl_notice_kind === NPC_EXPIRED_KIND && (ch[i].extra.worldscrawl_notice_people ?? []).some(p => p?.kind === 'appearance' && p.id === npc)) return i;
+/** Rebuild jobs on a message (its shown swipe): the stored ones (working / failed), and place rebuilds running now. */
+function jobsOf(msg) {
+    const stored = appearJobs(msg);
+    return [...stored, ...placeRebuildsWorking(msg).filter(w => !stored.some(j => j.id === w.id && j.key === w.key && j.domain === w.domain))];
+}
+/** The place expiry notice items (timed text changes) on a notice. */
+const placeItems = m => (m?.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND ? (m.extra.worldscrawl_notice_places ?? []).filter(it => it?.id) : []);
+/** Does an expiry notice item cover this rebuild job? A person's by its id; a place text's by the text it wrote. */
+const covers = (p, job) => (job.domain === 'place' ? (p.targets ?? []).includes(job.id) : p?.kind === 'appearance' && p.id === job.id);
+/** The expiry notice right after message h that names the job's person or place text, or -1. */
+function coveringNotice(ch, h, job) {
+    for (let i = h + 1; i < ch.length && isNotice(ch[i]); i++) {
+        const items = job.domain === 'place' ? placeItems(ch[i]) : ch[i].extra.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (ch[i].extra.worldscrawl_notice_people ?? []) : [];
+        if (items.some(p => covers(p, job))) return i;
+    }
     return -1;
 }
-/** A person's failed appearance rebuild shows on the expiry notice that covers it (with Check again), not as a second card. */
-const coveredJob = (ch, id, job) => job.status === 'failed' && job.domain !== 'place' && coveringNotice(ch, id, job.id) >= 0;
+const shownJob = j => j.status === 'working' || j.status === 'failed';
+/** A rebuild after an expiry shows on the expiry notice that covers it (working, or failed with Check again), not as a second card. */
+const coveredJob = (ch, id, job) => (job.status === 'failed' || (job.domain === 'place' && job.status === 'working')) && coveringNotice(ch, id, job) >= 0;
+/** The jobs an expiry card at notice `id` carries for item `p`: those on its host message that this notice covers. */
+function cardJobs(chat, id, p) {
+    const host = noticeHost(chat, id);
+    if (host < 0) return { host, jobs: [] };
+    return { host, jobs: jobsOf(chat[host]).filter(j => shownJob(j) && covers(p, j) && coveredJob(chat, host, j) && coveringNotice(chat, host, j) === id) };
+}
 function expiredPersonEl(msg, id, p) {
     const chat = ctx().chat ?? [];
-    const host = noticeHost(chat, id);
-    const job = host >= 0 && coveringNotice(chat, host, p.id) === id ? appearJobs(chat[host]).find(j => j.id === p.id && j.status === 'failed' && j.domain !== 'place') : null;
+    const { host, jobs } = cardJobs(chat, id, p);
+    const job = jobs.find(j => j.status === 'failed' && j.domain !== 'place') ?? null;
     const now = npcAt(chat, id, castPack()?.npcs ?? [], p.id, i => npcClock(chat, i));
     const before = npcBefore(chat, id, p.id, Number(p.ends));
     const key = `${msg.extra?.worldscrawl_mid || id}|npcexpired|${p.id}`;
@@ -325,14 +344,23 @@ function expiredPersonEl(msg, id, p) {
         ticketFor('expiry', { id, msg, key, kind: 'person', person: p, ...(job ? { host, job } : {}) }));
 }
 
-/** Under a place-expiry notice: the shared expiry card (before = with the temporary change, now = without it). */
+/**
+ * Under a place expiry notice: the shared expiry card (before = with the temporary change, now = without it). `got.item`
+ * is one timed text change of a place expiry notice (none: the vanished room); its text rebuild shows on the card
+ * (working, or failed with Check again).
+ */
 function expiredPlaceEl(msg, id, got) {
     const ch = ctx().chat ?? [];
-    const key = `${id}|expiry`, form = openForms.get(key);
-    const edited = patchesOn(msg).some(p => p.source === 'expiry_edit');
-    const desc = C.placeExpiry({ key, name: castPack()?.labels?.[got.address] || got.name, preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.patch.note ?? '', edited });
+    const item = got.item ?? null;
+    const key = item ? `${id}|expiry|${item.key}@${item.ends}` : `${id}|expiry`, form = openForms.get(key);
+    const edited = patchesOn(msg).some(p => p.source === 'expiry_edit' && (!item || p.expiry === item.key));
+    const { host, jobs } = item ? cardJobs(ch, id, item) : { host: -1, jobs: [] };
+    const name = castPack()?.labels?.[got.address] || got.name || got.preview?.after?.[got.address]?.name || '';
+    const desc = C.placeExpiry({ key, name, what: item?.what ?? '', preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.patch.note ?? '', edited,
+        jobs: jobs.map(j => ({ name: j.name || j.id, status: j.status, reason: j.reason ?? '' })) });
     if (desc.editor) desc.editor.formEl = form.el;
-    const rc = drawCard(desc, 'expiry', ticketFor('expiry', { id, msg, key, kind: 'place', got }));
+    const failed = jobs.filter(j => j.status === 'failed');
+    const rc = drawCard(desc, 'expiry', ticketFor('expiry', { id, msg, key, kind: 'place', got, ...(failed.length ? { host, jobs: failed } : {}) }));
     if (form && !edited && rc._panel) {
         const at = { changes: chatChanges(ch.slice(0, id + 1)), now: chatElapsed(ch.slice(0, id + 1)) };
         form.diffBox = rc._panel; form.onLive = ops => liveDiff(rc._panel, ops, at, form);
@@ -407,10 +435,10 @@ export function renderPatchCards() {
         const npcWarns = (msg.extra?.[NPC_WARN_KEY] ?? []).filter(w => w && (w.swipe ?? 0) === swipeOf(msg));
         const placeWarn = f && (f.swipe ?? 0) === swipeOf(msg) && f.personWarning ? f.personWarning : '';
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
-        const appearPending = appearJobs(msg).some(j => (j.status === 'working' || j.status === 'failed') && !coveredJob(ch, id, j));
+        const appearPending = jobsOf(msg).some(j => shownJob(j) && !coveredJob(ch, id, j));
         const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? (msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id) : [];
-        const placeGone = isPlaceExpiry(msg) ? expiryView(ch, id) : null;
-        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone) continue;
+        const placeGone = (isPlaceExpiry(msg) ? [expiryView(ch, id)] : placeItems(msg).map(it => expiryView(ch, id, it))).filter(Boolean);
+        if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
@@ -458,13 +486,13 @@ export function renderPatchCards() {
         if (waitCard) card.append(waitEl(msg, id, wc));
         if (rememberCard) card.append(rememberEl(msg, id, remember));
         for (const p of expired) card.append(expiredPersonEl(msg, id, p));
-        if (placeGone) card.append(expiredPlaceEl(msg, id, placeGone));
+        for (const got of placeGone) card.append(expiredPlaceEl(msg, id, got));
         for (const [, dd] of resolved) card.append(drawCard(C.resolvedNote(dd), 'resolved', null));
         if (placeWarn) card.append(drawCard(C.warnNote(placeWarn), 'warn', null));
         for (const w of npcWarns) card.append(drawCard(C.warnNote(w.text), 'warn', null));
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
-        for (const job of appearJobs(msg)) if ((job.status === 'working' || job.status === 'failed') && !coveredJob(ch, id, job))
+        for (const job of jobsOf(msg)) if (shownJob(job) && !coveredJob(ch, id, job))
             card.append(drawCard(C.appearJob({ key: `${id}|job|${job.id}|${job.key}`, name: job.name || job.id, status: job.status, reason: job.reason ?? '', domain: job.domain }), 'job', ticketFor('job', { id, msg, job })));
         let exported = new Set();
         for (const s of npcStamps) {
