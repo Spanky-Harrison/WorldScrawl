@@ -9,9 +9,9 @@ import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitT
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
-import { UPDATE_LINE, cardLib } from './cardlib.mjs';
+import { cardLib } from './cardlib.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
-import { render as P, setPrompts, hasPrompts, sharedError, pluginError, slug } from './shared.mjs';
+import { render as P, setPrompts, hasPrompts, offReason, slug } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
@@ -62,6 +62,7 @@ export const chatHasStamps = (chat = ctx().chat ?? []) => chat.some(m => { const
  * (older chats); else the global "Enable in new chats" setting (default off). When off it behaves as if uninstalled.
  */
 export function isOn() {
+    if (offReason) return false; // the version check turned WorldScrawl off for this page load
     const v = ctx().chatMetadata?.[ENABLED_KEY];
     if (typeof v === 'boolean') return v;
     return chatHasStamps() || !!settings().enableNewChats;
@@ -283,6 +284,7 @@ export function stripStartMarker(arr) {
 
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
+    if (offReason) return; // off (version check): the chat goes to the narrator untouched
     stripStartMarker(_chat);
     _chat.forEach((m, i) => { if (m?.is_user && typeof m.mes === 'string' && m.mes.includes('[')) { const t = unbracket(m.mes); if (t !== m.mes) _chat[i] = { ...m, mes: t }; } });
     if (type === 'quiet' || type === 'impersonate' || !isOn()) return;
@@ -785,7 +787,7 @@ export async function waitCommand(args, sleep = false) {
 
 const openCarriers = new WeakSet();
 (function carrierCss() {
-    if (typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
+    if (offReason || typeof document === 'undefined' || document.getElementById('worldscrawl_carrier_css')) return;
     const st = document.createElement('style'); st.id = 'worldscrawl_carrier_css';
     st.textContent = `${cardLib()?.CARD_CSS ?? ''}
 #chat .mes.worldscrawl_carrier_mes{padding:2px 10px;min-height:0;overflow:hidden;font-size:0.82em;}
@@ -798,8 +800,10 @@ const openCarriers = new WeakSet();
 
 (function init() {
     settings();
-    if (sharedError) { try { toastr.error(sharedError, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} } // also logged by shared.mjs
-    else if (pluginError) { try { toastr.error(UPDATE_LINE, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} } // an older plugin: the cards show the same line
+    // The one version check (shared.mjs, on load): extension and plugin are different releases, or the plugin's code
+    // can't be loaded. WorldScrawl turns itself off: one message, and nothing is started (no events, tools, commands,
+    // settings panel or map window; the interceptor and isOn() see it too).
+    if (offReason) { try { toastr.error(offReason, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} return; }
     applyTools();
     registerSlashCommands();
     const { eventSource, eventTypes } = ctx();

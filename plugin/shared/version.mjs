@@ -1,5 +1,4 @@
-// The one plugin version: what the extension checks before it uses anything it loads from the plugin (every module in
-// plugin/shared/, and plugin/ui/card.mjs and cardedit.mjs). Bump it together with PLUGIN_API in extension/shared.mjs
-// whenever any of them changes in a way the extension relies on (a new export, a new descriptor field). A plugin
-// without this file, or with another number, gets the "update the plugin" line instead of cards.
-export const PLUGIN_VERSION = 2;
+// The WorldScrawl version this plugin is. The extension carries the same number (extension/version.mjs); change both
+// together, on every release that changes either side. The extension compares them once on load; if they differ,
+// WorldScrawl turns itself off with one message (extension/shared.mjs).
+export const WORLDSCRAWL_VERSION = 3;

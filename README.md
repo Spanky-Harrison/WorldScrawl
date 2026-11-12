@@ -135,7 +135,7 @@ New-Item -ItemType Junction -Path "C:\sillyTavern\SillyTavern-Launcher\SillyTave
 
 Close the SillyTavern window and start it again. Its console should show `[WorldScrawl] serving 1 world(s) from C:\WorldScrawl-v2\worlds`. Then reload the page (Ctrl+F5). Under Extensions you'll see a **WorldScrawl** panel; **Test connection** should say "Connected".
 
-**After every `git pull` that changes the plugin, restart SillyTavern** (server code is only loaded at startup). Extension-only changes just need Ctrl+F5. If the extension is newer than the plugin (one version number covers everything it loads from the plugin), a startup message and every card say "WorldScrawl: update the plugin, then restart SillyTavern" instead of breaking. Map files you edit by hand are picked up without a restart when the worlds list is refreshed (open the WorldScrawl panel).
+**After every `git pull` that changes the plugin, restart SillyTavern** (server code is only loaded at startup). Extension-only changes just need Ctrl+F5. The extension and the plugin carry the same version number and must be the same release: on load, if they differ (or the plugin can't be reached), WorldScrawl turns itself off for that page load with one message, "WorldScrawl is off: the extension (version N) and the server plugin (version M) don't match. Update both to the same release, then restart SillyTavern." Nothing else of WorldScrawl runs until then. Map files you edit by hand are picked up without a restart when the worlds list is refreshed (open the WorldScrawl panel).
 
 ### Worlds folder
 

@@ -3,7 +3,7 @@ import { trackMark } from './tracker.mjs';
 import { waitReason } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
 import { render as P, cards as C } from './shared.mjs';
-import { UPDATE_LINE, cardLib, editLib } from './cardlib.mjs';
+import { cardLib, editLib } from './cardlib.mjs';
 import { runCardAction, ticketFor } from './cardacts.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
@@ -482,7 +482,8 @@ export function renderPatchCards() {
     const ch = ctx().chat ?? [];
     if (isOn()) { refreshChangeStatus(); markUnreadTags(); }
     const latest = latestReply(ch);
-    const lib = !!cardLib(), placePlan = lib ? placeExpiryPlan(ch) : null; // an old plugin: no shared code is used, only the update line
+    if (!cardLib()) return; // WorldScrawl is off (shared.mjs offReason): nothing is drawn
+    const placePlan = placeExpiryPlan(ch);
     for (const el of document.querySelectorAll('#chat .mes[mesid]')) {
         const id = Number(el.getAttribute('mesid')), msg = ch[id];
         el.querySelector('.worldscrawl_patchcard')?.remove();
@@ -510,18 +511,13 @@ export function renderPatchCards() {
         const resolved = Object.entries(msg.extra?.[DECIDED_KEY] ?? {}).filter(([nid, d]) => (d?.swipe ?? 0) === swipeOf(msg) && (!nid.startsWith('flag_') || d.action === 'discard') && !(rememberCard && remember.nid === nid));
         const appearPending = jobsOf(msg).some(j => shownJob(j) && !elsewhere(ch, id, j));
         // The collapse rule (C.groupExpiries): one card per rebuild, a person's changes by person, place changes by the text they wrote.
-        const expired = !lib ? (msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? msg.extra.worldscrawl_notice_people ?? [] : []) : msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? C.groupExpiries((msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id), p => [p.id]) : [];
-        const placeGone = !lib ? (isPlaceExpiry(msg) || placeItems(msg).length ? [true] : []) : (placePlan.get(id) ?? []).map(g => placeCardView(ch, id, g)).filter(Boolean);
+        const expired = msg.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND ? C.groupExpiries((msg.extra.worldscrawl_notice_people ?? []).filter(p => p?.kind === 'appearance' && p.id), p => [p.id]) : [];
+        const placeGone = (placePlan.get(id) ?? []).map(g => placeCardView(ch, id, g)).filter(Boolean);
         if ((!f || (f.swipe ?? 0) !== swipeOf(msg)) && !kept.length && !waitCard && !rememberCard && !npcStamps.length && !foundNotes.length && !resolved.length && !appearPending && !npcWarns.length && !placeWarn && !expired.length && !placeGone.length) continue;
         const card = document.createElement('div');
         card.className = 'worldscrawl_patchcard';
         card.style.cssText = 'margin-top:6px;padding:6px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;font-size:0.9em;';
         const line = t => { const d = document.createElement('div'); d.textContent = t; return d; };
-        if (!lib) { // a missing or older plugin (the one version check, shared.mjs): one line, never the old cards
-            const u = line(UPDATE_LINE); u.className = 'worldscrawl_update_plugin'; card.append(u);
-            (el.querySelector('.mes_block') ?? el).appendChild(card);
-            continue;
-        }
         const startPicker = () => {
             const wrap = document.createElement('span');
             wrap.append('Story from message #');
