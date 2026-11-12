@@ -3,8 +3,12 @@
 // index.js cannot be imported here (it imports this file), so the setting is read straight from SillyTavern.
 // Under Node (unit tests) the repo's plugin/shared/ next to extension/ is loaded instead.
 // If loading fails, every module below is empty, `sharedError` says which URL was tried, and startup shows it.
+// The one version check for everything the extension takes from the plugin (shared/ here, and ui/card.mjs and
+// cardedit.mjs in cardlib.mjs) is `pluginError`: plugin/shared/version.mjs must say PLUGIN_API.
 const NAMES = ['calendar', 'patches', 'doorbar', 'weather', 'prompts', 'npc', 'exits', 'ids', 'cards'];
 const PLUGIN_URL = '/api/plugins/worldscrawl';
+/** The plugin this extension needs (plugin/shared/version.mjs PLUGIN_VERSION). Bump both together. */
+export const PLUGIN_API = 2;
 
 /** The URL shared/ is loaded from, for the current Map server URL setting. */
 export function sharedUrl() {
@@ -14,6 +18,18 @@ export function sharedUrl() {
 
 /** null, or the message to show when shared/ could not be loaded. */
 export let sharedError = null;
+/** null, or why the plugin's code can't be used: 'missing' (not loaded) or 'old' (no version, or another one). */
+export let pluginError = null;
+/** The one version check: the plugin's PLUGIN_VERSION (undefined: a plugin from before the check). */
+export function checkPlugin(version) {
+    pluginError = version === PLUGIN_API ? null : 'old';
+    return !pluginError;
+}
+/** Tests: act as if the plugin said `version` (or could not be loaded: 'missing'). */
+export function usePluginVersion(version) {
+    if (version === 'missing') { pluginError = 'missing'; return false; }
+    return checkPlugin(version);
+}
 /** The URL shared/ was loaded from (a later change of the setting reloads the page; see settings.mjs). */
 export let sharedLoadedFrom = null;
 
@@ -21,8 +37,13 @@ async function loadShared() {
     const base = globalThis.process?.versions?.node ? new URL('../plugin/shared/', import.meta.url).href : sharedUrl();
     sharedLoadedFrom = base;
     try {
-        return Object.fromEntries(await Promise.all(NAMES.map(async n => [n, await import(`${base}${n}.mjs`)])));
+        const mods = Object.fromEntries(await Promise.all(NAMES.map(async n => [n, await import(`${base}${n}.mjs`)])));
+        let version;
+        try { version = (await import(`${base}version.mjs`)).PLUGIN_VERSION; } catch { version = undefined; } // a plugin from before the check
+        if (!checkPlugin(version)) console.error(`[WorldScrawl] the plugin at ${base} is version ${version ?? '(none)'}; this extension needs ${PLUGIN_API}`);
+        return mods;
     } catch (e) {
+        pluginError = 'missing';
         sharedError = `WorldScrawl could not load its shared code from ${base} (${e.message}). Is the WorldScrawl server plugin installed, and SillyTavern restarted since? If the Map server URL setting is filled in, check it.`;
         console.error('[WorldScrawl]', sharedError);
         return Object.fromEntries(NAMES.map(n => [n, {}]));

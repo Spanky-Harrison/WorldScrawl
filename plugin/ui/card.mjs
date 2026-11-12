@@ -5,9 +5,6 @@
 import { renderDiff, renderPersonDiff } from './diffview.mjs';
 import { buildCardEditor } from './cardedit.mjs';
 
-/** Bumped when the descriptor or editor shape changes: the extension refuses a plugin with another version. */
-export const CARD_VERSION = 1;
-
 /** The canonical button order. Adapters list actions; the card sorts them into this order. */
 export const ORDER = ['again', 'edit', 'close', 'scope', 'extra', 'rewrite', 'approve', 'save', 'off', 'on', 'undo', 'discard'];
 const LABELS = { again: 'Check again', edit: 'Edit', close: 'Close editor', rewrite: 'Rewrite with this', approve: 'Approve', save: 'Approve edited', off: 'Turn off', on: 'Turn on', undo: 'Undo', discard: 'Discard' };

@@ -4,8 +4,6 @@
 // decision revision), a field the player changed (dirty) is never overwritten by incoming data, and the caret and
 // selection come back after a redraw.
 
-export const CARD_VERSION = 1;
-
 const drafts = new Map(); // card key -> { open, fields: Map(field key -> {value, base, dirty, sel, focus}), extra }
 
 function draftOf(key) {

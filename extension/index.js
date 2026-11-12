@@ -9,9 +9,9 @@ import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitT
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
-import { cardLib } from './cardlib.mjs';
+import { UPDATE_LINE, cardLib } from './cardlib.mjs';
 import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
-import { render as P, setPrompts, hasPrompts, sharedError, slug } from './shared.mjs';
+import { render as P, setPrompts, hasPrompts, sharedError, pluginError, slug } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
@@ -799,6 +799,7 @@ const openCarriers = new WeakSet();
 (function init() {
     settings();
     if (sharedError) { try { toastr.error(sharedError, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} } // also logged by shared.mjs
+    else if (pluginError) { try { toastr.error(UPDATE_LINE, 'WorldScrawl', { timeOut: 0, extendedTimeOut: 0 }); } catch {} } // an older plugin: the cards show the same line
     applyTools();
     registerSlashCommands();
     const { eventSource, eventTypes } = ctx();

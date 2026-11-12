@@ -85,7 +85,7 @@ function openMapChannel() {
         }
         if (ev.data?.type === 'expand') { // the map's "Expand with AI": one model call with the map-built prompt (parent notes and neighbors only)
             const c = ctx(), d = ev.data;
-            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => gen('map expand', { prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }))
+            if (d.chatId && d.chatId === (c.chatId ?? c.getCurrentChatId?.())) ensurePrompts().then(() => gen('map expand', { prompt: String(d.prompt ?? ''), systemPrompt: expandSys(), responseLength: 300 }, { shown: 'map' }))
                 .then(t => ch.postMessage({ type: 'expand_result', req: d.req, ok: true, text: String(t ?? '').trim() }))
                 .catch(e => ch.postMessage({ type: 'expand_result', req: d.req, ok: false, error: e.message }));
         }

@@ -141,7 +141,7 @@ export function logEditCall(label, prompt, answer) {
     console.info(`[WorldScrawl] map edit call: ${label}`, { prompt, answer });
 }
 async function askModel(c, label, args) {
-    const raw = await gen(`map edit: ${label}`, args);
+    const raw = await gen(`map edit: ${label}`, args, { shown: 'card' }); // the map change card says working (status working, or rewriting)
     logEditCall(label, args.prompt, raw);
     return raw;
 }
