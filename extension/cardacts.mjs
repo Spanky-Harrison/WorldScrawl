@@ -13,6 +13,7 @@ import { FLAG_KEY, PATCH_KEY, WAITCARD_KEY, broadcastMapState, ctx, hooks } from
 import { analyzeFlag, isCarrier, removeFromCard, swapRewrite } from './carriers.mjs';
 import { discardWait, keepWait, renderPatchCards } from './waits.mjs';
 import { discardFlag, keepFlag, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
+import { retryPlaceRebuild } from './placerevert.mjs';
 import { isPlaceExpiry, keepExpiryEdit, keptForGood, openEditor, openForms, saveKeptEdit, toggleFromCard } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
 import { REMEMBER_KEY, appearJobs, applyFacts, castPack, npcClock, npcEnv, refreshLivePlaces, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryAppearance, retryRemember, settleNpc } from './scene.mjs';
@@ -348,9 +349,9 @@ const wait = {
     },
     discard: t => { E()?.closeCardEditor(t.key); return discardWait(t.id); },
 };
-// ---- an appearance rebuild job: Check again asks the model again
+// ---- a rebuild job (a person's appearance, or a place text after a temporary change ran out): Check again asks again
 const job = {
-    again: t => retryAppearance(t.id, t.job.id, t.job.key),
+    again: t => (t.job.domain === 'place' ? retryPlaceRebuild(t.id, t.job.id, t.job.key) : retryAppearance(t.id, t.job.id, t.job.key)),
 };
 
 /** The handlers: the only per-type card code that acts. */

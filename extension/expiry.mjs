@@ -1,7 +1,7 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { render as P, hasPrompts } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, placeStamp } from './actors.mjs';
-import { chatChanges, chatWorld, clockAt, rememberWorlds, worldSeed } from './clock.mjs';
+import { chatChanges, chatWorld, clockAt, rememberWorlds, withRevertRecords, worldSeed } from './clock.mjs';
 import { registerTools, toolsToRegister } from './discovery.mjs';
 import { api, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
@@ -50,7 +50,7 @@ export function narratedView(chat) {
     for (let i = L; i >= 0 && !address; i--) address = playerAddress(chat[i]?.extra?.[LOC_KEY]);
     if (!address) return null;
     const head = chat.slice(0, L + 1);
-    const changes = chatChanges(head).map(c => (c.narrated?.at === L ? { ...c, off: !!c.narrated.off } : c));
+    const changes = withRevertRecords(chatChanges(head, { raw: true }).map(c => (c.narrated?.at === L ? { ...c, off: !!c.narrated.off } : c)), head); // rebuilt texts as they stood then
     return { index: L, address, changes, now: clockAt(L, chat) };
 }
 /** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo). */

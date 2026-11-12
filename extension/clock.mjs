@@ -1,5 +1,7 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { calendar, weather } from './shared.mjs';
+import { calendar, patches as patchShared, weather } from './shared.mjs';
+import { applyRevertRecords, revertNeeds } from './arearewrite.mjs';
+import { composeRecords, findCompose, hash } from './replay.mjs';
 import { api } from './doors.mjs';
 import { fetchRaw, newRoom, renderAllExits } from './footer.mjs';
 import { CHANGE_KEY, WORLD_KEY, activeWorld, baseUrl, ctx, isOn } from './index.js';
@@ -98,7 +100,7 @@ export function worldSeed(chat = ctx().chat ?? []) {
     return null;
 }
 /** World changes (dug/removed exits) to apply: those stamped after the latest rebase (earlier ones are baked into that world). */
-export function chatChanges(chat = ctx().chat ?? []) {
+export function chatChanges(chat = ctx().chat ?? [], { raw = false } = {}) {
     const base = chatWorld(chat);
     const from = base?.rebase ? base.index : -1;
     const out = [];
@@ -106,7 +108,18 @@ export function chatChanges(chat = ctx().chat ?? []) {
         const c = m?.extra?.[CHANGE_KEY]; if (c && i > from) out.push(...(Array.isArray(c) ? c : [c]));
         if (i > from) for (const p of patchesOn(m)) out.push({ ...p, _msg: i });
     });
-    return out;
+    return raw ? out : withRevertRecords(out, chat);
+}
+/** Texts rebuilt after a temporary change ran out (placerevert.mjs) take the place of the stale text, when known. */
+export function placeRevertNeeds(changes, chat = ctx().chat ?? []) {
+    if (typeof patchShared.opActive !== 'function' || !changes.some(c => c?.type === 'patch')) return [];
+    return revertNeeds(changes, calendarLib ? chatElapsed(chat) : null, patchShared, hash);
+}
+export function withRevertRecords(changes, chat = ctx().chat ?? []) {
+    const needs = placeRevertNeeds(changes, chat);
+    if (!needs.length) return changes;
+    const records = composeRecords(chat);
+    return applyRevertRecords(changes, needs, key => findCompose(records, key));
 }
 /** A room with this chat's changes applied: exits dug from it added, removed exits dropped. */
 async function applyChanges(loc) {

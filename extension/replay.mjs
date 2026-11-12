@@ -7,7 +7,8 @@ export const BASELINE_KEY = 'worldscrawl_npc_baseline';
 export const COMPOSE_KEY = 'worldscrawl_compose';
 export const MID_KEY = 'worldscrawl_mid';
 
-const hash = s => {
+/** Short stable hash (compose keys). Shared with the place revert keys (arearewrite.mjs). */
+export const hash = s => {
     let h = 5381;
     const t = String(s);
     for (let i = 0; i < t.length; i++) h = Math.imul(h, 33) ^ t.charCodeAt(i);

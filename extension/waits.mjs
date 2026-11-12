@@ -424,7 +424,7 @@ export function renderPatchCards() {
         const npcNames = new Map((castPack()?.npcs ?? []).map(n => [n.id, n.name]));
         for (const m of ch) for (const s of m?.extra?.[NPC_KEY] ?? []) if (s?.id && s.name) npcNames.set(s.id, s.name);
         for (const job of appearJobs(msg)) if (job.status === 'working' || job.status === 'failed')
-            card.append(drawCard(C.appearJob({ key: `${id}|job|${job.id}|${job.key}`, name: job.name || job.id, status: job.status, reason: job.reason ?? '' }), 'job', ticketFor('job', { id, msg, job })));
+            card.append(drawCard(C.appearJob({ key: `${id}|job|${job.id}|${job.key}`, name: job.name || job.id, status: job.status, reason: job.reason ?? '', domain: job.domain }), 'job', ticketFor('job', { id, msg, job })));
         let exported = new Set();
         for (const s of npcStamps) {
             if (s.type === 'npc_found') continue; // drawn below, with Edit / Undo
