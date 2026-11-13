@@ -665,9 +665,9 @@ export function presentAt(chat, index, cast, env) {
 
 /**
  * Saved people who belong here (a schedule stop at this place, or a {{npc:id}} token in the lore being fed, `lore`)
- * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented). `.offmap` is set when any line is someone elsewhere.
+ * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented). `onOffmap` is called for each line about someone elsewhere.
  */
-export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {}) {
+export function absentAt(chat, index, cast, env, { lore = '', present = [], onOffmap = () => {} } = {}) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length) return [];
     const frames = framesOf(chat, end, cast, env?.clock);
@@ -683,7 +683,7 @@ export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {
         const stops = (npc.schedule ?? []).filter(e => e && !e.broken && e.place).some(e => resolveSchedulePlace(e.place, env).address === here);
         const nearHere = !!(sched?.offmap && withinNear(here, sched.near));
         if (!stops && !named.has(String(npc.id).toLowerCase()) && !nearHere) continue;
-        if (sched?.offmap) { out.push(offmapAbsentLine(npc, sched)); out.offmap = true; continue; }
+        if (sched?.offmap) { out.push(offmapAbsentLine(npc, sched)); onOffmap(); continue; }
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
         const who = shownName(npc);

@@ -333,11 +333,12 @@ function npcPromptBits(loc) {
         const env = npcEnv(chat, loc);
         const present = presentAt(chat, chat.length - 1, pack.npcs, env);
         const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
-        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
+        let elsewhere = false;
+        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present, onOffmap: () => { elsewhere = true; } });
         const comings = comingsAndGoings(chat, chat.length - 1, pack.npcs, env);
         if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
         if (!present.length && !absent.length) return {};
-        if (absent.offmap) absent.push(P('narration.offmap_found'));
+        if (elsewhere) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
