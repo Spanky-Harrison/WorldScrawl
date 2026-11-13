@@ -251,7 +251,7 @@ test('canary narrator: asleep off the map, fed lore with her token and her plain
     const m = say(c, '[lore] The Drowned Rat');
     await bracketIntent(m, parseBracket(m.mes));
     const f = await facts(blocks);
-    assert.match(f, /The landlady: asleep, somewhere off the map/);
+    assert.match(f, /The landlady: asleep, elsewhere/);
     assert.match(f, /run by its sharp-tongued landlady, the landlady\. The landlady keeps a cudgel under the bar; regulars call her the landlady\./);
     assert.doesNotMatch(f, GATE, 'no gated line while she is not here');
     assert.deepEqual(leaks(f), []);

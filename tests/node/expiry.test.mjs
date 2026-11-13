@@ -165,14 +165,16 @@ test('aftermath: a one-time line when the room the narrator last saw is gone or 
     const am = body => c.post('/aftermath', { json: body }).json();
     // Narrated in the stall at 0; now the stall expired and the party was moved to the lane.
     const gone = am({ then: { changes: ch, now: 0, address: BOOTH }, changes: ch, now: H, address: LANE });
-    assert.match(gone.note, /^Pop-up Stall.* is gone \(a temporary change ended\); the party is now in Market Lane/);
+    assert.match(gone.note, /^Pop-up Stall.* is gone; the characters are now in Market Lane/);
+    assert.equal(gone.why, 'a temporary change ended');
     assert.match(gone.note, /Anything only in Pop-up Stall.*such as the .*no longer exists/);
     // In the square: the stall's exit from the square is gone (expiry) — a lost-exit line.
     const lost = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: H, address: SQUARE });
-    assert.match(lost.note, /\(a temporary change ended\): the square in Village Square.*no longer exists/);
+    assert.match(lost.note, /^Since the last reply, the square in Village Square.*no longer exists/);
+    assert.equal(lost.why, 'a temporary change ended');
     // Turned off instead: says so.
     const off = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: [{ ...ch[0], off: true }], now: 0, address: SQUARE });
-    assert.match(off.note, /turned off or undone/);
+    assert.match(off.why, /turned off or undone/);
     // Nothing changed (or already narrated): no line.
     assert.equal(am({ then: { changes: ch, now: H, address: LANE }, changes: ch, now: H, address: LANE }).note, '');
     assert.equal(am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: 10, address: SQUARE }).note, '');
@@ -246,8 +248,9 @@ test('the narration line: what ran out, what made it, an excerpt, and where they
     const ex = ext.excerptOf(msg);
     assert.ok(ex.length <= 240 && ex.endsWith('...'), ex);
     const line = ext.expiryNarrationLine(room, { address: 'inn/upstairs', name: 'Upstairs Rooms' }, 'door', 'Ann', ex);
-    for (const w of ['Guest Room 1 has come to an end', 'lasted 1h, from message #5', 'A narrow room with a broken window.', 'innkeeper shows them a room; added place Guest Room 1', `"${ex}"`, 'ends up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ends up'])
+    for (const w of ['Guest Room 1 has come to an end', 'lasted 1h, from message #5', 'A narrow room with a broken window.', 'How it came about: innkeeper shows them a room\n', `"${ex}"`, 'ends up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ends up'])
         assert.ok(line.includes(w), w);
+    assert.ok(!line.includes('added place'), 'the engine summary stays off the narrator; the story note is enough');
 });
 test('the reply carries the stamp; the context line stays as the fallback', () => {
     assert.match(src, /m\.extra\[LOC_KEY\] = told\.to/);
@@ -311,7 +314,7 @@ test('turning a change on or off adds no chat row; aftermath still describes the
         assert.equal(p.off, true);
         assert.deepEqual(p.narrated, { at: 1, off: false });
         assert.equal(ext.narratedView(chat).changes[0].off, false);
-        assert.match(await aftermathNote(chat, { address: SQUARE }), /turned off or undone/);
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /^Since the last reply, the .* no longer exists?\. Do not describe/);
 
         const on = await ext.toggleChange(0, 'stall');
         assert.equal(on.off, false);
@@ -328,7 +331,7 @@ test('turning a change on or off adds no chat row; aftermath still describes the
         assert.equal(added.length, 0);
         assert.equal(p.off, true);
         assert.deepEqual(p.narrated, { at: 2, off: false });
-        assert.match(await aftermathNote(chat, { address: SQUARE }), /turned off or undone/);
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /^Since the last reply, the .* no longer exists?\. Do not describe/);
 
         const bare = [{ is_user: true, mes: 'only me', extra: { worldscrawl_patches: [stallPatch({ id: 'solo' })] } }];
         c.chat = bare;

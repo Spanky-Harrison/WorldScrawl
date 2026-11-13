@@ -45,9 +45,9 @@ test('rel: the line and the name-leak guard go with the memories', () => {
     assert.equal(relLine(p, 'Joe'), "Met Joe but doesn't know Joe by name.");
     assert.equal(relLine({}, 'Joe'), 'Has not met Joe before.');
     const engaged = npcSlices([p], { id: 'x' }, { tiers: { hesk: { tier: 'engaged' } }, pc: 'Joe' }).npcs_present;
-    assert.match(engaged, /Met Joe but doesn't know Joe by name\. \(Their memories use real names for clarity; the landlady does not know the name Joe and must not say it\.\) Remembers: Joe lied/);
+    assert.match(engaged, /Met Joe but doesn't know Joe by name\. \(Their memories name people by their real names; the landlady does not know the name Joe and must not say it\.\) Remembers: Joe lied/);
     const focus = npcSlices([p], { id: 'hesk', depth: 'focus' }, { pc: 'Joe' }).npc_focus.split('\n');
-    assert.deepEqual(focus.slice(0, 3), ['The landlady, in focus.', "Met Joe but doesn't know Joe by name.", '(Their memories use real names for clarity; the landlady does not know the name Joe and must not say it.)']);
+    assert.deepEqual(focus.slice(0, 3), ['More about the landlady:', "Met Joe but doesn't know Joe by name.", '(Their memories name people by their real names; the landlady does not know the name Joe and must not say it.)']);
     const known = { ...p, known: { known: true }, rel: { player: { state: 'named', at: 0, by: 'name flag' } } };
     const k = npcSlices([known], { id: 'hesk', depth: 'focus' }, { pc: 'Joe' }).npc_focus;
     assert.match(k, /Knows Joe by name\./);

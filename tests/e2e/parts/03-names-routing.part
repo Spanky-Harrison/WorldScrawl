@@ -6,7 +6,7 @@
     for (const d of tour) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
     check('tour back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Lore on file: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Places with local lore: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
     expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm')); await waitReqs(); // Hesk pours drinks from 16:00
     await queue([{ content: 'Hesk eyes you.' }]);
     await send('[lore] The Drowned Rat', 1);

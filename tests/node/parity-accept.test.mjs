@@ -1296,7 +1296,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     assert.equal(live.body, 'sturdy', 'the engine reverted her');
     // E: the wait's "ran out" line, from the real waitFacts.
     const wf = await waitFacts(c.chat, ROOM);
-    assert.match(wf, /these temporary changes ran out and are gone now: the temporary change "turned into a gnoll" on the landlady\./, 'the narrator gets what the player knows her as');
+    assert.match(wf, /these wore off and no longer hold: The landlady: "turned into a gnoll"\./, 'the narrator gets what the player knows her as');
     assert.match(wf, /Describe the people as they are now/);
     // A: one notice, like a place expiry's [Engine: ...] line, never twice.
     const posted = await scene.postPersonExpiryNotices();
@@ -1311,9 +1311,9 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     // B: the narrator's facts say who changed back and how she looks now.
     await scene.applyFacts();
     const text = facts.at(-1);
-    assert.match(text, /Engine note \(already applied; this is the same person, not someone new\)/);
+    assert.match(text, /these changes to people wore off \(the same people, not someone new\)/);
     // The facts block goes through the name portal: she is not named there.
-    assert.match(text, /- The landlady: the temporary change "turned into a gnoll" ran out and is gone/);
+    assert.match(text, /- The landlady: "turned into a gnoll" has worn off/);
     assert.doesNotMatch(text, /Hesk/);
     assert.match(text, /What they look like now: Looks: copper braids Body: sturdy Outfit: wool/);
     // C: the story narrates her turning back; the tracker hears it already happened, and its proposal is dropped.
@@ -1341,7 +1341,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     c.chat.push(userMsg('I look at her.'));
     assert.deepEqual(scene.freshPersonExpiries(c.chat, c.chat.length - 1), []);
     await scene.applyFacts();
-    assert.doesNotMatch(facts.at(-1), /Engine note/);
+    assert.doesNotMatch(facts.at(-1), /wore off/);
 });
 
 test('the no-op backstop keeps a real change: a tracker proposal that does change her still waits on the card', async () => {
@@ -1524,7 +1524,7 @@ test('re-timing a kept wait rechecks person expiries too, and a temporary fact t
     c.chat.push(userMsg('[wait] 2h'));
     await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
     const wf = await waitFacts(c.chat, ROOM);
-    assert.match(wf, /ran out and are gone now: [^\n]*the temporary change "turned into a gnoll" on the landlady[^\n]*; the temporary detail "has a split lip" on the landlady/);
+    assert.match(wf, /wore off and no longer hold: [^\n]*The landlady: "turned into a gnoll"[^\n]*; The landlady: "has a split lip"/);
 });
 
 // ---- S6: the cast Changes tab shows the chat's cards; a click runs the chat card's handler over the map channel

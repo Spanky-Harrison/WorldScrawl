@@ -181,7 +181,7 @@
     await page.evaluate(() => { const b = document.getElementById('worldscrawl_enabled'); b.checked = true; b.dispatchEvent(new Event('change')); });
     await settle(2000);
     const pOn = await prompts();
-    check('toggle on: world state re-injected and footers back, location from earlier stamps', pOn[0].includes('[World state from the game engine') && (await footers()) > 0 && (await stored()) === locBefore
+    check('toggle on: world state re-injected and footers back, location from earlier stamps', pOn[0].includes('[Scene facts. Treat these as true') && (await footers()) > 0 && (await stored()) === locBefore
         && (await wsExits()).startsWith('Exits:'), JSON.stringify(pOn).slice(0, 200));
     // A chat started while off has no stamps; nothing is stamped while off, even on chat load; turning on stamps the greeting.
     const toggle = on => page.evaluate(v => { const b = document.getElementById('worldscrawl_enabled'); b.checked = v; b.dispatchEvent(new Event('change')); }, on);

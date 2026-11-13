@@ -42,7 +42,8 @@ test('a named existing place never becomes a new one', () => {
 test('a failed break-through is told plainly to the narrator, outranking other notes', () => {
     const t = ext.factsText(up, null, false, { digFailed: true, look: { kind: 'window', what: 'x' }, newDoor: true });
     assert.match(t, /FAILED: nothing gave way\. No new opening or passage exists/);
-    assert.match(t, /do not flag a map change or a new room/);
+    assert.match(t, /Narrate the attempt failing \(the wall, floor or window holds\)\.$/m);
+    assert.doesNotMatch(t, /flag/, 'no engine bookkeeping in the narrator line');
 });
 test('after a failed break-through the reply cannot add a room or passage', () => {
     const chat = [{ is_user: true, mes: SAID, extra: { worldscrawl_dig_failed: true } }, { is_user: false, mes: 'The window gives way...' }];

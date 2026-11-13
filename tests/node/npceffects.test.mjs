@@ -221,7 +221,7 @@ test('comings: expired appearance while still in scene goes on the comings line'
     ];
     const clocks = [at(16), at(16), at(17)];
     const lines = comingsAndGoings(chat, 2, [heskRec], envOf(BAR, clocks));
-    assert.ok(lines.some(l => /Hesk's blonde hair fades \(expired/.test(l)), lines);
+    assert.ok(lines.some(l => /^\[\d\d:\d\d\] Hesk's blonde hair fades\.$/.test(l)), lines);
 });
 
 test('npcAt / expiryOf: a committed body is live, and stored start expires', () => {

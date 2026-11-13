@@ -57,7 +57,7 @@ test('absent lines name map, stub, and text nears, and do not place the person',
     const n = hesk();
     const chat = [msg('hello')];
     const mapLine = absentAt(chat, 0, [n], env(BAR, 8));
-    assert.deepEqual(mapLine, ['Hesk: asleep, somewhere off the map (her own room, in The Drowned Rat)']);
+    assert.deepEqual(mapLine, ['Hesk: asleep, elsewhere (her own room, in The Drowned Rat)']);
     assert.equal(absentAt(chat, 0, [n], env(SQUARE, 8)).length, 0, 'outside the near, and not named in lore, she is not mentioned');
     const john = validateRecord({
         id: 'john', name: 'John', line: 'A farmer.',
@@ -65,7 +65,7 @@ test('absent lines name map, stub, and text nears, and do not place the person',
     }, { file: 'john.json', places: rooms, nearIndex: index });
     const lore = '{{npc:john}} keeps a farm.';
     assert.deepEqual(absentAt(chat, 0, [john], env(BAR, 8), { lore }), [
-        "John: at home, somewhere off the map (at home, in Wickerton, a farming town three hours' ride north of Riverton)",
+        "John: at home, elsewhere (at home, in Wickerton, a farming town three hours' ride north of Riverton)",
     ]);
     const fisher = validateRecord({
         id: 'ned', name: 'Ned', line: 'A fisher.',
@@ -73,7 +73,7 @@ test('absent lines name map, stub, and text nears, and do not place the person',
     }, { file: 'ned.json', places: rooms, nearIndex: index });
     assert.equal(fisher.schedule[0].nearNote, 'not in the list');
     assert.equal(fisher.problems.length, 0);
-    assert.equal(offmapAbsentLine(fisher, scheduleAt(fisher, { minutes: 0 }, env(BAR))), 'Ned: fishing, somewhere off the map (a fishing camp up the river)');
+    assert.equal(offmapAbsentLine(fisher, scheduleAt(fisher, { minutes: 0 }, env(BAR))), 'Ned: fishing, elsewhere (a fishing camp up the river)');
 });
 
 test('a single unknown word is a load warning; multi-word text is only an inspector note', () => {
