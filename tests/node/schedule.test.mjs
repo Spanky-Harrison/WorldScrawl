@@ -495,3 +495,51 @@ test('editor: might rows show read-only and a save through the form leaves the f
     fs.rmSync(path.join(dir, 'cast', copy));
     assert.equal(fs.readFileSync(file, 'utf8'), bytes);
 });
+
+// ---- Options that are not on the map yet (a room made in play later): kept, away until the live map has them.
+const NOOK = 'riverton:drowned_rat/storage_nook';
+const WREN = { id: 'wren', name: 'Wren', personality: { summary: 'A potboy who hides from work.' }, disposition: { player: { value: 'indifferent' } },
+    schedule: [{ might: [NOOK], activity: 'hiding from work', from: '09:00', to: '12:00' }] };
+const MIXED = { id: 'pell', name: 'Pell', personality: { summary: 'A cooper.' }, schedule: [{ might: [`${NOOK}(50)`, BAR], activity: 'fixing casks', from: '09:00', to: '12:00' }] };
+const NOOK_PATCH = { type: 'patch', id: 'p_nook', swipe: 0, relocate: {}, summary: ['A storage nook off the common room'],
+    ops: [{ op: 'create_place', area: RAT, id: 'storage_nook', name: 'Storage Nook', description: 'Shelves of jars and a broom.', exits: [{ direction: 'north', to: BAR, return_direction: 'south' }] }] };
+
+test('not on the map yet: an all-unknown entry loads as a waiting block (not broken), they are away, and once the room exists in play the roll places them there', async () => {
+    const { c, server } = boot({ time: '10:00', cards: [WREN, MIXED] });
+    const body = server.get('/cast').json();
+    const wren = body.npcs.find(n => n.id === 'wren'), pell = body.npcs.find(n => n.id === 'pell');
+    assert.equal(wren.ok, true);
+    assert.equal(wren.schedule[0].broken, undefined, 'waiting, not broken');
+    assert.deepEqual(wren.problems, [`wren.json schedule[0]: no might option is on the map yet (${NOOK}); the whole block is away until one exists`]);
+    assert.deepEqual(pell.problems, [`pell.json schedule[0]: might option "${NOOK}" is not on the map yet; that share is away until it exists`]);
+    assert.ok(!body.npcs.flatMap(n => n.problems).some(p => /dropped/.test(p)));
+    assert.deepEqual(pell.schedule[0].options.map(o => [o.text, o.share]), [[NOOK, 50], [BAR, 50]], 'the option stays in the table');
+    // Base map: away (with the reason in Why), nobody turns up anywhere.
+    let env = envOf(c);
+    const s0 = scheduleAt(person('wren'), env.clock(0), env);
+    assert.deepEqual([s0.kind, s0.address, s0.pick], ['might', null, NOOK]);
+    assert.match(s0.note, /is not on the map, so away this time/);
+    assert.match(npcWhy(person('wren'), 0, env).schedule.why, /not on the map, so away this time/);
+    const m = say(c, 'I look around.');
+    await scene.prepareNpcs(m);
+    assert.ok(!appears(m).some(s => s.id === 'wren'));
+    // The nook is made in play (a kept map change on the chat): the live map has it, and the same roll now lands there.
+    c.chat[0].extra.worldscrawl_patches = [NOOK_PATCH];
+    await ext.refreshLivePlaces();
+    assert.ok(scene.castPack().places.has(NOOK), 'the live map has the new room');
+    env = envOf(c);
+    const s1 = scheduleAt(person('wren'), env.clock(c.chat.length - 1), env);
+    assert.deepEqual([s1.address, s1.roll], [NOOK, s0.roll], 'same seeded roll, now placed');
+    assert.equal(whoAt(c.chat, c.chat.length - 1, cast(), env, NOOK).find(x => x.id === 'wren')?.here, true);
+    reply(c, 'You push open a narrow door.', { worldscrawl_location: NOOK });
+    const there = say(c, 'Anyone hiding in here?');
+    await scene.prepareNpcs(there);
+    assert.ok(appears(there).some(s => s.id === 'wren' && s.place === NOOK), 'he turns up in the new room');
+    assert.ok(presentIds(c).includes('wren'));
+    // Pell's nook half follows the live map too: across many days some blocks put him in the nook, the rest at the bar.
+    const picks = new Set();
+    for (let d = 0; d < 40; d++) picks.add(scheduleAt(person('pell'), { day: day0(c) + d, minutes: H(10) }, env).address);
+    assert.deepEqual([...picks].sort(), [BAR, NOOK].sort());
+    c.chat[0].extra.worldscrawl_patches = [];
+    await ext.refreshLivePlaces();
+});
