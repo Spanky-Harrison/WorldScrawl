@@ -5,7 +5,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, sightCheck, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
@@ -92,7 +92,7 @@ function baseCastPack() {
     const id = activeWorld || defaultWorldId;
     return (id && worldCasts.get(id)) || (defaultWorldId && worldCasts.get(defaultWorldId)) || null;
 }
-// The live map for every NPC-side check (found, follow/stay, near, sightings, people here, schedules):
+// The live map for every NPC-side check (found, follow/stay, near, might picks, people here, schedules):
 // the world's places plus rooms this chat's map changes made. The server's effective map already drops
 // removed and moved rooms, so exists is "on that map", not "on the map and absent from relocate".
 // resolveSchedulePlace follows a relocate key only when the address is missing here. Refreshed whenever
@@ -304,8 +304,9 @@ async function setRelOn(msg, arg) {
     return { ok: true, name: n.name, state }; // name-ok: result for the inspector
 }
 /**
- * [found] / [ws_flag: found | Name]: put them in the current room when that room is within the placeless entry's near.
- * The stamp is keyed by the entry's where label. Accepted and rejected both stay on the message, so the notice and the activity log can say why.
+ * [found] / [find] / [ws_flag: found | Name]: put them in the current room when that room is within the placeless entry's near
+ * (the stamp is keyed by the entry's where label), or, for a might block, when this is where they actually are right now (an
+ * appearance stamp; there is no by-name roll). Accepted and rejected both stay on the message, so the notice and the activity log can say why.
  */
 async function applyFound(msg, names, source) {
     const list = [...new Set((names ?? []).map(n => String(n ?? '').trim()).filter(Boolean))];
@@ -318,15 +319,17 @@ async function applyFound(msg, names, source) {
     const folded = [...(framesOf(chat, at, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     const swipe = swipeOf(msg);
     msg.extra = msg.extra ?? {};
-    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_found' && (s.swipe ?? 0) === swipe && s.source === source));
+    msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !((s?.type === 'npc_found' || s?.type === 'npc_appear') && (s.swipe ?? 0) === swipe && s.source === source));
     const prev = (msg.extra[FOUND_KEY] ?? []).filter(f => (f?.swipe ?? 0) !== swipe || f.source !== source);
     const decisions = [];
     for (const nm of list) {
         const n = findPerson(nm, folded);
         if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '' }); continue; }
         const j = judgeFound(n, env.clock(at), env.playerAt(at), env);
-        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
-        if (j.ok) addNpcStamp(msg, { type: 'npc_found', id: n.id, where: j.where ?? '', place: j.place, source });
+        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
+        // A might block: accepted where they are right now, as an appearance stamp. An off-map entry: a found room for its where label.
+        if (j.ok && j.appear) addNpcStamp(msg, { type: 'npc_appear', id: n.id, ...j.appear, source });
+        else if (j.ok) addNpcStamp(msg, { type: 'npc_found', id: n.id, where: j.where ?? '', place: j.place, source });
     }
     msg.extra[FOUND_KEY] = [...prev, ...decisions];
     if (source === 'bracket') msg.extra.worldscrawl_bracket = { verb: 'found', target: list.join(', '), status: decisions.every(d => d.ok) ? 'ok' : 'rejected', reason: decisions.map(d => d.reason).join(' ') };
@@ -385,7 +388,10 @@ async function askWho(loc, said, present) {
     const hit = await askValid('who', prompt, pickKey(opts));
     return hit?.key && hit.key !== 'nobody' ? present.find(p => handleOf(p.id) === hit.key)?.id ?? null : null;
 }
-/** Before the narrator speaks: sighting stamps, a first attitude, and who is in focus. One pick-one, one retry, then indifferent. */
+/**
+ * Before the narrator speaks: appearance stamps (someone whose might block, or this segment of a wandering one, puts them in
+ * the player's room turns up), a first attitude, and who is in focus. One pick-one, one retry, then indifferent.
+ */
 async function prepareNpcs(userMsg) {
     const pack = castPack();
     const chat = ctx().chat ?? [];
@@ -408,12 +414,12 @@ async function prepareNpcs(userMsg) {
         const frame = framesOf(chat, index, pack.npcs);
         const now = frame[frame.length - 1];
         const said = userMsg.mes ?? '';
-        const seeking = /\b(find|seek|where is|look for|ask after|ask about)\b/i.test(said);
         if (now) for (const n of now.values()) {
-            const oneOff = n.seen_at && !(n.schedule ?? []).some(e => !e.broken);
-            if (seeking && oneOff && (nameIn(said, n.name) || nameIn(said, n.id)) && !n.seeks.some(s => s.day === clock.day)) addNpcStamp(userMsg, { type: 'npc_seek', id: n.id, day: clock.day }); // name-ok: inbound match (the player's words)
-            const check = sightCheck(n, clock, here, env, { appearances: n.appearances, seeks: n.seeks, useRoll: true });
-            if (check.present && check.needsStamp) addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: check.place, day: clock.day, hour: clock.hour });
+            const sched = scheduleAt(n, clock, env);
+            if (sched?.kind !== 'might' || !sched.address || sched.address !== here) continue;
+            const wandering = !!sched.entry.wandering;
+            if ((n.appearances ?? []).some(a => a.blockStart === sched.blockStart && (!wandering || a.segStart === sched.segStart))) continue;
+            addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: here, blockStart: sched.blockStart, ...(wandering ? { segStart: sched.segStart } : {}) });
         }
         let present = presentAt(chat, index, pack.npcs, env);
         for (const p of present) {
@@ -617,7 +623,7 @@ function mapNpcs(chat, here) {
         });
     } catch (e) { console.warn('[WorldScrawl] npc state for the map failed', e); return []; }
 }
-/** The per-message activity log for the map: the last 30 messages, newest first, with sighting rolls at each. */
+/** The per-message activity log for the map: the last 30 messages, newest first, with the might-block rolls in force at each. */
 function mapActivity(chat, here) {
     if (!chat?.length) return [];
     const c = ctx(), chatId = c.chatId ?? c.getCurrentChatId?.();
@@ -629,8 +635,10 @@ function mapActivity(chat, here) {
         const m = chat[i]; if (!m) continue;
         const rolls = [];
         if (env && frames?.[i] && !m.is_user) for (const n of frames[i].values()) {
-            if (!n.seen_at) continue;
-            try { const w = npcWhy(n, i, env); const g = w.sighting; if (g?.active && g.roll != null) rolls.push({ kind: 'roll', label: `${n.name} sighting${g.sought ? ' (by name)' : ''}`, roll: g.used, chance: g.now, seekRoll: g.seekRoll, present: g.wouldShow }); } catch { /* skip */ } // name-ok: inspector
+            try {
+                const sc = scheduleAt(n, env.clock(i), env);
+                if (sc?.kind === 'might') rolls.push({ kind: 'roll', label: `${n.name} ${sc.entry.from}–${sc.entry.to}${sc.entry.wandering ? ' (wandering)' : ''}`, roll: sc.roll, pick: sc.address ? env.names(sc.address) : sc.near?.kind === 'stub' ? sc.near.name : sc.near?.kind === 'text' ? sc.near.text : 'away', present: !!sc.address && sc.address === env.playerAt(i) }); // name-ok: inspector
+            } catch { /* skip */ }
         }
         out.push({ msg: i, who: m.is_user ? 'you' : m.is_system ? 'system' : m.name ?? 'narrator', snippet: String(m.mes ?? '').slice(0, 80), entries: messageActivity(m, i, { chatId, extra: rolls }) });
     }
@@ -644,7 +652,10 @@ function mapInspect(chat, here) {
         const env = npcEnv(chat, here);
         const end = chat.length - 1;
         const places = new Set([here?.address].filter(Boolean));
-        for (const n of pack.npcs ?? []) { for (const e of n.schedule ?? []) if (e?.place) places.add(resolveSchedulePlace(e.place, env).address ?? e.place); if (n.seen_at?.place) places.add(resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place); }
+        for (const n of pack.npcs ?? []) for (const e of n.schedule ?? []) {
+            if (e?.place) places.add(resolveSchedulePlace(e.place, env).address ?? e.place);
+            for (const o of Array.isArray(e?.might) ? e.options ?? [] : []) { const r = resolveSchedulePlace(o.text, env); if (r.ok) places.add(r.address); }
+        }
         const play = mapNpcs(chat, here);
         for (const n of play) if (n.position?.place) places.add(n.position.place);
         const who = {};
@@ -701,7 +712,6 @@ function toolNpcStamp(args = {}) {
     if (action === 'staying') return { type: 'npc_staying', id, elapsed: chatElapsed() };
     if (action === 'follow') return { type: 'npc_follow', id, who: PLAYER };
     if (action === 'stay') return { type: 'npc_stay', id };
-    if (action === 'seek') return { type: 'npc_seek', id, day: npcClock(ctx().chat ?? [], (ctx().chat ?? []).length - 1).day };
     if (action === 'appearance') {
         // Keep an empty intent: the reply handler rejects it when nothing changed, instead of dropping it.
         const intent = String(args.intent ?? args.text ?? '').trim();

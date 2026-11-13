@@ -8,7 +8,7 @@ import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged
 import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
-const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, exportRecord, authorRecord, isObj, matchEnum, nameIn, normName, npcTokenIds, resolveNear, resolveSchedulePlace, str } = npc;
+const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NOWHERE, exportRecord, authorRecord, areaPick, blockSpan, blockStartOf, isMight, isNowhere, isObj, matchEnum, mightKey, nameIn, normName, npcTokenIds, pickFromTable, readMightEntry, resolveNear, resolveSchedulePlace, str, wanderChain } = npc;
 
 export const NPC_KEY = 'worldscrawl_npc';
 
@@ -93,30 +93,8 @@ const cleanList = (v, cap) => (Array.isArray(v) ? v.map(x => (typeof x === 'stri
 
 const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
 
-/** 0-99, stable for the same seed. Same seed all day, so a swipe cannot flip a sighting. */
-export function hashRoll(seed) {
-    let h = 2166136261;
-    const s = String(seed);
-    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-    return (h >>> 0) % 100;
-}
-
-/** Hours away from the peak hour, around a clock of `span` hours. */
-export function hourDistance(hour, peak, span = 24) {
-    const s = span > 0 ? span : 24;
-    const d = Math.abs((hour % s) - (peak % s));
-    return Math.min(d, s - d);
-}
-
-/**
- * Chance at `distance` hours from the peak. `peak` (default 0.5) is the peak hour only.
- * One hour out is 0.2, two is 0.05, three or more is 0.02, and never higher than the peak.
- */
-export function sightChance(distance, peak = 0.5) {
-    const p = Number.isFinite(peak) ? peak : 0.5;
-    const base = distance <= 0 ? p : distance === 1 ? 0.2 : distance === 2 ? 0.05 : 0.02;
-    return Math.min(base, p);
-}
+/** 0-99, stable for the same seed (shared/npc.mjs). Every schedule roll seeds from an actual start time, so a swipe cannot flip it. */
+export const hashRoll = seed => npc.hashRoll(seed);
 
 /** True when `minutes` sits in [from, to). A window that passes midnight wraps. No times means always. */
 export function inTimeWindow(minutes, from, to, dayMinutes = DAY_MINUTES) {
@@ -138,12 +116,84 @@ export function withinNear(here, near) {
 
 const nearOf = (entry, env) => resolveNear(entry?.near, env?.index ? { ...env.index, exists: env.exists ?? env.index.exists, relocate: env.relocate ?? env.index.relocate ?? {} } : null);
 
-/** The schedule entry in force at `clock.minutes`. A placeless entry is off the map (address null) unless a found stamp for its `where` label names a room. */
+const dayOf = env => env?.dayMinutes ?? DAY_MINUTES;
+/** Absolute game minutes of a clock: day number times minutes per day, plus the minute of the day. */
+export const absMinutes = (clock, env) => (Number.isFinite(clock?.day) ? clock.day : 0) * dayOf(env) + (clock?.minutes ?? 0);
+/** A clock ({day, hour, minute, minutes}) for absolute game minute `t`. */
+export function clockAtMinutes(t, env) {
+    const D = dayOf(env), day = Math.floor(t / D), m = t - day * D;
+    return { day, hour: Math.floor(m / 60), minute: m % 60, minutes: m };
+}
+const hhmmOf = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+/**
+ * Where a might option puts someone for a block or segment starting at absolute minute `s`: {address, offmap, how, near?, area?, note?}.
+ * A room goes through the usual redirects (gone: away, with a note). An area picks its highest-scoring live room (every room
+ * counts as public for now). A stub place or plain text is off the map. Nowhere is away.
+ */
+function mightPlace(opt, base, s, env) {
+    const away = note => ({ address: null, offmap: true, how: 'nowhere', near: { kind: 'none' }, ...(note ? { note } : {}) });
+    if (!opt || isNowhere(opt.text)) return away();
+    const text = opt.text;
+    const r = resolveSchedulePlace(text, env ?? {});
+    if (r.ok) return { address: r.address, offmap: false, how: r.how };
+    if (r.how === 'expired') return away(`${text} is gone from the map, so away this time.`);
+    const idx = env?.index;
+    const scope = idx?.subs?.has?.(text) ? 'subregion' : idx?.regions?.has?.(text) ? 'region' : null;
+    if (scope) {
+        const area = { kind: 'map', scope, address: text };
+        const live = env?.exists ?? idx.exists;
+        const rooms = [...(idx.rooms ?? [])].filter(a => (!live || live(a)) && withinNear(a, area)).sort();
+        const name = idx.nameOf?.(text) ?? text;
+        const hit = areaPick(base, s, rooms);
+        if (!hit) return away(`No room in ${name} to pick, so away this time.`);
+        return { address: hit.address, offmap: false, how: 'area', area: { address: text, name, of: hit.of } };
+    }
+    const stub = idx?.stubs?.get?.(text);
+    if (stub) return { address: null, offmap: true, how: 'offmap', near: { kind: 'stub', id: text, name: stub.name || text, about: stub.about || '', lore: stub.lore || '' } };
+    if (text.includes(':')) return away(`${text} is not on the map, so away this time.`);
+    return { address: null, offmap: true, how: 'offmap', near: { kind: 'text', text } };
+}
+
+/**
+ * A might block at absolute minute `now` (inside its window): {kind: 'might', entry, key, blockStart, blockEnd, segStart, segEnd,
+ * roll, pick, address|null, offmap, how, near?, area?, note?, activity}. A normal block rolls once at its start; a wandering one
+ * walks its chain of 15-60 minute segments, each rolling its own place on the same table.
+ */
+export function mightAt(npc, entry, now, env) {
+    const D = dayOf(env);
+    const key = mightKey(entry), base = `${npc?.id ?? ''}|${key}`;
+    const blockStart = blockStartOf(entry.fromMin, now, D);
+    const blockEnd = blockStart + blockSpan(entry.fromMin, entry.toMin, D);
+    let segStart = blockStart, segEnd = blockEnd, roll;
+    if (entry.wandering) {
+        const seg = wanderChain(base, blockStart, blockEnd, now).at(-1);
+        segStart = seg.start; segEnd = seg.end; roll = seg.roll;
+    } else roll = hashRoll(`block|${base}|${blockStart}`);
+    const opt = pickFromTable(entry.options ?? [], roll); // an option not on the live map yet resolves to away in mightPlace
+    return { kind: 'might', entry, key, blockStart, blockEnd, segStart, segEnd, roll, pick: opt && !isNowhere(opt.text) ? opt.text : NOWHERE,
+        activity: entry.activity, where: '', ...mightPlace(opt, base, segStart, env) };
+}
+
+/** The appearance stamp that covers this might block (wandering: this segment), or null. */
+function appearanceFor(npc, sched) {
+    if (sched?.kind !== 'might') return null;
+    return [...(npc?.appearances ?? [])].reverse().find(a => a.blockStart === sched.blockStart && (!sched.entry.wandering || a.segStart === sched.segStart)) ?? null;
+}
+
+/**
+ * The schedule entry in force at `clock`. A might block whose window holds now comes first (it beats an overlapping is-at
+ * entry, and is never a fallback outside its window). Then is-at entries: matching timed, open, then the other timed ones.
+ * A placeless entry is off the map (address null) unless a found stamp for its `where` label names a room.
+ */
 export function scheduleAt(npc, clock, env) {
-    const entries = (npc?.schedule ?? []).filter(e => e && !e.broken);
-    if (!entries.length) return null;
+    const all = (npc?.schedule ?? []).filter(e => e && !e.broken);
+    if (!all.length) return null;
     const minutes = clock?.minutes ?? 0;
     const day = env?.dayMinutes ?? DAY_MINUTES;
+    const might = all.find(e => isMight(e) && e.fromMin != null && e.toMin != null && inTimeWindow(minutes, e.fromMin, e.toMin, day));
+    if (might) return mightAt(npc, might, absMinutes(clock, env), env);
+    const entries = all.filter(e => !isMight(e));
     const timed = entries.filter(e => e.fromMin != null || e.toMin != null);
     const open = entries.filter(e => e.fromMin == null && e.toMin == null);
     const matching = timed.filter(e => inTimeWindow(minutes, e.fromMin, e.toMin, day));
@@ -216,6 +266,14 @@ export function judgeFound(npc, clock, room, env) {
     const name = npc ? capFirst(shownName(npc)) : 'They';
     const sched = scheduleAt(npc, clock, env);
     if (!sched) return { ok: false, reason: `${name} has no schedule in force.` };
+    if (sched.kind === 'might') {
+        // No by-name roll: [find] only checks where they actually are now (the block's pick, or this segment's).
+        const detail = mightWhy(npc, sched, env);
+        if (!room) return { ok: false, where: '', reason: 'There is no current room to find them in.', detail };
+        const at = appearanceFor(npc, sched)?.place ?? sched.address;
+        if (at && at === room) return { ok: true, where: '', place: room, appear: { place: room, blockStart: sched.blockStart, ...(sched.entry.wandering ? { segStart: sched.segStart } : {}) }, reason: `Accepted: ${name} is here right now.`, detail };
+        return { ok: false, where: '', reason: `${name} isn't around here right now.`, detail };
+    }
     const placeless = sched.offmap || sched.how === 'found';
     if (!placeless) {
         const where = placeLabel(env, sched.address);
@@ -245,31 +303,6 @@ export function foundEditOk(npc, where, place, env) {
 }
 
 
-function sightPlaceOf(npc, env) {
-    if (!npc?.seen_at || npc.seen_at.broken) return null;
-    if ((npc.schedule ?? []).some(e => e && !e.broken)) return null; // a real schedule replaces the sighting
-    const r = resolveSchedulePlace(npc.seen_at.place, env);
-    return r.ok ? r.address : null;
-}
-
-/** The sighting check for this day and hour. Present only when an appearance stamp covers it, unless `roll` is set. */
-export function sightCheck(npc, clock, playerPlace, env, { appearances = [], seeks = [], useRoll = false } = {}) {
-    const place = sightPlaceOf(npc, env);
-    if (!place || playerPlace !== place) return { present: false, place, byName: !place && !!npc?.seen_at && !(npc.schedule ?? []).some(e => e && !e.broken) };
-    const day = clock?.day, hour = clock?.hour;
-    const stamped = (appearances ?? []).some(a => a.day === day && a.hour === hour && a.place === place);
-    if (stamped) return { present: true, place, stamped: true };
-    if (!useRoll) return { present: false, place, needsStamp: true };
-    const dist = hourDistance(hour ?? 0, npc.seen_at.hour, env?.hoursPerDay ?? 24);
-    const chance = sightChance(dist, npc.seen_at.chance ?? 0.5);
-    const roll = hashRoll(`sight|${npc.id}|${place}|${day}`);
-    const sought = (seeks ?? []).some(s => s.day === day);
-    const seekRoll = sought ? hashRoll(`seek|${npc.id}|${place}|${day}`) : roll;
-    const used = Math.min(roll, seekRoll);
-    const present = used < Math.round(chance * 100);
-    return { present, place, roll: used, chance, sought, needsStamp: present };
-}
-
 /** One step along the attitude ladder, unless this is the first value or something dramatic happened. */
 export function clampDisposition(from, to, dramatic = false) {
     const next = matchEnum(to, DISPOSITIONS);
@@ -290,8 +323,8 @@ function blankFrom(rec) {
         unknownAs: rec.unknownAs ?? '', aliases: Array.isArray(rec.aliases) ? rec.aliases.filter(a => typeof a === 'string' && a.trim()) : [], rel: clone(rec.rel ?? {}),
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
-        schedule: (rec.schedule ?? []).map(e => ({ ...e })), seen_at: rec.seen_at ? { ...rec.seen_at } : null,
-        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], seeks: [], stays: [], found: {}, temps: [],
+        schedule: (rec.schedule ?? []).map(e => ({ ...e })),
+        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], stays: [], found: {}, temps: [],
     };
 }
 
@@ -299,11 +332,11 @@ function snapshot(state) {
     const out = new Map();
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
-        fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), seeks: n.seeks.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
+        fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
         base: { ...(n.base ?? { looks: n.looks, body: n.body, outfit: n.outfit }) },
         effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
         caches: clone(n.caches ?? {}),
-        following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule, seen_at: n.seen_at,
+        following: n.following ? { ...n.following } : null, held: n.held ? { ...n.held } : null, schedule: n.schedule,
         found: Object.fromEntries(Object.entries(n.found ?? {}).map(([k, v]) => [k, { ...v }])),
     });
     return out;
@@ -444,15 +477,15 @@ function applyStamp(state, s, index, elapsed = null) {
         return;
     }
     if (s.type === 'npc_staying') { n.stays.push({ at: index, elapsed: Number.isFinite(s.elapsed) ? s.elapsed : 0 }); return; }
-    if (s.type === 'npc_appear') {
-        if (typeof s.place !== 'string' || !Number.isInteger(s.day) || !Number.isInteger(s.hour)) return;
-        n.appearances.push({ place: s.place, day: s.day, hour: s.hour, at: index });
+    if (s.type === 'npc_appear') { // they turned up for a might block (wandering: for one segment) where the player is
+        if (typeof s.place !== 'string' || !Number.isInteger(s.blockStart)) return;
+        n.appearances.push({ place: s.place, blockStart: s.blockStart, segStart: Number.isInteger(s.segStart) ? s.segStart : null, at: index });
         return;
     }
-    if (s.type === 'npc_seek') { if (Number.isInteger(s.day)) n.seeks.push({ day: s.day, at: index }); return; }
     if (s.type === 'npc_schedule') {
         if (!Array.isArray(s.schedule)) return;
         n.schedule = s.schedule.filter(e => e && typeof e === 'object').map(e => {
+            if (Array.isArray(e.might)) return readMightEntry(e).entry; // shared with the server's validateEntry
             const activity = str(e.activity, 200) ?? '';
             if (!activity) return null;
             const x = { activity };
@@ -542,6 +575,7 @@ export function sceneStart(end, playerAt) {
 
 function entryKey(sched) {
     if (!sched?.entry) return '';
+    if (sched.kind === 'might') return `might|${sched.key}|${sched.blockStart}`; // a hold ends with the block, not each segment
     const e = sched.entry;
     return `${e.place ?? ''}|${e.where ?? ''}|${e.from ?? ''}|${e.to ?? ''}|${e.activity ?? ''}`;
 }
@@ -562,7 +596,7 @@ function rejoined(npc, j, env) {
 
 /**
  * A stay stamp holds them at that place until the schedule entry in force changes (the next one
- * started, or the old one ended), a one-off's hour ends, or the player comes back after leaving.
+ * started, the old one ended, or a might block ended), or the player comes back after leaving.
  * Following again clears the hold. Until then they do not return to the schedule.
  */
 function holdActive(npc, j, env) {
@@ -574,7 +608,6 @@ function holdActive(npc, j, env) {
     const thenSched = scheduleAt(npc, then, env);
     const nowSched = scheduleAt(npc, now, env);
     if (entryKey(thenSched) !== entryKey(nowSched)) return false;
-    if (!thenSched && npc.seen_at && !npc.seen_at.broken && (now.day !== then.day || now.hour !== then.hour)) return false;
     return true;
 }
 
@@ -587,10 +620,13 @@ function duePlace(npc, j, env, { useRoll = false } = {}) {
     if (holdActive(npc, j, env)) return { address: npc.held.place, activity: 'waiting', kind: 'stay', entry: null };
     const clock = env.clock(j);
     const sched = scheduleAt(npc, clock, env);
-    if (sched) return sched;
-    const sight = sightCheck(npc, clock, env.playerAt(j), env, { appearances: npc.appearances, seeks: npc.seeks, useRoll });
-    if (sight.present) return { address: sight.place, activity: 'here', kind: 'sight', entry: null };
-    return null;
+    if (sched?.kind === 'might') {
+        // Turning up where the player is needs an appearance stamp (prepareNpcs, or an accepted [find]); it also freezes an area pick.
+        const stamp = appearanceFor(npc, sched);
+        if (stamp) return { ...sched, address: stamp.place, offmap: false, stamped: true };
+        if (sched.address && sched.address === env.playerAt(j) && !useRoll) return { ...sched, awaiting: true };
+    }
+    return sched;
 }
 
 function placeLabel(env, address) {
@@ -619,10 +655,14 @@ function stayCovers(npc, scene, clock) {
     return clock.elapsed - stay.elapsed < STAY_SECONDS;
 }
 
+/** They turned up during this same might block (any segment of it): no overdue note until it ends. */
+const appearedThisBlock = (npc, sched) => (npc.appearances ?? []).some(a => a.blockStart === sched.blockStart);
+
 /**
  * Who is in the player's scene after message `index`.
  * An NPC already in the scene is not removed when their hour ends; the narrator gets an overdue note instead.
- * Saved people are never filled in as unnamed strangers: they are here only by schedule, sighting stamp, or following.
+ * Saved people are never filled in as unnamed strangers: they are here only by schedule, an appearance stamp for a might block, or following.
+ * Mid-block (a wandering chain moving on) there is no note; when the block ends the usual one applies.
  */
 export function presentAt(chat, index, cast, env) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
@@ -644,7 +684,7 @@ export function presentAt(chat, index, cast, env) {
             if (ban) continue;
             const due = duePlace(then, j, env);
             const hereJ = env.playerAt(j);
-            if (due?.address && due.address === hereJ) inScene = true;
+            if (due?.address && due.address === hereJ && !due.awaiting) inScene = true;
             else if (then.held?.place && then.held.place === hereJ && rejoined(then, j, env)) inScene = true;
         }
         if (!inScene) continue;
@@ -653,9 +693,12 @@ export function presentAt(chat, index, cast, env) {
         let overdue = '';
         if (!now.following && (!due || due.address !== here)) {
             const sched = scheduleAt(now, clock, env);
-            if (sched?.offmap) overdue = stayCovers(now, scene, clock) ? '' : offmapAbsentLine(now, sched);
-            else if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
-            else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${capFirst(shownName(now))} would normally have moved on by now.`;
+            const covered = stayCovers(now, scene, clock);
+            const movedOn = `${capFirst(shownName(now))} would normally have moved on by now.`;
+            if (sched?.kind === 'might') overdue = covered || appearedThisBlock(now, sched) ? '' : movedOn;
+            else if (sched?.offmap) overdue = covered ? '' : offmapAbsentLine(now, sched);
+            else if (sched && sched.address !== here) overdue = covered ? '' : overdueNote(now, sched, clock, env);
+            else if (!sched && (now.appearances ?? []).some(a => a.at >= scene)) overdue = covered ? '' : movedOn;
         }
         out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
     }
@@ -708,7 +751,7 @@ function publicNpc(n) {
         liveOps: (n.liveOps ?? []).map(o => ({ owner: o.owner, lasts: o.lasts ?? null, start: o.start, intent: o.committed?.intent || o.intent || '', fields: o.committed?.fields || '' })),
         unknownAs: n.unknownAs ?? '', aliases: [...(n.aliases ?? [])], rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
         facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
-        following: n.following ? { ...n.following } : null, from: n.from, seen_at: n.seen_at ? { ...n.seen_at } : null,
+        following: n.following ? { ...n.following } : null, from: n.from,
         schedule: n.schedule.map(e => ({ ...e })),
     };
 }
@@ -792,7 +835,7 @@ export function npcPlayState(chat, cast, env) {
             const id = f.id || '';
             if (!id) continue;
             if (!attempts.has(id)) attempts.set(id, []);
-            attempts.get(id).push({ msg: i, ok: !!f.ok, reason: f.reason ?? '', where: f.where ?? '', place: f.place ?? '', source: f.source ?? '' });
+            attempts.get(id).push({ msg: i, ok: !!f.ok, reason: f.reason ?? '', ...(f.detail ? { detail: f.detail } : {}), where: f.where ?? '', place: f.place ?? '', source: f.source ?? '' });
         }
     });
     const out = [];
@@ -815,7 +858,7 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
     const deepKeys = Object.keys(n.deep ?? {}).filter(k => (Array.isArray(n.deep[k]) ? n.deep[k].length : n.deep[k] && (typeof n.deep[k] !== 'object' || Object.keys(n.deep[k]).length)));
     const tier = n.manner || n.voice || deepKeys.length ? 'full' : 'stub';
     const out = { clock: clock ? { day: clock.day, hour: clock.hour, minute: clock.minute } : null, tier, from: n.from, following: n.following ? { ...n.following } : null,
-        held: null, schedule: null, sighting: null, kind: null, place: null, reason: '', declined: false };
+        held: null, schedule: null, kind: null, place: null, reason: '', declined: false };
     if (declined && declined.has(normName(n.name))) out.declined = true; // name-ok: inbound match
     if (!clock) { out.reason = 'No game clock yet.'; return out; }
     let due = null; try { due = duePlace(n, j, env); } catch { /* no position */ }
@@ -831,42 +874,64 @@ export function npcWhy(n, j, env, { declined = null } = {}) {
         const near = sched?.near ?? null;
         out.schedule = { entry: i, address: sched?.address ?? null, how: sched?.how ?? null, activity: sched?.activity ?? '',
             offmap: !!sched?.offmap, where: e?.where ?? '', near,
-            why: i < 0 ? 'No entry resolves to a place in this world.'
+            ...(sched?.kind === 'might' ? { might: { from: e.from, to: e.to, blockStart: sched.blockStart, blockEnd: sched.blockEnd, segStart: sched.segStart, segEnd: sched.segEnd, roll: sched.roll, pick: sched.pick,
+                wandering: !!e.wandering, area: sched.area ?? null, note: sched.note ?? '', stamped: !!appearanceFor(n, sched) } } : {}),
+            why: sched?.kind === 'might' ? `Entry ${i + 1}: ${mightWhy(n, sched, env)}`
+                : i < 0 ? 'No entry resolves to a place in this world.'
                 : sched?.offmap ? `Off the map: ${e?.activity || 'away'}${e?.where ? ` (${e.where})` : ''}. Near ${nearPhrase(near)}.`
                     : sched?.how === 'found' ? `Found in this chat (${e?.where || 'that where'} → ${sched.address}). ${inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `Entry ${i + 1} has no times and fills the rest of the day.` : `Entry ${i + 1} is in force.`}`
                         : inside ? `Entry ${i + 1} covers ${e.from}–${e.to}.` : !timed ? `No timed entry covers now; entry ${i + 1} has no times and fills the rest of the day.` : `No entry covers now; entry ${i + 1} is the first that resolves.`,
             broken: entries.map((x, k) => (x?.broken ? k : -1)).filter(k => k >= 0) };
-    }
-    if (n.seen_at) {
-        const sp = sightPlaceOf(n, env);
-        const r = { place: n.seen_at.place, hour: n.seen_at.hour, chance: n.seen_at.chance ?? 0.5, resolved: sp, active: !!sp };
-        if (sp) {
-            const dist = hourDistance(clock.hour ?? 0, n.seen_at.hour, env?.hoursPerDay ?? 24);
-            const chance = sightChance(dist, n.seen_at.chance ?? 0.5);
-            const roll = hashRoll(`sight|${n.id}|${sp}|${clock.day}`);
-            const sought = (n.seeks ?? []).some(x => x.day === clock.day);
-            const seekRoll = sought ? hashRoll(`seek|${n.id}|${sp}|${clock.day}`) : null;
-            const used = seekRoll == null ? roll : Math.min(roll, seekRoll);
-            const stamped = (n.appearances ?? []).some(a => a.day === clock.day && a.hour === clock.hour && a.place === sp);
-            Object.assign(r, { day: clock.day, now: Math.round(chance * 100), roll, seekRoll, used, sought, stamped, wouldShow: used < Math.round(chance * 100) });
-        } else r.note = (entries.some(e => e && !e.broken)) ? 'A real schedule replaces the sighting.' : 'The sighting place is not in this world.';
-        out.sighting = r;
     }
     const dw = n.disposition?.[PLAYER];
     out.disposition = dw ? { ...dw } : { value: 'unknown', reason: '' };
     out.memory = [...(n.memory ?? [])];
     out.reason = n.following ? `Following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`
         : out.held?.active ? 'Told to stay; the hold is still on.'
-            : due?.kind === 'schedule' ? (out.schedule?.offmap ? out.schedule.why : out.schedule?.why ?? 'On their schedule.')
-                : due?.kind === 'sight' ? `Sighting: rolled ${out.sighting?.used} under ${out.sighting?.now}.`
-                    : out.sighting?.active ? `Not on a schedule; today's sighting roll is ${out.sighting.used} against ${out.sighting.now}${out.sighting.wouldShow ? ' (would show, waiting for the hour)' : ' (no-show)'}.`
-                        : 'Nowhere this hour.';
+            : due?.kind === 'schedule' || due?.kind === 'might' ? (out.schedule?.why ?? 'On their schedule.')
+                : 'Nowhere this hour.';
     return out;
 }
 
+/** Where a might pick reads in the inspector: a room's name, an off-map place, or away. */
+function mightLabel(sched, env) {
+    if (sched.address) return placeLabel(env, sched.address);
+    if (sched.near?.kind === 'stub') return `${sched.near.name} (off the map)`;
+    if (sched.near?.kind === 'text') return `${sched.near.text} (off the map)`;
+    return 'away';
+}
 /**
- * Who's at `place` after message `index`: everyone due there, plus everyone whose schedule or sighting points there but who is
- * not there now, with the reason (another entry, a no-show roll, following someone, told to stay elsewhere).
+ * The inspector's account of a might block: "Might be here 10:00–13:00: rolled 34 → Market Lane", "Away this block (rolled 81)",
+ * "Wandering: Market Lane 10:45–11:15, then the store until 12:00", plus "Area: Courtyard, highest of 3 rooms" and any note.
+ */
+export function mightWhy(npc, sched, env) {
+    const e = sched.entry, D = dayOf(env);
+    const t = m => hhmmOf(((m % D) + D) % D);
+    const tail = [sched.area ? `Area: ${placeLabel(env, sched.address)}, highest of ${sched.area.of} room${sched.area.of === 1 ? '' : 's'} in ${sched.area.name}.` : '', sched.note ?? ''].filter(Boolean).join(' ');
+    let head;
+    if (e.wandering) {
+        let next = null;
+        if (sched.segEnd < sched.blockEnd) next = mightAt(npc, e, sched.segEnd, env);
+        head = `Wandering ${e.from}–${e.to}: ${mightLabel(sched, env)} ${t(sched.segStart)}–${t(sched.segEnd)} (rolled ${sched.roll})${next ? `, then ${mightLabel(next, env)} until ${t(next.segEnd)}` : ''}.`;
+    } else head = sched.how === 'nowhere' && !sched.note ? `Away this block, ${e.from}–${e.to} (rolled ${sched.roll}).` : `Might be here ${e.from}–${e.to}: rolled ${sched.roll} → ${mightLabel(sched, env)}.`;
+    return tail ? `${head} ${tail}` : head;
+}
+
+/** Whether any might option of `e` is `place` (a room, after redirects) or an area holding it. */
+function mightPointsAt(e, place, env) {
+    return (e.options ?? []).some(o => {
+        if (isNowhere(o.text)) return false;
+        const r = resolveSchedulePlace(o.text, env ?? {});
+        if (r.ok) return r.address === place;
+        const idx = env?.index;
+        const scope = idx?.subs?.has?.(o.text) ? 'subregion' : idx?.regions?.has?.(o.text) ? 'region' : null;
+        return !!scope && withinNear(place, { kind: 'map', scope, address: o.text });
+    });
+}
+
+/**
+ * Who's at `place` after message `index`: everyone due there, plus everyone whose schedule points there but who is
+ * not there now, with the reason (another entry, a might block that rolled elsewhere, following someone, told to stay elsewhere).
  */
 export function whoAt(chat, index, cast, env, place) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
@@ -880,16 +945,17 @@ export function whoAt(chat, index, cast, env, place) {
     for (const n of last.values()) {
         const w = npcWhy(n, end, env);
         let due = null; try { due = duePlace(n, end, env, { useRoll: true }); } catch { /* no clock */ }
-        const pointsHere = (n.schedule ?? []).some(e => e && !e.broken && e.place && (resolveSchedulePlace(e.place, env).address ?? e.place) === place)
-            || (n.schedule ?? []).some(e => e && !e.broken && !e.place && withinNear(place, nearOf(e, env)))
-            || (n.seen_at && !n.seen_at.broken && (resolveSchedulePlace(n.seen_at.place, env).address ?? n.seen_at.place) === place) || n.held?.place === place;
+        const live = (n.schedule ?? []).filter(e => e && !e.broken);
+        const pointsHere = live.some(e => !isMight(e) && e.place && (resolveSchedulePlace(e.place, env).address ?? e.place) === place)
+            || live.some(e => !isMight(e) && !e.place && withinNear(place, nearOf(e, env)))
+            || live.some(e => isMight(e) && mightPointsAt(e, place, env)) || n.held?.place === place;
         const here = due?.address === place;
         if (!here && !pointsHere && !present.has(n.id)) continue;
         let reason = w.reason;
         if (!here && pointsHere) {
             if (n.following) reason = `Not here: following ${n.following.who === PLAYER ? 'the player' : n.following.who}.`;
             else if (w.held?.active && n.held.place !== place) reason = 'Not here: told to stay somewhere else.';
-            else if (w.sighting?.active && w.sighting.resolved === place && !w.sighting.wouldShow) reason = `No-show today: rolled ${w.sighting.used}, needed under ${w.sighting.now}${w.sighting.sought ? ' (with a by-name roll)' : ''}.`;
+            else if (w.schedule?.might) reason = `Not here: ${w.schedule.why}`;
             else if (w.schedule?.offmap) reason = `Not here: ${offmapAbsentLine(n, { activity: w.schedule.activity, where: w.schedule.where, near: w.schedule.near })}`;
             else if (w.schedule && w.schedule.address !== place) reason = `Not here: ${w.schedule.why} (${placeLabel(env, w.schedule.address ?? '') || 'nowhere'}${w.schedule.activity ? `, ${w.schedule.activity}` : ''})`;
             else reason = `Not here now. ${w.reason}`;
@@ -927,11 +993,46 @@ export function narratorView(chat, reply, cast, env, focusKey = 'worldscrawl_foc
 }
 
 const hhmm = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+/** The next absolute minute after `t` when where the schedule puts them could change: any entry's from or to, or the end of the might block or segment in force. */
+function nextChange(npc, t, sched, env) {
+    const D = dayOf(env), tod = ((t % D) + D) % D;
+    let best = t + D;
+    for (const e of npc?.schedule ?? []) for (const m of [e?.fromMin, e?.toMin]) if (m != null) best = Math.min(best, t + ((((m - tod) % D) + D) % D || D));
+    if (sched?.kind === 'might') best = Math.min(best, sched.segEnd);
+    return best;
+}
+/**
+ * The stretches [start, end) of absolute minutes between t0 and t1 when the schedule alone (rolls and chains included, no
+ * appearance stamp needed) puts them at `place`, clipped to the window. Walks entry boundaries, blocks and segments.
+ */
+export function visitsBetween(npc, t0, t1, place, env) {
+    const out = [];
+    let t = t0, cur = null, steps = 0;
+    while (t < t1 && steps++ < 5000) {
+        const sched = scheduleAt(npc, clockAtMinutes(t, env), env);
+        const next = Math.min(nextChange(npc, t, sched, env), t1);
+        if (sched?.address && sched.address === place) {
+            if (cur && cur.end === t) cur.end = next;
+            else { cur = { start: t, end: next }; out.push(cur); }
+        }
+        t = next;
+    }
+    return out;
+}
+/** The first time from `fromClock` to `toClock` that their schedule puts them at `place` (mid-chain included): {at (absolute minutes), clock} or null. */
+export function nextTurnUp(npc, fromClock, toClock, place, env) {
+    const t0 = absMinutes(fromClock, env);
+    const t1 = Number.isFinite(toClock?.elapsed) && Number.isFinite(fromClock?.elapsed) ? t0 + Math.round((toClock.elapsed - fromClock.elapsed) / 60) : absMinutes(toClock, env);
+    const v = visitsBetween(npc, t0, t1 + 1, place, env)[0];
+    return v ? { at: v.start, clock: clockAtMinutes(v.start, env) } : null;
+}
+
 /**
  * Saved people who came or went between the last narrator reply and `end` while the player stayed put and game time passed:
  * ['[14:20] Hesk arrives.', '[15:00] Maren leaves.']. Only people outside the scene come and go (presentAt keeps anyone
  * already in the scene, so they never snap back to their schedule). The time is the schedule's start (arrival) or end
- * (departure) when it falls inside the wait, else the time now.
+ * (departure) when it falls inside the wait, else the time now. Someone on a might block arrives at the block or segment
+ * start, and every stretch the wait crosses where they come into this room and go again is listed (arrival and departure).
  */
 export function comingsAndGoings(chat, end, cast, env) {
     let p = -1;
@@ -949,9 +1050,29 @@ export function comingsAndGoings(chat, end, cast, env) {
     const inside = m => m != null && ((m - (c0.minutes ?? 0)) % 1440 + 1440) % 1440 <= span;
     const at = m => `[${hhmm(inside(m) ? m : c1.minutes ?? 0)}]`;
     const shown = n => capFirst(shownName(n));
+    const D = dayOf(env), t0 = absMinutes(c0, env), t1 = t0 + span;
+    const stamp = m => `[${hhmm(((m % D) + D) % D)}]`;
+    const here = env.playerAt(end);
     const lines = [];
-    for (const n of now) if (!was.has(n.id)) lines.push(`${at(scheduleAt(n, c1, env)?.entry?.fromMin)} ${shown(n)} arrives.`);
-    for (const n of before) if (!is.has(n.id)) lines.push(`${at(scheduleAt(n, c0, env)?.entry?.toMin)} ${shown(n)} leaves.`);
+    const covered = new Set(); // people whose lines came from the might walk
+    let last = null;
+    try { last = framesOf(chat, end, cast, env.clock).at(-1) ?? null; } catch { last = null; }
+    for (const n of last?.values() ?? []) {
+        if (was.has(n.id) || n.following || !(n.schedule ?? []).some(e => e && !e.broken && isMight(e))) continue;
+        const visits = visitsBetween(n, t0, t1, here, env);
+        if (!visits.length) continue;
+        let arrivedNow = false;
+        visits.forEach((v, k) => {
+            if (k === visits.length - 1 && v.end >= t1) { if (is.has(n.id)) { lines.push(`${stamp(v.start)} ${shown(n)} arrives.`); arrivedNow = true; } return; }
+            lines.push(`${stamp(v.start)} ${shown(n)} arrives.`, `${stamp(v.end)} ${shown(n)} leaves.`);
+        });
+        if (arrivedNow || !is.has(n.id)) covered.add(n.id);
+    }
+    for (const n of now) if (!was.has(n.id) && !covered.has(n.id)) lines.push(`${at(scheduleAt(n, c1, env)?.entry?.fromMin)} ${shown(n)} arrives.`);
+    for (const n of before) if (!is.has(n.id)) {
+        const sc = scheduleAt(n, c0, env);
+        lines.push(`${sc?.kind === 'might' ? (sc.segEnd <= t1 ? stamp(sc.segEnd) : stamp(t1)) : at(sc?.entry?.toMin)} ${shown(n)} leaves.`);
+    }
     // Appearance effects that expired while the person was still in the scene.
     const beforeMap = new Map(before.map(n => [n.id, n]));
     for (const n of now) {
@@ -1160,7 +1281,6 @@ export function recordDiff(before, after) {
     const rels = new Set([...Object.keys(a.deep?.relationships ?? {}), ...Object.keys(b.deep?.relationships ?? {})]);
     for (const k of [...rels].sort()) diffLine(`deep.relationships.${k}`, a.deep?.relationships?.[k] ?? '', b.deep?.relationships?.[k] ?? '', lines);
     diffLine('schedule', JSON.stringify(a.schedule ?? []), JSON.stringify(b.schedule ?? []), lines);
-    diffLine('seen_at', JSON.stringify(a.seen_at ?? null), JSON.stringify(b.seen_at ?? null), lines);
     const invented = Array.isArray(after?.invented) ? after.invented.slice() : [];
     const text = lines.map(l => `${l.field}\n- ${l.from || '(empty)'}\n+ ${l.to || '(empty)'}`).join('\n')
         + (lines.length && invented.length ? `\n\nMade up when remembered (not in the story; edit before saving if wrong):\n${invented.map(x => `- ${x}`).join('\n')}` : '');
@@ -1240,7 +1360,7 @@ export function readBack(messages, name, cap = READBACK_CAP) {
     return { start: first < 0 ? 0 : (list[first].index ?? first), messages: sliced, truncated: span.length > sliced.length };
 }
 
-const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', seek: 'npc_seek', appearance: 'npc_appearance' };
+const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', appearance: 'npc_appearance' };
 
 /** One [ws_npc: ...] body -> a stamp, or null when it does not parse. */
 export function parseNpcTag(body) {
@@ -1261,7 +1381,6 @@ export function parseNpcTag(body) {
         return { type, id, who: PLAYER, value, reason: p.slice(3).join(' | ').trim() };
     }
     if (type === 'npc_follow') return { type, id, who: NPC_ID.test(p[2] ?? '') ? p[2] : PLAYER };
-    if (type === 'npc_seek') return { type, id };
     if (type === 'npc_appearance') {
         // appearance|id|intent|fields?|lasts?  — fields omit/"all" → all three; lasts omit → lasting.
         // An empty intent still parses: the reply handler rejects it when nothing changed, instead of dropping it.
@@ -1330,7 +1449,6 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_rel') return `${s.who && s.who !== PLAYER ? s.who : 'The player'} set ${who} to ${REL_TEXT[s.state] ?? s.state}`;
     if (s.type === 'npc_found') return `${who} found${s.where ? ` (${s.where})` : ''} at ${s.place}`;
     if (s.type === 'npc_appear') return `${who} is here`;
-    if (s.type === 'npc_seek') return `Looking for ${who}`;
     if (s.type === 'npc_appearance' || s.type === 'npc_baseline') {
         if (s.candidate && !s.committed) return `${who}: appearance proposal`;
         const intent = s.committed?.intent || s.committed?.text || s.intent || 'appearance';

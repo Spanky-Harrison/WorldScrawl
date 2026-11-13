@@ -510,7 +510,7 @@ export function renderPatchCards() {
         const kept = patchesOn(msg);
         const wc = msg.extra?.[WAITCARD_KEY], waitCard = wc && (wc.swipe ?? 0) === swipeOf(msg);
         const remember = msg.extra?.[REMEMBER_KEY], rememberCard = remember && remember.status === 'review' && (remember.swipe ?? 0) === swipeOf(msg);
-        const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_seek', 'npc_decline'].includes(s.type));
+        const npcStamps = (msg.extra?.[NPC_KEY] ?? []).filter(s => s && (s.swipe ?? 0) === swipeOf(msg) && !['npc_appear', 'npc_decline'].includes(s.type));
         const foundNotes = (msg.extra?.[FOUND_KEY] ?? []).filter(x => x && (x.swipe ?? 0) === swipeOf(msg));
         const npcWarns = (msg.extra?.[NPC_WARN_KEY] ?? []).filter(w => w && (w.swipe ?? 0) === swipeOf(msg));
         const placeWarn = f && (f.swipe ?? 0) === swipeOf(msg) && f.personWarning ? f.personWarning : '';

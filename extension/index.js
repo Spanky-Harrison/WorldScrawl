@@ -15,7 +15,7 @@ import { EXPIRY_LINE_KEY, genEnded, genError, genReceived, genStarted, genStoppe
 import { render as P, setPrompts, hasPrompts, offReason, slug } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, sightCheck, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
 import { WHICH_PREFIX, addNotice, bracketIntent, helpText, parseBracket, unbracket } from './brackets.mjs';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';

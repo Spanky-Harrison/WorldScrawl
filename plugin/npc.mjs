@@ -1,23 +1,16 @@
 // NPC record checks and the near-index: server only (cast files). The rest of the NPC code is in shared/npc.mjs
 // (both sides) and extension/npc.mjs (play).
-import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isObj, matchEnum, resolveNear, str } from './shared/npc.mjs';
+import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isMight, isNowhere, isObj, matchEnum, parseHm, readMightEntry, resolveNear, str, windowsOverlap } from './shared/npc.mjs';
+
+export { parseHm };
 
 export const DISPOSITION_ALL = ['unknown', ...DISPOSITIONS];
 
 export const IMPORTANCE = ['low', 'normal', 'high'];
 
-/** "HH:MM" -> minutes, or null. */
-export function parseHm(text) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim());
-    if (!m) return null;
-    const h = +m[1], mi = +m[2];
-    if (h > 23 || mi > 59) return null;
-    return h * 60 + mi;
-}
-
 /**
- * One cast record. Never throws. `places` (a Set of addresses), when given, marks a schedule or
- * sighting place that is not in the world as broken. A place that exists here can still expire later;
+ * One cast record. Never throws. `places` (a Set of addresses), when given, marks a schedule
+ * place that is not in the world as broken. A place that exists here can still expire later;
  * that is decided when the schedule is resolved, not here.
  */
 export function validateRecord(raw, { file = 'npc', places = null, nearIndex = null } = {}) {
@@ -75,30 +68,17 @@ export function validateRecord(raw, { file = 'npc', places = null, nearIndex = n
     const schedule = [];
     if (raw.schedule != null) {
         if (!Array.isArray(raw.schedule)) fail(`${file}: "schedule" must be a list`);
-        else raw.schedule.forEach((e, i) => schedule.push(validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex)));
+        else raw.schedule.forEach((e, i) => schedule.push(isObj(e) && Array.isArray(e.might) ? validateMight(e, `${file} schedule[${i}]`, places, note, nearIndex) : validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex)));
+        overlapNotes(schedule, `${file} schedule`, note);
     }
-    let seen_at = null;
-    if (raw.seen_at != null) {
-        if (!isObj(raw.seen_at)) fail(`${file}: "seen_at" must be {place, hour, chance}`);
-        else {
-            const place = str(raw.seen_at.place, 200);
-            const hour = raw.seen_at.hour;
-            const chance = raw.seen_at.chance == null ? 0.5 : raw.seen_at.chance;
-            const bad = !place || !Number.isInteger(hour) || hour < 0 || hour > 23 || typeof chance !== 'number' || chance < 0 || chance > 1;
-            if (bad) note(`${file}: "seen_at" needs a place, an hour 0-23, and a chance from 0 to 1`);
-            else {
-                const missing = places && !places.has(place);
-                if (missing) note(`${file}: seen_at place ${place} is not in this world`);
-                seen_at = { place, hour, chance, ...(missing ? { broken: true, problem: 'place is not in this world' } : {}) };
-            }
-        }
-    }
+    // The old one-off sighting is gone; might-be-at entries replace it.
+    if (raw.seen_at !== undefined) note(`${file}: unknown field "seen_at" (ignored; use a "might" schedule entry instead)`);
     const deep = cleanDeep(raw.deep, file, fail);
     if (history) deep.history = history;
     const facts = Array.isArray(raw.facts) ? raw.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 24) : [];
     const memory = Array.isArray(raw.memory) ? raw.memory.map(f => (typeof f === 'string' ? f.trim() : isObj(f) ? str(f.note, 240) : '')).filter(Boolean).slice(-MEMORY_CAP) : [];
     const ok = errors.length === 0 && !!id && !!name && !!line;
-    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, aliases, disposition, schedule, seen_at, deep, facts, memory, problems, from: 'cast' };
+    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, aliases, disposition, schedule, deep, facts, memory, problems, from: 'cast' };
 }
 
 function validateEntry(e, where, places, fail, nearIndex = null) {
@@ -150,6 +130,46 @@ function validateEntry(e, where, places, fail, nearIndex = null) {
         ...(from ? { from } : {}), ...(to ? { to } : {}), fromMin, toMin,
         ...(importance ? { importance } : {}), ...(broken ? { broken: true, problem } : {}),
     };
+}
+
+/**
+ * What one might option is in this world: a room, an area (subregion or region), a stub place, plain off-map text, or nowhere.
+ * An address-like option (with a colon) that is on no map is `unknown`. Without a place list everything but nowhere is unchecked.
+ */
+export function mightOptionKind(text, places = null, nearIndex = null) {
+    if (isNowhere(text)) return 'nowhere';
+    if (places?.has?.(text) || nearIndex?.rooms?.has?.(text)) return 'room';
+    if (nearIndex?.subs?.has?.(text) || nearIndex?.regions?.has?.(text)) return 'area';
+    if (nearIndex?.stubs?.has?.(text)) return 'stub';
+    if (!places && !nearIndex) return 'unchecked';
+    return text.includes(':') ? 'unknown' : 'text';
+}
+
+/**
+ * A might-be-at entry (shared readMightEntry plus the world checks). An option that is not on this map yet stays in the
+ * table: the roll resolves it against the live map (a room made in play counts), and until it exists that share is away.
+ * Every option unknown is not broken either: the whole block is away until one exists. Both get a note that does not block loading.
+ */
+function validateMight(e, where, places, note, nearIndex = null) {
+    const { entry, problems, warnings } = readMightEntry(e);
+    for (const w of warnings) note(`${where}: ${w}`);
+    if (!entry.broken && (places || nearIndex)) {
+        const unknown = entry.options.filter(o => mightOptionKind(o.text, places, nearIndex) === 'unknown');
+        if (unknown.length && unknown.length === entry.options.length) note(`${where}: no might option is on the map yet (${unknown.map(o => o.text).join(', ')}); the whole block is away until one exists`);
+        else for (const o of unknown) note(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
+        for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) note(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
+    }
+    if (entry.broken) note(`${where}: ${entry.problem}`);
+    return entry;
+}
+
+/** A load note for each hand-written overlap between a might block and another timed entry (the might block wins). */
+function overlapNotes(schedule, where, note) {
+    const timed = schedule.map((e, i) => ({ e, i })).filter(({ e }) => e && !e.broken && e.fromMin != null && e.toMin != null);
+    for (const a of timed) for (const b of timed) {
+        if (b.i <= a.i || !(isMight(a.e) || isMight(b.e))) continue;
+        if (windowsOverlap(a.e.fromMin, a.e.toMin, b.e.fromMin, b.e.toMin)) note(`${where}[${a.i}] and [${b.i}] overlap (${a.e.from}–${a.e.to}, ${b.e.from}–${b.e.to}); the might block is used there`);
+    }
 }
 
 function cleanDeep(raw, file, fail) {
