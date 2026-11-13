@@ -10,7 +10,8 @@ import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
 import { cardLib } from './cardlib.mjs';
-import { addCallNote, markCall, narratorNote, narratorStart, narratorFailure } from './calllog.mjs';
+import { addCallNote, markCall, narratorNote } from './calllog.mjs';
+import { EXPIRY_LINE_KEY, genEnded, genError, genReceived, genStarted, genStopped, hostIndex, onGenFailure, setGroupBusy, turnPlayerIndex, whenIdle } from './generations.mjs';
 import { render as P, setPrompts, hasPrompts, offReason, slug } from './shared.mjs';
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
@@ -155,7 +156,16 @@ export function syncWorld() {
 /** The saved room isn't in this chat's effective map (removed, merged, swiped or deleted away, or a temporary change expired):
  *  the server's blanket position resolver picks a real room (merge redirect, a surviving neighbour, the subregion/region
  *  entrance, the world start). One short system notice carries the new location (delete it to undo) and the narrator is told once. */
+const fallbackRuns = new Map();
 async function missingRoomFallback(stored) {
+    // One resolve per missing room at a time: the map refresh, the footer and a wait can all ask at once, and each
+    // would otherwise post its own notice (or start its own narrated expiry).
+    const key = `${chatKey()}|${stored}|${storedStamp()?.index ?? ''}`;
+    let run = fallbackRuns.get(key);
+    if (!run) { run = resolveMissingRoom(stored).finally(() => fallbackRuns.delete(key)); fallbackRuns.set(key, run); }
+    return run;
+}
+async function resolveMissingRoom(stored) {
     const st = storedStamp();
     const r = await api('/resolve', { method: 'POST', body: JSON.stringify({ address: st?.address ?? stored, since: st?.index ?? null, history: stampHistory(st?.index ?? (ctx().chat ?? []).length), ...mapCtx() }) }).catch(() => null);
     let to = r?.ok && r.body?.address ? await fetchLocationCached(r.body.address) : null;
@@ -164,7 +174,8 @@ async function missingRoomFallback(stored) {
     const c0 = ctx(), once = `${chatKey()}|${stored}|${(c0.chat ?? []).length}|${chatElapsed()}`;
     if (r?.body?.expired && settings().narrateExpiries !== false && typeof c0.generate === 'function' && !expiryNarrated.has(once)) {
         // Narrated expiry: pick where they end up first (own pick-one call, the way in by default), move them in memory,
-        // then one automatic narrator reply tells why and how; that reply carries the location stamp.
+        // then ONE narrator reply tells why and how: the one already running or about to run when it carries the line
+        // (a wait's own reply), else one automatic reply. The reply that tells it carries the location stamp.
         expiryNarrated.add(once);
         const opts = expiryOptions(r.body.options ?? []), room = r.body.expired_room ?? { name: stored };
         let dest = opts.find(o => o.address === to.address) ?? opts[0] ?? null;
@@ -189,21 +200,64 @@ async function missingRoomFallback(stored) {
     c.chat.push(msg); c.addOneMessage?.(msg); await c.saveChat?.();
     return to;
 }
-// ---- Narrated expiries: one pending move per chat, held in memory until the automatic narrator reply stamps it.
+// ---- Narrated expiries: one pending move per chat, held in memory until a narrator reply that carried it lands.
+// p.used: a narrator prompt carried the line (applyFacts in the interceptor). The told expiry is then kept on the
+// reply's host message (EXPIRY_LINE_KEY), so a swipe, a regenerate or a reload tells it again without a new run.
 let expiryPending = null;
-/** Fire the automatic narrator reply (like ST's own reply); if none arrives, fall back to the plain notice. */
-async function triggerExpiryNarration(p) {
-    if (expiryPending !== p || p.used) return; // a reply already in progress carries it
-    try { await ctx().generate('normal', { automatic_trigger: true }); } catch (e) { console.warn('[WorldScrawl] expiry narration failed:', e.message); }
-    if (expiryPending === p) { expiryPending = null; await postExpiredNotice(p.from, p.to, p.via); }
+/** In a group: exactly one member tells it (the one who spoke last, else the first one on). */
+function expiryNarrator(c = ctx()) {
+    if (!c.groupId) return {};
+    const g = (c.groups ?? []).find(x => x?.id === c.groupId);
+    if (!g) return {};
+    const on = (g.members ?? []).filter(a => !(g.disabled_members ?? []).includes(a));
+    const chat = c.chat ?? [];
+    let avatar = null;
+    for (let i = chat.length - 1; i >= 0 && !avatar; i--) { const m = chat[i]; if (m && !m.is_user && !m.is_system && on.includes(m.original_avatar)) avatar = m.original_avatar; }
+    avatar = avatar ?? on[0];
+    const chid = (c.characters ?? []).findIndex(ch => ch?.avatar === avatar);
+    return chid >= 0 ? { force_chid: chid } : {};
 }
-/** The narrator reply that told the expiry gets the move's stamp (delete it to rewind). */
+/**
+ * The one narration of a pending expiry. Waits for any narrator reply running or starting (a wait's own reply, the
+ * player's send, a group going through its members). If that reply's prompt carried the line and its reply landed,
+ * it was told (stampExpiryReply). If it carried it but stopped or failed: the plain notice, no second run.
+ * If nothing carried it: one automatic reply (one group member), then the plain notice if that brings no reply.
+ */
+async function triggerExpiryNarration(p) {
+    let fired = false;
+    for (;;) {
+        await whenIdle(() => engineBusy);
+        if (expiryPending !== p || p.chat !== chatKey()) return; // told, or the chat changed
+        if (p.used || fired) { // carried (or our own run) but no reply landed: the notice keeps the move
+            p.used = false; expiryPending = null;
+            await postExpiredNotice(p.from, p.to, p.via);
+            renderAllExits();
+            return;
+        }
+        fired = true;
+        try { await ctx().generate('normal', { automatic_trigger: true, ...expiryNarrator() }); } catch (e) { console.warn('[WorldScrawl] expiry narration failed:', e.message); }
+    }
+}
+/** The narrator reply that told the expiry gets the move's stamp (delete it to rewind); its host keeps the told line. */
 async function stampExpiryReply(id) {
-    const p = expiryPending, c = ctx(), m = c.chat?.[id];
-    if (!p || p.chat !== chatKey() || !m || m.is_user || m.is_system) return;
+    const p = expiryPending, c = ctx(), chat = c.chat ?? [], m = chat[id];
+    if (!m || m.is_user || m.is_system) return;
+    let told = null;
+    if (p && p.chat === chatKey() && p.used) { told = { from: p.from, to: p.to, via: p.via, line: p.line }; expiryPending = null; }
+    else if (!m.extra?.[LOC_KEY]) { // a swipe or regenerate of the reply that told it: the host's line gives it the stamp again
+        const h = hostIndex(chat, id), e = chat[h]?.extra?.[EXPIRY_LINE_KEY];
+        if (e && storedStamp()?.address === e.from) told = e;
+    }
+    if (!told) return;
     m.extra = m.extra ?? {};
-    m.extra[LOC_KEY] = p.to; m.extra.worldscrawl_expiry_narrated = { from: p.from, to: p.to };
-    expiryPending = null;
+    m.extra[LOC_KEY] = told.to; m.extra.worldscrawl_expiry_narrated = { from: told.from, to: told.to };
+    const h = hostIndex(chat, id), host = chat[h];
+    if (host) {
+        const rec = { from: told.from, to: told.to, via: told.via ?? '', line: told.line ?? '' };
+        host.extra = host.extra ?? {}; host.extra[EXPIRY_LINE_KEY] = rec;
+        const si = host.swipe_info?.[host.swipe_id ?? 0];
+        if (si && typeof si === 'object') { si.extra = si.extra ?? {}; si.extra[EXPIRY_LINE_KEY] = rec; }
+    }
     await c.saveChat?.();
 }
 
@@ -316,16 +370,20 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
             if (r.kind === 'found' || r.kind === 'name') renderPatchCards();
             renderAllExits();
         }
-        if ((!type || type === 'normal') && last?.is_user) {
-            const host = chat.length - 1;
+        // This turn's player line: the last player message after the last story reply, even when a notice was posted
+        // after it (a wait's "the passage seals" notice, another extension's system line). None after a story reply:
+        // a group's later members and automatic replies are not a new turn.
+        const host = !type || type === 'normal' ? turnPlayerIndex(chat) : -1;
+        if (host >= 0) {
+            const player = chat[host];
             // A person's temporary change that ran out with this turn's time gets its chat notice first (never on a swipe),
             // so the appearance rebuild in prepareNpcs shows working / failed on that notice's card.
-            await personExpiryTurn(host, { rebuild: false, after: () => prepareNpcs(last) });
+            await personExpiryTurn(host, { rebuild: false, after: () => prepareNpcs(player) });
             // Timed place text changes that ran out get their notice, then the texts a temporary change wrote under a later
             // one still in force are rebuilt (shown working on that card) before the narrator reads them.
             await placeExpiryTurn(host);
         }
-        await applyFacts();
+        await applyFacts({ carry: true, type });
     } catch (e) { console.error('[WorldScrawl] interceptor failed', e); }
 };
 
@@ -779,6 +837,9 @@ export async function waitCommand(args, sleep = false) {
         stampWait(msg, w);
         msg.extra.worldscrawl_engine = true;
         await c.saveChat();
+        // Where the wait leaves the party, before the narrator is called: a temporary place that ran out is resolved now
+        // (its notice, or its narrated expiry that this wait's own reply carries), not by the map refresh mid-reply.
+        await currentLocation().catch(e => console.warn('[WorldScrawl] wait location', e?.message || e));
         renderAllExits(); broadcastMapState();
         await narrate(c);
         return '';
@@ -809,16 +870,18 @@ const openCarriers = new WeakSet();
     const { eventSource, eventTypes } = ctx();
     // ST pushes the tool-call record message into the chat right before this event and saves it right after.
     eventSource.on(eventTypes.TOOL_CALLS_PERFORMED, stampLocation);
-    // Narrator generations that fail outright leave a 'narrator' failed note on the triggering message.
-    let narrGen = null;
-    const endNarr = () => { const p = narrGen; narrGen = null; const n = narratorFailure(p); if (n) { const len = ctx().chat?.length ?? 0; const at2 = p.type === 'swipe' ? len - 2 : len - 1; if (at2 >= 0) p.at = at2; noteCall(p.at, n); console.log(`[WorldScrawl] narrator failed on #${p.at}: ${n.reason}`); } };
-    if (eventTypes.GENERATION_STARTED) eventSource.on(eventTypes.GENERATION_STARTED, (type, opts, dry) => { if (narrGen) endNarr(); if (isOn()) { const p = narratorStart(ctx().chat, type, opts, dry); if (p) narrGen = p; } });
-    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, () => { if (narrGen) narrGen.stopped = true; });
-    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => { const p = narrGen; if (p) setTimeout(() => { if (narrGen === p) endNarr(); }, 800); });
-    if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, () => { if (narrGen) narrGen.received = true; });
+    // Narrator generations that fail outright leave a 'narrator' failed note on the triggering message. One record per
+    // generation (generations.mjs): a second start never closes the first one's bookkeeping.
+    onGenFailure((g, n) => { const len = ctx().chat?.length ?? 0; const at2 = g.type === 'swipe' ? len - 2 : len - 1; if (at2 >= 0) g.at = at2; noteCall(g.at, n); console.log(`[WorldScrawl] narrator failed on #${g.at}: ${n.reason}`); });
+    if (eventTypes.GENERATION_STARTED) eventSource.on(eventTypes.GENERATION_STARTED, (type, opts, dry) => { if (isOn()) genStarted(ctx().chat, type, opts, dry); });
+    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, () => { genStopped(); });
+    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => { setTimeout(genEnded, 800); });
+    if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, () => { genReceived(); });
+    if (eventTypes.GROUP_WRAPPER_STARTED) eventSource.on(eventTypes.GROUP_WRAPPER_STARTED, () => setGroupBusy(true));
+    if (eventTypes.GROUP_WRAPPER_FINISHED) eventSource.on(eventTypes.GROUP_WRAPPER_FINISHED, () => setGroupBusy(false));
     try {
         const tz = globalThis.toastr;
-        if (tz?.error && !tz.error.__ws) { const orig = tz.error; tz.error = function (msg, title, ...r) { if (narrGen && !narrGen.error) narrGen.error = String([title, msg].filter(Boolean).join(': ')).replace(/<[^>]+>/g, '').slice(0, 160); return orig.call(this, msg, title, ...r); }; tz.error.__ws = true; }
+        if (tz?.error && !tz.error.__ws) { const orig = tz.error; tz.error = function (msg, title, ...r) { genError(String([title, msg].filter(Boolean).join(': ')).replace(/<[^>]+>/g, '').slice(0, 160)); return orig.call(this, msg, title, ...r); }; tz.error.__ws = true; }
     } catch { /* no toastr */ }
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { stampExpiryReply(Number(id)).catch(e => console.error('[WorldScrawl] expiry stamp', e)); });
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, id => { onReplyForFlags(Number(id)).catch(e => console.error('[WorldScrawl] flag', e)); });

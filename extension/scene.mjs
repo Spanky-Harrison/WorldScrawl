@@ -17,6 +17,7 @@ import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
 import { aftermathNote, chatKey, relocationNote } from './expiry.mjs';
+import { EXPIRY_LINE_KEY, hostIndex } from './generations.mjs';
 import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, revealNamesOn, toolsOn } from './index.js';
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
@@ -732,7 +733,9 @@ function toolNpcStamp(args = {}) {
     return null;
 }
 
-async function applyFacts() {
+/** carry: the narrator prompt is being built (the generation interceptor), so a pending expiry's line counts as carried.
+ *  type: that generation's type (a swipe or continue rewrites the last reply, so its host is the message before it). */
+async function applyFacts({ carry = false, type = 'normal' } = {}) {
     await ensurePrompts();
     await refreshLivePlaces();
     const c = ctx();
@@ -749,10 +752,15 @@ async function applyFacts() {
         text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) });
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
-        if (ep) { ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
-        const rn = ep ? '' : relocationNote(c.chat ?? [], loc, partyText());
+        if (ep) { if (carry) ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
+        // A reply that told an expiry, written again (swipe, regenerate, continue): the line from its host, no new run.
+        const chat = c.chat ?? [];
+        const told = ep ? null : chat[hostIndex(chat, type === 'swipe' || type === 'continue' ? chat.length - 1 : chat.length)]?.extra?.[EXPIRY_LINE_KEY];
+        const retold = told?.to === loc.address && told.line ? told : null;
+        if (retold) text = `${text}\n${retold.line}`;
+        const rn = ep || retold ? '' : relocationNote(chat, loc, partyText());
         if (rn) text = `${text}\n${rn}`;
-        else if (!ep) { const am = await aftermathNote(c.chat ?? [], loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
+        else if (!ep && !retold) { const am = await aftermathNote(chat, loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
         const wf = await waitFacts(c.chat ?? [], loc);
         if (wf) text = `${text}\n${wf}`;
         const gone = expiryNarratorNote(freshPersonExpiries(c.chat ?? [], (c.chat ?? []).length - 1, partyText()), partyText());

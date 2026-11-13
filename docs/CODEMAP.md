@@ -42,6 +42,7 @@ The manifest loads `index.js`. Everything else is an ES module that index.js imp
 | cardlib.mjs | Loads the shared card and editor (plugin/ui/card.mjs, cardedit.mjs) at startup (covered by the one version check in shared.mjs; a load failure turns WorldScrawl off) | `cardLib`, `editLib`, `useCardLib` |
 | cardacts.mjs | The card action layer: one handler table per card type (place, person incl. kept changes, expiry notices, remember, kept map changes, person notes, found rows, narrator waits, appearance rebuild jobs) and the ticket (stale) check every async action passes; map-window card clicks run the same handlers with the GUI's editor values | `runCardAction`, `runGuiCardAction`, `ticketFor`, `HANDLERS` |
 | activity.mjs, calllog.mjs, timelabels.mjs | Activity log, model-call notes, game-time labels | — |
+| generations.mjs | Which generation is running: one record per generation (start, reply, stop, error, end) so failure notes go to the right one; `generating()` / `whenIdle()` (a run, ST's busy flag or a group turn); `turnPlayerIndex` (the player line of this turn, skipping notices, system and /hide lines), `hostIndex`, the saved expiry line (`EXPIRY_LINE_KEY`) and `toldExpiry` | — |
 | manifest.json | SillyTavern extension manifest (entry `index.js`) | — |
 
 ## plugin/ (SillyTavern server plugin; Node)
