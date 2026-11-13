@@ -1862,7 +1862,7 @@
     {
       "id": "npc.appearance_rebuild",
       "title": "People: appearance rebuild question",
-      "description": "Step 1 of 1: base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer.",
+      "description": "Step 1 of 1, for a full rewrite (any active change marked full rewrite): base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer. A change that is all light touch uses the light-touch edit question instead.",
       "group": "npc",
       "locked": "The game rebuilds only the listed fields from this answer.",
       "placeholders": [
@@ -1883,8 +1883,8 @@
     },
     {
       "id": "npc.appearance_edit_light",
-      "title": "People: appearance light-touch question",
-      "description": "Step 1 of 1, when every change is a light touch: base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer, and checks that it kept at least half of each base field.",
+      "title": "People: appearance light-touch edit question",
+      "description": "Step 1 of 1, used instead of the rebuild question when every active change is a light touch: base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer, and checks that it kept at least half of each base field.",
       "group": "npc",
       "locked": "The game rebuilds only the listed fields from this answer.",
       "placeholders": [
@@ -1906,9 +1906,9 @@
     {
       "id": "npc.appearance_edit_light_retry",
       "title": "People: light-touch retry line",
-      "description": "Alongside the light-touch question: added to it once when the first answer kept less than half of a base field.",
+      "description": "Alongside the light-touch edit question: added to it once when the first answer kept less than half of a base field.",
       "group": "npc",
-      "locked": "The game adds this line to the light-touch question as it is.",
+      "locked": "The game adds this line to the light-touch edit question as it is.",
       "placeholders": [],
       "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and change only the words the intents name."
     },
