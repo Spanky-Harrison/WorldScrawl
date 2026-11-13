@@ -1,0 +1,44 @@
+    // ---- B6: the next turn waits for the last reply's tracker. The fake holds the tracker's answer (a 2-hour wait,
+    // auto-kept) 2.5 s; the player sends again at once. The second turn is built after that wait landed on the first
+    // reply, and the busy line said "finishing the last reply's check" while it waited.
+    {
+        const pickedWorld = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.world);
+        await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = 'riverton'; s.dispatchEvent(new Event('change')); });
+        const was = await page.evaluate(() => { const s = SillyTavern.getContext().extensionSettings.worldscrawl; return { moveMode: s.moveMode, autoKeepWaits: s.autoKeepWaits }; });
+        await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+        await settle(4000);
+        await page.evaluate(async () => {
+            const c = SillyTavern.getContext(), s = c.extensionSettings.worldscrawl, now = Date.now();
+            s.moveMode = 'buttons'; s.autoKeepWaits = true; window.__wsSlow = 0;
+            c.chat.push({ name: c.name1, is_user: true, mes: 'I come in out of the rain.', send_date: now, swipe_id: 0, extra: { worldscrawl_intent_checked: true } },
+                { name: c.name2, is_user: false, mes: 'The common room is warm.', send_date: now, swipe_id: 0, swipes: ['The common room is warm.'], swipe_info: [{ extra: {} }],
+                    extra: { worldscrawl_mid: `m${now}`, worldscrawl_location: 'riverton:drowned_rat/common_room' } });
+            await c.saveChat(); await c.reloadCurrentChat();
+            if (!window.__wsTurnSawWrap) { // what the turn saw when WorldScrawl's interceptor finished: did reply A carry its tracked wait?
+                window.__wsTurnSawWrap = true;
+                const orig = globalThis.worldscrawlInterceptor;
+                globalThis.worldscrawlInterceptor = async (...a) => { const r = await orig(...a); window.__wsTurnSaw = (window.__wsTurnSaw ?? []).concat([SillyTavern.getContext().chat.map(m => !!m.extra?.worldscrawl_wait)]); return r; };
+            }
+            window.__wsTurnSaw = []; window.__wsBusySeen = [];
+            window.__wsBusyObs?.disconnect();
+            window.__wsBusyObs = new MutationObserver(() => { for (const el of document.querySelectorAll('.worldscrawl_busymark')) window.__wsBusySeen.push(el.textContent); });
+            window.__wsBusyObs.observe(document.getElementById('chat'), { childList: true, subtree: true, characterData: true });
+        });
+        await settle(3000);
+        const WAIT2H = JSON.stringify({ place: null, people: [], wait: { duration: '2 hours', reason: 'they watch the rain' } });
+        await queue([{ content: 'You sit by the window and watch the rain for a long while.' }, { kind: 'tracker', content: WAIT2H, delay: 2500 }, { content: 'The rain stops at last.' }]);
+        await page.fill('#send_textarea', 'I sit by the window.'); await page.click('#send_but');
+        await page.waitForFunction(() => { const ch = SillyTavern.getContext().chat; return /rain for a long while/.test(ch[ch.length - 1]?.mes ?? '') && !jQuery('#mes_stop').is(':visible'); }, null, { timeout: 15000 });
+        const replyA = await page.evaluate(() => SillyTavern.getContext().chat.length - 1);
+        await page.fill('#send_textarea', 'I keep watching.'); await page.click('#send_but');
+        await page.waitForFunction(() => /rain stops at last/.test(SillyTavern.getContext().chat.at(-1)?.mes ?? ''), null, { timeout: 30000 });
+        await settle(4000);
+        const r = await page.evaluate(i => ({ wait: SillyTavern.getContext().chat[i].extra?.worldscrawl_wait ?? null, saw: window.__wsTurnSaw, busy: [...new Set(window.__wsBusySeen)] }), replyA);
+        const second = r.saw[r.saw.length - 1] ?? [];
+        check('tracker wait: the first reply\'s tracked 2-hour wait is kept on that reply', r.wait?.seconds === 7200 && r.wait?.source === 'tracker', JSON.stringify(r.wait));
+        check('tracker wait: the next turn was built after it (the reply carried its wait when the interceptor finished)', second[replyA] === true, JSON.stringify(r.saw));
+        check('tracker wait: the busy line said "finishing the last reply\'s check" while the turn waited', r.busy.some(t => /finishing the last reply's check/.test(t)), JSON.stringify(r.busy));
+        await page.evaluate(w => { window.__wsBusyObs?.disconnect(); Object.assign(SillyTavern.getContext().extensionSettings.worldscrawl, w); }, was);
+        await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
+        await settle(2000);
+    }
