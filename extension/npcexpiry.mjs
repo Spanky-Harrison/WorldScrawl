@@ -88,11 +88,11 @@ export function expiryNarratorNote(items, party = 'the player') {
     if (!items?.length) return '';
     const lines = items.map(it => {
         const who = capFirst(it.shown || it.who);
-        if (it.kind === 'fact') return `- ${who}: "${it.what}" was temporary and no longer holds.`;
+        if (it.kind === 'fact') return `- ${who}: "${it.what}" no longer holds.`;
         const now = [it.looks && `Looks: ${it.looks}`, it.body && `Body: ${it.body}`, it.outfit && `Outfit: ${it.outfit}`].filter(Boolean).join(' ');
-        return `- ${who}: the temporary change "${it.what}" ran out and is gone; they are back to how they looked before it.${now ? ` What they look like now: ${now}` : ''}`;
+        return `- ${who}: "${it.what}" has worn off; they look as they did before it.${now ? ` What they look like now: ${now}` : ''}`;
     });
-    return `Engine note (already applied; this is the same person, not someone new): while time passed, these temporary changes to people ran out:\n${lines.join('\n')}\nIf ${party} can see them, describe them as they are now.`;
+    return `While time passed, these changes to people wore off (the same people, not someone new):\n${lines.join('\n')}\nIf ${party} can see them, describe them as they are now.`;
 }
 
 /** The tracker's list of what the engine already did, so a story that narrates it is not reported again. */

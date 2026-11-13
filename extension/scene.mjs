@@ -12,7 +12,7 @@ import { messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
-import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
+import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
 import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
@@ -333,11 +333,12 @@ function npcPromptBits(loc) {
         const env = npcEnv(chat, loc);
         const present = presentAt(chat, chat.length - 1, pack.npcs, env);
         const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
-        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present });
+        let elsewhere = false;
+        const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present, onOffmap: () => { elsewhere = true; } });
         const comings = comingsAndGoings(chat, chat.length - 1, pack.npcs, env);
         if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
         if (!present.length && !absent.length) return {};
-        if (absent.some(l => /, somewhere off the map/.test(l))) absent.push(P('narration.offmap_found'));
+        if (elsewhere) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
@@ -749,7 +750,7 @@ async function applyFacts({ carry = false, type = 'normal' } = {}) {
         await loadCalendar();
         const d = gameDate();
         const moveTools = toolsOn();
-        text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: placeWeatherNow(loc)?.line ?? '', took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) });
+        text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) });
         reminder = arrivalReminder(loc, move);
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { if (carry) ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }

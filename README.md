@@ -432,7 +432,7 @@ A wait is stamped on its chat message (`worldscrawl_wait.seconds`) exactly like 
 
 ## Weather
 
-Weather is worked out from the world's seed, the place's weather region and the game time, so it is the same every time you look, survives swipes and deleted messages, and moves on with the clock. The narrator gets one line (sky, wind, temperature and feels-like, humidity, what is underfoot, season), and a short version shows in the footer and the map window's top bar. Behind it: weather comes in stretches (a storm for a few hours, clear for most of a day) chained by odds that suit each sky and season, wind shortens stretches and makes change more likely, seasons blend into each other, temperature follows the day and the sky and drifts from day to day, rain turns to sleet and snow in the cold, the ground stays wet, snowy or icy for a while afterwards, and day length follows the season. You only set a few fields.
+Weather is worked out from the world's seed, the place's weather region and the game time, so it is the same every time you look, survives swipes and deleted messages, and moves on with the clock. The narrator gets one line (sky, wind, how warm it feels, humidity, what is underfoot, season; in words unless the weather-numbers setting is on), and a short version shows in the footer and the map window's top bar. Behind it: weather comes in stretches (a storm for a few hours, clear for most of a day) chained by odds that suit each sky and season, wind shortens stretches and makes change more likely, seasons blend into each other, temperature follows the day and the sky and drifts from day to day, rain turns to sleet and snow in the cold, the ground stays wet, snowy or icy for a while afterwards, and day length follows the season. You only set a few fields.
 
 ### `world.json`
 
@@ -476,13 +476,23 @@ The nearest level that sets one wins: location > subregion > region. Default `ou
 - `enclosed`: no weather at all, steady temperature (the climate's yearly average, or `indoor_temp`): cellars, caves, tunnels.
 - `fixed`: always the same: `"fixed_weather": { "condition": "Eternal twilight", "temp": 59 }` (magic places, other planes).
 
-The narrator line for each looks like:
+By default the narrator gets the weather in words only, no numbers:
+
+```
+Weather: Light rain, windy, cool, damp. Underfoot: wet. Mid spring.
+Weather (outside): Clear night, calm, freezing. Underfoot: snow on the ground. Mid winter. Inside, sheltered from the wind and rain, it is cool.
+Here it is cold and still; no weather reaches this place.
+```
+
+With the **Weather numbers to the narrator** setting on (off by default), it gets the numbers too:
 
 ```
 Weather: Light rain, windy, 48°F (feels like 42°F), cool, 88% humidity. Underfoot: wet. Mid spring.
 Weather (outside): Clear night, calm, 9°F, freezing, 70% humidity. Underfoot: snow on the ground. Mid winter. Inside, sheltered from the wind and rain: 62°F, cool.
 Temperature here: 45°F, cold and still; no weather reaches this place.
 ```
+
+Humidity in words is "humid" (80% or more, when warm), "damp" (80% or more, when cool) or "dry" (30% or less), and nothing in between. The footer and the map window always show the numbers.
 
 ### Custom climates
 

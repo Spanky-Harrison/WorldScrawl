@@ -9,7 +9,7 @@ Every place can have two kinds of text:
 
 Lore is not sent by default. Each turn the narrator gets one index line naming the places with lore here, innermost first:
 
-    Lore on file: The Drowned Rat, Riverton.
+    Places with local lore: The Drowned Rat, Riverton.
 
 Lore is fed in only two ways:
 

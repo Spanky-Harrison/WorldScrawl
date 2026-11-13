@@ -176,7 +176,7 @@ export function offmapAbsentLine(npc, sched) {
     else if (near?.kind === 'stub') place = `in ${near.name}${near.about ? `, ${near.about}` : ''}`;
     else if (near?.kind === 'text' && near.text) place = near.text;
     const hint = [where, place].filter(Boolean).join(', ');
-    return `${name}: ${activity}, somewhere off the map${hint ? ` (${hint})` : ''}`;
+    return `${name}: ${activity}, elsewhere${hint ? ` (${hint})` : ''}`;
 }
 
 /** How a resolved near reads in the inspector: "map: The Drowned Rat (riverton:drowned_rat)". */
@@ -601,7 +601,6 @@ function overdueNote(npc, sched, clock, env) {
     const name = capFirst(shownName(npc));
     const act = sched.entry?.activity || 'elsewhere';
     const where = placeLabel(env, sched.address);
-    const imp = sched.entry?.importance;
     let hours = 0;
     if (sched.entry?.fromMin != null) {
         let late = (clock.minutes ?? 0) - sched.entry.fromMin;
@@ -609,10 +608,9 @@ function overdueNote(npc, sched, clock, env) {
         if (late < 0) late += day;
         hours = Math.floor(late / 60);
     }
-    if (hours <= 0) return `${name} is due at ${where} (${act}${imp ? `, ${imp} importance` : ''}).`;
-    const why = imp ? ` (${imp} importance)` : '';
-    if (hours === 1) return `${name} is an hour late for ${act}${why}.`;
-    return `${name} is ${hours} hours late for ${act}${why}.`;
+    if (hours <= 0) return `${name} should be at ${where} by now (${act}).`;
+    if (hours === 1) return `${name} is an hour late for ${act}.`;
+    return `${name} is ${hours} hours late for ${act}.`;
 }
 
 function stayCovers(npc, scene, clock) {
@@ -657,7 +655,7 @@ export function presentAt(chat, index, cast, env) {
             const sched = scheduleAt(now, clock, env);
             if (sched?.offmap) overdue = stayCovers(now, scene, clock) ? '' : offmapAbsentLine(now, sched);
             else if (sched && sched.address !== here) overdue = stayCovers(now, scene, clock) ? '' : overdueNote(now, sched, clock, env);
-            else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${capFirst(shownName(now))}'s hour here has passed.`;
+            else if (now.seen_at && !sched) overdue = stayCovers(now, scene, clock) ? '' : `${capFirst(shownName(now))} would normally have moved on by now.`;
         }
         out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
     }
@@ -667,9 +665,9 @@ export function presentAt(chat, index, cast, env) {
 
 /**
  * Saved people who belong here (a schedule stop at this place, or a {{npc:id}} token in the lore being fed, `lore`)
- * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented).
+ * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented). `onOffmap` is called for each line about someone elsewhere.
  */
-export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {}) {
+export function absentAt(chat, index, cast, env, { lore = '', present = [], onOffmap = () => {} } = {}) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
     if (!chat?.length) return [];
     const frames = framesOf(chat, end, cast, env?.clock);
@@ -685,7 +683,7 @@ export function absentAt(chat, index, cast, env, { lore = '', present = [] } = {
         const stops = (npc.schedule ?? []).filter(e => e && !e.broken && e.place).some(e => resolveSchedulePlace(e.place, env).address === here);
         const nearHere = !!(sched?.offmap && withinNear(here, sched.near));
         if (!stops && !named.has(String(npc.id).toLowerCase()) && !nearHere) continue;
-        if (sched?.offmap) { out.push(offmapAbsentLine(npc, sched)); continue; }
+        if (sched?.offmap) { out.push(offmapAbsentLine(npc, sched)); onOffmap(); continue; }
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
         const who = shownName(npc);
@@ -966,7 +964,7 @@ export function comingsAndGoings(chat, end, cast, env) {
             const expiryMin = Number.isFinite(e.start) && e.lasts
                 ? Math.round((e.start + e.lasts * 60) / 60) % 1440
                 : (c1.minutes ?? 0);
-            lines.push(`${at(expiryMin)} ${shown(n)}'s ${e.intent} fades (expired ${hhmm(expiryMin)}).`);
+            lines.push(`${at(expiryMin)} ${shown(n)}'s ${e.intent} fades.`);
         }
     }
     return lines.sort();
@@ -1033,10 +1031,10 @@ export function focusRules(text, present) {
     return { id, depth, ambiguous };
 }
 
-function dispositionLine(n) {
+function dispositionLine(n, pc = 'the player') {
     const d = n.disposition?.[PLAYER];
     if (!d || !d.value || d.value === 'unknown') return '';
-    return ` Disposition toward the player: ${d.value}${d.reason ? ` (${d.reason})` : ''}.`;
+    return ` Attitude toward ${pc}: ${d.value}${d.reason ? ` (${d.reason})` : ''}.`;
 }
 
 const LOOK_BRACKET_RE = /\[\s*look\b/i;
@@ -1094,7 +1092,7 @@ export function relLine(p, pc = 'the player') {
     return `Has not met ${pc} before.`;
 }
 /** Above the memories when the name is unknown to them: memories use real names, but they must not say one they don't know. */
-const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [`(Their memories use real names for clarity; ${shownName(p)} does not know the name ${pc} and must not say it.)`]);
+const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [`(Their memories name people by their real names; ${shownName(p)} does not know the name ${pc} and must not say it.)`]);
 
 export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player', gate = null } = {}) {
     const list = present ?? [];
@@ -1113,7 +1111,7 @@ export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player'
             if (p.outfit) bits.push(`Wearing: ${p.outfit}`);
             if (p.manner) bits.push(`Manner: ${p.manner}`);
             if (p.voice) bits.push(`Speech: ${p.voice}`);
-            const d = dispositionLine(p).trim();
+            const d = dispositionLine(p, pc).trim();
             if (d) bits.push(d);
             bits.push(relLine(p, pc));
             if (p.memory?.length && focus?.id !== p.id) bits.push(...nameGuard(p, pc), `Remembers: ${p.memory.slice(-3).join('; ')}.`);
@@ -1124,7 +1122,7 @@ export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player'
     const who = focus?.id ? list.find(p => p.id === focus.id) : null;
     let npc_focus = '';
     if (who && focus.depth && focus.depth !== 'present') {
-        const bits = [`${capFirst(shownName(who))}, in focus.`, relLine(who, pc)];
+        const bits = [`More about ${shownName(who)}:`, relLine(who, pc)];
         if (who.facts?.length) bits.push(`Known facts: ${who.facts.join('; ')}`);
         if (who.memory?.length) bits.push(...nameGuard(who, pc), `Memory: ${who.memory.map(m => `- ${m}`).join('\n')}`);
         if (focus.depth === 'deep' && who.deep) {

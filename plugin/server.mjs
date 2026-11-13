@@ -476,14 +476,14 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                 const keep = new Set(here.exits.map(x => x.direction.toLowerCase()));
                 const only = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
                 const name = label(wThen, old);
-                return { note: `${name} is gone (${why}); the party is now in ${label(wNow, here)}.${only.length ? ` Anything only in ${name}, such as the ${only.slice(0, 4).join(', the ')}, no longer exists.` : ''} Do not describe or add it to the map.`, gone: was };
+                return { note: `${name} is gone; the characters are now in ${label(wNow, here)}.${only.length ? ` Anything only in ${name}, such as the ${only.slice(0, 4).join(', the ')}, no longer exists.` : ''} Do not describe it.`, why, gone: was };
             }
             if (was !== at) return { note: '' };
             const keep = new Set(nowRoom.exits.map(x => x.direction.toLowerCase()));
             const lost = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
             if (!lost.length) return { note: '' };
             if (now !== null) try { const nc = changed_for(wid, changes, null, false).w.locations.get(was); if (nc && lost.every(d => nc.exits.some(x => x.direction.toLowerCase() === d.toLowerCase()))) why = 'a temporary change ended'; } catch { /* keep */ }
-            return { note: `The map changed around the party without narration (${why}): the ${lost.join(', the ')} in ${label(wNow, nowRoom)} no longer ${lost.length === 1 ? 'exists' : 'exist'}. Do not describe or add ${lost.length === 1 ? 'it' : 'them'} to the map.` };
+            return { note: `Since the last reply, the ${lost.join(', the ')} in ${label(wNow, nowRoom)} no longer ${lost.length === 1 ? 'exists' : 'exist'}. Do not describe ${lost.length === 1 ? 'it' : 'them'}.`, why };
         },
         'POST /resolve': ({ q, body }) => {
             // Blanket position resolver: any stored location -> a real room of the effective map.
