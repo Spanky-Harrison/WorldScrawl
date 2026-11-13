@@ -31,10 +31,14 @@ const swipeOf = m => m?.swipe_id ?? 0;
 /** The patches on a message that belong to the swipe being shown. */
 export const patchesOn = m => (m?.extra?.[PATCH_KEY] ?? []).filter(p => (p?.swipe ?? 0) === swipeOf(m));
 /** A location stamped on message i, after any later patch merged or removed that room. */
+// The shared patch library (plugin/shared/, loaded at startup) before anything called loadPatchLib: without it the first
+// wait of a session read expired temporary changes as still active (a stale room cache key).
+const activeLib = () => patchLib ?? (typeof patchShared?.activeChanges === 'function' ? patchShared : null);
 function relocateFrom(addr, i, chat) {
     // Expired temporary patches ("lasts") no longer redirect (#47); the resolver handles any room that is still missing.
-    const now = patchLib ? chatElapsed(chat) : null;
-    const live = p => p?.off !== true && (!patchLib || patchLib.activeChanges([p], now).length > 0);
+    const lib = activeLib();
+    const now = lib ? chatElapsed(chat) : null;
+    const live = p => p?.off !== true && (!lib || lib.activeChanges([p], now).length > 0);
     for (let j = i; j < chat.length; j++) for (const p of patchesOn(chat[j]).filter(live)) if (p?.relocate && Object.hasOwn(p.relocate, addr)) addr = p.relocate[addr];
     return addr;
 }
@@ -45,7 +49,8 @@ function patchSig() {
     const chat = ctx().chat ?? [];
     if (!chat.some(m => m?.extra?.[PATCH_KEY])) return '';
     let ps = chatChanges(chat).filter(c => c.type === 'patch' && c.off !== true);
-    if (patchLib && ps.length) ps = patchLib.activeChanges(ps, chatElapsed(chat));
+    const lib = activeLib();
+    if (lib && ps.length) ps = lib.activeChanges(ps, chatElapsed(chat));
     if (!ps.length) return '';
     const s = JSON.stringify(ps.map(p => [p.id, p._msg, p.ops.length, ...(p._rebuilt ?? [])])); // a rebuilt text (placerevert.mjs) is a new room text
     let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;

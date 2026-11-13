@@ -1,4 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
+import { toldExpiry } from './generations.mjs';
 import { setPrompts, hasPrompts } from './shared.mjs';
 import { PLAYER, LOC_KEY, partyAddresses, positionOf, actorHistory } from './actors.mjs';
 import { defaultWorldId, worldMissing } from './clock.mjs';
@@ -167,6 +168,9 @@ async function currentLocation() {
     if (stored) {
         const loc = await fetchLocationCached(stored);
         if (loc) return loc;
+        // An expiry already told for this room (its reply swiped or being rewritten): where it left them, no new run.
+        const told = toldExpiry(ctx().chat ?? [], stored, storedStamp()?.index ?? -1);
+        if (told) { const t = await fetchLocationCached(told.to); if (t) return t; }
         if (patchSig()) return missingRoomFallback(stored); // not in this chat's patched map (moved, merged, removed): resolve it, even when the base world still has it
         const r = await api(`/location/${encodeURIComponent(stored)}`).catch(() => null);
         if (r?.status === 404 && r.body?.detail?.error === 'world_not_found') { syncWorld(); const again = await fetchLocationCached(stored); if (again) return again; }
