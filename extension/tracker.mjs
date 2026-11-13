@@ -98,10 +98,10 @@ export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { sc
 
 /** A why that only restates that something was updated ("door status updated", "changed"). */
 const STATUS_WHY_RE = /^(?:[\w-]+\s+){0,2}(?:status|state)?\s*(?:updated|changed)\.?$/i;
-/** Words for passing scene state: light, time of day, fire in the hearth, smells, sounds, mood, a door left open. */
-const TRANSIENT_RE = /\b(?:light|lit|sun|sunlight|sunrise|sunset|dawn|dusk|morning|evening|night|dark|darkness|darker|shadows?|lamps?|candles?|lanterns?|fire|hearth|embers?|smells?|scents?|odou?rs?|aromas?|warm|warmth|warmer|cold|colder|chill|mood|atmosphere|quiet|silent|silence|noise|noisy|crowded|empty|busy|door|ajar)\b/i;
+/** Words for passing scene state: light, time of day, fire in the hearth, smells, sounds, mood, a door left open or shut. */
+const TRANSIENT_RE = /\b(?:light|lit|sun|sunlight|sunrise|sunset|dawn|dusk|morning|evening|night|dark|darkness|darker|shadows?|lamps?|candles?|lanterns?|fire|hearth|embers?|smells?|scents?|odou?rs?|aromas?|warm|warmth|warmer|cold|colder|chill|mood|atmosphere|quiet|silent|silence|noise|noisy|crowded|empty|busy|ajar|open|opened|closed|shut|swung)\b/i;
 /** Words for a lasting physical change: any one keeps the place change. "burned down to embers" is the hearth, not the room. */
-const LASTING_RE = /\b(?:burn(?:s|ed|t)? (?:down|out|away)(?! to (?:embers|ash|coals))|burnt|scorch\w*|charred|collaps\w*|smash\w*|shatter\w*|break|breaks|broke|broken|flood\w*|block\w*|barricad\w*|built|build\w*|destroy\w*|ruin\w*|spread\w*|crack\w*|torn|tore|splinter\w*|knocked|hole|removed|added|install\w*|portal|cave[sd]? in|bricked|boarded|nailed|rubble|wrecked)\b/i;
+const LASTING_RE = /\b(?:burn(?:s|ed|t)? (?:down|out|away)(?! to (?:embers|ash|coals))|burnt|scorch\w*|charred|collaps\w*|smash\w*|shatter\w*|break|breaks|broke|broken|flood\w*|block\w*|barricad\w*|built|build\w*|destroy\w*|ruin\w*|spread\w*|crack\w*|torn|tore|splinter\w*|knocked|hole|removed|added|install\w*|portal|cave[sd]? in|bricked|boarded|nailed|rubble|wrecked|barred|barricaded|locked|bolted|chained|jammed|wedged|stuck|sealed|opened up)\b/i;
 /** Every clause of the note names only passing scene state, and none names a lasting change. */
 export function transientOnly(note) {
     const text = String(note ?? '').trim();
