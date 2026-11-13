@@ -254,10 +254,11 @@ async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
 /** The source of a name the player's own line used (learnSaidNames). */
 export const SAID_SOURCE = 'player line';
 /**
- * After a story reply: an unknown person who is not here (off the map, elsewhere) learns no name from the tracker, which
- * is only shown the people here. When the player's line before reply `id` uses their name or alias as the narrator wrote
- * it in an earlier story reply (in dialogue or not), the name is learned (learnName, source SAID_SOURCE: the portal's
- * rules without presence, and only the player's line counts). People here keep the tracker's path. No model call.
+ * After a story reply: when the player's line before reply `id` uses an unknown person's name or alias as the narrator
+ * wrote it in an earlier story reply (in dialogue or not), the name is learned (learnName, source SAID_SOURCE: the
+ * portal's rules without presence, and only the player's line counts). Everyone counts, here or not (off the map,
+ * elsewhere), so a person here no longer waits on the tracker proposing the name item; it runs first, and a tracker
+ * name item for the same person is then skipped as "already knows". No model call.
  */
 async function learnSaidNames(id) {
     const c = ctx(), chat = c.chat ?? [], msg = chat[id];
@@ -270,12 +271,8 @@ async function learnSaidNames(id) {
     const people = folded.length ? folded : cast;
     const story = chat.slice(0, ui).filter(m => m && !m.is_user && !m.is_system && !m.extra?.worldscrawl_notice).map(m => String(m.mes ?? ''));
     const hits = people.map(p => ({ p, name: saidNameOf(p, said, story) })).filter(h => h.name);
-    if (!hits.length) return [];
-    let present = [];
-    try { const loc = await currentLocation(); present = presentAt(chat, id, cast, npcEnv(chat, loc)); } catch { present = []; }
     const out = [];
     for (const { p, name } of hits) {
-        if (present.some(q => q.id === p.id)) continue; // here: the tracker's path
         out.push(await learnName(msg, { target: p.id, heard: name, source: SAID_SOURCE })); // name-ok: what the player said
     }
     return out;
