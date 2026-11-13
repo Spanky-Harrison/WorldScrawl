@@ -1882,6 +1882,37 @@
       "text": "Rewrite {{fields}} for {{name}}.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
     },
     {
+      "id": "npc.appearance_edit_light",
+      "title": "People: appearance light-touch question",
+      "description": "Step 1 of 1, when every change is a light touch: base fields plus active intents that touch them. The game rebuilds only the listed fields from the answer, and checks that it kept at least half of each base field.",
+      "group": "npc",
+      "locked": "The game rebuilds only the listed fields from this answer.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "fields"
+        },
+        {
+          "name": "base"
+        },
+        {
+          "name": "intents"
+        }
+      ],
+      "text": "Edit {{fields}} for {{name}}: copy the base and change only the words the intents name.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
+    },
+    {
+      "id": "npc.appearance_edit_light_retry",
+      "title": "People: light-touch retry line",
+      "description": "Alongside the light-touch question: added to it once when the first answer kept less than half of a base field.",
+      "group": "npc",
+      "locked": "The game adds this line to the light-touch question as it is.",
+      "placeholders": [],
+      "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and change only the words the intents name."
+    },
+    {
       "id": "npc.who",
       "title": "People: who is being addressed",
       "description": "Step 1 of 1 (only when the message does not already name one person here): who the player is addressing or looking at.",
