@@ -80,12 +80,13 @@ for (const order of ['text notice first', 'passage notice first']) {
         else { await postExpiredNotice('riverton:streets/stall', SQUARE, 'square'); c.chat.push(look()); await narrate(); }
         const text = c.chat.findIndex(m => m.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND), room = c.chat.findIndex(m => m.extra?.worldscrawl_notice_expired);
         assert.ok(text > 2 && room > 2, 'both notices are in the chat (the narrator still gets both lines)');
-        const host = Math.min(text, room);
+        const host = Math.max(text, room), older = Math.min(text, room);
         draw(c); await flush(80);
         let doc = draw(c);
         assert.equal(placeCards(doc).length, 1, 'one card for the change');
         let card = mesEl(doc, host).querySelector('.worldscrawl_placeexpired');
-        assert.ok(card, 'on the first of the two notices');
+        assert.ok(card, 'on the later of the two notices');
+        assert.equal(mesEl(doc, older).querySelector('.worldscrawl_placeexpired'), null, 'nothing under the earlier one');
         assert.deepEqual(card.querySelectorAll('.worldscrawl_card_summary li').map(li => li.textContent), ['Pop-up Stall ran out', 'Common Room: "Common Room: smoke" ran out']);
         const panel = card.querySelector('.worldscrawl_diff').textContent;
         assert.match(panel, /Canvas and crates\./, 'the room while it lasted');
@@ -109,8 +110,66 @@ for (const order of ['text notice first', 'passage notice first']) {
         doc = draw(c);
         assert.equal(placeCards(doc).length, 1);
         assert.deepEqual(btns(placeCards(doc)[0]), [], 'edited: done');
+        // Delete the later notice: the card goes back under the earlier one (derived, nothing stored moves).
+        c.chat.splice(host, 1);
+        draw(c); await flush(80);
+        doc = draw(c);
+        assert.equal(placeCards(doc).length, 1);
+        assert.ok(mesEl(doc, older).querySelector('.worldscrawl_placeexpired'), 'back under the earlier notice');
+        assert.ok(btns(placeCards(doc)[0]).includes('Edit'), 'the edit went with the deleted notice');
     });
 }
+
+test('an edit kept on the earlier notice of a group is found by the card on the later one: shown edited, never offered twice', async () => {
+    const c = boot(fairChat());
+    await narrate(); await postExpiredNotice('riverton:streets/stall', SQUARE, 'square');
+    const text = c.chat.findIndex(m => m.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND), room = c.chat.findIndex(m => m.extra?.worldscrawl_notice_expired);
+    assert.ok(text < room);
+    const item = c.chat[text].extra.worldscrawl_notice_places[0];
+    c.chat[text].extra.worldscrawl_patches = [{ type: 'patch', id: 'p_old', note: 'kept', at: 0, swipe: 0, source: 'expiry_edit', expiry: item.key,
+        ops: [{ op: 'set_description', loc: TAVERN, text: SMOKE }], summary: ['Common Room: smoke'] }];
+    draw(c); await flush(80);
+    const doc = draw(c);
+    assert.equal(placeCards(doc).length, 1);
+    const card = mesEl(doc, room).querySelector('.worldscrawl_placeexpired');
+    assert.ok(card, 'on the later notice');
+    assert.deepEqual(btns(card), [], 'edited already: no second Edit');
+});
+
+const BUNTING = 'Bunting for the fair hangs across the village square.';
+test('a shorter timed text of the same change ran out first: it keeps its own card; the passage card lists only the room', async () => {
+    const chat = fairChat();
+    chat[1].extra.worldscrawl_patches[0].ops = [{ ...STALL[0], lasts: '3h' }, { op: 'set_description', loc: SQUARE, text: BUNTING, lasts: '1h' }];
+    chat[1].extra.worldscrawl_patches[0].summary = ['Pop-up Stall: new room', 'Village Square: bunting'];
+    chat[2].extra.worldscrawl_wait = { seconds: 3600 };
+    const c = boot(chat);
+    await narrate();
+    const bunting = c.chat.findIndex(m => m.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND);
+    assert.ok(bunting > 2, 'the bunting ran out after the first hour');
+    c.chat.push({ is_user: false, mes: 'An hour passes.', swipe_id: 0, swipes: ['x'], swipe_info: [{ extra: {} }], extra: {} });
+    c.chat.push({ ...look(), mes: 'I [wait] two more hours.', extra: { worldscrawl_intent_checked: true, worldscrawl_wait: { seconds: 7200 } } });
+    await postExpiredNotice('riverton:streets/stall', SQUARE, 'square');
+    const room = c.chat.findIndex(m => m.extra?.worldscrawl_notice_expired);
+    assert.ok(room > bunting);
+    assert.deepEqual(patchesExt.expiredPatchAt(c.chat, room).ran.map(o => o.op), ['create_place'], 'only what ran out with the room');
+    draw(c); await flush(80);
+    const doc = draw(c);
+    assert.equal(placeCards(doc).length, 2, 'two cards: the bunting and the passage');
+    const own = mesEl(doc, bunting).querySelector('.worldscrawl_placeexpired');
+    assert.ok(own, 'the bunting card on its own notice');
+    const seal = mesEl(doc, room).querySelector('.worldscrawl_placeexpired');
+    const lines = seal.querySelectorAll('.worldscrawl_card_summary li').map(li => li.textContent);
+    assert.deepEqual(lines, ['Pop-up Stall ran out'], JSON.stringify(lines));
+    assert.doesNotMatch(seal.querySelector('.worldscrawl_diff')?.textContent ?? '', /Bunting/);
+    // The same change with the text ending with the room still joins it (one moment, one card).
+    const same = fairChat();
+    same[1].extra.worldscrawl_patches[0].ops = [{ ...STALL[0], lasts: '3h' }, { op: 'set_description', loc: SQUARE, text: BUNTING, lasts: '3h' }];
+    same[2].extra.worldscrawl_wait = { seconds: 10800 };
+    const c2 = boot(same);
+    await postExpiredNotice('riverton:streets/stall', SQUARE, 'square');
+    const room2 = c2.chat.findIndex(m => m.extra?.worldscrawl_notice_expired);
+    assert.deepEqual(patchesExt.expiredPatchAt(c2.chat, room2).ran.map(o => o.op), ['create_place', 'set_description']);
+});
 
 test('the same change with the text lasting longer: two expiries at two times, two cards', async () => {
     const chat = fairChat();
