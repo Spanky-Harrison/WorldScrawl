@@ -250,7 +250,7 @@ test('the narration line: what ran out, what made it, an excerpt, and where they
         assert.ok(line.includes(w), w);
 });
 test('the reply carries the stamp; the context line stays as the fallback', () => {
-    assert.match(src, /m\.extra\[LOC_KEY\] = p\.to/);
+    assert.match(src, /m\.extra\[LOC_KEY\] = told\.to/);
     assert.match(src, /automatic_trigger: true/);
     assert.match(src, /postExpiredNotice\(p\.from, p\.to, p\.via\)/);
 });
