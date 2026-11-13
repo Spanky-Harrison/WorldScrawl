@@ -22,6 +22,8 @@ const BASE = {
     outfit: "Widow's black wool under a stained leather apron, sleeves rolled to the elbow, and a ring of keys at her belt.",
 };
 const HESK = { ok: true, id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: BASE.body, outfit: BASE.outfit, file: 'hesk.json' };
+// A real light touch on Body: one of its three sentences reworded, the other two kept word for word.
+const TIED = BASE.body.replace(/Two thick copper braids[^.]*\./, 'Her copper braids are tied back in a knot for work.');
 const LIGHT_SYS = /^You make a small edit to a person's body or clothes/;
 const FULL_SYS = /^You rewrite a person's body and clothes/;
 
@@ -56,7 +58,7 @@ test('the Hesk case: the tracker\'s light outfit change (fill runs inside applyT
     assert.equal(calls.length, 1, 'one compose call: no lasts, so lasting and live are the same inputs');
     assert.match(calls[0].system, LIGHT_SYS, 'the light-only edit prompt');
     assert.doesNotMatch(calls[0].system, /full rewrite|from scratch/);
-    assert.match(calls[0].prompt, /^Rewrite outfit for Hesk\./);
+    assert.match(calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./, 'the light question says Edit, not Rewrite');
     assert.match(calls[0].prompt, /- outfit: Widow's black wool/);
     assert.doesNotMatch(calls[0].prompt, /- body:/, 'Body is not asked for');
     assert.equal(o.candidate.lastingPreview.body, BASE.body, 'Body is the base, word for word');
@@ -66,24 +68,24 @@ test('the Hesk case: the tracker\'s light outfit change (fill runs inside applyT
 });
 
 test('a light change on both fields uses the light prompt and asks both; an extra field in the answer is ignored', async () => {
-    const { c, calls } = boot(() => '{"body":"braids tied back","outfit":"damp hem","looks":"x"}');
+    const { c, calls } = boot(() => JSON.stringify({ body: TIED, outfit: 'damp hem', looks: 'x' }));
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'braids tied back, hem damp', fields: 'body,outfit', scope: 'light', why: 'two details' }] });
     const o = ownerOn(c);
     assert.equal(o.candidate.phase, 'review');
     assert.equal(calls.length, 1);
     assert.match(calls[0].system, LIGHT_SYS);
-    assert.match(calls[0].prompt, /^Rewrite body, outfit for Hesk\./);
-    assert.deepEqual(o.candidate.lastingPreview, { body: 'braids tied back', outfit: 'damp hem' });
+    assert.match(calls[0].prompt, /^Edit body, outfit for Hesk:/);
+    assert.deepEqual(o.candidate.lastingPreview, { body: TIED, outfit: 'damp hem' });
 });
 
 test('a body-only light change: an answer that also rewrites the outfit keeps the base outfit', async () => {
-    const { c, calls } = boot(() => '{"body":"braids tied back","outfit":"a whole new outfit"}');
+    const { c, calls } = boot(() => JSON.stringify({ body: TIED, outfit: 'a whole new outfit' }));
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'braids tied back', fields: 'body', scope: 'light' }] });
     const o = ownerOn(c);
     assert.equal(o.candidate.phase, 'review');
     assert.equal(calls.length, 1);
     assert.equal(o.candidate.lastingPreview.outfit, BASE.outfit);
-    assert.equal(o.candidate.lastingPreview.body, 'braids tied back');
+    assert.equal(o.candidate.lastingPreview.body, TIED);
 });
 
 test('an answer missing an asked field is still partial (nothing stored, the card fails)', async () => {
@@ -127,9 +129,11 @@ test('a temporary change: lasting is the base (no call), live is one light edit'
 
 test('composePlan: fields are the union the ops name; heavy anywhere picks the rewrite prompt; nothing named asks both', () => {
     const op = (fields, scope, kind = 'appearance') => ({ committed: { kind, fields, scope, intent: 'x' } });
-    assert.deepEqual(composePlan([op('outfit', 'light')]), { fields: ['outfit'], system: 'npc.appearance_edit_light_system' });
-    assert.deepEqual(composePlan([op('body', 'heavy'), op('outfit', 'light')]), { fields: ['body', 'outfit'], system: 'npc.appearance_rebuild_system' });
-    assert.deepEqual(composePlan([op('looks', 'light')]), { fields: ['body', 'outfit'], system: 'npc.appearance_edit_light_system' });
+    const LIGHT = { system: 'npc.appearance_edit_light_system', prompt: 'npc.appearance_edit_light', light: true, replaced: [] };
+    assert.deepEqual(composePlan([op('outfit', 'light')]), { fields: ['outfit'], ...LIGHT });
+    assert.deepEqual(composePlan([op('body', 'heavy'), op('outfit', 'light')]), { fields: ['body', 'outfit'], system: 'npc.appearance_rebuild_system', prompt: 'npc.appearance_rebuild', light: false, replaced: [] });
+    assert.deepEqual(composePlan([op('looks', 'light')]), { fields: ['body', 'outfit'], ...LIGHT });
+    assert.deepEqual(composePlan([{ committed: { kind: 'baseline', field: 'body', text: 't' } }, op('outfit', 'light')]).replaced, ['body'], 'typed text replaces Body: no keep check on it');
     assert.deepEqual(composePlan([{ committed: { kind: 'baseline', field: 'body', text: 't' } }]).fields, ['body']);
 });
 
@@ -143,4 +147,48 @@ test('prompts: light edit copies the base; both rewrite prompts describe the loo
     const tracker = promptText('npc.tracker');
     assert.match(tracker, /intent names only the change to their body or clothes \("braids tied back", "hem soaked"\), not how they arrived or what they did\./);
     assert.match(tracker, /When the change will wear off \(sweaty, disheveled, soaked, damp or wet clothes, mud on them, hair tied back for work, a bruise\)/);
+});
+
+// ---- B8: a light touch that keeps less than half of the base is asked once more, then fails visibly.
+const RETRY = /Your last answer changed most of the base text\. Copy each base field word for word/;
+const REWRITTEN = 'A gaunt woman with cropped black hair. Her face is smooth and young. She has dark eyes.';
+test('a light touch that kept less than half of Body is asked once more with the retry line; the second answer keeps enough and is used', async () => {
+    let n = 0;
+    const { c, calls } = boot(() => JSON.stringify({ body: ++n === 1 ? REWRITTEN : TIED }));
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'braids tied back', fields: 'body', scope: 'light' }] });
+    const o = ownerOn(c);
+    assert.equal(calls.length, 2, 'one retry');
+    assert.doesNotMatch(calls[0].prompt, RETRY);
+    assert.match(calls[1].prompt, RETRY);
+    assert.match(calls[1].system, LIGHT_SYS);
+    assert.equal(o.candidate.phase, 'review');
+    assert.equal(o.candidate.lastingPreview.body, TIED);
+});
+
+test('a light touch that keeps less than half twice fails on the card with the reason (nothing stored)', async () => {
+    const { c, calls } = boot(() => JSON.stringify({ body: REWRITTEN }));
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'braids tied back', fields: 'body', scope: 'light' }] });
+    const o = ownerOn(c);
+    assert.equal(calls.length, 2);
+    assert.equal(o.candidate.phase, 'failed');
+    assert.ok(!o.candidate.lastingPreview, 'no rewritten text kept');
+    assert.match(JSON.stringify(c.chat[0].extra), /the light touch changed more than half of the body/);
+    const { makeDoc } = await import('./fakedom.mjs');
+    const { renderPatchCards } = await import('../../extension/waits.mjs');
+    const doc = makeDoc();
+    globalThis.document = doc;
+    renderPatchCards();
+    assert.match(doc.querySelector('.worldscrawl_npcpending')?.textContent ?? '', /the light touch changed more than half of the body/, 'the card says why');
+});
+
+test('a full rewrite is never held to the keep check; a one-sentence field (Outfit) always counts as kept', async () => {
+    let r = boot(() => JSON.stringify({ body: REWRITTEN }));
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'turned into someone else', fields: 'body', scope: 'heavy' }] });
+    assert.equal(r.calls.length, 1);
+    assert.equal(ownerOn(r.c).candidate.phase, 'review');
+    assert.match(r.calls[0].prompt, /^Rewrite body for Hesk\./, 'the full question still says Rewrite');
+    r = boot(() => '{"outfit":"A red silk gown."}');
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'apron off', fields: 'outfit', scope: 'light' }] });
+    assert.equal(r.calls.length, 1);
+    assert.equal(ownerOn(r.c).candidate.phase, 'review');
 });

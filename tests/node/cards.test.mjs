@@ -52,7 +52,7 @@ function model(answers) {
     SillyTavern.getContext().generateRaw = async args => {
         const p = String(args?.prompt ?? '');
         calls.push(p);
-        const kind = /Which places did the story change/.test(p) ? 'rooms' : /Write the patch JSON/.test(p) ? 'patch' : /Looks line/.test(p) ? 'looks' : /Rewrite body/.test(p) ? 'fields' : 'other';
+        const kind = /Which places did the story change/.test(p) ? 'rooms' : /Write the patch JSON/.test(p) ? 'patch' : /Looks line/.test(p) ? 'looks' : /(?:Rewrite|Edit) body/.test(p) ? 'fields' : 'other';
         const a = answers[kind];
         return typeof a === 'function' ? a(p) : a ?? '{}';
     };
@@ -270,7 +270,7 @@ for (const [order, gnollLasts, stripperLasts] of [['the stripper ends first', 12
     test(`layered gnoll + stripper through the card's Check again and scope switch: ${order}`, async () => {
         const { c, stripper, prompts } = await layered(gnollLasts, stripperLasts);
         let doc = draw([0]);
-        const fieldAsks = () => prompts.filter(p => /Rewrite body/.test(p));
+        const fieldAsks = () => prompts.filter(p => /(?:Rewrite|Edit) body/.test(p));
         const before = fieldAsks().length;
         byText(doc, 'Check again').click();
         await flush(60);
@@ -355,7 +355,7 @@ test('stale: a person Check again from a card drawn before the change was decide
     await flush(60);
     assert.equal(JSON.stringify(o.committed), committed);
     assert.equal(o.candidate, null);
-    assert.equal(calls.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(calls.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
 });
 
 // ---- S2: the place expiry notice (a temporary room ran out under the party)
