@@ -52,8 +52,8 @@ test('a scene override (for a story engine) wins over the setting, and null fall
     assert.equal(ext.proactiveDiscovery(), false);
     assert.equal(typeof globalThis.worldscrawlScene.set, 'function');
 });
-test('discoveries are kept at once (no Keep / Discard card)', () => {
-    assert.match(src, /await keepFlag\(id, \{ quiet: true \}\); \/\/ a discovery is added at once/);
+test('a discovery asked for is kept at once; the tracker\'s own waits for Approve unless Auto-keep (real handlers: discoveryhygiene.test.mjs)', () => {
+    assert.match(src, /if \(f\.source !== TRACKER_SOURCE \|\| settings\(\)\.autoKeep\) await keepFlag\(id, \{ quiet: true \}\);/);
 });
 }
 
