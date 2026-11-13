@@ -7,7 +7,7 @@
 // the extension's (extension/version.mjs). If not, or if the plugin's code can't be loaded at all, `offReason` is set
 // and WorldScrawl turns itself off: index.js shows that one message and starts nothing.
 import { WORLDSCRAWL_VERSION } from './version.mjs';
-const NAMES = ['calendar', 'patches', 'doorbar', 'weather', 'prompts', 'npc', 'exits', 'ids', 'cards'];
+const NAMES = ['calendar', 'patches', 'doorbar', 'weather', 'prompts', 'npc', 'exits', 'ids', 'cards', 'text'];
 const PLUGIN_URL = '/api/plugins/worldscrawl';
 
 /** The URL shared/ is loaded from, for the current Map server URL setting. */
@@ -44,7 +44,7 @@ async function loadShared() {
 }
 
 const S = await loadShared();
-export const { calendar, patches, doorbar, weather, prompts, npc, exits, ids, cards } = S;
+export const { calendar, patches, doorbar, weather, prompts, npc, exits, ids, cards, text } = S;
 // Prompt text helpers, used everywhere in the extension.
 export const { render, setPrompts, hasPrompts } = S.prompts;
 // NPC record helpers the server uses too (cast files, exports, ids).

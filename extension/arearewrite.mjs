@@ -59,6 +59,28 @@ export function targetLabel(target, labels = {}) {
     return `the ${dir ? `"${dir}" ` : ''}exit text of ${name || 'a place'}`;
 }
 
+const COLLAPSE = { set_description: 'set', append_description: 'append', set_lore: 'set', append_lore: 'append', set_exit_description: 'set' };
+/**
+ * One text edit per target, last wins: a later set_* replaces an earlier set_* or append_* of the same text (and the
+ * same "lasts"); an append_* after it folds into it. Two appends with no set fold into the first. Other ops are
+ * untouched and keep their order. Returns {ops, merged} (merged: how many ops were folded or dropped).
+ */
+export function collapseTextOps(ops) {
+    const out = [], at = new Map();
+    let merged = 0;
+    for (const op of Array.isArray(ops) ? ops : []) {
+        const kind = isObj(op) ? COLLAPSE[op.op] : null, target = kind ? targetKeyOf(op) : '';
+        if (!target) { out.push(op); continue; }
+        const key = `${target}|${JSON.stringify(op.lasts ?? null)}`;
+        if (!at.has(key)) { at.set(key, out.length); out.push({ ...op }); continue; }
+        merged++;
+        if (kind === 'set') { out[at.get(key)] = null; at.set(key, out.length); out.push({ ...op }); continue; }
+        const prev = out[at.get(key)];
+        prev.text = [str(prev.text), str(op.text)].filter(Boolean).join(' ');
+    }
+    return { ops: out.filter(o => o !== null), merged };
+}
+
 /**
  * The texts a scope switch may rewrite: one per existing-prose op of the proposal, with the text before the change and as
  * proposed (from the preview's before/after). A room or area the patch itself creates is new-room text and is left out,
@@ -88,20 +110,25 @@ export function textTargets(proposal) {
             was = str(bx.description); now = str(exitOf(after[op.loc], op.direction)?.description); where = op.loc;
             label = `the "${bx.direction}" exit text of ${before[op.loc]?.name ?? op.loc} (${op.loc}), this side only`;
         }
-        out.push({ key, i, op: op.op, family: fam, where, direction: fam === 'exit' ? str(op.direction) : '', label, was, now: now || was });
+        out.push({ key, i, op: op.op, family: fam, where, direction: fam === 'exit' ? str(op.direction) : '', label, was, now: now || was, added: /^append_/.test(op.op) ? str(op.text) : '' });
     }
     return out.sort((a, b) => a.i - b.i);
 }
 
+/** A light touch on an appended text asks for the added part only, so the text before it is never lost. */
+export const appendOnly = (t, rewrite) => rewrite !== 'full' && /^append_/.test(t.op);
 /** The op shape the rewrite call answers with for a target. */
-export function answerShape(t) {
+export function answerShape(t, rewrite = 'light') {
+    if (appendOnly(t, rewrite)) return t.family === 'desc' ? `{"op":"append_description","loc":"${t.where}","text":"..."}` : `{"op":"append_lore","area":"${t.where}","text":"..."}`;
     if (t.family === 'desc') return `{"op":"set_description","loc":"${t.where}","text":"..."}`;
     if (t.family === 'lore') return `{"op":"set_lore","area":"${t.where}","text":"..."}`;
     return `{"op":"set_exit_description","loc":"${t.where}","direction":"${t.direction}","text":"..."}`;
 }
-/** The targets as the rewrite question lists them. */
-export function targetLines(targets) {
-    return targets.map((t, n) => [`${n + 1}. ${t.label}. Answer with ${answerShape(t)}`, `Before the change: ${t.was || '(empty)'}`, `As proposed now: ${t.now || '(empty)'}`].join('\n')).join('\n\n');
+/** The targets as the rewrite question lists them: each text as it was before the change (never the current proposal,
+ *  which the model would only echo), and for a light touch on an appended text, the added part to edit. */
+export function targetLines(targets, rewrite = 'light') {
+    return targets.map((t, n) => [`${n + 1}. ${t.label}. Answer with ${answerShape(t, rewrite)}`, `Before the change: ${t.was || '(empty)'}`,
+        ...(appendOnly(t, rewrite) ? [`The change adds: ${t.added || '(empty)'}`, 'Answer with the added part only; the text before it stays as it is.'] : [])].join('\n')).join('\n\n');
 }
 
 const TEXT_FIELD = { set_description: 'text', append_description: 'text', set_lore: 'text', append_lore: 'text', update_area: 'lore', set_exit_description: 'text' };
@@ -140,7 +167,8 @@ export function rewriteGuard(oldOps, newOps) {
 
 /**
  * Put the rewrite call's answer into the proposal's ops: each answer op must name one of `targets` and set only its text.
- * A target left out keeps its text. Returns {ops} or {error}. An appended text comes back whole, as a set_*.
+ * A target left out keeps its text. Returns {ops} or {error}. An appended text comes back whole as a set_*, or as the
+ * added part only (the light touch) as the same append_*.
  */
 export function mergeRewrite(oldOps, targets, answerOps) {
     const ops = structuredClone(oldOps ?? []);
@@ -163,7 +191,7 @@ export function mergeRewrite(oldOps, targets, answerOps) {
         }
         if (r.op === 'update_area' && str(r.name) && str(r.name) !== str(old.name)) return { error: `the answer renamed ${t.where}` };
         if (r.op === 'set_exit') for (const [k, v] of Object.entries(r.fields ?? {})) if (k !== 'description' && !same(v, old.fields?.[k])) return { error: `the answer changed the exit's "${k}"` };
-        ops[t.i] = withText(old, String(text).trim());
+        ops[t.i] = /^append_/.test(old.op) && r.op === old.op ? { ...old, text: String(text).trim() } : withText(old, String(text).trim()); // an append answered as an append stays one
     }
     return { ops, rewritten: [...done] };
 }

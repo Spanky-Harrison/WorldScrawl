@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P, hasPrompts, patches } from './shared.mjs';
+import { render as P, hasPrompts, patches, text as textLib } from './shared.mjs';
 import { baseReply, gen, mergeDuplicates, nearbyRooms, noteCall } from './dig.mjs';
 import { analyzeDiscovery, keepFlag, syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, ensurePrompts } from './doors.mjs';
@@ -9,7 +9,7 @@ import { FLAG_KEY, MOVE_KEY, PATCH_KEY, baseUrl, broadcastMapState, ctx, isOn, s
 import { RANGE_CAP, changeDependents, confirmOff, loadFormLib, mapCtx, patchesOn } from './patches.mjs';
 import { applyFacts } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
-import { REWRITE_SET_BY_YOU, mergeRewrite, rewriteGuard, targetLines, textTargets } from './arearewrite.mjs';
+import { REWRITE_SET_BY_YOU, collapseTextOps, mergeRewrite, rewriteGuard, targetLines, textTargets, writtenText } from './arearewrite.mjs';
  // from the ws_flag tool: attached to the reply when it arrives
 let patchLib = null;
 
@@ -238,6 +238,8 @@ async function analyzeFlag(id, { note } = {}) {
             if (ans?.nothing) { f.status = 'nothing'; return; }
             ops = ans?.ops ?? null;
             if (!ops) { err = 'the answer was not {"ops": [...]} JSON'; continue; }
+            const col = collapseTextOps(ops); // one text edit per target, last wins: the switch can then rewrite it
+            if (col.merged) { ops = col.ops; noteCall(id, { kind: 'the change', status: 'ok', reason: `merged ${col.merged} duplicate text edit${col.merged === 1 ? '' : 's'}` }); }
             const md = mergeDuplicates(ops, nearHere); // a "new" room that is a place a few steps away: connect to that place instead
             if (md.merged.length) {
                 const rm = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: md.ops }, ...mapCtx() }) });
@@ -269,7 +271,7 @@ async function analyzeFlag(id, { note } = {}) {
 }
 
 export const rewriteSys = (pl, rewrite) => P('change.rewrite_system', { reply: baseReply('json'), rewrite: pl.rewritePiece(rewrite), style: P('change.style') });
-export const rewritePrompt = (pl, { story, what, targets, rewrite }) => P('change.rewrite', { story, what, targets: targetLines(targets), rewrite: pl.rewritePiece(rewrite) });
+export const rewritePrompt = (pl, { story, what, targets, rewrite }) => P('change.rewrite', { story, what, targets: targetLines(targets, rewrite), rewrite: pl.rewritePiece(rewrite) });
 /**
  * The light touch / full rewrite switch on a proposed place change: ask again for ONLY the proposal's existing texts
  * (one call listing them), keep every other edit, the rooms and the lasts, and check the result with rewriteGuard. On any
@@ -299,6 +301,13 @@ async function swapRewrite(id, to) {
         if (!ans || ans.cant || !Array.isArray(ans.ops)) return fail(ans?.cant ? `the model said it can't: ${ans.cant}` : ans?.nothing ? 'the model rewrote nothing' : "the model's answer was not {\"ops\": [...]} JSON");
         const m = mergeRewrite(pr.ops, targets, ans.ops);
         if (m.error) return fail(m.error);
+        const flat = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+        const redone = targets.filter(t => m.rewritten.includes(t.key));
+        if (redone.every(t => m.ops[t.i].op === pr.ops[t.i].op && flat(writtenText(m.ops[t.i])) === flat(writtenText(pr.ops[t.i])))) return fail('the model gave back the same text');
+        if (to === 'light') for (const t of redone) {
+            if (/^append_/.test(m.ops[t.i].op)) continue; // only the added part was asked for: the text before it stays
+            if (textLib.keepShare(t.was, writtenText(m.ops[t.i])) < textLib.KEEP_MIN) return fail(`the light touch dropped most of ${t.label.replace(/ \([^)]*\)(, this side only)?$/, '')}`);
+        }
         const bad = rewriteGuard(pr.ops, m.ops);
         if (bad) return fail(bad);
         const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops: m.ops }, ...mapCtx() }) });

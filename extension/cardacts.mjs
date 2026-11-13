@@ -35,8 +35,10 @@ const stampTicket = (type, id, msg, s, key) => {
 /** What makes each type's card current. ctx: what the card was drawn from. */
 const TICKETS = {
     place({ id }) {
-        const msg = ctx().chat?.[id], f = msg?.extra?.[FLAG_KEY], swipe = swipeOf(msg);
-        return { type: 'place', id, msg, f, key: `${id}|flag`, still: () => ctx().chat?.[id] === msg && msg?.extra?.[FLAG_KEY] === f && !!f && swipeOf(msg) === swipe && f.status !== 'kept' && f.status !== 'discarded' };
+        const msg = ctx().chat?.[id], f = msg?.extra?.[FLAG_KEY], swipe = swipeOf(msg), pr = f?.proposal ?? null;
+        // Stale once the proposal it was drawn for is replaced (a switch, Check again, Rewrite with this): a click on an older
+        // drawing must not approve or switch text the player has not seen.
+        return { type: 'place', id, msg, f, key: `${id}|flag`, still: () => ctx().chat?.[id] === msg && msg?.extra?.[FLAG_KEY] === f && !!f && swipeOf(msg) === swipe && f.status !== 'kept' && f.status !== 'discarded' && (f.proposal ?? null) === pr };
     },
     person({ msg, s, who }) {
         const rev = s.decisionRev ?? 1, token = s.candidate?.token ?? null, swipe = swipeOf(msg);
