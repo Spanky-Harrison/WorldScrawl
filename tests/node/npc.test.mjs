@@ -136,9 +136,9 @@ test('she does not vanish mid-scene; the note escalates, and a staying stamp cov
     const at = i => clock(i === 0 ? 16 : 18, i === 0 ? 30 : 0, 1, i === 0 ? 16 * 3600 : 18 * 3600);
     const late = presentAt(chat, 1, cast, envOf(BAR, at));
     assert.equal(late.length, 1);
-    assert.equal(late[0].overdue, 'Hesk is an hour late for work (high importance).');
+    assert.equal(late[0].overdue, 'Hesk is an hour late for work.');
     const just = presentAt(chat, 1, cast, envOf(BAR, i => clock(i === 0 ? 16 : 17, i === 0 ? 0 : 10, 1, i === 0 ? 16 * 3600 : 17 * 3600 + 600)));
-    assert.equal(just[0].overdue, 'Hesk is due at the forge (work, high importance).');
+    assert.equal(just[0].overdue, 'Hesk should be at the forge by now (work).');
     chat[1].extra = npc([{ type: 'npc_staying', id: 'hesk', elapsed: 17 * 3600 }]);
     const stayed = presentAt(chat, 1, cast, envOf(BAR, i => clock(i === 0 ? 16 : 17, i === 0 ? 0 : 30, 1, i === 0 ? 16 * 3600 : 17 * 3600 + 1800)));
     assert.equal(stayed[0].overdue, '');
@@ -169,7 +169,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     const due = presentAt(shift, 2, cast, envOf(FORGE, i => clock(i < 2 ? 9 : 16)));
     assert.equal(due[0].id, 'hesk');
     assert.notEqual(due[0].kind, 'stay');
-    assert.match(due[0].overdue, /due at/);
+    assert.match(due[0].overdue, /should be at .* by now/);
     const trip = [
         msg('Come.', npc([{ type: 'npc_follow', id: 'hesk' }])),
         msg('Wait.', npc([{ type: 'npc_stay', id: 'hesk', place: FORGE }])),
@@ -178,7 +178,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     ];
     const back = presentAt(trip, 3, cast, envOf(i => (i === 2 ? SQUARE : FORGE), clock(9)));
     assert.equal(back[0].id, 'hesk');
-    assert.match(back[0].overdue, /due at/);
+    assert.match(back[0].overdue, /should be at .* by now/);
     trip.push(msg('Come along.', npc([{ type: 'npc_follow', id: 'hesk' }])));
     const again = presentAt(trip, 4, cast, envOf(i => (i === 2 ? SQUARE : i === 4 ? BAR : FORGE), clock(9)));
     assert.equal(again[0].kind, 'follow');
@@ -196,7 +196,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     assert.equal(hour[0].overdue, '');
     const later = presentAt(sight, 2, [maren], envOf(FORGE, i => clock(i < 2 ? 16 : 17, 10, day)));
     assert.equal(later[0].id, 'maren');
-    assert.match(later[0].overdue, /hour here has passed/);
+    assert.match(later[0].overdue, /would normally have moved on by now/);
 });
 
 test('sightings: one roll per day, hourly falloff, a stamp for the hour, and a better by-name roll', () => {
@@ -223,7 +223,7 @@ test('sightings: one roll per day, hourly falloff, a stamp for the hour, and a b
     const here = presentAt(chat, 0, [maren], envOf(BAR, clock(16, 40, day)));
     assert.equal(here[0].id, 'maren');
     const later = presentAt([chat[0], msg('Still evening.')], 1, [maren], envOf(BAR, i => clock(i === 0 ? 16 : 19, 0, day)));
-    assert.match(later[0].overdue, /hour here has passed/);
+    assert.match(later[0].overdue, /would normally have moved on by now/);
     let seekDay = -1;
     for (let d = 0; d < 800; d++) {
         const a = hashRoll(`sight|maren|${BAR}|${d}`), b = hashRoll(`seek|maren|${BAR}|${d}`);

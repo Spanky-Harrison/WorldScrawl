@@ -6,7 +6,7 @@
     for (const d of tour) { expected += 1; await page.evaluate(d => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go ' + d), d); await waitReqs(); }
     check('tour back in the tavern', (await stored()) === 'riverton:drowned_rat/common_room', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Lore on file: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
+    check('lore: tavern index names the tavern and the region; description fed, lore not', narr.includes('Places with local lore: The Drowned Rat, Riverton.') && !narr.includes("Riverton's oldest tavern") && narr.includes('This location: A low-beamed'));
     expected += 1; await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait until 5pm')); await waitReqs(); // Hesk pours drinks from 16:00
     await queue([{ content: 'Hesk eyes you.' }]);
     await send('[lore] The Drowned Rat', 1);
@@ -166,7 +166,7 @@
     check('arrival note on the same turn: Stable is the current room, with its description, entered through the gate',
         arrNote.includes('Current location: Stable, The Drowned Rat') && arrNote.includes('This location: ' + stableDesc)
         && arrNote.includes('User arrives in the Stable of The Drowned Rat, entering through the gate from Market Lane. They are in the Stable, not the Common Room or any other part of The Drowned Rat.')
-        && (await lastReq()).messages.slice(-2).some(m => m.content.includes('[Engine: this turn ends in the Stable of The Drowned Rat. Do not narrate entering any other room. If the player\'s message assumes they arrive somewhere else or do things there, they actually stopped in the Stable of The Drowned Rat. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]'))
+        && (await lastReq()).messages.slice(-2).some(m => m.content.includes('[At the end of this reply the characters are in the Stable of The Drowned Rat. Do not narrate entering any other room. If the last message assumes they arrive somewhere else or do things there, they actually stopped in the Stable of The Drowned Rat. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]'))
         && arrNote.includes('ending with arriving in the Stable of The Drowned Rat') && !arrNote.includes('Current location: Common Room'), arrNote.slice(0, 1500));
     await go('gate', 'smithy');
     await typedTo('go to the Drowned Rat', 'The Drowned Rat');

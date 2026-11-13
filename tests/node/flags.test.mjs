@@ -238,7 +238,7 @@ test('the story prompt keeps the people list and does not say how to report', ()
     assert.doesNotMatch(moving, /You only narrate/);
     story(moving);
     const lore = ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Drowned Rat', text: 'Old.' }] }, true);
-    assert.match(lore.lore_index, /Lore on file: The Drowned Rat\./);
+    assert.match(lore.lore_index, /Places with local lore: The Drowned Rat\./);
     assert.doesNotMatch(lore.lore_index, /ws_flag/);
     assert.doesNotMatch(ext.newDoorLine('You', 'Hall', true), /ws_flag|ws_npc|ws_wait/);
 });

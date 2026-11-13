@@ -135,5 +135,5 @@
     check('footer re-rendered on chat load', ((await footer()) ?? '').startsWith('Exits:'), String(await footer()));
     const reqs3 = await (await fetch(`${FAKE}/__requests`)).json();
     check('footer never sent to model', !reqs3.some(r => JSON.stringify(r.messages).includes('Exits: ')));
-    check('facts injected (tool mode)', reqs3.some(r => JSON.stringify(r.messages).includes('World state from the game engine')));
+    check('facts injected (tool mode)', reqs3.some(r => JSON.stringify(r.messages).includes('Scene facts. Treat these as true')));
 

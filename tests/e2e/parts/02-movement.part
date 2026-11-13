@@ -28,7 +28,7 @@
     await send('I look at the boats.', 2);
     check('non-movement keeps location', (await stored()) === 'riverton:docks/piers');
     narr = JSON.stringify((await lastReq()).messages);
-    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks') && narr.includes('User has NOT moved this turn and is still at River Docks'));
+    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks') && narr.includes('User stays in River Docks'));
 
     // Invalid answer (not on the list) is treated as none.
     await queue([{ content: 'I think they go to the temple' }, { content: 'no' }, { content: 'Hmm.' }]);
@@ -60,7 +60,7 @@
     await page.evaluate(async () => { const o = await import('/scripts/openai.js'); o.oai_settings.send_if_empty = ''; });
     check('/ws-go moves party', (await stored()) === 'riverton:temple/nave', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('lore: temple index lists only the temple (inherit_lore false), lore itself not fed', narr.includes('Lore on file: Temple of the Tides.') && !narr.includes('A hushed, holy place') && !narr.includes('About Riverton:'), narr.slice(0, 300));
+    check('lore: temple index lists only the temple (inherit_lore false), lore itself not fed', narr.includes('Places with local lore: Temple of the Tides.') && !narr.includes('A hushed, holy place') && !narr.includes('About Riverton:'), narr.slice(0, 300));
     const ex = await page.evaluate(async () => (await SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-exits')).pipe);
     check('/ws-exits lists exits', ex === 'Exits: south (Village Square), grate', String(ex));
     const before = (await (await fetch(`${FAKE}/__requests`)).json()).length;
@@ -118,7 +118,7 @@
     await waitReqs();
     check('game message button moves party', (await stored()) === 'riverton:drowned_rat/upstairs', String(await stored()));
     narr = JSON.stringify((await lastReq()).messages);
-    check('lore: quiet upstairs indexes region lore only (location override), nothing fed', narr.includes('Lore on file: Riverton.') && !narr.includes("Riverton's oldest tavern") && !narr.includes('Background knowledge (lore)'));
+    check('lore: quiet upstairs indexes region lore only (location override), nothing fed', narr.includes('Places with local lore: Riverton.') && !narr.includes("Riverton's oldest tavern") && !narr.includes('Background knowledge (lore)'));
     await queue([{ content: 'Down again.' }]); expected += 1;
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-go down')); await waitReqs();
 
@@ -128,7 +128,7 @@
     lm = await lastMsg();
     narr = JSON.stringify((await lastReq()).messages);
     check('bar: normal reply, no game message', !lm.sys && lm.mes === 'The wood is smooth.' && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
-    check('bar: not-moved injection', narr.includes('User has NOT moved this turn and is still at Common Room (The Drowned Rat)'));
+    check('bar: not-moved injection', narr.includes('User stays in Common Room (The Drowned Rat)'));
 
     // Think tags stripped before matching; a real move still works, and the game messages never reach the model.
     await queue([{ content: '<think>they want to go outside</think>\nOut' }, { content: 'The square.' }]);

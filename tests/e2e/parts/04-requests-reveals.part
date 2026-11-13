@@ -144,7 +144,7 @@
     check('missing room: walks back to the last room in the move history, with a system notice', (await lastMes()).includes('no longer exists in this world') && (await stored()) === 'riverton:streets/square' && exMissing.startsWith('Exits: in'), exMissing + ' | ' + (await lastMes()));
     await page.evaluate(() => document.getElementById('worldscrawl_who').dispatchEvent(new Event('input'))); // refresh the facts prompt
     await settle(800);
-    check('missing room: the narrator gets one "now in" note', /no longer exists in this world\. .* is now in /.test(await page.evaluate(() => SillyTavern.getContext().extensionPrompts?.worldscrawl_facts?.value ?? '')));
+    check('missing room: the narrator gets one "now in" note', / is no longer there\. .* is now in /.test(await page.evaluate(() => SillyTavern.getContext().extensionPrompts?.worldscrawl_facts?.value ?? '')));
         // Swiping the greeting keeps/restamps the start location.
     await page.evaluate(async () => { const c = SillyTavern.getContext(); delete c.chat[0].extra.worldscrawl_location; for (let i = 1; i < c.chat.length; i++) if (c.chat[i].extra) delete c.chat[i].extra.worldscrawl_location; await c.eventSource.emit(c.eventTypes.MESSAGE_SWIPED, 0); });
     await settle(1000);
@@ -181,7 +181,7 @@
     await page.evaluate(() => { const b = document.getElementById('worldscrawl_enabled'); b.checked = true; b.dispatchEvent(new Event('change')); });
     await settle(2000);
     const pOn = await prompts();
-    check('toggle on: world state re-injected and footers back, location from earlier stamps', pOn[0].includes('[World state from the game engine') && (await footers()) > 0 && (await stored()) === locBefore
+    check('toggle on: world state re-injected and footers back, location from earlier stamps', pOn[0].includes('[Scene facts. Treat these as true') && (await footers()) > 0 && (await stored()) === locBefore
         && (await wsExits()).startsWith('Exits:'), JSON.stringify(pOn).slice(0, 200));
     // A chat started while off has no stamps; nothing is stamped while off, even on chat load; turning on stamps the greeting.
     const toggle = on => page.evaluate(v => { const b = document.getElementById('worldscrawl_enabled'); b.checked = v; b.dispatchEvent(new Event('change')); }, on);
