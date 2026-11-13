@@ -186,10 +186,10 @@ export function nameLeaks(text, people) {
 const writesName = (text, name) => { const t = String(text ?? ''); return [...t.matchAll(nameRe(name, 'g'))].some(m => !inPlace(t, m.index, m[0])); };
 /**
  * The player-line learn's test: the real name or alias of p (not yet known to the player) that the player's own line
- * `said` uses and the narrator wrote earlier in `story` (earlier story replies, quoted or plain), as written (exact case,
- * whole words, outside a place name). The name, or '' when none.
+ * `said` uses (whole words, any case) and the narrator wrote earlier in `story` (earlier story replies, quoted or plain;
+ * as written: exact case, whole words, outside a place name). The name, or '' when none.
  */
 export function saidNameOf(p, said, story = []) {
     if (!p?.unknownAs || isKnown(p)) return '';
-    return namesOf(p).find(n => writesName(said, n) && story.some(t => writesName(t, n))) ?? '';
+    return namesOf(p).find(n => nameIn(said, n) && story.some(t => writesName(t, n))) ?? '';
 }
