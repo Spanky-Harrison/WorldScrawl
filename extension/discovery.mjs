@@ -21,6 +21,7 @@ import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { capFirst, findPerson, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
+import { withWait } from './work.mjs';
 import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
@@ -502,8 +503,41 @@ export async function applyTrackerResult(id, parsed) {
     syncSwipeExtra(msg);
     renderPatchCards();
 }
+const trackerRuns = new Map(); // reply message -> its running tracker read
+/** The next turn waits this long at most for the last reply's tracker (ms). An object so tests can shorten it. */
+export const TRACKER_WAIT = { cap: 25000 };
+export const TRACKER_WAIT_LABEL = "finishing the last reply's check";
+let stopWaiting = null;
+/** Stop pressed: the turn stops waiting for the tracker (the interceptor then does nothing more). */
+export function stopTrackerWait() { stopWaiting?.(); }
+/**
+ * Before a turn is built: wait (at most TRACKER_WAIT.cap, shown on the busy line) for the tracker reads of replies before
+ * message `before` (the turn's player line), so the turn sees their results. Never a reply after it: the one a
+ * regenerate or swipe throws away is not waited for, and its late answer is dropped by the tracker's own stale check.
+ * Returns 'none' (nothing running), 'done', 'cap' (went ahead without it; noted on that reply) or 'stopped'.
+ */
+export async function trackerSettled(before, cap = TRACKER_WAIT.cap) {
+    const chat = ctx().chat ?? [];
+    const runs = [...trackerRuns].filter(([m]) => { const i = chat.indexOf(m); return i >= 0 && i < before; });
+    if (!runs.length) return 'none';
+    let timer = null;
+    const r = await withWait(TRACKER_WAIT_LABEL, () => Promise.race([
+        Promise.allSettled(runs.map(([, p]) => p)).then(() => 'done'),
+        new Promise(res => { timer = setTimeout(() => res('cap'), cap); }),
+        new Promise(res => { stopWaiting = () => res('stopped'); }),
+    ]));
+    clearTimeout(timer); stopWaiting = null;
+    if (r === 'cap') for (const [m] of runs) if (trackerRuns.has(m)) noteCall(chat.indexOf(m), { kind: 'tracker', status: 'skipped', reason: 'tracker still running; the reply went ahead without it' });
+    return r;
+}
 /** Hit 3. A small question, not the narrator, and not the narrator's chat. Story is already on screen. */
 async function runTracker(id) {
+    const msg = ctx().chat?.[id];
+    const p = trackReply(id);
+    if (msg) { trackerRuns.set(msg, p); p.finally(() => { if (trackerRuns.get(msg) === p) trackerRuns.delete(msg); }).catch(() => {}); }
+    return p;
+}
+async function trackReply(id) {
     if (!isOn()) return;
     const c = ctx(), chat = c.chat ?? [], msg = chat[id];
     if (!shouldTrackReply(msg, chat, id)) return;

@@ -21,7 +21,7 @@ export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';
 import { calendarLib, chatElapsed, chatWorld, defaultWorldId, effectiveWorld, listedWorlds, loadCalendar, rememberWorlds, worldLiving, worldMissing, worldName, worldNames, worldTimes } from './clock.mjs';
 import { askValid, noteCall } from './dig.mjs';
-import { flagMessage, onReplyForFlags, onStorySwipe, syncSwipeExtra } from './discovery.mjs';
+import { flagMessage, onReplyForFlags, onStorySwipe, stopTrackerWait, syncSwipeExtra, trackerSettled } from './discovery.mjs';
 import { api, barAction, currentLocation, doorAction, ensurePrompts, getStoredLocation, stampHistory, storedStamp } from './doors.mjs';
 import { applyNudge, applyTools, chatKey, describe, ensureStartStamp, excerptOf, expiredNotice, expiryNarrated, expiryNarrationLine, expiryOptions, expiryPickPrompt, postExpiredNotice } from './expiry.mjs';
 import { START_MARKER, exitsCache, exitsText, fetchLocationCached, primeCache, renderAllExits, renderStartButton, warmRooms } from './footer.mjs';
@@ -345,12 +345,21 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
     try {
         const c = ctx();
         const chat = c.chat ?? [];
-        const last = chat[chat.length - 1];
         const s = settings();
-        const bracket = (!type || type === 'normal') && last?.is_user && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked ? parseBracket(last.mes) : null;
-        if (bracket || ((!type || type === 'normal') && last?.is_user && s.moveMode === 'typed'
-            && !last.extra?.worldscrawl_engine && !last.extra?.worldscrawl_intent_checked)) {
-            const r = (bracket && await bracketIntent(last, bracket)) || await parseIntent(last);
+        // The turn waits (capped, on the busy line) for the last reply's tracker, so it is built on that reply's results.
+        // Only replies before the turn's player line: a regenerated or swiped reply is not waited for. Stop ends the wait.
+        if (!type || type === 'normal' || type === 'regenerate' || type === 'swipe') {
+            let before = chat.length;
+            while (before > 0 && !(chat[before - 1]?.is_user && !chat[before - 1].is_system)) before--;
+            if (before > 0 && await trackerSettled(before - 1) === 'stopped') return;
+        }
+        // The brackets and typed moves are read from this turn's player line (turnPlayerIndex), not the last message: a
+        // notice, system line or /hide'd line after it does not hide them. None in a group's later members.
+        const turnAt = !type || type === 'normal' ? turnPlayerIndex(chat) : -1;
+        const turn = turnAt >= 0 ? chat[turnAt] : null;
+        const bracket = turn && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked ? parseBracket(turn.mes) : null;
+        if (bracket || (turn && s.moveMode === 'typed' && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked)) {
+            const r = (bracket && await bracketIntent(turn, bracket)) || await parseIntent(turn);
             await c.saveChat();
             if (r.kind === 'help' || r.kind === 'bracket_failed') {
                 abort(true); // answered here: the narrator is not called
@@ -874,7 +883,7 @@ const openCarriers = new WeakSet();
     // generation (generations.mjs): a second start never closes the first one's bookkeeping.
     onGenFailure((g, n) => { const len = ctx().chat?.length ?? 0; const at2 = g.type === 'swipe' ? len - 2 : len - 1; if (at2 >= 0) g.at = at2; noteCall(g.at, n); console.log(`[WorldScrawl] narrator failed on #${g.at}: ${n.reason}`); });
     if (eventTypes.GENERATION_STARTED) eventSource.on(eventTypes.GENERATION_STARTED, (type, opts, dry) => { if (isOn()) genStarted(ctx().chat, type, opts, dry); });
-    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, () => { genStopped(); });
+    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, () => { genStopped(); stopTrackerWait(); });
     if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => { setTimeout(genEnded, 800); });
     if (eventTypes.MESSAGE_RECEIVED) eventSource.on(eventTypes.MESSAGE_RECEIVED, () => { genReceived(); });
     if (eventTypes.GROUP_WRAPPER_STARTED) eventSource.on(eventTypes.GROUP_WRAPPER_STARTED, () => setGroupBusy(true));

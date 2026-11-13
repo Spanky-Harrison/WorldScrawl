@@ -73,6 +73,13 @@ export async function withCall(kind, shown, fn) {
     callsChanged();
     try { return await fn(); } finally { calls.delete(token); callsChanged(); }
 }
+/** Wait on `fn` (not a model call: the turn waiting for one) with `label` on the busy line while it runs. */
+export async function withWait(label, fn) {
+    const token = Symbol('wait');
+    calls.set(token, { kind: 'wait', label, shown: null });
+    callsChanged();
+    try { return await fn(); } finally { calls.delete(token); callsChanged(); }
+}
 /** The calls running now: [{kind, label, shown}]. */
 export const liveCalls = () => [...calls.values()];
 /** What the busy line says now: each running call no card shows, once. */
