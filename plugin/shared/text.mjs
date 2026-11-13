@@ -14,10 +14,10 @@ const words = s => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' '
 export const KEEP_MIN = 0.5;
 /**
  * How much of `before` an edit kept: the share (0..1) of its sentences that `after` still holds word for word
- * (case and punctuation aside). A text of `exempt` sentences or fewer counts as kept (1): rewording one of two
- * sentences is a light touch. The one keep check for light touches on places and people.
+ * (case and punctuation aside). A text of `exempt` sentences or fewer counts as kept (1): a one-sentence text can only
+ * change by rewording it. Rewording one of two sentences keeps half. The one keep check for light touches on places and people.
  */
-export function keepShare(before, after, { exempt = 2 } = {}) {
+export function keepShare(before, after, { exempt = 1 } = {}) {
     const was = splitSentences(before).map(words).filter(Boolean);
     if (was.length <= exempt) return 1;
     const now = ` ${words(after)} `;
