@@ -287,7 +287,7 @@ test('the op docs say create_place makes the exit pair and explain ref / new:', 
 test('change prompts count temporary changes and drop the "lasting" wording', () => {
     const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
     const by = Object.fromEntries(def.prompts.map(e => [e.id, e.text]));
-    for (const id of ['change.system', 'change.scope', 'change.scope_system', 'narration.flag_hint']) assert.doesNotMatch(by[id], /lasting|permanently/, id);
+    for (const id of ['change.system', 'change.scope', 'change.scope_system']) assert.doesNotMatch(by[id], /lasting|permanently/, id);
     assert.match(by['change.system'], /portal open for 1 hour/);
     assert.match(by['change.system'], /Moment-to-moment action/);
 });

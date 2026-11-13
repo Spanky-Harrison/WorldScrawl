@@ -461,26 +461,9 @@ test('canary narrator: asleep off the map, fed lore with her token and her plain
     assert.deepEqual(leaks(f), []);
 });
 
-test('canary narrator: the lore tool answers about her by shown name, history masked', async () => {
-    const { c, tools } = boot();
-    ext.settings().flagTools = true;
-    const { registerTools } = await import('../../extension/discovery.mjs');
-    registerTools(new Set(['ws_flag']));
-    say(c, 'Who is she?');
-    const out = await tools.ws_flag.action({ action: 'lore', note: 'the landlady' });
-    assert.match(out, /^The landlady's history: The landlady came to Riverton as a bargeman's daughter; the landlady to her friends\.$/);
-    delete ext.settings().flagTools;
-});
-
-test('canary narrator: the ws_npc tool takes her handle (detail answers masked; a tag by handle lands on her)', async () => {
-    const { c, tools } = boot();
-    const { registerTools } = await import('../../extension/discovery.mjs');
-    registerTools(new Set(['ws_npc']));
+test('canary narrator: a [ws_npc] tag by her handle lands on her', async () => {
+    const { c } = boot();
     say(c, 'I look at the landlady.');
-    const out = await tools.ws_npc.action({ action: 'detail', id: handle() });
-    assert.match(out, /^Personality: The landlady's inn/);
-    assert.deepEqual(leaks(out), []);
-    assert.equal(await tools.ws_npc.action({ action: 'detail', id: 'nobody' }), 'No saved person with that id is here.');
     const id = reply(c, `She glares. [ws_npc: fact | ${handle()} | a scar on her knuckle]`);
     await onReplyForFlags(id);
     assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_fact' && s.id === 'hesk'), 'stored under the cast id');
@@ -508,7 +491,7 @@ test('canary side calls: the tracker lists her as "the landlady [handle]"; after
 });
 
 test('canary side calls: first-meeting disposition and the appearance rebuild never see her name', async () => {
-    const { c, calls, tools } = boot();
+    const { c, calls } = boot();
     const said = 'I wave at everyone in the room.';
     const user = say(c, said);
     await scene.prepareNpcs(user);
@@ -517,8 +500,6 @@ test('canary side calls: first-meeting disposition and the appearance rebuild ne
     assert.match(dispo.prompt, /the landlady/i);
     assert.deepEqual(leaks(engineOnly(dispo, said)), []);
     calls.length = 0;
-    const { registerTools } = await import('../../extension/discovery.mjs');
-    registerTools(new Set(['ws_npc']));
     const id = reply(c, `Her braids turn white. [ws_npc: appearance | ${handle()} | hair turned white | looks,body | 1 hour]`);
     await onReplyForFlags(id);
     const rebuild = calls.filter(x => /body/i.test(x.prompt) && !/Reply with JSON only:\n\{"place"/.test(x.prompt));

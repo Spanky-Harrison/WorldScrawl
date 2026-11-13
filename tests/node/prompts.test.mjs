@@ -153,7 +153,7 @@ test('tiny fragments are pieces', () => {
 });
 test('format-critical prompts are locked with a one-line reason; creative ones are not', () => {
     for (const id of ['intent.system', 'travel.system', 'dig.system', 'change.system', 'change.scope_system', 'discover.system', 'change.patch_retry', 'discover.retry',
-        'narration.flag_hint', 'narration.wait_hint', 'narration.new_door_tags', 'narration.new_door_tools', 'look.closed_door',
+        'look.closed_door',
         ...def.prompts.filter(e => e.id.startsWith('intent.option.')).map(e => e.id)]) {
         assert.equal(typeof byId[id].locked, 'string', id); assert.ok(byId[id].locked.length > 5 && !byId[id].locked.includes('\n'), id);
     }
@@ -195,7 +195,7 @@ test('Writing style: open by default, holds the prose prompts, each says which p
     assert.ok(def.groups.slice(1).every(g => !g.open));
     for (const id of ['narration.move', 'narration.travel', 'narration.look_around', 'narration.exits_hint', 'dig.style', 'expand.system', 'expand.question'])
         assert.equal(byId[id].group, 'style', id);
-    for (const id of ['narration.header', 'narration.rules', 'narration.arrival_reminder', 'narration.flag_hint', 'narration.wait_hint']) { assert.equal(byId[id].group, 'narration', id); assert.ok(byId[id].locked, id); }
+    for (const id of ['narration.header', 'narration.rules', 'narration.arrival_reminder']) { assert.equal(byId[id].group, 'narration', id); assert.ok(byId[id].locked, id); }
     for (const e of def.prompts.filter(e => e.group === 'style')) assert.match(e.description, /^Used by /, e.id);
 });
 }
@@ -285,42 +285,9 @@ const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.jso
 const all = []; (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.id && typeof o.text === 'string') all.push(o); Object.values(o).forEach(walk); } })(def);
 const P = id => all.find(p => p.id === id);
 
-test('npc_tags / npc_tools / npc_tool guide memory and disposition, keep fact, keep the locked formats', () => {
-    for (const id of ['narration.npc_tags', 'narration.npc_tools', 'narration.npc_tool']) {
-        const t = P(id).text;
-        for (const w of ['fact', 'memory', 'disposition', 'appearance', 'remember tomorrow', 'lied to', 'threatened', 'helped', 'insulted', 'promise', 'point of view', 'one ', 'hostile, unfriendly, indifferent, friendly or helpful', 'reason']) assert.ok(t.includes(w), `${id}: ${w}`);
-    }
-    assert.equal(P('narration.npc_tags').locked, 'The game reads these [ws_npc: …] tags.');
-    assert.equal(P('narration.npc_tools').locked, 'The game reads the ws_npc tool.');
-    const tags = P('narration.npc_tags').text;
-    const tools = P('narration.npc_tools').text;
-    const tool = P('narration.npc_tool').text;
-    // Appearance leads; concrete example; fact lasts drop disguise; tools intent-enough.
-    assert.match(tags, /^When someone's Looks, Body or Outfit changes/);
-    assert.match(tags, /\[ws_npc: appearance \| p3k9 \| magically young \| body \| 1 hour\]/);
-    assert.doesNotMatch(tags, /a bruise, a mood, a disguise/);
-    assert.match(tags, /a bruise, a mood/);
-    assert.match(tools, /^When someone's Looks, Body or Outfit changes/);
-    assert.match(tools, /magically young/);
-    assert.match(tools, /Intent, fields and lasts are enough/);
-    assert.doesNotMatch(tools, /rewritten looks\/body\/outfit text/);
-    assert.match(tool, /magically young/);
-    assert.match(tool, /Intent, fields and lasts are enough/);
-    assert.match(tags, /\[ws_npc: memory \| their-id \|/); assert.match(tags, /\[ws_npc: disposition \| their-id \| value \| short reason\]/);
-    assert.match(tags, /\[ws_npc: appearance \| their-id \|/);
+test('person updates come from the tracker: its prompt guides memory, disposition and appearance; change style and the rebuild prompts keep their formats', () => {
     assert.match(P('change.style').text, /writes places only/);
     assert.doesNotMatch(P('change.style').text, /people-here/);
-    assert.match(tags, /A place changing is not a reason to report a person update/);
-    assert.match(tools, /A place changing is not a reason to call this/);
-    assert.match(tool, /Do not call this because a place changed/);
-    for (const t of [tags, tools, tool]) {
-        assert.match(t, /only when Looks, Body or Outfit actually changed/);
-        assert.match(t, /entered, was described, or was looked at/);
-        assert.match(t, /intent like "looks" or "appeared"/);
-        assert.match(t, /walk in soaked/);
-    }
-    for (const [, body] of tags.matchAll(/\[ws_npc:\s*([^\]]+)\]/g)) if (!/their-id/.test(body)) assert.ok(parseNpcTag(body), `example parses: ${body}`);
-    assert.ok(/clearly shifts/.test(tags) && /clearly shifts/.test(tools));
     // Rebuild side-call prompts exist and stay locked to JSON fields.
     assert.match(P('npc.appearance_rebuild_system').text, /JSON object/);
     assert.match(P('npc.appearance_rebuild').text, /Active intents/);
@@ -365,5 +332,20 @@ test('npc memory prompts demand real names', async () => {
   const s = readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8');
   const j = JSON.parse(s); const all = JSON.stringify(j);
   assert.doesNotMatch(all, /The stranger lied/);
-  assert.equal((all.match(/never \\"the stranger\\"/g) || []).length, 3); // narrator tag, narrator tool, tracker
+  assert.equal((all.match(/never \\"the stranger\\"/g) || []).length, 1); // the tracker
+});
+
+test('P2: the dead narrator tool and tag-hint prompts are gone from the prompt manager; no prompt offers a ws_flag, ws_wait or ws_npc tool', async () => {
+  const { readFileSync } = await import('node:fs');
+  const j = JSON.parse(readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
+  const ids = new Set(j.prompts.map(e => e.id));
+  for (const id of ['narration.flag_tool', 'narration.flag_tool_strict', 'narration.flag_tool_proactive', 'narration.flag_action', 'narration.flag_action_strict', 'narration.flag_action_proactive',
+    'narration.wait_tool', 'narration.npc_tool', 'narration.npc_tools', 'narration.npc_tags', 'narration.new_door_tools', 'narration.new_door_tags', 'narration.lore_how_tags', 'narration.lore_how_tools',
+    'narration.flag_hint', 'narration.discover_strict', 'narration.discover_proactive', 'narration.wait_hint']) assert.ok(!ids.has(id), id);
+  assert.equal(j.placeholders.discover, undefined);
+  for (const e of j.prompts) assert.doesNotMatch(`${e.title} ${e.description} ${e.locked ?? ''} ${e.text}`, /ws_(flag|wait|npc) tool|tool's .* action|call ws_(flag|wait|npc)|reporter tools/i, e.id);
+  for (const id of ['narration.rules_tools', 'narration.rules', 'narration.lore_index', 'narration.new_door', 'narration.offmap_found']) assert.ok(ids.has(id), `${id} is still live`);
+  const ext = await import('../../extension/index.js');
+  assert.deepEqual(ext.TOOL_NAMES, ['ws_look', 'ws_move']);
+  for (const fn of ['flagHint', 'flagToolText', 'flagActionText', 'waitHint']) assert.equal(ext[fn], undefined, fn);
 });

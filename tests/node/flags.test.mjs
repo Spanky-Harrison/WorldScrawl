@@ -32,22 +32,16 @@ test('flagging a player message flags the reply from that message on (no "flag t
     assert.match(src, /if \(r >= 0\) return flagMessage\(r, \{ note, hint, start: id, source, kind \}\)/);
     assert.match(src, /pendingUserFlag = \{ chat: chatKey\(\), start: id/);
 });
-test('Proactive room discovery: off by default; off wording only counts doors actually opened, never scenery', () => {
+test('Proactive room discovery: off by default', () => {
     assert.match(src, /proactiveDiscovery: false/);
     assert.doesNotMatch(src, /reviewDiscoveries/);
     assert.equal(ext.proactiveDiscovery(), false);
-    for (const t of [ext.flagHint(false), ext.flagToolText(false), ext.flagActionText(false)]) {
-        assert.match(t, /actually open/); assert.match(t, /scenery/); assert.doesNotMatch(t, /\{\{/);
-    }
-    for (const t of [ext.flagHint(true), ext.flagToolText(true), ext.flagActionText(true)]) { assert.match(t, /names a room or passage/); assert.doesNotMatch(t, /\{\{/); }
-    assert.match(ext.flagHint(false), /\[ws_flag: discover \| which door\]/);
 });
 test('a scene override (for a story engine) wins over the setting, and null falls back', () => {
     const c = SillyTavern.getContext();
     assert.equal(ext.setSceneOverride('proactiveDiscovery', true), true);
     assert.equal(ext.proactiveDiscovery(), true);
     assert.deepEqual(c.chatMetadata[ext.SCENE_KEY], { proactiveDiscovery: true });
-    assert.match(ext.flagHint(), /names a room or passage/);
     ext.setSceneOverride('proactiveDiscovery', null);
     assert.equal(ext.proactiveDiscovery(), false);
     assert.equal(typeof globalThis.worldscrawlScene.set, 'function');
@@ -174,7 +168,6 @@ const { validateRecord } = await import('../../plugin/npc.mjs');
 const { rememberWorlds } = await import('../../extension/clock.mjs');
 const { applyTools } = await import('../../extension/expiry.mjs');
 const { toolsToRegister } = await import('../../extension/discovery.mjs');
-const { pendingNpc, toolNpcStamp } = await import('../../extension/scene.mjs');
 const ext = await import('../../extension/index.js');
 const def = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
 ext.setPrompts(def);
@@ -257,9 +250,8 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
     const s = ext.settings();
     s.flagNpcs = false;
     s.moveMode = 'typed';
-    const reply = async (mes, toolStamps = []) => {
+    const reply = async mes => {
         rebuilds = 0;
-        pendingNpc.splice(0, pendingNpc.length, ...toolStamps);
         const msg = { mes, is_user: false, swipe_id: 0, extra: {} };
         c.chat = [msg];
         await ext.onReplyForFlags(0);
@@ -276,28 +268,15 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
     const empty = await reply('[ws_npc: appearance | hesk]');
     assert.equal((empty.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
     assert.match(JSON.stringify(empty.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
-    const tool = toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'looks' });
-    const fromTool = await reply('Hesk steps in.', [tool]);
-    assert.equal((fromTool.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
-    assert.equal(rebuilds, 0);
     const soaked = await reply('Hesk walks in soaked. [ws_npc: appearance | hesk | soaked from the rain | outfit]');
     const stamp = (soaked.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
     assert.equal(stamp?.intent, 'soaked from the rain');
     assert.equal(stamp?.id, 'hesk');
     assert.equal(stamp?.committed, null);
     assert.equal(soaked.extra?.worldscrawl_appearance?.jobs?.[0]?.status, 'failed');
-    const changed = await reply('Noted.', [toolNpcStamp({ action: 'appearance', id: 'hesk', intent: 'looks', outfit: 'a soaked cloak', lasts: '1 hour' })]);
-    const real = (changed.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
-    const { npcAt } = await import('../../extension/npc.mjs');
-    const live = npcAt(c.chat, 0, [hesk], 'hesk');
-    assert.equal(real?.candidate?.layer?.outfit, 'a soaked cloak');
-    assert.equal(real?.committed, null, 'a temporary appearance waits for approval');
-    assert.notEqual(live?.outfit, 'a soaked cloak');
-    assert.equal(rebuilds, 0, 'explicit outfit text does not ask for a field rewrite before approval');
     } finally {
         const s = ext.settings();
         Object.assign(s, saved);
-        pendingNpc.splice(0, pendingNpc.length);
     }
 });
 
