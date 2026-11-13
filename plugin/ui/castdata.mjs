@@ -1,7 +1,7 @@
 // The cast browser and editor's data side (pure, no DOM): the list (cast files plus people created in play), search and
 // filters, the editor form <-> cast record, inline validation, the in-play view's rows, and the map's NPC markers.
 // The server validates again on save (plugin/npc.mjs validateRecord); these checks are for showing problems inline.
-import { NPC_ID, authorRecord } from '../shared/npc.mjs';
+import { NPC_ID, authorRecord, isNowhere, mightTable, parseMightOption } from '../shared/npc.mjs';
 import * as C from '../shared/cards.mjs';
 export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
 export const IMPORTANCE = ['low', 'normal', 'high'];
@@ -9,13 +9,33 @@ const HM = /^(\d{1,2}):(\d{2})$/;
 const hmOk = t => { const m = HM.exec(String(t ?? '').trim()); return !!m && +m[1] < 24 && +m[2] < 60; };
 const s = v => (typeof v === 'string' ? v.trim() : '');
 
-/** Every place a cast record names (schedule and sighting). */
+/** Every place a cast record names (schedule entries, and the map places a might entry lists). */
 export function npcPlaces(rec) {
     const out = [];
-    for (const e of rec?.schedule ?? []) if (e?.place) out.push(e.place);
-    if (rec?.seen_at?.place) out.push(rec.seen_at.place);
+    for (const e of rec?.schedule ?? []) {
+        if (e?.place) out.push(e.place);
+        if (Array.isArray(e?.might)) for (const o of mightShares(e)) if (o.text.includes(':')) out.push(o.text);
+    }
     return [...new Set(out)];
 }
+/** A might entry's options with their percent shares: [{text, share}] (from a loaded entry's table, or worked out from the written list). */
+export function mightShares(e) {
+    if (Array.isArray(e?.options)) return e.options.map(o => ({ text: o.text, share: o.share ?? 0, dropped: !!o.dropped }));
+    return mightTable((Array.isArray(e?.might) ? e.might : []).map(parseMightOption).filter(Boolean)).options.map(o => ({ text: o.text, share: o.share }));
+}
+/** "might be at Market Lane 20%, the store 20% (wandering), 10:00–13:00": a might entry for the cast panel (away is left out). */
+export function mightText(e, placeName = a => a) {
+    const opts = mightShares(e).filter(o => !isNowhere(o.text) && !o.dropped).map(o => `${o.text.includes(':') ? placeName(o.text) : o.text} ${o.share}%`);
+    return `might be at ${opts.join(', ') || 'nowhere in particular'}${e?.wandering ? ' (wandering)' : ''}, ${e?.from ?? ''}–${e?.to ?? ''}`;
+}
+const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'importance'];
+/** A might entry as written (a loaded entry keeps it as `authored`), for the editor to carry through unchanged. */
+const writtenMight = e => {
+    const src = e?.authored && typeof e.authored === 'object' ? e.authored : e;
+    const out = {};
+    for (const k of Object.keys(src ?? {})) if (MIGHT_KEYS.includes(k)) out[k] = JSON.parse(JSON.stringify(src[k]));
+    return out;
+};
 /** Does an address sit at or inside a place / subregion (riverton:streets) / region (riverton)? */
 export const within = (addr, p) => !!addr && !!p && (addr === p || addr.startsWith(`${p}/`) || (!p.includes(':') && addr.startsWith(`${p}:`)));
 
@@ -27,7 +47,7 @@ export function castRows(cast = [], play = []) {
     const byId = new Map((play ?? []).map(n => [n.id, n]));
     const rows = [];
     for (const rec of cast ?? []) {
-        const broken = !rec.ok || (rec.schedule ?? []).some(e => e.broken) || !!rec.seen_at?.broken;
+        const broken = !rec.ok || (rec.schedule ?? []).some(e => e.broken);
         const p = rec.ok ? byId.get(rec.id) ?? null : null;
         rows.push({ key: `file:${rec.file ?? rec.id}`, id: rec.id ?? '', name: rec.name || rec.id || rec.file || '(unnamed)', line: rec.line ?? '', status: broken ? 'broken' : 'cast',
             rec, play: p, places: npcPlaces(rec), disposition: (p?.disposition?.player?.value ?? rec.disposition?.player?.value) || 'unknown', problems: rec.problems ?? [] });
@@ -83,11 +103,11 @@ export function formFromRecord(rec = null) {
         facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], memory: Array.isArray(raw.memory) ? raw.memory.map(x => (typeof x === 'string' ? x : x?.note ?? '')) : [],
         disposition: s(d.value) || '', reason: s(d.reason),
         others: Object.fromEntries(Object.entries(raw.disposition ?? {}).filter(([k]) => k !== 'player')),
-        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => ({
+        // A might-be-at row is read-only here: it is carried through as written (editing it comes later).
+        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => (Array.isArray(e?.might) ? { mightRow: writtenMight(e) } : {
             place: s(e?.place), offmap: !s(e?.place) && !!(s(e?.activity) || s(e?.where) || s(e?.near)),
             activity: s(e?.activity), where: s(e?.where), near: s(e?.near), from: s(e?.from), to: s(e?.to), importance: s(e?.importance),
         })),
-        seen: raw.seen_at && typeof raw.seen_at === 'object' ? { place: s(raw.seen_at.place), hour: raw.seen_at.hour ?? '', chance: raw.seen_at.chance ?? 0.5 } : null,
     };
 }
 export function recordFromForm(f) {
@@ -108,6 +128,7 @@ export function recordFromForm(f) {
     if (s(f.disposition)) disp.player = { value: s(f.disposition), ...(s(f.reason) ? { reason: s(f.reason) } : {}) };
     if (Object.keys(disp).length) out.disposition = disp;
     const sched = (f.schedule ?? []).map(e => {
+        if (e.mightRow) return JSON.parse(JSON.stringify(e.mightRow)); // unchanged
         const placed = !e.offmap && !!s(e.place);
         const x = { activity: s(e.activity) };
         if (placed) x.place = s(e.place);
@@ -120,9 +141,8 @@ export function recordFromForm(f) {
         if (s(e.importance)) x.importance = s(e.importance);
         if (x.place) { const { place, activity, ...rest } = x; return { place, activity, ...rest }; }
         return x;
-    }).filter(e => e.activity);
+    }).filter(e => e.activity || Array.isArray(e.might));
     if (sched.length) out.schedule = sched;
-    if (f.seen && s(f.seen.place)) out.seen_at = { place: s(f.seen.place), hour: Number(f.seen.hour), chance: Number(f.seen.chance) };
     const deep = {};
     const secrets = (f.secrets ?? []).map(s).filter(Boolean);
     if (secrets.length) deep.secrets = secrets;
@@ -144,7 +164,7 @@ export function slugFor(name, taken = new Set()) {
 }
 
 /**
- * Inline problems: {field: message} with keys like 'id', 'name', 'schedule.0.place', 'seen.hour'.
+ * Inline problems: {field: message} with keys like 'id', 'name', 'schedule.0.place'. A read-only might row is not checked here.
  * `places` is a Set of this world's addresses; `ids` the ids other cast files use (not this one's own).
  */
 export function formProblems(f, { places = null, ids = new Set() } = {}) {
@@ -157,6 +177,7 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
     if (!s(f.line)) p.line = 'One line about who they are is required.';
     if (s(f.disposition) && !DISPOSITIONS.includes(s(f.disposition))) p.disposition = `One of ${DISPOSITIONS.join(', ')}.`;
     (f.schedule ?? []).forEach((e, i) => {
+        if (e.mightRow) return;
         if (e.offmap) { /* a placeless entry: off the map, place not required */ }
         else if (!s(e.place)) p[`schedule.${i}.place`] = 'Choose a place on the map, or tick Off the map.';
         else if (places && !places.has(s(e.place))) p[`schedule.${i}.place`] = `${e.place} is not in this world. Choose another place.`;
@@ -165,19 +186,11 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
         if (s(e.to) && !hmOk(e.to)) p[`schedule.${i}.to`] = 'A time like 17:00.';
         if (s(e.importance) && !IMPORTANCE.includes(s(e.importance))) p[`schedule.${i}.importance`] = 'low, normal or high.';
     });
-    if (f.seen) {
-        if (!s(f.seen.place)) p['seen.place'] = 'Choose a place on the map.';
-        else if (places && !places.has(s(f.seen.place))) p['seen.place'] = `${f.seen.place} is not in this world. Choose another place.`;
-        const h = Number(f.seen.hour);
-        if (f.seen.hour === '' || !Number.isInteger(h) || h < 0 || h > 23) p['seen.hour'] = 'An hour from 0 to 23.';
-        const c = Number(f.seen.chance);
-        if (f.seen.chance === '' || !Number.isFinite(c) || c < 0 || c > 1) p['seen.chance'] = 'A chance from 0 to 1.';
-    }
     (f.relationships ?? []).forEach((r, i) => { if (s(r.text) && !s(r.who)) p[`relationships.${i}.who`] = 'Who is this about?'; });
     return p;
 }
 
-const KIND = { follow: 'following', stay: 'staying', sight: 'seen here', schedule: 'on schedule', scene: 'here' };
+const KIND = { follow: 'following', stay: 'staying', might: 'turned up', schedule: 'on schedule', scene: 'here' };
 /**
  * Looks, Body and Outfit the cast card shows. In a chat that is the effective appearance
  * (base plus active effects and rebuild caches — the same text the narrator is told).
@@ -418,7 +431,7 @@ export function permanentSchedule(schedule, where, place) {
     const label = String(where ?? '').trim();
     let changed = 0;
     const out = (schedule ?? []).map(e => {
-        if (!e || typeof e !== 'object' || String(e.place ?? '').trim()) return e;
+        if (!e || typeof e !== 'object' || String(e.place ?? '').trim() || Array.isArray(e.might)) return e;
         if (String(e.where ?? '').trim() !== label) return e;
         changed++;
         const x = { place, activity: e.activity ?? '' };
@@ -447,14 +460,11 @@ export function whyRows(play, placeName = a => a) {
     rows.push(['Record', `${w.tier}${w.from === 'play' ? ', created in this chat' : ', from the cast file'}`]);
     rows.push(['Following', w.following ? (w.following.who === 'player' ? 'the player' : w.following.who) : 'no']);
     if (w.held) rows.push(['Staying', `${placeName(w.held.place)} (since #${w.held.at}${w.held.active ? ', still holding' : ', hold over'})`]);
-    if (w.schedule) rows.push(['Schedule', w.schedule.offmap ? w.schedule.why : w.schedule.entry >= 0 ? `entry ${w.schedule.entry + 1}: ${w.schedule.activity || ''} at ${placeName(w.schedule.address)}${w.schedule.how && w.schedule.how !== 'here' && w.schedule.how !== 'exact' ? ` (${w.schedule.how})` : ''}. ${w.schedule.why}` : w.schedule.why]);
+    if (w.schedule) rows.push(['Schedule', w.schedule.might || w.schedule.offmap ? w.schedule.why : w.schedule.entry >= 0 ? `entry ${w.schedule.entry + 1}: ${w.schedule.activity || ''} at ${placeName(w.schedule.address)}${w.schedule.how && w.schedule.how !== 'here' && w.schedule.how !== 'exact' ? ` (${w.schedule.how})` : ''}. ${w.schedule.why}` : w.schedule.why]);
     const founds = activeFounds(play);
     if (founds.length) rows.push(['Found', founds.map(f => `${f.where || '(no label)'} → ${placeName(f.place)} (message #${f.msg})`).join('; ')]);
-    if (play.foundAttempts?.length) rows.push(['Found flags', play.foundAttempts.map(a => `${a.ok ? 'accepted' : 'rejected'}${a.source ? ` (${a.source})` : ''}: ${a.reason}`).join(' · ')]);
-    if (w.sighting) {
-        const g = w.sighting;
-        rows.push(['Sighting', g.active ? `${placeName(g.resolved)} around ${g.hour}:00, peak ${Math.round(g.chance * 100)}%. Today (day ${g.day}): chance now ${g.now}, roll ${g.roll}${g.seekRoll != null ? `, by-name roll ${g.seekRoll}` : ''} → ${g.wouldShow ? 'shows' : 'no-show'}${g.stamped ? ' (appearance stamped)' : ''}` : `${g.place}: ${g.note}`]);
-    }
+    if (play.foundAttempts?.length) rows.push(['Found flags', play.foundAttempts.map(a => `${a.ok ? 'accepted' : 'rejected'}${a.source ? ` (${a.source})` : ''}: ${a.reason}${a.detail ? ` (${a.detail})` : ''}`).join(' · ')]);
+    if (w.schedule?.might) rows.push(['Turned up', w.schedule.might.stamped ? 'yes, for this block (appearance stamped)' : 'not stamped yet']);
     rows.push(['Toward the player', `${w.disposition?.value ?? 'unknown'}${w.disposition?.reason ? ` (${w.disposition.reason})` : ''}`]);
     rows.push(['Knows the player', relText(play.rel?.player)]);
     rows.push(['Memory', w.memory?.length ? w.memory.join('; ') : '(none)']);
@@ -475,7 +485,7 @@ export function permanentProblem(place, basePlaces) {
  * near, from, to, src: 'card'|'chat', notes: [], current}. `rec` is the card record; null play = the card as is.
  */
 export function liveSchedule(rec, play) {
-    const key = e => [e?.place ?? '', e?.activity ?? '', e?.where ?? '', e?.near ?? '', e?.from ?? '', e?.to ?? ''].join('|');
+    const key = e => [e?.place ?? '', e?.activity ?? '', e?.where ?? '', e?.near ?? '', e?.from ?? '', e?.to ?? '', JSON.stringify(e?.might ?? null), e?.wandering ? 'w' : ''].join('|');
     const card = (rec?.schedule ?? []).filter(e => e && !e.broken);
     const cardKeys = new Set(card.map(key));
     const eff = play?.record?.schedule ?? card;
@@ -484,6 +494,12 @@ export function liveSchedule(rec, play) {
     const overriding = !!(play?.following || (play?.held && play?.why?.held?.active !== false));
     const rows = eff.map(e => {
         const notes = [];
+        if (Array.isArray(e.might)) {
+            const src = cardKeys.has(key(e)) ? 'card' : 'chat';
+            if (src === 'chat') notes.push('changed in this chat');
+            const current = !overriding && !!cur?.might && (cur.activity ?? '') === (e.activity ?? '') && (cur.might.from ?? '') === (e.from ?? '');
+            return { place: '', might: e, activity: e.activity ?? '', where: '', near: '', from: e.from ?? '', to: e.to ?? '', importance: e.importance ?? '', src, notes, current };
+        }
         const src = cardKeys.has(key(e)) ? 'card' : 'chat';
         if (src === 'chat') notes.push('changed in this chat');
         let place = e.place ?? '';

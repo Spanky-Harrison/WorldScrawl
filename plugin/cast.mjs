@@ -180,6 +180,15 @@ export function tidyRecord(raw) {
     }
     if (Array.isArray(raw.schedule)) {
         const sched = raw.schedule.filter(isObj).map(e => {
+            if (Array.isArray(e.might)) { // a might-be-at entry is kept as written
+                const x = {};
+                for (const k of Object.keys(e)) { // in the order written
+                    if (k === 'might') x.might = e.might.filter(o => typeof o === 'string').map(o => o.trim()).filter(Boolean);
+                    else if (['activity', 'from', 'to', 'importance'].includes(k) && s(e[k])) x[k] = s(e[k]);
+                    else if (k === 'wandering' && typeof e.wandering === 'boolean') x.wandering = e.wandering;
+                }
+                return x;
+            }
             const x = { activity: s(e.activity) };
             if (s(e.place)) x.place = s(e.place);
             else {
@@ -194,7 +203,6 @@ export function tidyRecord(raw) {
         }).filter(e => e.activity);
         if (sched.length) out.schedule = sched;
     }
-    if (isObj(raw.seen_at) && s(raw.seen_at.place)) out.seen_at = { place: s(raw.seen_at.place), hour: raw.seen_at.hour, chance: raw.seen_at.chance ?? 0.5 };
     return out;
 }
 

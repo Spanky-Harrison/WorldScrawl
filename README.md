@@ -240,8 +240,19 @@ the old "In this chat" block. **Raw** is the cast file, or the played record whe
 lists loader problems. **Changes** lists stamps, each linked to its message.
 
 Selecting someone outlines their current place and schedule stops on the map. With a place selected, **Who's here**
-lists who is there now and who should be but is not, with the reason (another schedule entry, a no-show roll today,
-following someone).
+lists who is there now and who should be but is not, with the reason (another schedule entry, a might-be-at block that
+rolled somewhere else, following someone).
+
+**Might be at.** A schedule entry with `might` instead of `place` is a time block with options and odds:
+`{ "might": ["riverton:streets/market_lane", "riverton:general_store/shop", "nowhere(80)"], "activity": "running errands", "from": "10:00", "to": "12:00", "wandering": false }`.
+An option is a room, an area (a subregion like `riverton:streets` or a region, which picks one of its rooms), a stub place
+or plain words (off the map), or `nowhere`. A `(N)` after an option is its percent; options without one split what is left
+of 100, a total under 100 leaves the rest as nowhere, and over 100 breaks the entry. `from` and `to` are required, and the
+block only applies inside its window (it beats an overlapping entry, which gets a load note). A normal block rolls once
+when it starts and that answer holds for the whole block; `"wandering": true` moves them every 15 to 60 minutes, each
+stretch rolling its own place. Every roll is seeded from the person, the entry and the actual start time, so swipes and
+reloads never change it. Adjacent blocks each roll on their own, so their chances add up. Someone in your scene stays
+until the block ends. The Cast editor shows might entries read-only and keeps them exactly as written when you save.
 
 Two read-only views are recomputed from the chat: **What the narrator was told** (the exact `{{npcs_present}}` and
 `{{npc_focus}}` text for the latest reply, or one you pick, with who was listed, at which detail level, and which
@@ -261,7 +272,7 @@ temporary transformation is not baked into the file. Confirm shows exactly what 
 stamp the chat. **Delete** removes the file only; the confirm says chats keep their stamps. **Make this permanent**
 (on State and Changes) still writes a found room into the base schedule.
 
-The Cast summary's Schedule is the live one for this chat: the card's entries with this chat's edits folded in, found rooms in place of a where-label ("found here this chat"), and any follow/stay on top. Rows from this chat are marked, the entry in force is marked "← now", and it redraws whenever the chat's stamps change. NPC checks (found, follow/stay, near, sightings, people here) all read the chat's live map, so a room discovered in play counts. "Make this permanent" refuses a room that only exists in this chat; save the room to the world first (Save world in the settings, or `/ws-save-world`).
+The Cast summary's Schedule is the live one for this chat: the card's entries with this chat's edits folded in, found rooms in place of a where-label ("found here this chat"), and any follow/stay on top. Rows from this chat are marked, the entry in force is marked "← now", and it redraws whenever the chat's stamps change. NPC checks (found, follow/stay, near, might picks, people here) all read the chat's live map, so a room discovered in play counts. "Make this permanent" refuses a room that only exists in this chat; save the room to the world first (Save world in the settings, or `/ws-save-world`).
 
 Apart from the Cast editor (and its In this chat stamps) and the editor mode below, the window only reads. It never changes the chat. Room data comes through the normal
 `/rooms` and `/doors` endpoints, so it follows the same rules as the extension. Plugin files changed, so
@@ -426,7 +437,7 @@ Time can pass without moving:
 - A reply can pass time with a tag, such as `[ws_wait: 45m | searching the cellar]`, `[ws_wait: until dusk]` or `[ws_wait: sleep until morning | sleeping at the inn]` (the reason goes after `|`). The tag is removed from the reply. Waits under 15 minutes are ignored. Others wait on a Keep / Adjust / Discard card (or are kept straight away with **Auto-keep waits**); the card shows the reason as "Why: …", and the inspector's call log lists each proposed, kept, discarded or ignored wait with its reason.
 - The older tag still works: `[ws_flag: wait | 2h]` / `[ws_flag: sleep | until morning]`.
 
-**Lenient tag reading.** The documented tags stay as they are, but the reader also accepts the obvious short forms the model sometimes writes: `[ws_<action> | args]` and `[ws_<action>: args]` for the `ws_flag` actions (change, discover, wait, sleep, npc, name, lore, found) and the `ws_npc` actions (fact, memory, disposition, leave, staying, follow, stay, seek), plus case and spacing differences (`[WS_Flag : Found|Hesk]`). They are normalized to the documented form and hidden like any read tag. A `[ws_...]` tag WorldScrawl can't read stays visible in the message, marked with a warning style (tooltip "WorldScrawl couldn't read this tag"), and the Activity log shows a warning "unreadable tag: ...".
+**Lenient tag reading.** The documented tags stay as they are, but the reader also accepts the obvious short forms the model sometimes writes: `[ws_<action> | args]` and `[ws_<action>: args]` for the `ws_flag` actions (change, discover, wait, sleep, npc, name, lore, found) and the `ws_npc` actions (fact, memory, disposition, leave, staying, follow, stay), plus case and spacing differences (`[WS_Flag : Found|Hesk]`). They are normalized to the documented form and hidden like any read tag. A `[ws_...]` tag WorldScrawl can't read stays visible in the message, marked with a warning style (tooltip "WorldScrawl couldn't read this tag"), and the Activity log shows a warning "unreadable tag: ...".
 
 A wait is stamped on its chat message (`worldscrawl_wait.seconds`) exactly like a move's travel time. Deleting the message undoes it, and swipes keep it. On the next reply the narrator is told how long passed, the time before and after, a change of light (night to dawn and so on), how the weather changed, and any temporary map changes that ran out during the wait. The map's top bar shows the wait next to the clock.
 

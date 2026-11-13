@@ -30,7 +30,35 @@
     {
       "activity": "asleep",
       "where": "her own room",
-      "near": "riverton:drowned_rat"
+      "near": "riverton:drowned_rat",
+      "from": "02:00",
+      "to": "10:00"
+    },
+    {
+      "might": [
+        "riverton:streets/market_lane",
+        "riverton:general_store/shop",
+        "riverton:streets/square",
+        "nowhere(40)"
+      ],
+      "activity": "buying for the inn",
+      "from": "10:00",
+      "to": "13:00",
+      "wandering": true
+    },
+    {
+      "might": [
+        "riverton:drowned_rat"
+      ],
+      "activity": "seeing to the inn",
+      "from": "13:00",
+      "to": "15:00"
+    },
+    {
+      "place": "riverton:drowned_rat/cellar",
+      "activity": "checking the casks",
+      "from": "15:00",
+      "to": "16:00"
     }
   ]
 }

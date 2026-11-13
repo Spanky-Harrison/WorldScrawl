@@ -6,7 +6,7 @@
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses),
 //       decideNpc({identity, decisionRev, action, card, ref, seen, values, to}) -> {ok, error, stale} (a Changes card click, run by the chat's card handler) }
-import { permanentProblem, liveSchedule } from './castdata.mjs';
+import { permanentProblem, liveSchedule, mightText } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 import { stampCard } from './castdata.mjs';
@@ -73,7 +73,7 @@ export function castPanel(doc, io) {
         const list = filt.place ? insp()?.who?.[filt.place] : null;
         if (!filt.place) { who.replaceChildren(); return; }
         who.replaceChildren($('b', {}, `Who's here: ${placeName(filt.place)}`), !list ? $('p', { class: 'muted' }, 'Open a chat to see who is here right now.')
-            : !list.length ? $('p', { class: 'muted' }, 'Nobody is due here, and no schedule or sighting points here.')
+            : !list.length ? $('p', { class: 'muted' }, 'Nobody is due here, and no schedule points here.')
                 : $('ul', { class: 'cast-wholist' }, ...list.map(x => $('li', { class: x.here ? 'here' : 'away', 'data-id': x.id },
                     $('button', { type: 'button', class: 'linkish', onclick: () => api.selectId(x.id, 'state') }, x.name), ' ',
                     $('span', { class: `cast-badge ${x.here ? 'here' : 'away'}` }, x.here ? (x.inScene ? 'here, in your scene' : 'here') : 'not here'),
@@ -144,11 +144,10 @@ export function castPanel(doc, io) {
         return tbl;
     }
     function scheduleBlock(r) {
-        const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
-            ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
-            ...e.notes.map(n => $('span', { class: 'cast-schednote' }, ` · ${n}`)), e.current ? $('b', { class: 'cast-schednow' }, ' ← now') : '', $('span', { class: 'muted' }, e.src === 'card' ? ' (card)' : ''))) : (r.rec?.schedule ?? []).map(e => $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
+        const places = r.play ? liveSchedule(r.rec?.ok ? r.rec : null, r.play).map(e => $('li', { class: `cast-schedrow src-${e.src}${e.current ? ' current' : ''}` }, e.might ? $('span', { class: 'cast-might' }, mightText(e.might, placeName)) : e.place ? placeLink(e.place, false) : $('span', { class: 'muted' }, 'off the map'),
+            e.might ? ` · ${e.activity}${e.importance ? ` · ${e.importance}` : ''}` : ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near && !e.place ? ` near ${e.near}` : ''}${e.from || e.to ? ` ${e.from}–${e.to}` : ''}${e.importance ? ` · ${e.importance}` : ''}`,
+            ...e.notes.map(n => $('span', { class: 'cast-schednote' }, ` · ${n}`)), e.current ? $('b', { class: 'cast-schednow' }, ' ← now') : '', $('span', { class: 'muted' }, e.src === 'card' ? ' (card)' : ''))) : (r.rec?.schedule ?? []).map(e => Array.isArray(e.might) ? $('li', {}, $('span', { class: 'cast-might' }, mightText(e, placeName)), ` · ${e.activity}${e.broken ? ` (${e.problem})` : ''}`) : $('li', {}, e.place ? placeLink(e.place, e.broken) : $('span', { class: 'muted' }, 'off the map'),
             ` ${e.activity}${e.where ? ` (${e.where})` : ''}${e.near ? ` near ${e.near}` : ''}${e.nearNote ? ` · ${e.nearNote}` : ''}${e.from || e.to ? ` ${e.from ?? ''}–${e.to ?? ''}` : ''}${e.importance ? ` · ${e.importance}` : ''}${e.broken ? ` (${e.problem})` : ''}`));
-        if (r.rec?.seen_at) places.push($('li', {}, placeLink(r.rec.seen_at.place, r.rec.seen_at.broken), ` sometimes, around ${r.rec.seen_at.hour}:00 (${Math.round((r.rec.seen_at.chance ?? 0.5) * 100)}%)`));
         return places.length ? [$('b', {}, 'Schedule'), $('ul', { class: 'cast-sched' }, ...places)] : [];
     }
     function appearanceRetry(play) {
@@ -362,6 +361,8 @@ export function castPanel(doc, io) {
         const schedBox = $('div', { class: 'cf-schedule' });
         const drawSched = () => {
             schedBox.replaceChildren(...(f.schedule ?? []).map((e, i) => {
+                if (e.mightRow) return $('div', { class: 'cf-sched cf-might', 'data-i': i }, $('div', { class: 'cf-schedtop' }, $('span', {}, `${mightText(e.mightRow, placeName)} · ${e.mightRow.activity ?? ''}`)),
+                    $('div', { class: 'muted' }, 'A might-be-at entry. It is kept exactly as written; editing it here comes later.'));
                 const off = $('input', { type: 'checkbox', class: 'cf-offmap' }); off.checked = !!e.offmap;
                 off.addEventListener('change', () => { e.offmap = off.checked; if (off.checked) e.place = ''; drawSched(); check(); });
                 const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.offmap ? '' : e.place });
@@ -382,19 +383,6 @@ export function castPanel(doc, io) {
         form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, chatMode
             ? 'A change here is stamped on the latest message and applies only in this chat. It is not written to the cast file.'
             : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'), schedBox);
-        const seenBox = $('div', { class: 'cf-seen' });
-        const drawSeen = () => {
-            const on = $('input', { type: 'checkbox', class: 'cf-seenon' }); on.checked = !!f.seen;
-            on.addEventListener('change', () => { f.seen = on.checked ? { place: '', hour: 12, chance: 0.5 } : null; drawSeen(); check(); });
-            seenBox.replaceChildren($('label', {}, on, ' Sometimes seen at a place'));
-            if (!f.seen) return;
-            const pk = pickField(doc, { kind: 'room', title: 'where they are seen', outline, value: f.seen.place });
-            pk.addEventListener('change', () => { f.seen.place = pk.value; check(); });
-            const hr = $('input', { type: 'number', min: 0, max: 23, step: 1, class: 'pf-input cf-hour' }); hr.value = f.seen.hour; hr.addEventListener('input', () => { f.seen.hour = hr.value; check(); });
-            const ch = $('input', { type: 'number', min: 0, max: 1, step: 0.05, class: 'pf-input cf-chance' }); ch.value = f.seen.chance; ch.addEventListener('input', () => { f.seen.chance = ch.value; check(); });
-            seenBox.append(pk, err('seen.place'), $('div', { class: 'cf-schedrow' }, $('span', { class: 'muted' }, 'hour'), hr, $('span', { class: 'muted' }, 'chance'), ch), err('seen.hour'), err('seen.chance'));
-        };
-        if (!chatMode) { drawSeen(); form.append($('b', {}, 'Sighting'), seenBox); }
         const relBox = $('div', { class: 'cf-rels' });
         const drawRels = () => relBox.replaceChildren(...(f.relationships ?? []).map((x, i) => {
             const w = $('input', { type: 'text', class: 'pf-input cf-relwho', placeholder: 'who' }); w.value = x.who; w.addEventListener('input', () => { x.who = w.value; check(); });
