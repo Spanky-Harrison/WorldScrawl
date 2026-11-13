@@ -1,0 +1,97 @@
+    // ---- A temporary place running out with the party inside: one narrator reply tells it, and the turn's expiry cards
+    // still post. Each case in a fresh chat: the party in a 1-hour pop-up stall, Hesk a gnoll for the hour, smoke in the
+    // Common Room for the hour. "slow" holds WorldScrawl's interceptor 300 ms (as an earlier extension's interceptor or a
+    // slow server ping does), past the 150 ms map refresh.
+    {
+        const pickedWorld = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.world);
+        await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = 'riverton'; s.dispatchEvent(new Event('change')); });
+        await page.evaluate(() => {
+            if (window.__wsSlowWrap) return;
+            window.__wsSlowWrap = true; window.__wsSlow = 0;
+            const orig = globalThis.worldscrawlInterceptor;
+            globalThis.worldscrawlInterceptor = async (...a) => { if (window.__wsSlow) await new Promise(r => setTimeout(r, window.__wsSlow)); return orig(...a); };
+        });
+        const storyReqs = async from => (await reqsOf()).slice(from).filter(r => r.messages.some(m => /Current location:/.test(String(m.content))));
+        const calm = async (ms = 1500, max = 20000) => { // the deferred expiry narration starts only once nothing else runs
+            const end = Date.now() + max; let n = -1, since = Date.now();
+            while (Date.now() < end) {
+                await page.waitForTimeout(150);
+                const k = (await reqsOf('all')).length + ':' + await page.evaluate(() => SillyTavern.getContext().chat.length + (document.body.dataset.generating ? 'g' : ''));
+                if (k !== n) { n = k; since = Date.now(); } else if (Date.now() - since >= ms) return;
+            }
+        };
+        const seed = async ({ narrate, slow }) => {
+            await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+            await settle(4000);
+            await page.evaluate(async ([narrate, slow]) => {
+                const c = SillyTavern.getContext();
+                c.extensionSettings.worldscrawl.narrateExpiries = narrate; c.extensionSettings.worldscrawl.autoKeepWaits = false;
+                window.__wsSlow = slow;
+                const BOOTH = 'riverton:streets/stall', SQUARE = 'riverton:streets/square', TAVERN = 'riverton:drowned_rat/common_room', now = Date.now();
+                const gnoll = { swipe: 0, type: 'npc_appearance', id: 'hesk', intent: 'turned into a gnoll', owner: 'og', start: 0, lasts: 60, contentId: 'c_og', candidate: null, decisionRev: 1,
+                    identity: { owner: 'og', message: 'm', swipe: 0, npc: 'hesk', domain: 'appearance', chat: 'c' }, committed: { kind: 'appearance', intent: 'turned into a gnoll', fields: 'body', layer: {} } };
+                const FAIR = [{ op: 'create_place', area: 'riverton:streets', id: 'stall', name: 'Pop-up Stall', description: 'Canvas and crates.', lasts: '1h', exits: [{ direction: 'stall', to: SQUARE, return_direction: 'square' }] },
+                    { op: 'set_description', loc: TAVERN, text: 'Smoke from the fair drifts through the common room.', lasts: '1h' }];
+                const text = 'The fair is in town; Hesk, a gnoll for the hour, hands you a mug.';
+                c.chat.push({ name: c.name1, is_user: true, mes: 'I duck into the pop-up stall.', send_date: now, swipe_id: 0, extra: { worldscrawl_move: { to: BOOTH } } },
+                    { name: c.name2, is_user: false, mes: text, send_date: now, swipe_id: 0, swipes: [text], swipe_info: [{ extra: {} }],
+                        extra: { worldscrawl_mid: `m${now}`, worldscrawl_location: BOOTH, worldscrawl_patches: [{ type: 'patch', id: `fair${now}`, note: 'the fair comes to town', at: 0, swipe: 0, ops: FAIR, summary: ['Pop-up Stall', 'Common Room: smoke'] }],
+                            worldscrawl_npc: [{ swipe: 0, type: 'npc_create', id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: 'sturdy', outfit: 'wool' }, gnoll] } });
+                await c.saveChat(); await c.reloadCurrentChat();
+            }, [narrate, slow]);
+            await settle(3000);
+        };
+        const state = () => page.evaluate(() => {
+            const ch = SillyTavern.getContext().chat;
+            const kind = m => m.is_user ? 'player' : m.extra?.worldscrawl_notice ? m.extra.worldscrawl_notice_kind : 'reply';
+            const failed = ch.flatMap((m, i) => Object.values(m.extra?.worldscrawl_calls ?? {}).flat().filter(n => n?.kind === 'narrator' && n.status === 'failed').map(n => `#${i} ${n.reason}`));
+            const replies = ch.map((m, i) => [m, i]).filter(([m]) => !m.is_user && !m.is_system).slice(1);
+            return { kinds: ch.slice(1).map(kind), failed, told: replies.filter(([m]) => m.extra?.worldscrawl_expiry_narrated).map(([m]) => m.extra.worldscrawl_location),
+                ready: ch.filter(m => m.is_user && m.extra?.worldscrawl_npc_ready).length, last: ch[ch.length - 1]?.extra?.worldscrawl_location };
+        });
+        const ends = r => r.messages.some(m => /has come to an end/.test(String(m.content)));
+        const cases = [
+            ['/ws-wait 2 hours, Narrate expiries on', { narrate: true, slow: 0 }, () => page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2 hours'))],
+            ['/ws-wait 2 hours, Narrate expiries on, slow', { narrate: true, slow: 300 }, () => page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2 hours'))],
+            ['typed [wait] 2 hours, Narrate expiries on', { narrate: true, slow: 0 }, async () => { await page.fill('#send_textarea', '[wait] 2 hours'); await page.click('#send_but'); }],
+        ];
+        for (const [name, opts, act] of cases) {
+            await seed(opts);
+            const from = (await reqsOf()).length;
+            await queue([{ content: 'Two hours pass; the stall folds up around you and you step out into the square.' }, { content: 'A second reply (should not be asked for).' }]);
+            await act(); await settle(15000); await calm();
+            const reqs = await storyReqs(from), s = await state();
+            check(`expiry narration: ${name}: one narrator call, and its prompt tells the stall ending`, reqs.length === 1 && ends(reqs[0]), JSON.stringify({ n: reqs.length, ends: reqs.map(ends), kinds: s.kinds }));
+            check(`expiry narration: ${name}: that reply carries the move; both expiry cards; person check ran; no failure note`,
+                s.told.length === 1 && s.told[0] === 'riverton:streets/square' && s.kinds.filter(k => k === 'npc_expired').length === 1 && s.kinds.filter(k => k === 'place_expired').length === 1 && !s.kinds.includes('missing') && s.ready >= 1 && !s.failed.length, JSON.stringify(s));
+        }
+        // Narrate expiries off, slow: the plain "passage seals" notice is posted before the reply, and the turn still runs.
+        await seed({ narrate: false, slow: 300 });
+        {
+            const from = (await reqsOf()).length;
+            await queue([{ content: 'Two hours pass in the square.' }, { content: 'A second reply (should not be asked for).' }]);
+            await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2 hours'));
+            await settle(15000); await calm();
+            const reqs = await storyReqs(from), s = await state();
+            check('expiry, Narrate expiries off, slow: one narrator call; one "passage seals" notice; both expiry cards; person check ran',
+                reqs.length === 1 && !ends(reqs[0]) && s.kinds.filter(k => k === 'missing').length === 1 && s.kinds.filter(k => k === 'npc_expired').length === 1 && s.kinds.filter(k => k === 'place_expired').length === 1 && s.ready >= 1, JSON.stringify(s));
+            check('expiry, Narrate expiries off, slow: the cards follow the "passage seals" notice, before the reply', JSON.stringify(s.kinds.slice(-5)) === JSON.stringify(['player', 'missing', 'npc_expired', 'place_expired', 'reply']), JSON.stringify(s.kinds));
+        }
+        // Swipe the reply that told it: the line again, the stamp again, no extra run.
+        await seed({ narrate: true, slow: 0 });
+        {
+            await queue([{ content: 'Two hours pass; the stall folds up around you.' }]);
+            await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-wait 2 hours'));
+            await settle(15000); await calm();
+            const from = (await reqsOf()).length;
+            await queue([{ content: 'Another telling: the canvas collapses and you are back in the square.' }, { content: 'A second reply (should not be asked for).' }]);
+            await page.locator('#chat .mes.last_mes .swipe_right').click();
+            await settle(15000); await calm();
+            const reqs = await storyReqs(from), s = await state();
+            const lastMes = await page.evaluate(() => { const ch = SillyTavern.getContext().chat, m = ch[ch.length - 1]; return { swipe: m.swipe_id, loc: m.extra?.worldscrawl_location, told: !!m.extra?.worldscrawl_expiry_narrated }; });
+            check('expiry narration: a swipe of the reply that told it carries the line again, no extra run', reqs.length === 1 && ends(reqs[0]), JSON.stringify({ n: reqs.length, kinds: s.kinds }));
+            check('expiry narration: the new swipe carries the move again', lastMes.swipe === 1 && lastMes.loc === 'riverton:streets/square' && lastMes.told && !s.kinds.includes('missing'), JSON.stringify(lastMes));
+        }
+        await page.evaluate(() => { window.__wsSlow = 0; SillyTavern.getContext().extensionSettings.worldscrawl.narrateExpiries = true; });
+        await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
+    }
