@@ -6,7 +6,7 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
@@ -495,7 +495,10 @@ export async function applyTrackerResult(id, parsed) {
     if (dropped) { noteCall(id, { kind: 'tracker place', status: 'skipped', reason: dropped }); gated.place = null; }
     if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE, rewrite: gated.place.rewrite ?? '', why: gated.place.why ?? '', raw: gated.place.raw ?? null });
     if (gated.wait) {
-        const args = gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
+        // A clock time on the player's own line ("I wait until 17:15") wins over the tracker's reading of it ("17:00").
+        const said = calendarLib?.untilClockIn?.(playerLineBefore(c.chat, id)) ?? null;
+        if (said && (gated.wait.until || '').trim() !== said) noteCall(id, { kind: 'tracker wait', status: 'ok', reason: `until ${said} from the player's line (the tracker read ${gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration})` });
+        const args = said ? `until ${said}` : gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
         const w = await planWait(args, gated.wait.sleep, gated.wait.reason);
         if (w.error) noteCall(id, { kind: 'tracker wait', status: 'failed', reason: w.error });
         else await applyProposedWait(id, w, TRACKER_SOURCE);

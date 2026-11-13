@@ -57,10 +57,14 @@ const ARTICLE = /^(?:the|a|an) /;
 const bareName = s => normName(s).replace(ARTICLE, '');
 const namesOf = p => [p?.name, ...(Array.isArray(p?.aliases) ? p.aliases : [])].filter(x => typeof x === 'string' && x.trim());
 
+/** Words that end the person part of what was typed: "the landlady behind the bar" is "the landlady". */
+const PLACE_WORD = /\s+(?:behind|beside|by|near|next|at|in|inside|outside|on|under|over|with|from|across|around|among|between|into|through|toward|towards|upstairs|downstairs)\b.*$/;
 /**
  * The person `text` means in `people`: an opaque handle or a cast id first, then an exact name, alias or unknownAs
- * (with or without "the"), then a name or alias contained either way, or the words inside an unknownAs. Null when none
- * or several match: no match rather than the wrong person. A made-up id ("mo-ran", "elara") is read as text.
+ * (with or without "the"), then a name or alias contained either way, or an unknownAs that starts with the typed words
+ * ("guard" -> "guard captain", never "guard captain" -> "guard"). Still nobody: the same with the text cut at its first
+ * place word ("the landlady behind the bar" -> "the landlady"). Null when none or several match: no match rather than
+ * the wrong person. A made-up id ("mo-ran", "elara") is read as text.
  */
 export function findPerson(text, people) {
     const raw = String(text ?? '').trim();
@@ -71,13 +75,21 @@ export function findPerson(text, people) {
     const byId = list.find(p => p.id === raw);
     if (byId) return byId;
     const said = raw.replace(/[_-]+/g, ' ');
+    const hit = matchSaid(said, list);
+    if (hit !== undefined) return hit;
+    const cut = said.replace(PLACE_WORD, '').trim();
+    return cut && cut !== said ? matchSaid(cut, list) ?? null : null;
+}
+/** One person for the words `said`, null for several (ambiguous: stop), undefined for none. */
+function matchSaid(said, list) {
     const key = normName(said), bare = bareName(said);
-    if (!key) return null;
+    if (!key) return undefined;
     const exact = list.filter(p => namesOf(p).some(n => normName(n) === key) || (p.unknownAs && bareName(p.unknownAs) === bare));
     if (exact.length === 1) return exact[0];
     if (exact.length > 1) return null;
-    const loose = list.filter(p => namesOf(p).some(n => nameIn(said, n) || nameIn(n, said)) || (p.unknownAs && bare && !ARTICLE.test(`${bare} `) && nameIn(p.unknownAs, bare)));
-    return loose.length === 1 ? loose[0] : null;
+    const starts = d => { const b = bareName(d); return b === bare || b.startsWith(`${bare} `); };
+    const loose = list.filter(p => namesOf(p).some(n => nameIn(said, n) || nameIn(n, said)) || (p.unknownAs && bare && !ARTICLE.test(`${bare} `) && starts(p.unknownAs)));
+    return loose.length === 1 ? loose[0] : loose.length > 1 ? null : undefined;
 }
 
 // ---- Learning a name.

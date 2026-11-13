@@ -244,25 +244,48 @@ export function parse12Hour(text, cal = GREGORIAN) {
     if (h >= cal.hours_per_day) throw new Error(`time ${JSON.stringify(text)} is outside the day`);
     return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 }
+/** A clock time or day-part word at the start of a wait target ("17:15", "5:15 pm", "dawn"), ignoring words after it. */
+const UNTIL_TOKEN = /^(\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\b\.?)?|\d{1,2}\s*[ap]\.?\s*m\b\.?|sunrise|sunset|dawn|morning|noon|dusk|evening|night|midnight)(?![\w:])/;
+/** One wait target ("17:15", "5 pm", "dawn") -> its WAIT_TARGETS word or "HH:MM"; throws when it is none. */
+function untilTarget(t, cal) {
+    t = t.replace(/^(\d{1,2})\.(\d{2})$/, '$1:$2'); // "17.15" is 17:15
+    if (t === 'sunrise') return 'dawn';
+    if (t === 'sunset') return 'dusk';
+    if (WAIT_TARGETS.includes(t)) return t;
+    const ampm = parse12Hour(t, cal);
+    if (ampm) return ampm;
+    parseClock(t, cal);
+    return t;
+}
 export function parseWait(text, cal = GREGORIAN) {
     const s = String(text ?? '').trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^(?:for|about|around|roughly)\s+/, '');
     if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
     const u = /^(?:until|till|til|to|unti)\s+(.+)$/.exec(s);
-    if (u) {
-        const t = u[1].trim().replace(/^the\s+/, '').replace(/^(\d{1,2})\.(\d{2})$/, '$1:$2'); // "17.15" is 17:15
-        if (t === 'sunrise') return { until: 'dawn' };
-        if (t === 'sunset') return { until: 'dusk' };
-        if (WAIT_TARGETS.includes(t)) return { until: t };
-        const ampm = parse12Hour(t, cal);
-        if (ampm) return { until: ampm };
-        parseClock(t, cal);
-        return { until: t };
+    // A bare clock time ("[wait] 17:15", or "[wait] to 17:15" once the bracket drops "to") is a wait until it.
+    const clock = !u && /^\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\.?)?$/.test(s) ? s : null;
+    if (u || clock) {
+        const t = clock ?? u[1].trim().replace(/^(?:the|about|around|roughly|approximately)\s+/, '');
+        try { return { until: untilTarget(t, cal) }; } catch (e) {
+            // Words after the time ("until 17:15 and eat", "until dawn, then go"): the time alone, not a model guess.
+            const lead = UNTIL_TOKEN.exec(t);
+            if (lead && lead[1].trim() !== t) return { until: untilTarget(lead[1].trim(), cal) };
+            throw e;
+        }
     }
     if (/^\d+$/.test(s)) { if (+s <= 0) throw new Error('the wait must be longer than zero'); return { seconds: +s * 3600 }; } // a bare number: hours
     const secs = waitWords(s, secondsPerDay(cal));
     if (secs == null) throw new Error(`wait must look like "2h", "1h30m", "an hour and a half", "90 min" or "until dawn", got ${JSON.stringify(String(text ?? '').trim())}`);
     if (secs <= 0) throw new Error('the wait must be longer than zero');
     return { seconds: secs };
+}
+/**
+ * The clock time a player's line waits until ("I wait until 17:15", "sit till 5:15 pm and eat"): "HH:MM", or null when
+ * the line names no clock time after until/till. Day-part words are left to whoever reads the line.
+ */
+export function untilClockIn(text, cal = GREGORIAN) {
+    const m = /\b(?:until|till|til)\s+(?:about\s+|around\s+|roughly\s+)?(\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\b\.?)?|\d{1,2}\s*[ap]\.?\s*m\b\.?)/i.exec(String(text ?? ''));
+    if (!m) return null;
+    try { return untilTarget(m[1].trim().toLowerCase(), cal); } catch { return null; }
 }
 /**
  * Seconds from game time `elapsed` until the next `target` (a WAIT_TARGETS word or "HH:MM") - always in the future,
