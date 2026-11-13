@@ -2,7 +2,7 @@
 // Other types keep their own stamp fields. Composition jobs are not owners.
 import { FOUND_KEY } from './npc.mjs';
 import { appearanceScope, classifyAppearanceReply, effectFields, looksInputKey } from './npceffects.mjs';
-import { render as P } from './shared.mjs';
+import { render as P, text as textLib } from './shared.mjs';
 import { maskForModel } from './names.mjs';
 import { withWork } from './work.mjs';
 
@@ -121,14 +121,25 @@ function opFields(op) {
 }
 /**
  * What one compose call asks for: only the fields the ops name (a field no op touches stays the base), and the
- * light-only edit prompt when no appearance op is a full rewrite. Any full rewrite keeps the mixed rewrite prompt.
+ * light-only edit prompts ("Edit ...") when no appearance op is a full rewrite. Any full rewrite keeps the mixed rewrite
+ * prompts ("Rewrite ..."). `replaced`: fields a baseline op replaces with the player's text (no keep check on them).
  */
 export function composePlan(ops) {
     const list = ops ?? [];
     const named = new Set(list.flatMap(opFields));
     const fields = BODY_OUTFIT.filter(f => named.has(f));
     const heavy = list.some(o => (o.committed?.kind ?? 'appearance') !== 'baseline' && appearanceScope(o.committed?.scope) === 'heavy');
-    return { fields: fields.length ? fields : BODY_OUTFIT.slice(), system: heavy ? 'npc.appearance_rebuild_system' : 'npc.appearance_edit_light_system' };
+    const replaced = BODY_OUTFIT.filter(f => list.some(o => o.committed?.kind === 'baseline' && o.committed.field === f));
+    return { fields: fields.length ? fields : BODY_OUTFIT.slice(), system: heavy ? 'npc.appearance_rebuild_system' : 'npc.appearance_edit_light_system',
+        prompt: heavy ? 'npc.appearance_rebuild' : 'npc.appearance_edit_light', light: !heavy, replaced };
+}
+/**
+ * A light compose answer that kept less than half of a field's base (the shared keep check, plugin/shared/text.mjs):
+ * that field's name, or '' when every asked field kept enough.
+ */
+export function lightDropped(plan, baseline, answer) {
+    if (!plan?.light) return '';
+    return plan.fields.find(f => !plan.replaced?.includes(f) && textLib.keepShare(baseline?.[f] ?? '', answer?.[f] ?? '') < textLib.KEEP_MIN) ?? '';
 }
 
 /**
@@ -164,8 +175,8 @@ async function askFields(name, baseline, ops, timeout) {
     }).join('\n') || '(none)';
     const base = plan.fields.map(f => `- ${f}: ${baseline[f] || '(empty)'}`).join('\n');
     const { baseReply } = await model();
-    return askTried('appearance compose', {
-        prompt: maskForModel(P('npc.appearance_rebuild', { name: name || 'them', fields: plan.fields.join(', '), base, intents })),
+    const ask = retry => askTried('appearance compose', {
+        prompt: maskForModel(P(plan.prompt, { name: name || 'them', fields: plan.fields.join(', '), base, intents }) + (retry ? `\n${P('npc.appearance_edit_light_retry')}` : '')),
         systemPrompt: P(plan.system, { reply: baseReply('json') }),
         responseLength: 500,
     }, { timeout, read: raw => {
@@ -177,6 +188,14 @@ async function askFields(name, baseline, ops, timeout) {
         if (plan.fields.some(f => !out[f])) return { kind: 'partial', reason: 'the answer did not cover every field' };
         return { ok: true, body: out.body, outfit: out.outfit };
     } });
+    const first = await ask(false);
+    // A light touch must keep at least half of the base: once more with a stricter line, then a visible failure.
+    const dropped = first.ok ? lightDropped(plan, baseline, first) : '';
+    if (!dropped) return first;
+    const again = await ask(true);
+    if (!again.ok) return again;
+    const still = lightDropped(plan, baseline, again);
+    return still ? { ok: false, kind: 'dropped', reason: `the light touch changed more than half of the ${still}` } : again;
 }
 
 async function askLooks(name, body, outfit, timeout) {
