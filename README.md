@@ -247,7 +247,9 @@ rolled somewhere else, following someone).
 `{ "might": ["riverton:streets/market_lane", "riverton:general_store/shop", "nowhere(80)"], "activity": "running errands", "from": "10:00", "to": "12:00", "wandering": false }`.
 An option is a room, an area (a subregion like `riverton:streets` or a region, which picks one of its rooms), a stub place
 or plain words (off the map), or `nowhere`. A `(N)` after an option is its percent; options without one split what is left
-of 100, a total under 100 leaves the rest as nowhere, and over 100 breaks the entry. `from` and `to` are required, and the
+of 100, a total under 100 leaves the rest as nowhere, and over 100 breaks the entry. An option that is not on the map yet (a room
+that will be made in play) is kept: its share is away until the room exists in this chat's map, and then the roll can
+place them there; if no option exists yet, the whole block is away. Either way the file loads, with a note. `from` and `to` are required, and the
 block only applies inside its window (it beats an overlapping entry, which gets a load note). A normal block rolls once
 when it starts and that answer holds for the whole block; `"wandering": true` moves them every 15 to 60 minutes, each
 stretch rolling its own place. Every roll is seeded from the person, the entry and the actual start time, so swipes and

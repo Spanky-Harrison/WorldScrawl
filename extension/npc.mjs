@@ -170,8 +170,7 @@ export function mightAt(npc, entry, now, env) {
         const seg = wanderChain(base, blockStart, blockEnd, now).at(-1);
         segStart = seg.start; segEnd = seg.end; roll = seg.roll;
     } else roll = hashRoll(`block|${base}|${blockStart}`);
-    const table = (entry.options ?? []).map(o => (o.dropped ? { ...o, text: NOWHERE } : o));
-    const opt = pickFromTable(table, roll);
+    const opt = pickFromTable(entry.options ?? [], roll); // an option not on the live map yet resolves to away in mightPlace
     return { kind: 'might', entry, key, blockStart, blockEnd, segStart, segEnd, roll, pick: opt && !isNowhere(opt.text) ? opt.text : NOWHERE,
         activity: entry.activity, where: '', ...mightPlace(opt, base, segStart, env) };
 }
@@ -921,7 +920,7 @@ export function mightWhy(npc, sched, env) {
 /** Whether any might option of `e` is `place` (a room, after redirects) or an area holding it. */
 function mightPointsAt(e, place, env) {
     return (e.options ?? []).some(o => {
-        if (o.dropped || isNowhere(o.text)) return false;
+        if (isNowhere(o.text)) return false;
         const r = resolveSchedulePlace(o.text, env ?? {});
         if (r.ok) return r.address === place;
         const idx = env?.index;

@@ -20,12 +20,12 @@ export function npcPlaces(rec) {
 }
 /** A might entry's options with their percent shares: [{text, share}] (from a loaded entry's table, or worked out from the written list). */
 export function mightShares(e) {
-    if (Array.isArray(e?.options)) return e.options.map(o => ({ text: o.text, share: o.share ?? 0, dropped: !!o.dropped }));
+    if (Array.isArray(e?.options)) return e.options.map(o => ({ text: o.text, share: o.share ?? 0 }));
     return mightTable((Array.isArray(e?.might) ? e.might : []).map(parseMightOption).filter(Boolean)).options.map(o => ({ text: o.text, share: o.share }));
 }
 /** "might be at Market Lane 20%, the store 20% (wandering), 10:00–13:00": a might entry for the cast panel (away is left out). */
 export function mightText(e, placeName = a => a) {
-    const opts = mightShares(e).filter(o => !isNowhere(o.text) && !o.dropped).map(o => `${o.text.includes(':') ? placeName(o.text) : o.text} ${o.share}%`);
+    const opts = mightShares(e).filter(o => !isNowhere(o.text)).map(o => `${o.text.includes(':') ? placeName(o.text) : o.text} ${o.share}%`);
     return `might be at ${opts.join(', ') || 'nowhere in particular'}${e?.wandering ? ' (wandering)' : ''}, ${e?.from ?? ''}–${e?.to ?? ''}`;
 }
 const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'importance'];

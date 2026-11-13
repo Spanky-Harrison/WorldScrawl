@@ -145,18 +145,19 @@ export function mightOptionKind(text, places = null, nearIndex = null) {
     return text.includes(':') ? 'unknown' : 'text';
 }
 
-/** A might-be-at entry (shared readMightEntry plus the world checks): an unknown option is dropped (its odds become away) with a note; all unknown breaks it. */
+/**
+ * A might-be-at entry (shared readMightEntry plus the world checks). An option that is not on this map yet stays in the
+ * table: the roll resolves it against the live map (a room made in play counts), and until it exists that share is away.
+ * Every option unknown is not broken either: the whole block is away until one exists. Both get a note that does not block loading.
+ */
 function validateMight(e, where, places, note, nearIndex = null) {
     const { entry, problems, warnings } = readMightEntry(e);
     for (const w of warnings) note(`${where}: ${w}`);
     if (!entry.broken && (places || nearIndex)) {
         const unknown = entry.options.filter(o => mightOptionKind(o.text, places, nearIndex) === 'unknown');
-        for (const o of unknown) note(`${where}: might option "${o.text}" is not a place in this world (dropped; that share is away)`);
+        if (unknown.length && unknown.length === entry.options.length) note(`${where}: no might option is on the map yet (${unknown.map(o => o.text).join(', ')}); the whole block is away until one exists`);
+        else for (const o of unknown) note(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
         for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) note(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
-        if (unknown.length) {
-            for (const o of unknown) o.dropped = true;
-            if (unknown.length === entry.options.length) Object.assign(entry, { broken: true, problem: 'no option is a place in this world' });
-        }
     }
     if (entry.broken) note(`${where}: ${entry.problem}`);
     return entry;
