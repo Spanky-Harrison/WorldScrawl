@@ -679,7 +679,7 @@ test('engine-resolved body text asks only for a Looks summary, and Retry does no
     await scene.retryAppearance(0, 'hesk', job.key);
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /Write one short Looks line/);
-    assert.doesNotMatch(prompts[0], /Rewrite body/);
+    assert.doesNotMatch(prompts[0], /(?:Rewrite|Edit) body/);
     const after = npcAt(c.chat, 0, [hesk], 'hesk');
     assert.equal(after.body, 'a towering woman');
     assert.equal(after.looks, 'a towering woman with copper braids');

@@ -342,7 +342,7 @@ test('a baseline edit under a lasting owner and a temp is one lasting step, and 
     const approved = await scene.settleNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token, elapsed: 0 });
     assert.equal(approved.ok, true, approved.error);
     assert.equal(proposal.start, started);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 1, prompts.map(p => p.slice(0, 40)).join(' || '));
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 1, prompts.map(p => p.slice(0, 40)).join(' || '));
     const live = npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 }));
     assert.equal(live.lasting.body, 'broader shoulders');
     assert.equal(live.outfit, 'a red cloak');
@@ -480,7 +480,7 @@ test('turning an unknown overlap off settles the survivor without a direct recom
     await flush();
     const play = npcAt(c.chat, 0, [HESK], 'hesk', () => ({ elapsed: 0 }));
     assert.equal(play.body, 'a centaur barrel');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
     assert.equal(cacheRows(c.chat), false);
 });
 
@@ -680,7 +680,7 @@ test('the map channel saves, mirrors the swipe, and both surfaces redraw', async
     let saves = 0;
     c.saveChat = async () => { saves++; };
     await scene.fillCandidate(c.chat, o.identity, { baseline: { body: 'sturdy', outfit: 'wool' }, name: 'Hesk', elapsed: 0 });
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
     Chan.all = [];
     globalThis.BroadcastChannel = Chan;
     openMapChannel();
@@ -707,7 +707,7 @@ test('the map channel saves, mirrors the swipe, and both surfaces redraw', async
     assert.ok(saves >= 1);
     assert.equal(o.committed?.layer?.body, 'a towering woman');
     assert.equal(host.swipe_info[0].extra.worldscrawl_npc.some(s => s.committed?.layer?.body === 'a towering woman'), true);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
     const reloaded = JSON.parse(JSON.stringify(c.chat));
     c.chat = reloaded;
     renderPatchCards();
@@ -740,7 +740,7 @@ test('kept change Edit: the review card\'s Body editor; Approve edited saves typ
     assert.equal(o.candidate, null);
     assert.equal(o.committed.layer.body, 'a cropped frame');
     assert.equal(o.committed.edited, true);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0, 'typed text needs no rewrite call');
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0, 'typed text needs no rewrite call');
     renderPatchCards();
     assert.match(doc.querySelector('.worldscrawl_npcchange').textContent, /Character changed here/);
 
@@ -788,14 +788,14 @@ test('Check again uses the current clock, and Approve refuses a review whose inp
     const doc = makeDoc();
     globalThis.document = doc;
     renderPatchCards();
-    const before = prompts.filter(p => /Rewrite body/.test(p)).length;
+    const before = prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length;
     byText(doc, '.worldscrawl_card_btn', 'Check again').click();
     await flush();
     assert.equal(proposal.candidate.livePreview.outfit, 'wool');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, before);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, before);
     const approved = await scene.settleNpc(c.chat, proposal.identity, proposal.decisionRev, 'approve', { token: proposal.candidate.token, elapsed: 3600 });
     assert.equal(approved.ok, true, approved.error);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, before);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, before);
 
     const moved = appearance({ intent: 'taller', fields: 'body', layer: { body: 'a towering woman' }, owner: 'moved' });
     c.chat = [msg([moved])];
@@ -812,11 +812,11 @@ test('Check again uses the current clock, and Approve refuses a review whose inp
     const wrong = scene.decideNpc(c.chat, { ...moved.identity, domain: 'place' }, moved.decisionRev, 'approve', { token: 'nope', elapsed: 0 });
     assert.equal(wrong.stale, true);
     assert.equal(moved.committed, null);
-    const fields = prompts.filter(p => /Rewrite body/.test(p)).length;
+    const fields = prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length;
     const accepted = await scene.settleNpc(c.chat, moved.identity, moved.decisionRev, 'approve', { token: moved.candidate.token, elapsed: 0 });
     assert.equal(accepted.ok, true, accepted.error);
     assert.equal(moved.committed.layer.body, 'a towering woman');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, fields);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, fields);
 });
 
 test('a turn refreshes pending appearance with and without a location, and skips a resolved person', async () => {
@@ -833,7 +833,7 @@ test('a turn refreshes pending appearance with and without a location, and skips
     };
     globalThis.fetch = async () => { throw new Error('no server'); };
     await scene.prepareNpcs(user);
-    assert.ok(prompts.some(p => /Hesk/.test(p) && /Rewrite body/.test(p)));
+    assert.ok(prompts.some(p => /Hesk/.test(p) && /(?:Rewrite|Edit) body/.test(p)));
     assert.equal(prompts.some(p => /Bran/.test(p)), false);
     assert.equal(npcAt(c.chat, 1, [HESK, bran], 'hesk', () => ({ elapsed: 0 })).body, 'a pending frame');
     const asked = prompts.length;
@@ -873,12 +873,12 @@ test('a failed field or Looks job stays failed on the next turn until Retry or t
     const once = prompts.length;
     await scene.ensureAppearanceRebuilds(0);
     assert.equal(prompts.length, once, 'a failed Looks summary is not asked again for the same body and outfit');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
     const looks = scene.appearJobs(c.chat[0]).find(j => j.part === 'looks');
     const looksBefore = prompts.filter(p => /Looks line/.test(p)).length;
     await scene.retryAppearance(0, 'hesk', looks.key);
     assert.ok(prompts.filter(p => /Looks line/.test(p)).length > looksBefore);
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, 0);
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 0);
 });
 
 test('the compose record is kept on the swipe that received it', async () => {
@@ -1526,7 +1526,7 @@ test('a kept temporary change: Edit → Approve edited saves the typed for-now t
     assert.equal(o.candidate, null);
     assert.equal(o.committed.layer.body, 'a grey-furred gnoll');
     assert.equal(o.lasts, 60, 'still lasts an hour');
-    assert.equal(prompts.filter(p => /Rewrite body/.test(p)).length, prompts.slice(0, before).filter(p => /Rewrite body/.test(p)).length, 'no rewrite call');
+    assert.equal(prompts.filter(p => /(?:Rewrite|Edit) body/.test(p)).length, prompts.slice(0, before).filter(p => /(?:Rewrite|Edit) body/.test(p)).length, 'no rewrite call');
     assert.equal(npcAt(c.chat, 0, [LANDLADY], 'hesk', i => ({ elapsed: chatElapsed(c.chat.slice(0, i + 1)) })).body, 'a grey-furred gnoll');
     // Stale: the card was drawn, then the change was turned off elsewhere (the map); its Undo does nothing.
     renderPatchCards();
