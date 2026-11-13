@@ -421,7 +421,7 @@ function applyStamp(state, s, index, elapsed = null) {
         n.disposition[who] = { value, reason: str(s.reason, 240) ?? '' };
         return;
     }
-    if (s.type === 'npc_name') { relUp(n, str(s.who, 40) || PLAYER, 'named', index, s.source === 'bracket' ? 'name bracket' : s.source === 'tracker' ? 'heard in dialogue' : 'name flag'); return; }
+    if (s.type === 'npc_name') { relUp(n, str(s.who, 40) || PLAYER, 'named', index, s.source === 'bracket' ? 'name bracket' : s.source === 'tracker' ? 'heard in dialogue' : s.source === 'player line' ? 'said by the player' : 'name flag'); return; }
     if (s.type === 'npc_rel') { // the player's edit: the only way back
         const who = str(s.who, 40) || PLAYER;
         if (REL_STATES.includes(s.state)) n.rel[who] = { state: s.state, at: index, by: 'player edit' };
