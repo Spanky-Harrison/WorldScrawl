@@ -46,7 +46,7 @@
     {
       "id": "change",
       "title": "Map changes",
-      "flow": "Runs when a message is flagged as changing the map: the flag button, the narrator's ws_flag tool or [ws_flag: …] tag, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
+      "flow": "Runs when a message is flagged as changing the map: the flag button, a [ws_flag: …] tag in a reply, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
     },
     {
       "id": "discover",
@@ -123,7 +123,6 @@
     "change": "the summary of the map change that made the place",
     "excerpt": "a short excerpt of the chat message that made the place",
     "default": "the key to use when unsure (the way the party came in)",
-    "discover": "The discovery wording, filled in by the game: the 'Proactive room discovery' off or on piece (the scene can override the setting).",
     "npcs_present": "The saved people in this scene, one short line each: name, what they are doing, and how they feel about the player.",
     "npc_focus": "The person the player is addressing, with manner, voice and memory, plus history when the talk goes deep. Empty when nobody is the focus.",
     "lore_places": "the names of the places here with lore on file, innermost first",
@@ -850,26 +849,6 @@
       ]
     },
     {
-      "id": "narration.new_door_tools",
-      "title": "Narration: flagging a new door (tools on)",
-      "description": "Piece: Fills {{how_to_flag}} when reporter tools are on.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the ws_flag tool and its 'discover' action, which the game listens for.",
-      "text": "call ws_flag with action \"discover\" and a note naming the door",
-      "placeholders": []
-    },
-    {
-      "id": "narration.new_door_tags",
-      "title": "Narration: flagging a new door (tools off)",
-      "description": "Piece: Fills {{how_to_flag}} when reporter tools are off.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
-      "text": "end your reply with [ws_flag: discover | which door]",
-      "placeholders": []
-    },
-    {
       "id": "narration.look_around",
       "title": "Narration: looking around",
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): looking around.",
@@ -982,88 +961,6 @@
       ]
     },
     {
-      "id": "narration.flag_hint",
-      "title": "Narration: how to flag map changes",
-      "description": "Alongside (reporter tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
-      "group": "narration",
-      "locked": "The exact [ws_flag: …] and [ws_flag: npc | …] tag formats the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as elsewhere as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.",
-      "placeholders": [
-        {
-          "name": "discover",
-          "generated": true
-        }
-      ]
-    },
-    {
-      "id": "narration.discover_strict",
-      "title": "Narration: flagging a discovery (Proactive room discovery off)",
-      "description": "Piece: fills {{discover}} in 'how to flag map changes' when Proactive room discovery is off: only a door that is actually opened or entered counts.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
-      "text": "If the characters actually open or go through a door that is not one of the exits, and the room description mentions it or such a door plausibly fits the room, end your reply with [ws_flag: discover | which door]. A door or room that is only mentioned in the scenery (a hallway \"lined with four guest rooms\") is not a discovery: do not flag it. If no such door fits, there is none: do not flag it.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.discover_proactive",
-      "title": "Narration: flagging a discovery (Proactive room discovery on)",
-      "description": "Piece: fills {{discover}} in 'how to flag map changes' when Proactive room discovery is on: rooms the narration mentions may be added too.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
-      "text": "If the characters open or go through a door that is not one of the exits, or your narration names a room or passage off this place that is not on the map yet (e.g. the guest rooms along a hallway), and it fits the room, end your reply with [ws_flag: discover | which door or room]; it will be added to the map. If nothing like that fits, do not flag it.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.flag_tool",
-      "title": "Narration: the ws_flag tool description (tools on)",
-      "description": "Alongside (reporter tools on): the description of the ws_flag tool, telling the narrator when to flag a map change or a discovery.",
-      "group": "narration",
-      "locked": "Names the ws_flag tool's 'discover' action, which the game reads.",
-      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} With action \"found\", note is the name of someone listed as elsewhere whom the characters have just found at the mapped place named as near them (or any room inside it). If you narrate such a person as actually present with the characters, you must call this with \"found\" for them in that same reply; otherwise do not narrate them as present. The engine handles it after your reply. Do not call it for ordinary events.",
-      "placeholders": [
-        {
-          "name": "discover",
-          "generated": true
-        }
-      ]
-    },
-    {
-      "id": "narration.flag_tool_strict",
-      "title": "Narration: ws_flag discovery wording (Proactive room discovery off)",
-      "description": "Piece: fills {{discover}} in the ws_flag tool description when Proactive room discovery is off.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the 'discover' action the game reads.",
-      "text": "only when the characters actually open or go through a door that is not a listed exit, either one the room description mentions or one that plausibly fits the room. A door only mentioned in the scenery (a hallway lined with guest rooms) is not a discovery.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.flag_tool_proactive",
-      "title": "Narration: ws_flag discovery wording (Proactive room discovery on)",
-      "description": "Piece: fills {{discover}} in the ws_flag tool description when Proactive room discovery is on.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the 'discover' action the game reads.",
-      "text": "when the characters open or go through a door that is not a listed exit, or when your narration names a room or passage off this place that is not on the map yet and fits it (e.g. the guest rooms along a hallway).",
-      "placeholders": []
-    },
-    {
-      "id": "narration.flag_action",
-      "title": "Narration: the ws_flag action argument (tools on)",
-      "description": "Alongside (reporter tools on): the description of ws_flag's action argument.",
-      "group": "narration",
-      "locked": "Names the action values change, discover, wait, sleep, npc, name, lore and found, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": only when the narrated events clearly take 15 minutes or more here without travelling (resting, sleeping the night, a lengthy task); never for an ordinary exchange of dialogue or a single action. If it isn't clear, don't. \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here. \"found\": note is the name of someone listed as elsewhere; the characters have reached the mapped place named as near them (or any room inside it). Required in the same reply whenever you narrate such a person as actually present with the characters; if you don't flag them, don't narrate them present. The engine puts them in the current room when that room is within it, and says why when it cannot.",
-      "placeholders": [
-        {
-          "name": "discover",
-          "generated": true
-        }
-      ]
-    },
-    {
       "id": "narration.offmap_found",
       "title": "Narration: the off-the-map people rule",
       "description": "Alongside: added under the people-here list whenever it names someone as elsewhere.",
@@ -1077,33 +974,13 @@
       "title": "Narration: the lore index line",
       "description": "Alongside: one line naming the places here that have lore on file. It does not tell the narrator how to ask.",
       "group": "narration",
-      "locked": "Names the places the [ws_flag: lore | …] tag or the ws_flag lore action can ask for.",
+      "locked": "Names the places the [ws_flag: lore | …] tag can ask for.",
       "text": "Places with local lore: {{lore_places}}.",
       "placeholders": [
         {
           "name": "lore_places"
         }
       ]
-    },
-    {
-      "id": "narration.lore_how_tags",
-      "title": "Narration: how to ask for lore (tags)",
-      "description": "Piece: fills {{how}} in the lore index line when reporter tools are off.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The exact [ws_flag: lore | …] tag the game looks for.",
-      "text": "If the scene needs what locals know about one of them (its history, who runs it, its reputation), end your reply with [ws_flag: lore | its name]; you will be given it while the characters stay here.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.lore_how_tools",
-      "title": "Narration: how to ask for lore (tools)",
-      "description": "Piece: fills {{how}} in the lore index line when reporter tools are on.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the ws_flag tool's 'lore' action, which the game reads.",
-      "text": "If the scene needs what locals know about one of them (its history, who runs it, its reputation), call ws_flag with action \"lore\" and location set to its name.",
-      "placeholders": []
     },
     {
       "id": "narration.lore_block",
@@ -1117,44 +994,6 @@
           "name": "lore"
         }
       ]
-    },
-    {
-      "id": "narration.flag_action_strict",
-      "title": "Narration: ws_flag discover action (Proactive room discovery off)",
-      "description": "Piece: fills {{discover}} in the action argument when Proactive room discovery is off.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the 'discover' action the game reads.",
-      "text": "the characters actually open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room; the room behind it is added. Never for a door only mentioned in the scenery.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.flag_action_proactive",
-      "title": "Narration: ws_flag discover action (Proactive room discovery on)",
-      "description": "Piece: fills {{discover}} in the action argument when Proactive room discovery is on.",
-      "group": "narration",
-      "piece": true,
-      "locked": "Names the 'discover' action the game reads.",
-      "text": "the characters open or go through a door (or stairs, hatch...) that is not one of the exits, or the narration names a room or passage off this place that is not on the map yet, e.g. one of the guest rooms off a hallway; the room is added.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.wait_hint",
-      "title": "Narration: how to pass time",
-      "description": "Alongside (reporter tools off, flag tags on): tells the narrator when and how to tag time passing in the scene.",
-      "group": "narration",
-      "locked": "The exact [ws_wait: … | reason] tag format the game looks for (the reason after | is optional).",
-      "text": "End your reply with [ws_wait: 45m | searching the cellar] (or [ws_wait: 2h | a long meal], [ws_wait: until dusk | resting], [ws_wait: sleep until morning | sleeping the night]) only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. After the | give a short reason (a few words on what takes the time). An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). Give your best guess at how long. If it isn't clear, don't. Never write it otherwise.",
-      "placeholders": []
-    },
-    {
-      "id": "narration.wait_tool",
-      "title": "Narration: the ws_wait tool description (tools on)",
-      "description": "Alongside (reporter tools on): the description of the ws_wait tool, telling the narrator when to pass time.",
-      "group": "narration",
-      "locked": "Names the ws_wait tool's duration, until and reason arguments, which the game reads.",
-      "placeholders": [],
-      "text": "Call this only when the narrated events clearly take 15 minutes or more of scene time without travelling: a long meal, searching a room thoroughly, crafting, a lengthy task, resting, sleeping the night, or an explicit time skip. An ordinary exchange of dialogue, a single action, or moment-to-moment play does not count, and neither does travel (moves already count their own time). If it isn't clear, don't. Give your best guess at how long: a duration (\"45m\", \"2h\", \"1h30m\", \"2d\") or a time to wait until (\"morning\", \"dusk\", \"14:00\"), and a short reason (a few words on what takes the time, e.g. \"searching the cellar\"). The game clock moves on once the player keeps it; the result says the new time."
     },
     {
       "id": "narration.expiry_pick",
@@ -1739,35 +1578,6 @@
           "name": "name"
         }
       ]
-    },
-    {
-      "id": "narration.npc_tags",
-      "title": "Narration: how to report a person (tags)",
-      "description": "Piece: fills {{how_to_report}} when reporter tools are off and NPC changes may be flagged.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The game reads these [ws_npc: …] tags.",
-      "placeholders": [],
-      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), end your reply with [ws_npc: appearance | their-id | short intent | fields | lasts], e.g. [ws_npc: appearance | p3k9 | magically young | body | 1 hour]: fields is looks, body, outfit (comma-separated) or omit for all three; lasts (e.g. 1 hour) when temporary, omit when lasting. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above (a scar, a kin's name, a favor), end your reply with [ws_npc: fact | their-id | the fact]; if it only lasts a while (a bruise, a mood), add how long in game time: [ws_npc: fact | their-id | the fact | 2 hours]. Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), add a memory highlight: [ws_npc: memory | their-id | a short note from their point of view], one per notable event, always with real names (never \"the stranger\"), e.g. [ws_npc: memory | p3k9 | Joe lied to me about the missing coin.]. When their attitude toward the player clearly shifts, report it: [ws_npc: disposition | their-id | value | short reason], where value is hostile, unfriendly, indifferent, friendly or helpful, e.g. [ws_npc: disposition | p3k9 | friendly | they paid her debt]. Don't report small mood swings. If they leave the scene, [ws_npc: leave | their-id]. If they stay past the time they are due, [ws_npc: staying | their-id]. If they come along, [ws_npc: follow | their-id]. If they are told to wait where they are, [ws_npc: stay | their-id]: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. A place changing is not a reason to report a person update. Report someone only when their own looks, a fact about them, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance that is already listed under Known facts or Looks. Report appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not report it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
-    },
-    {
-      "id": "narration.npc_tools",
-      "title": "Narration: how to report a person (tools)",
-      "description": "Piece: fills {{how_to_report}} when reporter tools are on and NPC changes may be flagged.",
-      "group": "narration",
-      "piece": true,
-      "locked": "The game reads the ws_npc tool.",
-      "placeholders": [],
-      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), lasts when temporary (e.g. \"1 hour\"), and scope \"heavy\" when the change remakes them (a transformation, a whole new outfit) or \"light\" when it touches one detail; e.g. intent \"magically young\", fields \"body\", lasts \"1 hour\". Intent, fields and lasts are enough — do not rewrite looks/body/outfit in this call; they are rebuilt for you. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. A place changing is not a reason to call this. Call it only when that person's own looks, a fact, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance already listed under Known facts or Looks. Call appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not call it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
-    },
-    {
-      "id": "narration.npc_tool",
-      "title": "Narration: the ws_npc tool description",
-      "description": "Alongside (reporter tools on, NPC changes flagged): the description of the ws_npc tool.",
-      "group": "narration",
-      "locked": "Names the ws_npc actions the game reads.",
-      "placeholders": [],
-      "text": "Report a change about a saved person who is here, or ask for a detail you must not invent. action is fact, memory, disposition, appearance, leave, staying, follow, stay, seek or detail. id is their id from the people-here list. For appearance: intent is what changed (e.g. \"magically young\"); fields is looks/body/outfit (omit for all); lasts when temporary (e.g. \"1 hour\"). Intent, fields and lasts are enough — do not put rewritten looks/body/outfit here. Call appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not call it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. For fact and detail, put the text in text. For memory, text is a short note, from their point of view, of something they would still remember tomorrow (lied to, threatened, helped, insulted, a surprising claim, a promise); one call per event. For disposition (their attitude toward the player clearly shifted), value is hostile, unfriendly, indifferent, friendly or helpful, and reason is a few words on why. Use detail only when you would otherwise invent something important. Do not call this because a place changed."
     },
     {
       "id": "npc.tracker_system",

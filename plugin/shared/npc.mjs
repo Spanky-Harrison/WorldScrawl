@@ -167,7 +167,7 @@ export function authorRecord(npc) {
 }
 
 // ---- Place lore (docs/lore.md). A place has a sensory description (fed on moves and looks) and lore: background
-// knowledge, fed only when the narrator asks with [ws_flag: lore | Place] (or the ws_flag tool's "lore" action) or the
+// knowledge, fed only when the narrator asks with [ws_flag: lore | Place] or the
 // player writes [lore]. The narrator always sees a one-line index of the lore on file. Cast NPCs are written as
 // {{npc:castId}} tokens in lore and descriptions; the engine renders them as names before SillyTavern's macros run.
 export const NPC_TOKEN = /\{\{\s*npc\s*:\s*([^{}\s]*)\s*\}\}/gi;

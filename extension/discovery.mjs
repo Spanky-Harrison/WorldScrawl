@@ -1,10 +1,10 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { WAIT_TAG, waitArgs, parseWaitTag, normalizeWsTags, unreadTags } from './words.mjs';
+import { WAIT_TAG, parseWaitTag, normalizeWsTags, unreadTags } from './words.mjs';
 import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, loreFor, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
@@ -14,18 +14,18 @@ import { exitsCache, exitsText, locationAt, renderAllExits } from './footer.mjs'
 import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
-import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, judgeFoundNow, learnName, learnSaidNames, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, listedPeople, maybeSuggest, npcClock, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
-import { capFirst, findPerson, maskForModel, shownName } from './names.mjs';
+import { findPerson, maskForModel } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
 import { withWait } from './work.mjs';
 import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
-import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
+import { narratorWaitAction, planWait, proposeWait, renderPatchCards, stampWait } from './waits.mjs';
 
-/** Movement tools follow moveMode. ws_flag, ws_wait, and ws_npc are not narrator tools; the after-reply tracker reports changes. */
+/** The narrator's only tools are the movement ones (ws_look, ws_move), when moveMode is 'tools'. The after-reply tracker reports changes. */
 export function toolsToRegister(s = {}, on = true) {
     if (!on) return [];
     const names = [];
@@ -57,103 +57,8 @@ function registerTools(want) {
         action: moveAction,
         formatMessage: ({ direction } = {}) => `Moving ${direction ?? ''}...`,
     });
-    if (use('ws_flag')) registerFunctionTool({
-        name: 'ws_flag',
-        displayName: 'WorldScrawl: Flag a map change',
-        description: flagToolText(),
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: { action: { type: 'string', enum: ['change', 'discover', 'wait', 'sleep', 'npc', 'name', 'lore', 'found'], description: flagActionText() },
-                location: { type: 'string', description: 'The place that changed (its name); for "lore", the place whose lore you want.' }, note: { type: 'string', description: 'For "change": a few words on what changed, e.g. "the inn burned down". For "wait"/"sleep": how long, e.g. "2h", "1h30m", "until morning", "until 14:00".' } },
-            required: ['note'],
-        },
-        action: async ({ action = 'change', location = '', note = '' } = {}) => {
-            if (action === 'wait' || action === 'sleep') {
-                const tg = parseWaitTag(String(note ?? ''));
-                const w = await planWait(tg.args, action === 'sleep' || tg.sleep, tg.reason);
-                if (w.error) return `Could not pass time: ${w.error}`;
-                if (!(w.seconds >= MIN_NARRATOR_WAIT)) { noteShortWait(w); return 'Under 15 minutes: no time is added to the clock.'; } pendingWait = w; return `Time passes: ${w.label}. It will then be ${w.afterText}.${waitAsk()}`;
-            }
-            if (action === 'lore') {
-                const loc = await currentLocation(), chain = loreChain(loc);
-                let hits = loreFor(chain, String(location || note || ''));
-                const asked = String(location || note || '').trim();
-                if (!hits.length) { const stub = matchStubLore(asked); if (stub) hits = [{ level: 'elsewhere', id: stub.id, name: stub.name, text: stub.lore }]; }
-                const person = !hits.length && asked ? findPerson(asked, [...(framesOf(ctx().chat ?? [], (ctx().chat ?? []).length - 1, castPack()?.npcs ?? []).at(-1)?.values() ?? [])]) : null;
-                if (person?.deep?.history) { pendingLoreFlags.push(asked); return renderTokens(`${capFirst(shownName(person))}'s history: ${person.deep.history}`); }
-                if (!hits.length) return chain.length ? `No lore on file for that. Lore on file: ${chain.map(c => c.name).join(', ')}.` : 'No lore on file here.';
-                pendingLoreFlags.push(...hits.map(h => h.name));
-                return renderTokens(P('narration.lore_block', { lore: hits.map(c => `- ${c.name}: ${c.text}`).join('\n') }));
-            }
-            if (action === 'name') { const n = String(note || location || '').trim().slice(0, 60); if (n) pendingNameFlags.push(n); return 'Noted.'; }
-            if (action === 'found') {
-                const n = String(note || location || '').trim().slice(0, 80);
-                if (!n) return 'Say who was found.';
-                pendingFoundFlags.push(n);
-                const j = await judgeFoundNow(n);
-                return j.reason;
-            }
-            if (action === 'npc') { const n = String(note || location || '').trim().slice(0, 60); if (n) pendingNpcFlags.push(n); return 'Noted.'; }
-            if (action === 'discover') { pendingFlag = { kind: 'discover', hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will add the room behind that door after your reply.'; }
-            pendingFlag = { hint: String(location ?? ''), note: String(note ?? '').slice(0, 200), source: 'tool' }; return 'Noted. The engine will review the map change after your reply.'; },
-        formatMessage: ({ action } = {}) => action === 'wait' || action === 'sleep' ? 'Passing time...' : 'Noting a map change...',
-    });
-    if (use('ws_wait')) registerFunctionTool({
-        name: 'ws_wait',
-        displayName: 'WorldScrawl: Wait or sleep',
-        description: P('narration.wait_tool'),
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: { duration: { type: 'string', description: 'How long, e.g. "2h", "1h30m", "2d".' },
-                until: { type: 'string', description: 'Instead of a duration: wait until dawn, morning, noon, dusk, evening, night, midnight, or a time like "14:00".' },
-                sleep: { type: 'boolean', description: 'true if they sleep (default 8h when no duration or until is given).' },
-                reason: { type: 'string', description: 'Optional: a few words on what takes the time, e.g. "searching the cellar".' } },
-            required: [],
-        },
-        action: async ({ duration = '', until = '', sleep = false, reason = '' } = {}) => {
-            const w = await planWait(waitArgs({ duration, until }), sleep === true || sleep === 'true', reason);
-            if (w.error) return `Could not pass time: ${w.error}`;
-            if (!(w.seconds >= MIN_NARRATOR_WAIT)) { noteShortWait(w); return 'Under 15 minutes: no time is added to the clock.'; } pendingWait = w; return `Time passes: ${w.label}. It is now ${w.afterText}.${waitAsk()}`;
-        },
-        formatMessage: ({ sleep } = {}) => (sleep ? 'Sleeping...' : 'Waiting...'),
-    });
-    if (use('ws_npc')) registerFunctionTool({
-        name: 'ws_npc',
-        displayName: 'WorldScrawl: A person here',
-        description: P('narration.npc_tool'),
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#', type: 'object',
-            properties: {
-                action: { type: 'string', description: 'fact, memory, disposition, appearance, leave, staying, follow, stay, seek, or detail.' },
-                id: { type: 'string', description: 'The person\'s id from the people-here list.' },
-                text: { type: 'string', description: 'The fact; the memory note (short, from their point of view: something they would still remember tomorrow); or what detail is needed.' },
-                value: { type: 'string', enum: ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'], description: 'For disposition: their attitude toward the player now: hostile, unfriendly, indifferent, friendly, or helpful.' },
-                reason: { type: 'string', description: 'For disposition: a few words on why their attitude toward the player changed.' },
-                lasts: { type: 'string', description: 'For fact or appearance: how long it lasts in game time (e.g. "2 hours", "3 days") when it is temporary. Leave out for a lasting change.' },
-                intent: { type: 'string', description: 'For appearance: what actually changed in Looks, Body or Outfit (e.g. "magically young", "soaked from the rain"). Not "looks" or "appeared", and not because they entered or were looked at.' },
-                fields: { type: 'string', description: 'For appearance: which of looks, body, outfit changed (comma-separated). Omit or "all" when a full rewrite.' },
-                scope: { type: 'string', enum: ['light', 'heavy'], description: 'For appearance: light when one detail changes and the rest still fits; heavy when the change remakes them (a transformation, a whole new outfit).' },
-                why: { type: 'string', description: 'For appearance: a few words on why that scope.' },
-                looks: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; Looks is rebuilt for you.' },
-                body: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; Body is rebuilt for you.' },
-                outfit: { type: 'string', description: 'For appearance: optional. Prefer intent/fields/lasts only; Outfit is rebuilt for you.' },
-            },
-            required: ['action', 'id'],
-        },
-        action: async (args = {}) => {
-            if (String(args.action ?? '').toLowerCase() === 'detail') return npcDetail(String(args.id ?? ''));
-            const stamp = toolNpcStamp(args);
-            if (!stamp) return 'Nothing to record.';
-            pendingNpc.push(stamp);
-            return 'Noted. It will be kept on this reply.';
-        },
-        formatMessage: () => 'Noting a person...',
-    });
 }
-let pendingWait = null; // places from ws_flag action lore: stamped on the reply when it arrives
-let pendingFlag = null;
+let pendingWait = null; // a wait read from a reply's tag: proposed once the reply's tags are read
 let pendingUserFlag = null;
 
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
@@ -603,13 +508,12 @@ export async function onReplyForFlags(id) {
     const emitted = [];
     const norm = normalizeWsTags(msg.mes ?? '');
     if (norm !== (msg.mes ?? '')) { msg.mes = norm; if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes; }
-    if (pendingFlag) { flag = pendingFlag; pendingFlag = null; emitted.push(`ws_flag ${flag.kind ?? flag.hint ?? ''} (tool)`.trim()); }
     if (pendingUserFlag) {
         const u = pendingUserFlag; pendingUserFlag = null;
         const um = c.chat?.[u.start];
         if (u.chat === chatKey() && um?.extra?.[FLAG_KEY]?.status === 'user' && replyAfter(c.chat, u.start) === id) { delete um.extra[FLAG_KEY]; flag ??= { note: u.note, hint: u.hint, start: u.start, source: 'button' }; renderPatchCards(); }
     }
-    const lf = takeLoreFlags(msg.mes ?? ''), lorePlaces = [...pendingLoreFlags.splice(0), ...lf.places];
+    const lf = takeLoreFlags(msg.mes ?? ''), lorePlaces = lf.places;
     if (lf.text !== (msg.mes ?? '')) {
         msg.mes = lf.text.trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
@@ -624,14 +528,14 @@ export async function onReplyForFlags(id) {
             await c.saveChat?.();
         } catch (e) { console.warn('[WorldScrawl] lore flag', e.message); }
     }
-    const ff = takeFoundFlags(msg.mes ?? ''), foundNames = [...pendingFoundFlags.splice(0), ...ff.names];
+    const ff = takeFoundFlags(msg.mes ?? ''), foundNames = ff.names;
     if (ff.text !== (msg.mes ?? '')) {
         msg.mes = ff.text.trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
     }
     if (foundNames.length) await applyFound(msg, foundNames, 'flag');
-    const kf = takeNameFlags(msg.mes ?? ''), learned = [...pendingNameFlags.splice(0), ...kf.names];
+    const kf = takeNameFlags(msg.mes ?? ''), learned = kf.names;
     if (kf.text !== (msg.mes ?? '')) {
         msg.mes = kf.text.trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
@@ -643,7 +547,7 @@ export async function onReplyForFlags(id) {
         for (const nm of new Set(learned)) await learnName(msg, { target: nm, heard: nm, source: 'flag' });
         await c.saveChat?.();
     }
-    const nf = takeNpcFlags(msg.mes ?? ''), npcNames = [...pendingNpcFlags.splice(0), ...nf.names];
+    const nf = takeNpcFlags(msg.mes ?? ''), npcNames = nf.names;
     if (nf.text !== (msg.mes ?? '')) {
         msg.mes = nf.text.trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
@@ -682,9 +586,7 @@ export async function onReplyForFlags(id) {
     if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); noteCall(id, { kind: `ws_flag ${flag.kind ?? ''}`.trim(), status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
     const taken = takeNpcTags(msg.mes ?? '');
-    const fromTool = pendingNpc.splice(0);
-    const stamped = [...fromTool, ...taken.stamps];
-    for (const s of fromTool) emitted.push(`${s.type} (tool)`);
+    const stamped = taken.stamps;
     for (const s of taken.stamps) emitted.push(`${s.type} tag`);
     noteCall(id, narratorNote(emitted));
     if (taken.text !== (msg.mes ?? '')) {

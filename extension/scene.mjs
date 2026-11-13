@@ -88,7 +88,6 @@ function requestLore(msg, loc, place, source) {
 const REMEMBER_KEY = 'worldscrawl_remember';
 const APPEAR_KEY = 'worldscrawl_appearance'; // pending/failed appearance rebuilds per swipe
 const FOCUS_KEY = 'worldscrawl_focus';
-let pendingNpc = []; // ws_npc tool calls, stamped on the reply
 function baseCastPack() {
     const id = activeWorld || defaultWorldId;
     return (id && worldCasts.get(id)) || (defaultWorldId && worldCasts.get(defaultWorldId)) || null;
@@ -303,17 +302,6 @@ async function setRelOn(msg, arg) {
     syncSwipeExtra(msg);
     await ctx().saveChat?.();
     return { ok: true, name: n.name, state }; // name-ok: result for the inspector
-}
-/** Judge a found name against the room the party is in right now (for the tool's answer, before the reply is stamped). */
-async function judgeFoundNow(name) {
-    const loc = await currentLocation();
-    const chat = ctx().chat ?? [];
-    const env = npcEnv(chat, loc);
-    const end = Math.max(0, chat.length - 1);
-    const folded = [...(framesOf(chat, end, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const n = findPerson(name, folded);
-    if (!n) return { ok: false, reason: `No saved person is called "${name}".` };
-    return judgeFound(n, env.clock(end), env.playerAt(end), env);
 }
 /**
  * [found] / [ws_flag: found | Name]: put them in the current room when that room is within the placeless entry's near.
@@ -701,36 +689,6 @@ async function npcChatEdit(d) {
     broadcastMapState();
     return { ok: true, count: stamps.length, msg: i };
 }
-function npcDetail(id) {
-    // The narrator names people by their handle (or a name it was shown): resolve through the portal, answer masked.
-    const people = peopleNow();
-    const npc = findPerson(id, people);
-    if (!npc) return 'No saved person with that id is here.';
-    return maskText(npcDetailText(npc), people);
-}
-function npcDetailText(npc) {
-    const bits = [`Personality: ${npc.line}`];
-    if (npc.manner) bits.push(`Manner: ${npc.manner}`);
-    if (npc.voice) bits.push(`Speech: ${npc.voice}`);
-    if (npc.base && (npc.base.looks || npc.base.body || npc.base.outfit)) {
-        bits.push(`Base Looks: ${npc.base.looks || '—'}`);
-        if (npc.base.body) bits.push(`Base Body: ${npc.base.body}`);
-        if (npc.base.outfit) bits.push(`Base Wearing: ${npc.base.outfit}`);
-    }
-    if (npc.effects?.length) bits.push(`Active effects: ${npc.effects.map(e => {
-        const lasts = e.lasts ? ` for ${e.lasts}m` : ' (lasting)';
-        const by = e.by === 'player' ? ', player edit' : '';
-        return `${e.intent}${lasts}${by}`;
-    }).join('; ')}`);
-    if (npc.looks) bits.push(`Looks now (${npc.appearanceHow || 'base'}): ${npc.looks}`);
-    if (npc.body) bits.push(`Body: ${npc.body}`);
-    if (npc.outfit) bits.push(`Wearing: ${npc.outfit}`);
-    if (npc.memory?.length) bits.push(`Memory: ${npc.memory.join('; ')}`);
-    if (npc.deep?.history) bits.push(`History: ${npc.deep.history}`);
-    if (npc.deep?.secrets?.length) bits.push(`Secrets: ${npc.deep.secrets.join('; ')}`);
-    if (npc.deep?.relationships) bits.push(`Relationships: ${Object.entries(npc.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
-    return bits.filter(Boolean).join('\n');
-}
 const SCOPE_NOT_GIVEN = 'not judged, so the default';
 function toolNpcStamp(args = {}) {
     const action = String(args.action ?? '').toLowerCase();
@@ -1068,4 +1026,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

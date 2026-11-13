@@ -9,7 +9,7 @@ export const lookOnly = text => LOOK_RE.test(String(text ?? '')) && !MOVE_RE.tes
 /** The stay-put line for a turn with no move. */
 export const stayPutLine = (who, here) => `${who} stays in ${here}: no move happens. Do not describe ${who} leaving, stepping out, going through any exit or arriving anywhere else. Everything in this reply happens in ${here}.`;
 
-// ---- Narrator wait: ws_wait tool args and the [ws_wait: ...] tag (non-tools mode).
+// ---- Narrator wait: the [ws_wait: ...] tag in a reply.
 export const WAIT_TAG = /\[ws_wait:\s*([^\]]{0,100})\]/i;
 /** Tool/tag arguments -> parseWait text: {duration, until} -> "2h" or "until morning". */
 export function waitArgs({ duration = '', until = '' } = {}) {
