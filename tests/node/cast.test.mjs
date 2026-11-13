@@ -22,14 +22,16 @@ test('castdata: rows, search and filters by place, status and disposition', () =
     assert.deepEqual(rows.map(r => [r.id, r.status]), [['bad', 'broken'], ['hesk', 'cast'], ['maren', 'play']]);
     assert.equal(filterRows(rows, { q: 'landlady' }).map(r => r.id).join(), 'hesk');
     assert.equal(filterRows(rows, { place: 'riverton:drowned_rat' }).map(r => r.id).join(), 'hesk');
-    assert.equal(filterRows(rows, { place: SQUARE }).map(r => r.id).join(), 'maren');
+    assert.equal(filterRows(rows, { place: SQUARE }).map(r => r.id).join(), 'hesk,maren', 'a might option (the square) counts as a place she names');
+    assert.equal(filterRows(rows, { place: 'riverton:smithy' }).map(r => r.id).join(), '');
     assert.equal(filterRows(rows, { status: 'broken' }).map(r => r.id).join(), 'bad');
     assert.equal(filterRows(rows, { disposition: 'indifferent' }).map(r => r.id).join(), 'hesk');
     assert.ok(within(BAR, 'riverton'));
     assert.ok(!within('riverton2:x', 'riverton'));
     const marks = markersByPlace(rows);
     assert.deepEqual(marks.get(BAR).map(m => m.id), ['hesk']);
-    assert.equal(marks.get(SQUARE)[0].now, true);
+    assert.equal(marks.get(SQUARE).find(m => m.id === 'maren').now, true);
+    assert.equal(marks.get(SQUARE).find(m => m.id === 'hesk').now, false, 'a might option is a scheduled place (no chat)');
     assert.deepEqual(markersAt(marks, { id: BAR }).map(m => m.id), ['hesk']);
     assert.deepEqual(markersAt(marks, { id: 'a', layer: { level: 'subregion', region: 'riverton', subregion: 'drowned_rat' } }).map(m => m.id), ['hesk']);
 });
@@ -38,8 +40,8 @@ test('castdata: the form round-trips a record and validates inline', () => {
     const hesk = heskOf(RIVERTON);
     const f = formFromRecord({ raw: hesk });
     assert.deepEqual(recordFromForm(f), hesk);
-    const places = new Set([BAR, UP, SQUARE]);
-    assert.deepEqual(formProblems(f, { places, ids: new Set() }), {});
+    const places = new Set([BAR, UP, SQUARE, 'riverton:drowned_rat/cellar']);
+    assert.deepEqual(formProblems(f, { places, ids: new Set() }), {}, 'her might rows are read-only and not checked');
     assert.ok(formProblems(f, { places, ids: new Set(['hesk']) }).id, 'a new person cannot take a used id');
     assert.equal(slugFor('Old Tom', new Set(['old-tom'])), 'old-tom-2');
     const bad = { ...f, id: 'Bad Id', name: '', schedule: [{ ...f.schedule[0], place: 'riverton:nowhere', from: '25:00' }] };
@@ -143,20 +145,6 @@ test('inspector: why someone is where they are, who is at a place, the narrator 
     assert.equal(bram.threshold, 3);
     assert.equal(bram.count, 2);
     assert.ok(!un.some(x => x.name === 'Hesk'));
-});
-
-test('sighting rolls: the seeded roll against the chance, and a no-show reason', () => {
-    const npc = { ok: true, id: 'tam', name: 'Old Tam', line: 'A fisherman.', seen_at: { place: SQUARE, hour: 12, chance: 0.5 }, schedule: [] };
-    const chat = [{ mes: 'hi', is_user: false, extra: {} }];
-    const w = npcWhy(framesOf(chat, 0, [npc])[0].get('tam'), 0, inspEnv(12, SQUARE));
-    assert.equal(w.sighting.active, true);
-    assert.equal(w.sighting.now, 50);
-    assert.ok(w.sighting.roll >= 0 && w.sighting.roll < 100);
-    assert.equal(w.sighting.wouldShow, w.sighting.used < 50);
-    const list = whoAt(chat, 0, [npc], inspEnv(12, SQUARE), SQUARE);
-    const t = list.find(x => x.id === 'tam');
-    assert.ok(t);
-    if (!t.here) assert.match(t.reason, /No-show today: rolled \d+/);
 });
 
 test('editor diffs: base record changes and "In this chat" stamps', () => {

@@ -147,7 +147,8 @@ test('npc short forms read as stamps and are hidden', () => {
     assert.equal(r.text, 'Hi.');
     assert.deepEqual(r.stamps.map(s => s.type), ['npc_disposition', 'npc_memory', 'npc_fact']);
     assert.equal(r.stamps[0].value, 'friendly');
-    for (const a of ['leave', 'staying', 'follow', 'stay', 'seek']) assert.match(normalizeWsTags(`[ws_${a} | hesk]`), new RegExp(`^\\[ws_npc: ${a} \\| hesk\\]$`));
+    for (const a of ['leave', 'staying', 'follow', 'stay']) assert.match(normalizeWsTags(`[ws_${a} | hesk]`), new RegExp(`^\\[ws_npc: ${a} \\| hesk\\]$`));
+    assert.equal(normalizeWsTags('[ws_seek | hesk]'), '[ws_seek | hesk]', 'seek is gone (there is no by-name roll); the tag is not read');
 });
 
 test('unreadable [ws_...] tags stay in the text and become an activity warning', () => {
