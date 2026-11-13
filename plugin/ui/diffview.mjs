@@ -2,16 +2,10 @@
 // sentence, each changed run shown as a REMOVED block (red) then an ADDED block (green), labels on their own line,
 // unchanged sentences dimmed. Pure helpers (splitSentences, blockDiff, fieldDiffs) run in node; renderDiff needs a DOM.
 import { flipBar } from '../shared/doorbar.mjs';
+import { splitSentences } from '../shared/text.mjs';
 
-/** Sentence blocks (a newline also ends one); joined they give back the text's words. */
-export function splitSentences(text) {
-    const out = [];
-    for (const line of String(text ?? '').split(/\n+/)) {
-        const parts = line.match(/[^.!?\u2026]+(?:[.!?\u2026]+["'\u201d\u2019)\]*]*(?=\s|$)|$)/g) ?? [];
-        for (const p of parts) { const t = p.trim(); if (t) out.push(t); }
-    }
-    return out;
-}
+export { splitSentences };
+
 /** Block diff (LCS): [{type: 'same'|'del'|'ins', blocks}], removed blocks before added ones in each changed run. */
 export function blockDiff(oldText, newText) {
     const a = splitSentences(oldText), b = splitSentences(newText), n = a.length, m = b.length, w = m + 1;

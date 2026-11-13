@@ -1502,7 +1502,7 @@
           "generated": true
         }
       ],
-      "text": "You rewrite the existing texts of a change to places in a story: room descriptions, area notes and exit texts. {{reply}}: {\"ops\": [...]}, one op per listed text, in exactly the shape given for it, with the whole new text (not just the added part). Never add other ops, never change an address, an exit name or how long anything lasts, and never write about a place that is not listed.\n{{rewrite}}{{style}}"
+      "text": "You rewrite the existing texts of a change to places in a story: room descriptions, area notes and exit texts. {{reply}}: {\"ops\": [...]}, one op per listed text, in exactly the shape given for it, with the whole new text (not just the added part), except where the shape given is an append_* op: then only the added part. Never add other ops, never change an address, an exit name or how long anything lasts, and never write about a place that is not listed.\n{{rewrite}}{{style}}"
     },
     {
       "id": "change.rewrite",
@@ -1526,7 +1526,7 @@
           "generated": true
         }
       ],
-      "text": "Story:\n{{story}}\n\n{{what}}\nThe texts this change rewrites:\n{{targets}}\n\n{{rewrite}}Write the ops JSON."
+      "text": "Story:\n{{story}}\n\n{{what}}\nThe texts this change rewrites, as they were before the change:\n{{targets}}\n\n{{rewrite}}Write the ops JSON."
     },
     {
       "id": "change.revert_system",
