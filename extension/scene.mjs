@@ -9,7 +9,7 @@ import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesO
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
-import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, shownName } from './names.mjs';
+import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -240,7 +240,7 @@ async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
     const ui = (() => { for (let i = at - 1; i >= 0; i--) if (chat[i]?.is_user) return i; return -1; })();
     const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
     const story = msg.is_user ? '' : msg.mes ?? '';
-    const j = judgeLearn({ person, present, heard: heard || (player ? person.name : ''), said: msg.is_user ? msg.mes ?? '' : said, story }); // name-ok: the player's own [name]
+    const j = judgeLearn({ person, present, heard: heard || (player ? person.name : ''), said: msg.is_user ? msg.mes ?? '' : said, story, saidOnly: source === SAID_SOURCE }); // name-ok: the player's own [name]
     if (!j.ok && !player) {
         noteCall(at, { kind: 'name learn', status: 'skipped', reason: `${source}: ${j.reason}` });
         return { ok: false, reason: j.reason, id: person.id, name: person.name }; // name-ok: result for the inspector
@@ -250,6 +250,35 @@ async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
     msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !(s?.type === 'npc_name' && s.source === source && (s.swipe ?? 0) === swipe && s.id === person.id));
     addNpcStamp(msg, { type: 'npc_name', id: person.id, who: PLAYER, source, ...(j.ok ? {} : { override: j.reason }) });
     return { ok: true, reason: j.ok ? j.reason : `player override: ${j.reason}`, id: person.id, name: person.name }; // name-ok: result for the inspector
+}
+/** The source of a name the player's own line used (learnSaidNames). */
+export const SAID_SOURCE = 'player line';
+/**
+ * After a story reply: an unknown person who is not here (off the map, elsewhere) learns no name from the tracker, which
+ * is only shown the people here. When the player's line before reply `id` uses their name or alias as the narrator wrote
+ * it in an earlier story reply (in dialogue or not), the name is learned (learnName, source SAID_SOURCE: the portal's
+ * rules without presence, and only the player's line counts). People here keep the tracker's path. No model call.
+ */
+async function learnSaidNames(id) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id];
+    if (!msg || msg.is_user || msg.is_system) return [];
+    const ui = (() => { for (let i = id - 1; i >= 0; i--) if (chat[i]?.is_user) return i; return -1; })();
+    const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
+    if (!said.trim()) return [];
+    const cast = castPack()?.npcs ?? [];
+    const folded = [...(framesOf(chat, id, cast).at(-1)?.values() ?? [])];
+    const people = folded.length ? folded : cast;
+    const story = chat.slice(0, ui).filter(m => m && !m.is_user && !m.is_system && !m.extra?.worldscrawl_notice).map(m => String(m.mes ?? ''));
+    const hits = people.map(p => ({ p, name: saidNameOf(p, said, story) })).filter(h => h.name);
+    if (!hits.length) return [];
+    let present = [];
+    try { const loc = await currentLocation(); present = presentAt(chat, id, cast, npcEnv(chat, loc)); } catch { present = []; }
+    const out = [];
+    for (const { p, name } of hits) {
+        if (present.some(q => q.id === p.id)) continue; // here: the tracker's path
+        out.push(await learnName(msg, { target: p.id, heard: name, source: SAID_SOURCE })); // name-ok: what the player said
+    }
+    return out;
 }
 /** [name] /ws-name: the player's own name learn (always lands; see learnName). */
 async function learnNameOn(msg, name) {
@@ -1054,4 +1083,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, judgeFoundNow, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcDetail, npcEnv, offerRemember, pendingNpc, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

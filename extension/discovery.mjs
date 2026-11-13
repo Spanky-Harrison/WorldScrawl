@@ -15,7 +15,7 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, flagActionText, flagToolText, mapCtx, openEditor, openForms, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, judgeFoundNow, learnName, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, judgeFoundNow, learnName, learnSaidNames, listedPeople, loreChain, matchStubLore, maybeSuggest, npcClock, npcDetail, pendingNpc, refreshLivePlaces, renderTokens, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
@@ -702,6 +702,8 @@ export async function onReplyForFlags(id) {
         await c.saveChat?.();
     }
     markUnreadTags();
+    // Someone not here whose name the player just used, as the narrator gave it earlier: learned (the tracker isn't shown them).
+    if (settings().flagNpcs !== false) { try { if ((await learnSaidNames(id)).some(r => r?.ok)) await c.saveChat?.(); } catch (e) { console.warn('[WorldScrawl] player-line name', e?.message || e); } }
     await runTracker(id);
     maybeSuggest(id);
         if (msg.extra?.[REMEMBER_KEY] || (msg.extra?.[NPC_KEY] ?? []).length || (msg.extra?.[FOUND_KEY] ?? []).length || (msg.extra?.[NPC_WARN_KEY] ?? []).length) { await c.saveChat?.(); renderPatchCards(); }

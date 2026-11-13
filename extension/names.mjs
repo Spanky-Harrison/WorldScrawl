@@ -107,16 +107,18 @@ export const isNameOf = (p, heard) => !!normName(heard) && namesOf(p).some(n => 
  * The rules a model-sourced name learn must pass: `person` resolved, is present, the player does not know the name yet,
  * `heard` is their name or an alias, and that name was spoken in this exchange (inside quotes in the reply, or anywhere
  * in the player's own line). {ok, reason}. Player sources (bracket, /ws-name) skip the rules; see learnName in scene.mjs.
+ * `saidOnly` (the player-line learn, learnSaidNames in scene.mjs): presence is not needed, and only the player's own
+ * line counts as where the name was said.
  */
-export function judgeLearn({ person, present = [], heard = '', said = '', story = '' } = {}) {
+export function judgeLearn({ person, present = [], heard = '', said = '', story = '', saidOnly = false } = {}) {
     if (!person) return { ok: false, reason: 'no saved person matched' };
-    if (!present.some(p => p.id === person.id)) return { ok: false, reason: `${person.name} is not here` };
+    if (!saidOnly && !present.some(p => p.id === person.id)) return { ok: false, reason: `${person.name} is not here` };
     if (relOf(person).state === 'named' || !person.unknownAs) return { ok: false, reason: `the player already knows ${person.name}'s name` };
     if (!isNameOf(person, heard)) return { ok: false, reason: `"${String(heard ?? '').trim()}" is not ${person.name}'s name` };
     const name = namesOf(person).find(n => nameIn(heard, n) || normName(n) === normName(heard)) ?? heard;
-    const spoken = [String(said ?? ''), ...spokenParts(story)].some(t => nameIn(t, name));
-    if (!spoken) return { ok: false, reason: `${person.name}'s name was not said in dialogue` };
-    return { ok: true, reason: 'introduced in dialogue' };
+    const spoken = [String(said ?? ''), ...(saidOnly ? [] : spokenParts(story))].some(t => nameIn(t, name));
+    if (!spoken) return { ok: false, reason: saidOnly ? `the player did not say ${person.name}'s name` : `${person.name}'s name was not said in dialogue` };
+    return { ok: true, reason: saidOnly ? 'said by the player' : 'introduced in dialogue' };
 }
 
 // ---- Outbound text.
@@ -178,4 +180,16 @@ export function nameLeaks(text, people) {
         if (hit) out.push({ id: p.id, name: hit });
     }
     return out;
+}
+
+/** Does `text` hold `name` as written (exact case, whole words) outside a place name? */
+const writesName = (text, name) => { const t = String(text ?? ''); return [...t.matchAll(nameRe(name, 'g'))].some(m => !inPlace(t, m.index, m[0])); };
+/**
+ * The player-line learn's test: the real name or alias of p (not yet known to the player) that the player's own line
+ * `said` uses (whole words, any case) and the narrator wrote earlier in `story` (earlier story replies, quoted or plain;
+ * as written: exact case, whole words, outside a place name). The name, or '' when none.
+ */
+export function saidNameOf(p, said, story = []) {
+    if (!p?.unknownAs || isKnown(p)) return '';
+    return namesOf(p).find(n => nameIn(said, n) && story.some(t => writesName(t, n))) ?? '';
 }
