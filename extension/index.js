@@ -47,7 +47,7 @@ export { renderTokens, fedLore, loreBits, refreshLivePlaces, flaggedInScene } fr
 export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
 export { revealsDestination } from './shared.mjs';
 export { themeVars, mapState, expandSys, openMapWindow, openWorldFolder } from './mapwindow.mjs';
-export { flagHint, flagToolText, flagActionText, waitHint, patchesOn, previewOps, restampChange, changeDependents, toggleChange, liveEdit } from './patches.mjs';
+export { patchesOn, previewOps, restampChange, changeDependents, toggleChange, liveEdit } from './patches.mjs';
 export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagStatusText, USER_FLAG_NOTE, replyAfter, SCENE_KEY, sceneOverrides, setSceneOverride, proactiveDiscovery } from './carriers.mjs';
 export { modelWait, planWait, MIN_NARRATOR_WAIT, narratorWaitAction, waitAmount, proposeWait, keepWait, waitExpiryDelta, editKeptWait, discardWait, waitNote, renderPatchCards } from './waits.mjs';
 export { setPrompts, P as render };
@@ -76,7 +76,7 @@ const WAITCARD_KEY = 'worldscrawl_waitcard'; // {swipe, seconds, sleep, label, u
 const WAIT_KEY = 'worldscrawl_wait'; // {seconds, sleep, label, before}: on the message where time passed without moving
 const FACTS_KEY = 'worldscrawl_facts';
 const REMINDER_KEY = 'worldscrawl_arrival_reminder'; // depth 0: right after the latest user message
-const TOOL_NAMES = ['ws_look', 'ws_move', 'ws_flag', 'ws_wait', 'ws_npc'];
+const TOOL_NAMES = ['ws_look', 'ws_move'];
 const PATCH_KEY = 'worldscrawl_patches'; // [{type: 'patch', ops, relocate, swipe, ...}] on the message where a map change settled
 const FLAG_KEY = 'worldscrawl_flag'; // {swipe, loc, note, start, status, proposal}: a flagged message's review card
 const FLAGHINT_KEY = 'worldscrawl_flaghint';

@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { render as P, patches as patchShared } from './shared.mjs';
-import { carrierLine, clip, isCarrier, patchLib, proactiveDiscovery, snapCarriers } from './carriers.mjs';
+import { patches as patchShared } from './shared.mjs';
+import { carrierLine, clip, isCarrier, patchLib, snapCarriers } from './carriers.mjs';
 import { chatChanges, chatElapsed } from './clock.mjs';
 import { targetKeyOf } from './arearewrite.mjs';
 import { expiryKey, expiryWindow, noticedExpiries } from './npcexpiry.mjs';
@@ -16,17 +16,9 @@ import { editLib } from './cardlib.mjs';
 // ---- Map patches: lasting changes to places (a fire, a collapse, a smashed door). A patch is stamped on the message
 // where the change settled (PATCH_KEY, per swipe); the server applies the stamped patches to the world per request
 // (plugin/shared/patches.mjs), world files are never written, and deleting the message undoes the patch. Triggers: the
-// flag button on a message, the ws_flag tool, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
-export const flagHint = (on = proactiveDiscovery()) => P('narration.flag_hint', { discover: P(on ? 'narration.discover_proactive' : 'narration.discover_strict') });
-export const flagToolText = (on = proactiveDiscovery()) => P('narration.flag_tool', { discover: P(on ? 'narration.flag_tool_proactive' : 'narration.flag_tool_strict') });
-export const flagActionText = (on = proactiveDiscovery()) => P('narration.flag_action', { discover: P(on ? 'narration.flag_action_proactive' : 'narration.flag_action_strict') });
-export const waitHint = () => P('narration.wait_hint');
-const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i; // from ws_flag action wait/sleep: stamped on the reply when it arrives
+// flag button on a message, a [ws_flag: place | what changed] tag in a reply, and /ws-change.
+const FLAG_TAG = /\[ws_flag:\s*([^\]]{0,300})\]/i; // a [ws_flag: ...] tag in a reply (read in onReplyForFlags)
 const RANGE_CAP = 10;
-let pendingFoundFlags = []; // names from ws_flag action found: judged and stamped on the reply
-let pendingNameFlags = []; // names from ws_flag action name: the player learned them; stamped on the reply
-let pendingNpcFlags = []; // names from ws_flag action npc: stamped on the reply when it arrives
-let pendingLoreFlags = [];
 const swipeOf = m => m?.swipe_id ?? 0;
 /** The patches on a message that belong to the swipe being shown. */
 export const patchesOn = m => (m?.extra?.[PATCH_KEY] ?? []).filter(p => (p?.swipe ?? 0) === swipeOf(m));
@@ -454,4 +446,4 @@ export async function keepExpiryEdit(id, key, note = '', still = () => true, ite
     return { ok: true, patch: p };
 }
 
-export { FLAG_TAG, RANGE_CAP, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, pendingFoundFlags, pendingLoreFlags, pendingNameFlags, pendingNpcFlags, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };
+export { FLAG_TAG, RANGE_CAP, confirmOff, drawDiff, drawPersonDiff, failedFor, liveDiff, loadFormLib, mapCtx, openEditor, openForms, patchSig, refreshChangeStatus, relocateFrom, saveKeptEdit, swipeOf, toggleFromCard };

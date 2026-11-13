@@ -10,7 +10,6 @@ import { RANGE_CAP, changeDependents, confirmOff, loadFormLib, mapCtx, patchesOn
 import { applyFacts } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
 import { REWRITE_SET_BY_YOU, collapseTextOps, mergeRewrite, rewriteGuard, targetLines, textTargets, writtenText } from './arearewrite.mjs';
- // from the ws_flag tool: attached to the reply when it arrives
 let patchLib = null;
 
 // ---- Map-edit carriers: one compact message holds a run of editor edits.
