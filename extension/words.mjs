@@ -7,7 +7,7 @@ export const MOVE_RE = /\b(?:go|goes|going|went|gone|walk|walks|walked|walking|h
 /** Only looking (a perception word, no movement word): the intent question offers no move options. */
 export const lookOnly = text => LOOK_RE.test(String(text ?? '')) && !MOVE_RE.test(String(text ?? ''));
 /** The stay-put line for a turn with no move. */
-export const stayPutLine = (who, here) => `${who} has NOT moved this turn and is still at ${here}. No move happened: do not describe ${who} leaving, stepping out, going through any exit or arriving anywhere else. Everything this turn happens in ${here}.`;
+export const stayPutLine = (who, here) => `${who} stays in ${here}: no move happens. Do not describe ${who} leaving, stepping out, going through any exit or arriving anywhere else. Everything in this reply happens in ${here}.`;
 
 // ---- Narrator wait: ws_wait tool args and the [ws_wait: ...] tag (non-tools mode).
 export const WAIT_TAG = /\[ws_wait:\s*([^\]]{0,100})\]/i;

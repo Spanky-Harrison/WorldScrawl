@@ -308,36 +308,41 @@ export function groundWords(g, tempC) {
     if (g.icy) w.push(g.wetness > 0.5 ? 'icy' : 'icy in patches');
     return w.join(', ');
 }
+/** Humidity in words for the narrator's no-numbers line: empty when unremarkable. */
+export const humidWord = (h, tempC) => (h >= 80 ? (tempC >= 18 ? 'humid' : 'damp') : h <= 30 ? 'dry' : '');
 const seasonWord = s => `${s.phase === 'mid' ? '' : `${s.phase} `}${s.name.replace(/_/g, ' ')}`;
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * What a place feels like now. place = {weather_region, exposure, indoor_temp?, insulation?, temp_offset?, fixed_weather?}
- * (temperatures °C). Returns {exposure, line (narrator), short (footer/map), outside?, inside_temp?}.
+ * (temperatures °C). Returns {exposure, line (narrator, with numbers), words (narrator, no numbers), short (footer/map), outside?, inside_temp?}.
  */
 export function placeWeather(cfg, place, t, cal = GREGORIAN) {
     const u = cfg.unit ?? 'F', exp = place?.exposure ?? 'outdoor', off = place?.temp_offset ?? 0;
     if (exp === 'fixed') {
         const fw = place.fixed_weather ?? {};
         const tp = fw.temp ?? null;
-        return { exposure: exp, line: `Weather here: ${fw.condition ?? 'unchanging'}${tp !== null ? `, ${fmtTemp(tp, u)}` : ''}.`, short: `${fw.condition ?? 'Unchanging'}${tp !== null ? ` · ${fmtTemp(tp, u)}` : ''}`, inside_temp: tp };
+        return { exposure: exp, line: `Weather here: ${fw.condition ?? 'unchanging'}${tp !== null ? `, ${fmtTemp(tp, u)}` : ''}.`, words: `Weather here: ${fw.condition ?? 'unchanging'}${tp !== null ? `, ${feelWord(tp)}` : ''}.`, short: `${fw.condition ?? 'Unchanging'}${tp !== null ? ` · ${fmtTemp(tp, u)}` : ''}`, inside_temp: tp };
     }
     const wr = place?.weather_region;
     if (!wr || !cfg.regions[wr]) return null;
     if (exp === 'enclosed') {
         const tp = place.indoor_temp ?? climateMean(cfg.regions[wr].climate) + off;
-        return { exposure: exp, line: `Temperature here: ${fmtTemp(tp, u)}, ${feelWord(tp)} and still; no weather reaches this place.`, short: fmtTemp(tp, u), inside_temp: tp };
+        return { exposure: exp, line: `Temperature here: ${fmtTemp(tp, u)}, ${feelWord(tp)} and still; no weather reaches this place.`, words: `Here it is ${feelWord(tp)} and still; no weather reaches this place.`, short: fmtTemp(tp, u), inside_temp: tp };
     }
     const w = weatherAt(cfg, wr, t, cal);
     w.temp += off; w.feels += off;
     const g = groundWords(w.ground, w.temp), wind = cfg.winds[w.wind]?.label ?? '';
     const feels = Math.abs(cToF(w.feels) - cToF(w.temp)) >= 3 ? ` (feels like ${fmtTemp(w.feels, u)})` : '';
+    const humid = humidWord(w.humidity, w.temp);
+    const said = `${w.label}${wind ? `, ${wind}` : ''}, ${feelWord(w.feels)}${humid ? `, ${humid}` : ''}.${g ? ` Underfoot: ${g}.` : ''} ${cap(seasonWord(w.season))}.`;
     const sentence = `${w.label}${wind ? `, ${wind}` : ''}, ${fmtTemp(w.temp, u)}${feels}, ${feelWord(w.feels)}, ${w.humidity}% humidity.${g ? ` Underfoot: ${g}.` : ''} ${cap(seasonWord(w.season))}.`;
     if (exp === 'sheltered') {
         const inside = indoorTemp(w.temp, place.indoor_temp, place.insulation);
         return { exposure: exp, outside: w, inside_temp: inside,
             line: `Weather (outside): ${sentence} Inside, sheltered from the wind and rain: ${fmtTemp(inside, u)}, ${feelWord(inside)}.`,
+            words: `Weather (outside): ${said} Inside, sheltered from the wind and rain, it is ${feelWord(inside)}.`,
             short: `${w.label} outside · ${fmtTemp(inside, u)} inside` };
     }
-    return { exposure: exp, outside: w, line: `Weather: ${sentence}`, short: `${w.label}${wind ? `, ${wind}` : ''} · ${fmtTemp(w.temp, u)}` };
+    return { exposure: exp, outside: w, line: `Weather: ${sentence}`, words: `Weather: ${said}`, short: `${w.label}${wind ? `, ${wind}` : ''} · ${fmtTemp(w.temp, u)}` };
 }

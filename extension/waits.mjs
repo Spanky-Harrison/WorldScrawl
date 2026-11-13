@@ -1,6 +1,7 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { trackMark } from './tracker.mjs';
 import { waitReason } from './words.mjs';
+import { capFirst } from './names.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
 import { render as P, cards as C } from './shared.mjs';
 import { cardLib, editLib } from './cardlib.mjs';
@@ -8,7 +9,7 @@ import { runCardAction, ticketFor } from './cardacts.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
 import { targetLabel, textTargets } from './arearewrite.mjs';
-import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, narratorWeather, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
 import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
@@ -17,7 +18,7 @@ import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, 
 import { lastUserIndex, partyText } from './movement.mjs';
 import { PLACE_EXPIRED_KIND, drawDiff, expiryView, roomExpiryKeys, textExpiryKey, failedFor, isPlaceExpiry, liveDiff, openForms, patchesOn, previewOps, refreshChangeStatus, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, abandonStuckAppearance, appearJobs, applyFacts, castPack, exportNpc, npcBefore, npcClock, personExpiriesIn, personExpiryTurn, prefetchRemember } from './scene.mjs';
-import { NPC_EXPIRED_KIND, changeLabel, modelChangeLabel } from './npcexpiry.mjs';
+import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
 import { busyLines, onCallChange, onWorkChange, workingOn } from './work.mjs';
@@ -180,13 +181,14 @@ async function waitFacts(chat, loc) {
     const lines = [];
     try {
         const d0 = calendarLib.dateAt(before, t?.start_date ?? null, t?.calendar ?? null), d1 = calendarLib.dateAt(after, t?.start_date ?? null, t?.calendar ?? null);
-        lines.push(`What just happened: ${who} ${r.w.sleep ? 'slept' : 'waited'} here for ${dur}, without travelling. It was ${calendarLib.describeDate(d0)}; it is now ${calendarLib.describeDate(d1)}.${d0.part !== d1.part ? ` The light has changed from ${d0.part} to ${d1.part}.` : ''}${r.w.sleep ? ' Narrate waking up.' : ''}`);
+        lines.push(`What just happened: ${who} ${r.w.sleep ? 'slept' : 'waited'} here for ${dur}, staying put. It was ${calendarLib.describeDate(d0)}; it is now ${calendarLib.describeDate(d1)}.${d0.part !== d1.part ? ` The light has changed from ${d0.part} to ${d1.part}.` : ''}${r.w.sleep ? ' Narrate waking up.' : ''}`);
     } catch {}
     const w0 = placeWeatherNow(loc, chat.map((m, j) => (j === r.i ? { ...m, extra: { ...m.extra, [WAIT_KEY]: undefined } } : m))), w1 = placeWeatherNow(loc, chat);
-    if (w0?.line && w1?.line && w0.line !== w1.line) lines.push(`Before the wait: ${w0.line} Describe how the weather has changed.`);
+    const s0 = narratorWeather(w0), s1 = narratorWeather(w1);
+    if (s0 && s1 && s0 !== s1) lines.push(`Before the wait: ${s0} Describe how the weather has changed.`);
     const lib = await loadPatchLib();
     const gone = expiredAll(chat, lib, who)(chatChanges(chat), before, after);
-    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these temporary changes ran out and are gone now: ${gone.map(g => (g.person ? modelChangeLabel(g.person) : g.note)).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
+    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these wore off and no longer hold: ${gone.map(g => (g.person ? `${capFirst(g.person.shown || g.person.who)}: "${g.person.what}"` : `"${g.story || g.note}"`)).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
     return lines.join('\n');
 }
 

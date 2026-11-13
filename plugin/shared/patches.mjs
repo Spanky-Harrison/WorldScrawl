@@ -84,7 +84,7 @@ export function opActive(op, patch, now) {
 }
 /**
  * Temporary patch ops that run out after game time `before` and by `after` (a wait or a journey):
- * [{patch, op, note, ends}] in the order they run out.
+ * [{patch, op, note, story (the change's story note), ends}] in the order they run out.
  */
 export function expiredBetween(changes = [], before = 0, after = 0) {
     const out = [];
@@ -93,7 +93,7 @@ export function expiredBetween(changes = [], before = 0, after = 0) {
         c.ops.forEach((op, i) => {
             if (!has(op, 'lasts')) return;
             let ends; try { ends = Number(c.at) + parseLasts(op.lasts); } catch { return; }
-            if (ends > before && ends <= after) out.push({ patch: c.id, op, note: c.summary?.[i] ?? c.note ?? String(op.op ?? '').replace(/_/g, ' '), ends });
+            if (ends > before && ends <= after) out.push({ patch: c.id, op, note: c.summary?.[i] ?? c.note ?? String(op.op ?? '').replace(/_/g, ' '), story: c.note ?? '', ends });
         });
     }
     return out.sort((a, b) => a.ends - b.ends);

@@ -18,7 +18,7 @@ export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', 
 /** A short excerpt of the message that made the place (about 240 characters, one line). */
 export const excerptOf = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 240 ? `${t.slice(0, 237).replace(/\s+\S*$/, '')}...` : t; };
 export function expiryNarrationLine(room, to, via, who, excerpt) {
-    const sum = room.change ? [room.change.note, ...(Array.isArray(room.change.summary) ? room.change.summary : [room.change.summary])].filter(Boolean).join('; ') : '';
+    const sum = room.change?.note || ''; // the story's own note; the engine summary ("Created place ...") stays off the narrator
     return P('narration.expired', { place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description || '(none)', change: sum || '(unknown)', excerpt: excerpt || '(none)', party: who, to: displayName(to), via: via ? ` (out through the ${via})` : '' });
 }
 async function postExpiredNotice(from, toAddr, via) {
@@ -69,8 +69,8 @@ export const expiredNotice = (to, via) => `[Engine: the passage seals behind you
 export function relocationNote(chat, loc, who) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
         const m = chat[i];
-        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the temporary place ${who} was in is gone (its time ran out); the passage sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
-        if (m?.extra?.worldscrawl_notice_kind === 'missing') return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in no longer exists in this world. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in is gone; the way back sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing') return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in is no longer there. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
         if (m && !m.is_system && !m.is_user) return '';
     }
     return '';

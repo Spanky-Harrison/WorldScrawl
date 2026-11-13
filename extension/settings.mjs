@@ -42,6 +42,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes</label>
       <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
+      <label class="checkbox_label"><input id="worldscrawl_weather_numbers" type="checkbox"> Weather numbers to the narrator (off: the narrator gets words like &quot;a warm, humid evening&quot;; on: the temperature and humidity numbers too)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the wait card)</label>
       <div>Movement</div>
       <label class="checkbox_label"><input type="radio" name="worldscrawl_mode" value="commands"> Clicks and commands only</label>
@@ -81,6 +82,9 @@ function addSettingsPanel() {
     const nex = document.getElementById('worldscrawl_narrate_expiries');
     nex.checked = settings().narrateExpiries !== false;
     nex.addEventListener('change', () => { settings().narrateExpiries = nex.checked; ctx().saveSettingsDebounced(); });
+    const wxn = document.getElementById('worldscrawl_weather_numbers');
+    wxn.checked = !!settings().weatherNumbers;
+    wxn.addEventListener('change', () => { settings().weatherNumbers = wxn.checked; applyFacts(); ctx().saveSettingsDebounced(); });
     const akw = document.getElementById('worldscrawl_auto_keep_waits');
     akw.checked = !!settings().autoKeepWaits;
     akw.addEventListener('change', () => { settings().autoKeepWaits = akw.checked; ctx().saveSettingsDebounced(); });

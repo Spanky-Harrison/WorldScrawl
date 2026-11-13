@@ -639,7 +639,7 @@
       "description": "Step 1 of 5: the first line. First line of the world state given to the narrator each turn.",
       "group": "narration",
       "locked": "The narrator relies on this marker to know the block is from the game.",
-      "text": "[World state from the game engine. This is authoritative.]",
+      "text": "[Scene facts. Treat these as true.]",
       "placeholders": []
     },
     {
@@ -756,7 +756,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): broke through, stayed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. It exists now and is listed in the exits. {{party}} has not gone through it yet and is still at {{place}}. Narrate the breakthrough.",
+      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. The opening is there now. {{party}} has not gone through it yet and is still at {{place}}. Narrate the breakthrough.",
       "placeholders": [
         {
           "name": "party"
@@ -778,7 +778,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): breaking through failed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way. No new opening or passage exists, and none appears in this reply. {{party}} is still at {{place}}. Narrate the attempt failing (the wall, floor or window holds), and do not flag a map change or a new room for it.",
+      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way. No new opening or passage exists, and none appears in this reply. {{party}} is still at {{place}}. Narrate the attempt failing (the wall, floor or window holds).",
       "placeholders": [
         {
           "name": "party"
@@ -905,7 +905,7 @@
       "description": "Used by Narration. Step 4 of 5 (after a move or looking around): mention the exits. Added after a move or looking around.",
       "group": "style",
       "process": "narration",
-      "text": "In this reply, mention every exit listed above, and weave in what can be seen through the open ones (the \"you can see\" lines). For an exit listed without a destination, mention only the exit itself; do not hint or guess where it leads.",
+      "text": "In this reply, mention every exit above, and weave in what can be seen through the open ones. For an exit whose destination is not given, mention only the exit itself; do not hint or guess where it leads.",
       "placeholders": []
     },
     {
@@ -914,7 +914,7 @@
       "description": "Used by Narration. Step 2 of 2 when a temporary place runs out with the party inside (setting \"Narrate expiries\"): the game has already picked where the party ends up and moved them; this line, sent with one automatic narrator reply, lets the narrator decide why and how the place ends.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{place}} has come to an end; {{ended}}. About it: {{description}}\nIt was made by this change: {{change}}\nFrom the message that made it: \"{{excerpt}}\"\n{{party}} has to leave it and ends up in {{to}}{{via}}. You are free to decide why and how it ends (it fades, collapses, they are shown out or thrown out, the spell breaks...), in keeping with what made it. Do not change where {{party}} ends up. Describe leaving and arriving in {{to}}.",
+      "text": "What just happened: {{place}} has come to an end; {{ended}}. About it: {{description}}\nHow it came about: {{change}}\nFrom the story where it appeared: \"{{excerpt}}\"\n{{party}} has to leave it and ends up in {{to}}{{via}}. You are free to decide why and how it ends (it fades, collapses, they are shown out or thrown out, the spell breaks...), in keeping with what made it. Do not change where {{party}} ends up. Describe leaving and arriving in {{to}}.",
       "placeholders": [
         {
           "name": "place"
@@ -961,7 +961,7 @@
       "description": "Step 5 of 5 (map tools off): the last line.",
       "group": "narration",
       "locked": "Keeps the narrator from moving the party itself; the game controls movement.",
-      "text": "You only narrate. The game engine controls movement: never move {{party}} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.",
+      "text": "You only narrate. {{party}} goes only where the story's moves take them: never move {{party}} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.",
       "placeholders": [
         {
           "name": "party"
@@ -974,7 +974,7 @@
       "description": "Alongside (move and travel turns): a short reminder after the latest message. Short last-line reminder on move and travel turns.",
       "group": "narration",
       "locked": "Tells the narrator where the turn ends; the game relies on it to keep the story and map in step.",
-      "text": "[Engine: this turn ends in {{where}}. Do not narrate entering any other room. If the player's message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
+      "text": "[At the end of this reply the characters are in {{where}}. Do not narrate entering any other room. If the last message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
       "placeholders": [
         {
           "name": "where"
@@ -987,7 +987,7 @@
       "description": "Alongside (reporter tools off, flag tags on): tells the narrator how to tag map changes (permanent or temporary) and door discoveries. The discovery sentence depends on 'Proactive room discovery'.",
       "group": "narration",
       "locked": "The exact [ws_flag: …] and [ws_flag: npc | …] tag formats the game looks for.",
-      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as somewhere off the map as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.",
+      "text": "If something in the story changes a place, for good or for a while (it burns down, collapses, floods, fills with smoke, a door is smashed or barricaded, a portal opens for an hour), end your reply with [ws_flag: place | what changed]. {{discover}} Rarely, and only if you are sure: when a named person who is not on the people-here list is actually here and engaging with the characters (speaking to them or acting with them), you may also end your reply with [ws_flag: npc | their name]. Never for passersby or people only mentioned, and never for places, things, animals, ships, days, gods or anyone already saved. When in doubt, leave it out. When someone on the people-here list is shown without their name and the player's character learns it in your reply (told, introduced, overheard), end your reply with [ws_flag: name | their name]. If the scene needs the past of someone on the people-here list, end your reply with [ws_flag: lore | their name]. If you narrate someone listed as elsewhere as actually here with the characters (at the mapped place named as near them, or any room inside it), you must end that same reply with [ws_flag: found | their name]. If you are not flagging them, do not narrate them as present. Do not use it when they are already in a room, or when that near place is not on the map. Never write these otherwise.",
       "placeholders": [
         {
           "name": "discover",
@@ -1012,7 +1012,7 @@
       "group": "narration",
       "piece": true,
       "locked": "The exact [ws_flag: discover | …] tag the game looks for.",
-      "text": "If the characters open or go through a door that is not one of the exits, or your narration names a room or passage off this place that is not on the map yet (e.g. the guest rooms along a hallway), and it fits the room, end your reply with [ws_flag: discover | which door or room]; the engine adds it to the map. If nothing like that fits, do not flag it.",
+      "text": "If the characters open or go through a door that is not one of the exits, or your narration names a room or passage off this place that is not on the map yet (e.g. the guest rooms along a hallway), and it fits the room, end your reply with [ws_flag: discover | which door or room]; it will be added to the map. If nothing like that fits, do not flag it.",
       "placeholders": []
     },
     {
@@ -1021,7 +1021,7 @@
       "description": "Alongside (reporter tools on): the description of the ws_flag tool, telling the narrator when to flag a map change or a discovery.",
       "group": "narration",
       "locked": "Names the ws_flag tool's 'discover' action, which the game reads.",
-      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} With action \"found\", note is the name of someone listed as somewhere off the map whom the characters have just found at the mapped place named as near them (or any room inside it). If you narrate such a person as actually present with the characters, you must call this with \"found\" for them in that same reply; otherwise do not narrate them as present. The engine handles it after your reply. Do not call it for ordinary events.",
+      "text": "Call this when something in the story permanently changes a place (it burns, collapses, floods, a door is smashed or barricaded, rooms are knocked together), or with action \"discover\" {{discover}} With action \"found\", note is the name of someone listed as elsewhere whom the characters have just found at the mapped place named as near them (or any room inside it). If you narrate such a person as actually present with the characters, you must call this with \"found\" for them in that same reply; otherwise do not narrate them as present. The engine handles it after your reply. Do not call it for ordinary events.",
       "placeholders": [
         {
           "name": "discover",
@@ -1055,7 +1055,7 @@
       "description": "Alongside (reporter tools on): the description of ws_flag's action argument.",
       "group": "narration",
       "locked": "Names the action values change, discover, wait, sleep, npc, name, lore and found, which the game reads.",
-      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": only when the narrated events clearly take 15 minutes or more here without travelling (resting, sleeping the night, a lengthy task); never for an ordinary exchange of dialogue or a single action. If it isn't clear, don't. \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here. \"found\": note is the name of someone listed as somewhere off the map; the characters have reached the mapped place named as near them (or any room inside it). Required in the same reply whenever you narrate such a person as actually present with the characters; if you don't flag them, don't narrate them present. The engine puts them in the current room when that room is within it, and says why when it cannot.",
+      "text": "\"change\" (default): a place changed permanently. \"discover\": {{discover}} \"wait\" or \"sleep\": only when the narrated events clearly take 15 minutes or more here without travelling (resting, sleeping the night, a lengthy task); never for an ordinary exchange of dialogue or a single action. If it isn't clear, don't. \"npc\" (rarely, only if you are sure): note is the name of a named person, not on the people-here list, who is actually here and speaking to or acting with the characters; never passersby, places, things, animals, ships, days, gods or anyone already saved. \"name\": note is the name of someone on the people-here list, shown without their name, whose name the player's character just learned (told, introduced, overheard). \"lore\": location is the name of a place listed under \"Lore on file\", or of someone on the people-here list whose past the scene needs; the tool answers with what locals know about it, and it stays in your notes while the characters remain here. \"found\": note is the name of someone listed as elsewhere; the characters have reached the mapped place named as near them (or any room inside it). Required in the same reply whenever you narrate such a person as actually present with the characters; if you don't flag them, don't narrate them present. The engine puts them in the current room when that room is within it, and says why when it cannot.",
       "placeholders": [
         {
           "name": "discover",
@@ -1066,10 +1066,10 @@
     {
       "id": "narration.offmap_found",
       "title": "Narration: the off-the-map people rule",
-      "description": "Alongside: added under the people-here list whenever it names someone as somewhere off the map.",
+      "description": "Alongside: added under the people-here list whenever it names someone as elsewhere.",
       "group": "narration",
-      "locked": "Keeps someone listed as off the map out of the scene until they have actually come here.",
-      "text": "(Anyone above listed as somewhere off the map is not with the characters. Do not narrate them as present unless they have actually come here.)",
+      "locked": "Keeps someone listed as elsewhere out of the scene until they have actually come here.",
+      "text": "(Anyone above who is elsewhere is not with the characters. Do not narrate them as present unless they have actually come here.)",
       "placeholders": []
     },
     {
@@ -1078,7 +1078,7 @@
       "description": "Alongside: one line naming the places here that have lore on file. It does not tell the narrator how to ask.",
       "group": "narration",
       "locked": "Names the places the [ws_flag: lore | …] tag or the ws_flag lore action can ask for.",
-      "text": "Lore on file: {{lore_places}}.",
+      "text": "Places with local lore: {{lore_places}}.",
       "placeholders": [
         {
           "name": "lore_places"
@@ -1125,7 +1125,7 @@
       "group": "narration",
       "piece": true,
       "locked": "Names the 'discover' action the game reads.",
-      "text": "the characters actually open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room; the engine adds the room behind it. Never for a door only mentioned in the scenery.",
+      "text": "the characters actually open or go through a door (or stairs, hatch...) that is not one of the exits, either one the room description mentions or one that plausibly fits the room; the room behind it is added. Never for a door only mentioned in the scenery.",
       "placeholders": []
     },
     {
@@ -1135,7 +1135,7 @@
       "group": "narration",
       "piece": true,
       "locked": "Names the 'discover' action the game reads.",
-      "text": "the characters open or go through a door (or stairs, hatch...) that is not one of the exits, or the narration names a room or passage off this place that is not on the map yet, e.g. one of the guest rooms off a hallway; the engine adds it.",
+      "text": "the characters open or go through a door (or stairs, hatch...) that is not one of the exits, or the narration names a room or passage off this place that is not on the map yet, e.g. one of the guest rooms off a hallway; the room is added.",
       "placeholders": []
     },
     {
@@ -1713,7 +1713,7 @@
       "description": "Alongside (when a saved person is in the scene): who is here, and the detail for whoever is the focus.",
       "group": "narration",
       "locked": "The game fills these from the cast and the stamps. Saved people are never unnamed strangers.",
-      "text": "People here (saved people only — anyone not listed is scenery, not one of them):\n{{npcs_present}}\n{{npc_focus}}",
+      "text": "People here (anyone not listed is a background figure, not one of them):\n{{npcs_present}}\n{{npc_focus}}",
       "placeholders": [
         {
           "name": "npcs_present"
@@ -1758,7 +1758,7 @@
       "piece": true,
       "locked": "The game reads the ws_npc tool.",
       "placeholders": [],
-      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), lasts when temporary (e.g. \"1 hour\"), and scope \"heavy\" when the change remakes them (a transformation, a whole new outfit) or \"light\" when it touches one detail; e.g. intent \"magically young\", fields \"body\", lasts \"1 hour\". Intent, fields and lasts are enough — do not rewrite looks/body/outfit in this call; the engine rebuilds those. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. A place changing is not a reason to call this. Call it only when that person's own looks, a fact, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance already listed under Known facts or Looks. Call appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not call it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
+      "text": "When someone's Looks, Body or Outfit changes (a spell, a wound that remakes them, a disguise, a polymorph), call ws_npc with action \"appearance\", their id, intent (what changed), fields (looks/body/outfit, omit for all), lasts when temporary (e.g. \"1 hour\"), and scope \"heavy\" when the change remakes them (a transformation, a whole new outfit) or \"light\" when it touches one detail; e.g. intent \"magically young\", fields \"body\", lasts \"1 hour\". Intent, fields and lasts are enough — do not rewrite looks/body/outfit in this call; they are rebuilt for you. Do not put appearance changes in a fact note. If you invent a new fact about someone listed above, call ws_npc with action \"fact\", their id and the text, plus lasts (e.g. \"2 hours\") when it only lasts a while (a bruise, a mood). Whenever something happens that this person would still remember tomorrow (they are lied to, threatened, helped, insulted, told something surprising, or promised something), call ws_npc with action \"memory\", their id and a short note from their point of view in text, one call per notable event, always with real names, never \"the stranger\" (e.g. \"Joe lied to me about the missing coin.\"). When their attitude toward the player clearly shifts, call ws_npc with action \"disposition\", their id, value (hostile, unfriendly, indifferent, friendly or helpful) and a short reason. Don't report small mood swings. Use action \"leave\", \"staying\" or \"follow\" the same way. Use action \"stay\" when they are told to wait where they are: they remain in that place until their next scheduled time, so do not walk them back to their usual place yet. Call it with action \"detail\" only when you would otherwise invent something important about them. A place changing is not a reason to call this. Call it only when that person's own looks, a fact, a memory, or their attitude changed in this reply. Do not re-report a fact or appearance already listed under Known facts or Looks. Call appearance only when Looks, Body or Outfit actually changed from what is already listed. Do not call it because someone entered, was described, or was looked at, and do not use an intent like \"looks\" or \"appeared\". A real change on arrival (they walk in soaked) still counts. Do not use a saved person as an unnamed stranger."
     },
     {
       "id": "narration.npc_tool",

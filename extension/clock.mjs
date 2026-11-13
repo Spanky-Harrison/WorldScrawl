@@ -4,7 +4,7 @@ import { applyRevertRecords, revertNeeds } from './arearewrite.mjs';
 import { composeRecords, findCompose, hash } from './replay.mjs';
 import { api } from './doors.mjs';
 import { fetchRaw, newRoom, renderAllExits } from './footer.mjs';
-import { CHANGE_KEY, WORLD_KEY, activeWorld, baseUrl, ctx, isOn } from './index.js';
+import { CHANGE_KEY, WORLD_KEY, activeWorld, baseUrl, ctx, isOn, settings } from './index.js';
 import { displayName } from './movement.mjs';
 import { patchesOn } from './patches.mjs';
  // '' = server default
@@ -38,6 +38,8 @@ export function placeWeatherNow(loc, chat = ctx().chat ?? []) {
     if (!weatherLib || !t?.weather || !loc?.weather || !d) return null;
     try { return weatherLib.placeWeather(t.weather, loc.weather, weatherLib.absSeconds(d, t.calendar), t.calendar); } catch (e) { console.warn('[WorldScrawl] weather:', e.message); return null; }
 }
+/** The weather line the narrator gets: words only ("warm, humid"), or with the numbers when the weather-numbers setting is on. */
+export const narratorWeather = w => (w ? (settings().weatherNumbers ? w.line : w.words ?? w.line) : '') ?? '';
 /** Seconds of travel stamped on this chat's messages since its world's start_date. */
 /** Game seconds elapsed at message `index` (the shared clock lookup; kept waits and moves only, wait cards count once kept). */
 export function clockAt(index, chat = ctx().chat ?? []) {
