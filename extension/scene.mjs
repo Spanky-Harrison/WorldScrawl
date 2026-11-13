@@ -929,18 +929,6 @@ function looksSummaryPrompt(name, body, outfit) {
     return P('npc.looks_summary', { name: name || 'them', body: body || '(empty)', outfit: outfit || '(empty)', reply: baseReply('json') });
 }
 
-/** Format rebuildInputs for the appearance-rebuild prompt. */
-function appearanceRebuildPrompt(name, inputs) {
-    const base = Object.entries(inputs.base).map(([f, v]) => `- ${f}: ${v || '(empty)'}`).join('\n');
-    const intents = (inputs.intents ?? []).map((e, i) => `${i + 1}. ${e.intent} [${e.fields.join('+')}]`).join('\n') || '(none)';
-    return P('npc.appearance_rebuild', {
-        name: name || 'them',
-        fields: (inputs.fields ?? []).join(', '),
-        base,
-        intents,
-    });
-}
-
 /** Jobs list on the message for the current swipe (working / failed rebuilds). */
 function appearJobs(msg) {
     const block = msg?.extra?.[APPEAR_KEY];
