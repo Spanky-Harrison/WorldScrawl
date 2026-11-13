@@ -502,7 +502,9 @@ export function renderPatchCards() {
             bar.prepend(b);
         }
         if (!isOn()) { el.querySelector('.worldscrawl_flag_btn')?.remove(); continue; }
-        const f = msg.extra?.[FLAG_KEY];
+        // A "No map change found" card goes once the player has sent another line (derived, never stored; the call log keeps it).
+        const noopDone = f0 => f0?.status === 'nothing' && ch.slice(id + 1).some(m => m?.is_user && !m.is_system);
+        const f = noopDone(msg.extra?.[FLAG_KEY]) ? null : msg.extra?.[FLAG_KEY];
         const kept = patchesOn(msg);
         const wc = msg.extra?.[WAITCARD_KEY], waitCard = wc && (wc.swipe ?? 0) === swipeOf(msg);
         const remember = msg.extra?.[REMEMBER_KEY], rememberCard = remember && remember.status === 'review' && (remember.swipe ?? 0) === swipeOf(msg);

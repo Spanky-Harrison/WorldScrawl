@@ -1,6 +1,7 @@
 // Red/green before/after view for map changes, in the style of LoreReviser's "Changes" view: prose compared sentence by
 // sentence, each changed run shown as a REMOVED block (red) then an ADDED block (green), labels on their own line,
 // unchanged sentences dimmed. Pure helpers (splitSentences, blockDiff, fieldDiffs) run in node; renderDiff needs a DOM.
+import { flipBar } from '../shared/doorbar.mjs';
 
 /** Sentence blocks (a newline also ends one); joined they give back the text's words. */
 export function splitSentences(text) {
@@ -45,13 +46,16 @@ export function wordDiff(oldText, newText) {
 }
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-/** An exit's door state in words. */
-export function exitState(e) {
+/** An exit's door state in words. A door set on one side holds for both (as the map reads it): `back` is the exit the
+ *  other way, whose barrier counts when this side has none. */
+export function exitState(e, back = null) {
     if (!e) return '';
-    const b = isObj(e.barrier) ? e.barrier : null;
+    const b = isObj(e.barrier) ? e.barrier : isObj(back?.barrier) ? flipBar(back.barrier) : null;
     const door = !b ? 'open way' : b.openable === false ? 'blocked' : b.locked ? 'locked door' : b.starts_open ? 'open door' : 'closed door';
     return [door, e.hidden ? 'hidden' : '', e.obscured ? 'obscured' : ''].filter(Boolean).join(', ');
 }
+/** The exit back from `e.to` to `key` in the same map, or null. */
+const backOf = (map, key, e) => (map?.[e?.to]?.exits ?? []).filter(isObj).find(x => x.to === key) ?? null;
 const exitLine = e => `${e.direction} → ${e.to ?? '?'}`;
 
 /**
@@ -70,7 +74,7 @@ export function fieldDiffs(before = {}, after = {}, relocate = {}) {
         if (!area) {
             const oe = (o?.exits ?? []).filter(isObj), ne = (n?.exits ?? []).filter(isObj);
             const dirs = [...new Set([...oe, ...ne].map(e => e.direction))];
-            const one = (e, old) => e ? `${exitLine(old ? { ...e, to: relocate?.[e.to] ?? e.to } : e)} (${exitState(e)})${e.description ? `: ${e.description}` : ''}` : '';
+            const one = (e, old) => e ? `${exitLine(old ? { ...e, to: relocate?.[e.to] ?? e.to } : e)} (${exitState(e, backOf(old ? before : after, key, e))})${e.description ? `: ${e.description}` : ''}` : '';
             const rows = dirs.map(d => ({ a: one(oe.find(e => e.direction === d), true), b: one(ne.find(e => e.direction === d)) }));
             if (rows.length) fields.push({ field: 'exits', label: 'Exits', kind: 'list', old: rows.map(r => r.a).filter(Boolean), new: rows.map(r => r.b).filter(Boolean), changed: rows.some(r => r.a !== r.b) });
         }
