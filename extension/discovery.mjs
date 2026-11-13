@@ -702,7 +702,7 @@ export async function onReplyForFlags(id) {
         await c.saveChat?.();
     }
     markUnreadTags();
-    // Someone not here whose name the player just used, as the narrator gave it earlier: learned (the tracker isn't shown them).
+    // An unknown person (here or not) whose name the player just used, as the narrator gave it earlier: learned before the tracker runs.
     if (settings().flagNpcs !== false) { try { if ((await learnSaidNames(id)).some(r => r?.ok)) await c.saveChat?.(); } catch (e) { console.warn('[WorldScrawl] player-line name', e?.message || e); } }
     await runTracker(id);
     maybeSuggest(id);
