@@ -1578,7 +1578,7 @@
       "description": "Step 1 of 1: the system prompt for the new room (JSON answer). The game reads the JSON answer, so keep the reply format. {{style}} is the Writing style entry for the new room's name and description. {{reply}} is the shared base line pick.base_json.",
       "group": "discover",
       "locked": "The game reads the JSON answer with these exact keys.",
-      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. {{reply}}:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\"}\n{{style}} direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
+      "text": "You add one room to a role-play map: the room behind a door that the story just opened: a door the current room's description mentions, or one the description does not mention but that plausibly fits the room. {{reply}}:\n{\"name\": \"...\", \"description\": \"...\", \"direction\": \"exit name from the current room\", \"return_direction\": \"exit name back\", \"exit_description\": \"...\", \"return_description\": \"...\", \"door\": true}\nOr reply {\"none\": true} when the story does not actually open a new door or way here (for example, it says there is no other way out).\n{{style}} door: false for an open way (an arch, a curtain, a gap in the wall), true for a real door. direction: a short hand-written exit name not already used by the current room (e.g. \"east guest room\", \"green door\"). return_direction: usually \"out\" or \"hallway\". exit_description / return_description: one sentence each about the door from each side.",
       "placeholders": [
         {
           "name": "style",
@@ -1596,7 +1596,7 @@
       "description": "Step 1 of 1: describe the room behind the door.",
       "group": "discover",
       "locked": "The game reads the reply as a new room in a fixed format; changing this can break new rooms.",
-      "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{existing}}{{door}}{{retry}}Describe the room behind the door that was opened.",
+      "text": "Region: {{region_name}}. {{region_notes}}\nArea: {{area_name}}. {{area_notes}}\n\nCurrent room: {{name}} ({{address}})\n{{description}}\nIts exits:\n{{exits}}\n\nRooms one step away:\n{{near}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{existing}}{{door}}{{retry}}Describe the room behind the door that was opened, or reply {\"none\": true} if the story opens no new door.",
       "placeholders": [
         {
           "name": "region_name"

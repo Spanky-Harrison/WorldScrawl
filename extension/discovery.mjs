@@ -157,7 +157,8 @@ let pendingUserFlag = null;
 
 // ---- Discovery rooms: a door that the room description only mentions (set dressing) is opened in the story, and the
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
-// id and one door pair; ). No lore, no rewrite of the room it opens from. Stamped at once unless "review discoveries" is on.
+// id and one door pair). No lore, no rewrite of the room it opens from. Kept at once when the player or the narrator asked
+// (button, /ws-change, tag, tool, [open]); a tracker discovery waits on its card for Approve unless Auto-keep is on.
 export const discoverSys = () => P('discover.system', { reply: baseReply('json'), style: P('discover.style') });
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
@@ -168,7 +169,7 @@ export function existingDiscovery(a, existing, from) {
     if (key == null) return { error: `"existing" must be one of the place keys: ${existing.map(o => o.key).join(', ') || '(none): describe a new room'}` };
     const t = x => (typeof a[x] === 'string' && a[x].trim() ? a[x].trim() : undefined);
     if (!t('direction')) return { error: '"direction" is needed' };
-    return { op: { op: 'add_exit', loc: from, to: existing.find(o => o.key === key).room.address, direction: t('direction'), return_direction: t('return_direction') ?? 'out', door: true, description: t('exit_description'), return_description: t('return_description') } };
+    return { op: { op: 'add_exit', loc: from, to: existing.find(o => o.key === key).room.address, direction: t('direction'), return_direction: t('return_direction') ?? 'out', door: a.door !== false, description: t('exit_description'), return_description: t('return_description') } };
 }
 async function analyzeDiscovery(id) {
     await ensurePrompts();
@@ -193,13 +194,14 @@ async function analyzeDiscovery(id) {
         for (let tries = 0; tries < 2 && !preview; tries++) {
             const a = parseJsonAnswer(await askModel(c, 'discovery', { prompt: q(err), systemPrompt: discoverSys(), responseLength: 500 }));
             if (!a || typeof a !== 'object') { err = 'the answer was not JSON'; continue; }
+            if (a.none === true) { f.status = 'nothing'; f.error = 'the story opens no new door here'; return; }
             let ex = existingDiscovery(a, existing, k.location);
             if (ex?.error) { err = ex.error; continue; }
             const dup = !ex && typeof a.name === 'string' ? duplicatePlace(a.name, [...nearAll, ...k.neighbors.map(n => ({ address: n.address, name: n.name, steps: 1 }))], { not: [k.location] }) : null; // name-ok: place names
             if (dup && linked.has(dup.address)) { f.status = 'nothing'; f.error = `${dup.name} is already connected here, so no new room was added`; return; }
             if (dup) { const o = existing.find(e => e.room.address === dup.address); if (o) { ex = existingDiscovery({ ...a, existing: o.key }, existing, k.location); if (ex?.error) ex = null; else console.log(`[WorldScrawl] discovery: "${a.name}" is ${dup.name}, already on the map: connecting it`); } }
             // The same create_place the editor and the change call use (engine-made id, one door pair back to this room).
-            ops = ex ? [ex.op] : [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])) })];
+            ops = ex ? [ex.op] : [(await loadPatchLib()).discoverToCreate({ loc: k.location, ...Object.fromEntries(['name', 'description', 'direction', 'return_direction', 'exit_description', 'return_description'].filter(x => typeof a[x] === 'string' && a[x].trim()).map(x => [x, a[x].trim()])), ...(a.door === false ? { door: false } : {}) })];
             const r = await api('/patch/preview', { method: 'POST', body: JSON.stringify({ patch: { ops }, ...mapCtx() }) });
             if (r.ok) { preview = r.body; ops = r.body.ops ?? ops; } else err = r.body?.detail?.error ?? JSON.stringify(r.body?.detail ?? r.status);
         }
@@ -207,7 +209,9 @@ async function analyzeDiscovery(id) {
         f.note = f.note || clip(preview.summary[0], 120);
         f.proposal = { ops, summary: preview.summary, relocate: preview.relocate ?? {}, inherit: preview.inherit ?? {}, names: preview.names ?? {}, before: preview.before, after: preview.after };
         f.status = 'review';
-        await keepFlag(id, { quiet: true }); // a discovery is added at once; its 'Map changed here' bar offers Edit / Turn off / Undo
+        // Asked for (button, tag, tool, [open]): added at once; its 'Map changed here' bar offers Edit / Turn off / Undo.
+        // The tracker's own discovery waits for Approve on its card, unless Auto-keep is on.
+        if (f.source !== TRACKER_SOURCE || settings().autoKeep) await keepFlag(id, { quiet: true });
     } catch (e) {
         f.status = 'error'; f.error = e.message;
     } finally {
@@ -482,8 +486,8 @@ export async function applyTrackerResult(id, parsed) {
     const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
     const { stamps, found, names } = trackerPayloads(gated.people);
     if (stamps.length) await applyPersonStamps(id, stamps);
+    if (found.length) await applyFound(msg, found, TRACKER_SOURCE); // found first: someone found here can then learn their name
     if (names.length) await applyLearnedNames(id, names, TRACKER_SOURCE);
-    if (found.length) await applyFound(msg, found, TRACKER_SOURCE);
     const existing = msg.extra?.[FLAG_KEY];
     const taggedPlace = existing && (existing.swipe ?? 0) === swipeOf(msg) && existing.source !== TRACKER_SOURCE;
     const dropped = placeDropReason(c.chat, id, gated.place);
