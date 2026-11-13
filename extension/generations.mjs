@@ -79,6 +79,14 @@ export function hostIndex(chat, at) {
     for (let i = Math.min(at, chat?.length ?? 0) - 1; i >= 0; i--) if (!offStory(chat[i])) return i;
     return -1;
 }
+/** The player line a reply at `at` answers (works after the reply is in, unlike turnPlayerIndex): its host when that is
+ *  the player's, else -1 (an automatic reply, such as a told expiry, answers no player line). */
+export function answeredPlayerIndex(chat, at) {
+    const h = hostIndex(chat, at);
+    return h >= 0 && chat[h]?.is_user && !chat[h]?.is_system ? h : -1;
+}
+/** Where this reply's turn starts: the player line it answers, or the reply itself when it answers none. */
+export const turnStartOf = (chat, at) => { const p = answeredPlayerIndex(chat, at); return p >= 0 ? p : at; };
 
 // ---- A told expiry, kept on the host of the reply that told it (survives a swipe, a regenerate and a reload)
 export const EXPIRY_LINE_KEY = 'worldscrawl_expiry_line';
