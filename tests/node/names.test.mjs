@@ -230,6 +230,32 @@ test('canary inbound: found and named in one tracker answer: found applies first
     assert.deepEqual(nameStamps(c.chat[id]).map(s => s.id), ['hesk'], JSON.stringify(callNotes(c.chat[id])));
 });
 
+// B7: a name the narrator only mentioned in plain text is learned once the player says it (the player's line counts).
+test('canary inbound: the player says a name the narrator only mentioned: learned (present)', async () => {
+    const { c, blocks } = boot({ tracker: () => nameItem(handle())() });
+    say(c, 'I look around.');
+    reply(c, `${CANARY} wipes down the bar and eyes the door.`); // the narrator let the name slip, outside dialogue
+    say(c, `Evening, ${CANARY}. A room for the night?`);
+    const id = reply(c, 'The landlady grunts and slides a key across the bar.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'tracker']], JSON.stringify(callNotes(c.chat[id])));
+    assert.equal(known(c), true);
+    say(c, 'I take the key.');
+    assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
+});
+
+test('canary inbound: the player says a name the narrator only mentioned: learned (off the map, found by that line)', async () => {
+    const { c } = boot({ card: ASLEEP_CARD, tracker: () => JSON.stringify({ place: null, people: [{ id: CANARY, action: 'found', name: CANARY }, { id: CANARY, action: 'name', name: CANARY }], wait: null }) });
+    say(c, 'I ask the cook where the landlady is.');
+    reply(c, `"Asleep," the cook says. ${CANARY} keeps late hours.`); // the name slips in narration, not dialogue
+    say(c, `I bang on the door upstairs. "${CANARY}! Wake up!"`);
+    const id = reply(c, 'The landlady stumbles out, scowling, a shawl round her shoulders.');
+    await onReplyForFlags(id);
+    assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.id === 'hesk'), JSON.stringify(callNotes(c.chat[id])));
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'tracker']], JSON.stringify(callNotes(c.chat[id])));
+    assert.equal(known(c), true);
+});
+
 // ---- Narrator outbound (S2): the facts block is the prompt choke point.
 const GATE = new RegExp(`^.*If the landlady is introduced or called by name in spoken dialogue, their name is ${CANARY}\\..*$`, 'm');
 const leaks = text => [CANARY, CANARY_ALIAS, '[hesk]', '(hesk)'].filter(w => text.includes(w));

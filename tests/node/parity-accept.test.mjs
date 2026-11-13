@@ -1212,6 +1212,40 @@ test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matche
     assert.equal(findPerson('Hesk', [LANDLADY]).id, 'hesk');
 });
 
+// B7 [find]: the target stops at its first place word, and a saved description matches only when it starts with the
+// typed words ("the guard captain" is not the saved "the guard"). Still a single unique hit.
+test('[find] the landlady behind the bar reaches Hesk; "the guard captain" never hits the saved "guard"; ambiguous is nobody', async () => {
+    const { c } = boot();
+    const GUARD = { ok: true, id: 'bors', name: 'Bors', unknownAs: 'the guard', schedule: [{ activity: 'on watch', where: 'the gate', near: 'riverton:streets' }] };
+    rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY, GUARD] }] });
+    roomFetch();
+    const find = async text => {
+        const b = parseBracket(text);
+        assert.equal(b.verb, 'found', text);
+        const user = { mes: text, is_user: true, swipe_id: 0, extra: {} };
+        c.chat = [msg([]), user];
+        const r = await bracketIntent(user, b);
+        return { r, d: user.extra[FOUND_KEY]?.at(-1) };
+    };
+    for (const text of ['I [find] the landlady behind the bar', 'I [find] landlady at the bar', 'I [find] the landlady', 'I [find] Landlady, then sit']) {
+        const { r, d } = await find(text);
+        assert.equal(r.kind, 'found', `${text}: ${r.note}`);
+        assert.equal(d?.id, 'hesk', `${text}: ${d?.reason}`);
+    }
+    const { d: captain } = await find('I [find] the guard captain');
+    assert.notEqual(captain?.id, 'bors', 'a longer description is not the saved "guard"');
+    assert.match(captain?.reason ?? '', /No saved person/, JSON.stringify(captain));
+    { const { d } = await find('I [find] the guard by the gate'); assert.doesNotMatch(d?.reason ?? '', /No saved person/, JSON.stringify(d)); assert.equal(d?.id, 'bors', JSON.stringify(d)); }
+    // Typed words that start a saved description still reach it; two who fit is nobody.
+    assert.equal(findPerson('guard', [{ id: 'g1', name: 'Ulf', unknownAs: 'the guard captain' }])?.id, 'g1');
+    assert.equal(findPerson('the guard captain', [{ id: 'g1', name: 'Bors', unknownAs: 'the guard' }]), null);
+    assert.equal(findPerson('guard at the gate', [{ id: 'a', name: 'A', unknownAs: 'a guard' }, { id: 'b', name: 'B', unknownAs: 'a guard' }]), null);
+    // The tracker's found goes through the same lookup.
+    c.chat = [msg([])];
+    await applyTrackerResult(0, readTrackerAnswer('{"people": [{"action": "found", "name": "the landlady behind the bar"}]}'));
+    assert.equal(c.chat[0].extra[FOUND_KEY].at(-1).id, 'hesk');
+});
+
 // ---- fix/expiry-notices: person expiries get a notice, reach the narrator, the tracker and a wait's summary;
 // a no-op proposal drops itself; the revert is editable; "[wait] until HH:MM" lands on that minute.
 const { waitFacts, keepWait, editKeptWait } = await import('../../extension/waits.mjs');
