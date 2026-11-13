@@ -19,7 +19,7 @@
     await send('I look around', 2);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look around: no target question, no view_link, kind around', lq.length === 2 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.kind === 'around' && !lq.some(q => promptOf(q).includes('What is the player looking at')), JSON.stringify(lk.extra) + lq.length);
-    check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looks around') && promptOf(lq[1]).includes('mention every exit listed above') && !promptOf(lq[1]).includes('looks out and sees'), promptOf(lq[1]).slice(-600));
+    check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looks around') && promptOf(lq[1]).includes('mention every exit above') && !promptOf(lq[1]).includes('looks out and sees'), promptOf(lq[1]).slice(-600));
     // Bracket commands: a known verb skips the intent question; [help] and unresolved targets never reach the narrator.
     const lastChatMsg = () => page.evaluate(() => { const m = SillyTavern.getContext().chat.at(-1); return { mes: m.mes, sys: !!m.is_system, kind: m.extra?.worldscrawl_notice_kind }; });
     rL = (await reqsNow()).length;
@@ -54,7 +54,7 @@
     await queue([{ content: 'look' }, { content: 'Around' }, { content: 'The room, in general.' }]);
     await send('I look at things for a while', 3);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
-    check('look: option around gives kind around, no stamp', lk.extra.worldscrawl_look?.kind === 'around' && !lk.extra.worldscrawl_change && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[2]).includes('mention every exit listed above'), JSON.stringify(lk.extra));
+    check('look: option around gives kind around, no stamp', lk.extra.worldscrawl_look?.kind === 'around' && !lk.extra.worldscrawl_change && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[2]).includes('mention every exit above'), JSON.stringify(lk.extra));
     check('look: window option absent without window words', !promptOf(lq[1]).includes('out a window or opening'), promptOf(lq[1]).slice(-400));
     rL = (await reqsNow()).length;
     await queue([{ content: 'look' }, { content: 'out' }, { content: 'They peek.' }, { content: 'You peek outside.' }]);
