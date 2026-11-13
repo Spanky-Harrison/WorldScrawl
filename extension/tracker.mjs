@@ -3,6 +3,9 @@
 import { render as P } from './shared.mjs';
 import { FOUND_KEY, NPC_KEY, NPC_WARN_KEY } from './npc.mjs';
 import { judgeRewrite } from './arearewrite.mjs';
+import { PLAYER, positionOf } from './actors.mjs';
+import { turnStartOf } from './generations.mjs';
+import { DOOR_OPEN_RE } from './looking.mjs';
 
 export const TRACKER_SOURCE = 'tracker';
 const FLAG_KEY = 'worldscrawl_flag';
@@ -76,14 +79,15 @@ export function trackerPeopleLines(people) {
     return lines.join('\n') || '(none)';
 }
 /**
- * The scrap for the one after-reply question. The full place name, display name, and description,
+ * The scrap for the one after-reply question. The full place name, display name, description and exits (so arriving by one is not a discovery),
  * the known weather, and each person here. No earlier chat. Weather is listed so a foggy sky is not
  * mistaken for a new fact about the room.
  */
-export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
+export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
     return [
         `This place: ${placeTitle(placeName, displayName)}`,
         `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
+        `Exits: ${String(exits ?? '').trim() || '(none)'}`,
         `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
         `People here:\n${peopleLines || '(none)'}`,
         ...(engineLines && engineLines !== '(none)' ? [`Already done by the game (not new changes; do not report them):\n${engineLines}`] : []),
@@ -92,6 +96,33 @@ export function trackerScrap({ placeName = '', displayName = '', placeDescriptio
 export const trackerSys = () => P('npc.tracker_system');
 export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000) });
 
+/** A why that only restates that something was updated ("door status updated", "changed"). */
+const STATUS_WHY_RE = /^(?:[\w-]+\s+){0,2}(?:status|state)?\s*(?:updated|changed)\.?$/i;
+/** Words for passing scene state: light, time of day, fire in the hearth, smells, sounds, mood, a door left open or shut. */
+const TRANSIENT_RE = /\b(?:light|lit|sun|sunlight|sunrise|sunset|dawn|dusk|morning|evening|night|dark|darkness|darker|shadows?|lamps?|candles?|lanterns?|fire|hearth|embers?|smells?|scents?|odou?rs?|aromas?|warm|warmth|warmer|cold|colder|chill|mood|atmosphere|quiet|silent|silence|noise|noisy|crowded|empty|busy|ajar|open|opened|closed|shut|swung)\b/i;
+/** Words for a lasting physical change: any one keeps the place change. "burned down to embers" is the hearth, not the room. */
+const LASTING_RE = /\b(?:burn(?:s|ed|t)? (?:down|out|away)(?! to (?:embers|ash|coals))|burnt|scorch\w*|charred|collaps\w*|smash\w*|shatter\w*|break|breaks|broke|broken|flood\w*|block\w*|barricad\w*|built|build\w*|destroy\w*|ruin\w*|spread\w*|crack\w*|torn|tore|splinter\w*|knocked|hole|removed|added|install\w*|portal|cave[sd]? in|bricked|boarded|nailed|rubble|wrecked|barred|barricaded|locked|bolted|chained|jammed|wedged|stuck|sealed|opened up)\b/i;
+/** Every clause of the note names only passing scene state, and none names a lasting change. */
+export function transientOnly(note) {
+    const text = String(note ?? '').trim();
+    if (!text || LASTING_RE.test(text)) return false;
+    const clauses = text.split(/[;,.]|\band\b|\bwhile\b/i).map(s => s.trim()).filter(Boolean);
+    return clauses.length > 0 && clauses.every(c => TRANSIENT_RE.test(c));
+}
+/** Did the engine move the player this turn (the place at this reply differs from the place before its turn started)?
+ *  Counts a player move on the player line, ws_move in tools mode, and an automatic reply that tells an expiry. */
+export function movedThisTurn(chat, at) {
+    const start = turnStartOf(chat, at);
+    const before = positionOf(chat, start - 1, PLAYER)?.address ?? null, now = positionOf(chat, at, PLAYER)?.address ?? null;
+    return !!before && !!now && before !== now;
+}
+/** Why the tracker's place item is dropped before it becomes a card, or '' to keep it. */
+export function placeDropReason(chat, at, place) {
+    if (!place) return '';
+    if (place.kind === 'discover' && movedThisTurn(chat, at) && !DOOR_OPEN_RE.test(playerLineBefore(chat, at))) return 'tracker discover dropped: arrival by an exit';
+    if (place.kind !== 'discover' && transientOnly(place.note)) return `tracker place dropped: only passing scene state (${place.note})`;
+    return '';
+}
 export function readPlace(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (p.changed === false) return null;
@@ -102,6 +133,7 @@ export function readPlace(p) {
     // Light touch or full rewrite (not "scope": a change's scope is which rooms): from rewrite, else from a why that leads
     // with the word. Kept only when judged; why only with it. `raw` is the tracker's place object as given, for diagnosis.
     const j = judgeRewrite(p.rewrite, p.why ?? p.rewrite_reason);
+    if (j.why && STATUS_WHY_RE.test(j.why.trim())) j.why = ''; // "door status updated" says nothing: the card shows "Light touch" alone
     return { changed: true, kind, note: note.slice(0, 200), ...(hint ? { hint: hint.slice(0, 80) } : {}),
         ...(j.rewrite ? { rewrite: j.rewrite } : {}), ...(j.rewrite && j.why ? { why: j.why.slice(0, 200) } : {}), raw: p };
 }

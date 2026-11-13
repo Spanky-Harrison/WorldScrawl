@@ -10,7 +10,7 @@ import { chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
-import { exitsCache, locationAt, renderAllExits } from './footer.mjs';
+import { exitsCache, exitsText, locationAt, renderAllExits } from './footer.mjs';
 import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
@@ -21,7 +21,7 @@ import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { capFirst, findPerson, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
-import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
+import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { MIN_NARRATOR_WAIT, narratorWaitAction, noteShortWait, planWait, proposeWait, renderPatchCards, stampWait, waitAsk } from './waits.mjs';
 
 /** Movement tools follow moveMode. ws_flag, ws_wait, and ws_npc are not narrator tools; the after-reply tracker reports changes. */
@@ -486,6 +486,8 @@ export async function applyTrackerResult(id, parsed) {
     if (found.length) await applyFound(msg, found, TRACKER_SOURCE);
     const existing = msg.extra?.[FLAG_KEY];
     const taggedPlace = existing && (existing.swipe ?? 0) === swipeOf(msg) && existing.source !== TRACKER_SOURCE;
+    const dropped = placeDropReason(c.chat, id, gated.place);
+    if (dropped) { noteCall(id, { kind: 'tracker place', status: 'skipped', reason: dropped }); gated.place = null; }
     if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE, rewrite: gated.place.rewrite ?? '', why: gated.place.why ?? '', raw: gated.place.raw ?? null });
     if (gated.wait) {
         const args = gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
@@ -516,7 +518,7 @@ async function runTracker(id) {
         const people = listedPeople(chat, id, loc);
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
-        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', weather, peopleLines: trackerPeopleLines(people), engineLines }));
+        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id, shown: 'marker' }); // "tracking…"
         // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
