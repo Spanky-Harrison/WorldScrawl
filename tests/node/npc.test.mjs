@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exportRecord, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, hourDistance, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, sightChance, sightCheck, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, narratorView, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore } from '../../extension/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, narratorView, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore } from '../../extension/npc.mjs';
 import { findPerson, knows, maskText } from '../../extension/names.mjs';
 import { castNameWarnings, loadCast, writeCastNpc, saveCastNpc, tidyRecord } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath, makeWorld } from './helpers.mjs';
@@ -13,7 +13,7 @@ import { load_world } from '../../plugin/world.mjs';
 
 // ---- from npc.test.mjs
 {
-// NPC phase 1: cast records, stamps, schedules, sightings, following, disposition, memory and slices.
+// NPC phase 1: cast records, stamps, schedules, following, disposition, memory and slices.
 
 
 
@@ -73,7 +73,7 @@ test('a one-sentence cast record validates, and a bad file is marked instead of 
 
 test('riverton ships Hesk, and a duplicate id is marked', () => {
     const loaded = loadCast(RIVERTON, null);
-    assert.ok(loaded.npcs.some(n => n.id === 'hesk' && n.ok && n.schedule.length === 2));
+    assert.ok(loaded.npcs.some(n => n.id === 'hesk' && n.ok && n.schedule.length === 5));
     const c = client(RIVERTON);
     const body = c.get('/cast').json();
     assert.equal(body.npcs.find(n => n.id === 'hesk').name, 'Hesk');
@@ -184,10 +184,11 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     assert.equal(again[0].kind, 'follow');
     assert.equal(again[0].place, BAR);
     assert.equal(again[0].overdue, '');
-    const maren = validateRecord({ id: 'maren', name: 'Maren', line: 'A knife-grinder.', seen_at: { place: BAR, hour: 16, chance: 0.5 } }, { file: 'maren.json', places });
+    // A might block (16:00-17:00, always the bar): she turned up, came along, was told to stay; the hold ends with the block.
+    const maren = validateRecord({ id: 'maren', name: 'Maren', line: 'A knife-grinder.', schedule: [{ might: [BAR], activity: 'grinding knives', from: '16:00', to: '17:00' }] }, { file: 'maren.json', places });
     const day = 3;
     const sight = [
-        msg('She is here.', npc([{ type: 'npc_appear', id: 'maren', place: BAR, day, hour: 16 }, { type: 'npc_follow', id: 'maren' }])),
+        msg('She is here.', npc([{ type: 'npc_appear', id: 'maren', place: BAR, blockStart: day * 1440 + 16 * 60 }, { type: 'npc_follow', id: 'maren' }])),
         msg('Wait.', npc([{ type: 'npc_stay', id: 'maren', place: FORGE }])),
         msg('The hour turns.'),
     ];
@@ -197,49 +198,6 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     const later = presentAt(sight, 2, [maren], envOf(FORGE, i => clock(i < 2 ? 16 : 17, 10, day)));
     assert.equal(later[0].id, 'maren');
     assert.match(later[0].overdue, /would normally have moved on by now/);
-});
-
-test('sightings: one roll per day, hourly falloff, a stamp for the hour, and a better by-name roll', () => {
-    assert.equal(sightChance(0), 0.5);
-    assert.equal(sightChance(1), 0.2);
-    assert.equal(sightChance(2), 0.05);
-    assert.equal(sightChance(3), 0.02);
-    assert.equal(sightChance(1, 0.1), 0.1);
-    assert.equal(hourDistance(16, 16), 0);
-    assert.equal(hourDistance(15, 16), 1);
-    assert.equal(hashRoll('same'), hashRoll('same'));
-    const maren = validateRecord({ id: 'maren', name: 'Maren', line: 'A knife-grinder.', seen_at: { place: BAR, hour: 16, chance: 0.5 } }, { file: 'maren.json', places });
-    let day = 0, roll = -1;
-    for (; day < 400; day++) { roll = hashRoll(`sight|maren|${BAR}|${day}`); if (roll === 30) break; }
-    assert.equal(roll, 30);
-    const peak = sightCheck(maren, clock(16, 17, day), BAR, { exists, relocate: {} }, { useRoll: true });
-    const early = sightCheck(maren, clock(15, 0, day), BAR, { exists, relocate: {} }, { useRoll: true });
-    assert.equal(peak.present, true);
-    assert.equal(early.present, false);
-    assert.equal(early.roll, peak.roll);
-    const chat = [msg('The square is busy.')];
-    assert.deepEqual(presentAt(chat, 0, [maren], envOf(BAR, clock(16, 17, day))), []);
-    chat[0].extra = npc([{ type: 'npc_appear', id: 'maren', place: BAR, day, hour: 16 }]);
-    const here = presentAt(chat, 0, [maren], envOf(BAR, clock(16, 40, day)));
-    assert.equal(here[0].id, 'maren');
-    const later = presentAt([chat[0], msg('Still evening.')], 1, [maren], envOf(BAR, i => clock(i === 0 ? 16 : 19, 0, day)));
-    assert.match(later[0].overdue, /would normally have moved on by now/);
-    let seekDay = -1;
-    for (let d = 0; d < 800; d++) {
-        const a = hashRoll(`sight|maren|${BAR}|${d}`), b = hashRoll(`seek|maren|${BAR}|${d}`);
-        if (a >= 50 && b < 50) { seekDay = d; break; }
-    }
-    assert.ok(seekDay >= 0);
-    const missed = sightCheck(maren, clock(16, 0, seekDay), BAR, { exists, relocate: {} }, { useRoll: true });
-    const found = sightCheck(maren, clock(16, 0, seekDay), BAR, { exists, relocate: {} }, { useRoll: true, seeks: [{ day: seekDay }] });
-    assert.equal(missed.present, false);
-    assert.equal(found.present, true);
-    assert.equal(found.roll, Math.min(missed.roll, hashRoll(`seek|maren|${BAR}|${seekDay}`)));
-    const elsewhere = sightCheck(maren, clock(16, 0, seekDay), FORGE, { exists, relocate: {} }, { useRoll: true, seeks: [{ day: seekDay }] });
-    assert.equal(elsewhere.present, false);
-    const gone = validateRecord({ id: 'maren', name: 'Maren', line: 'A knife-grinder.', seen_at: { place: 'other:world/lane', hour: 16 } }, { file: 'maren.json', places });
-    assert.equal(gone.seen_at.broken, true);
-    assert.equal(sightCheck(gone, clock(16), BAR, { exists, relocate: {} }, { useRoll: true }).present, false);
 });
 
 test('disposition moves one step, memory stays capped, and a no lasts for the scene', () => {

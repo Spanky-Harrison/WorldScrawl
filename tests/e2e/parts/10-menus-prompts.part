@@ -139,7 +139,7 @@
     check('settings panel has an Open WorldScrawl GUI button on one line', await page.evaluate(() => { const b = document.getElementById('worldscrawl_open_map'); return !!b && b.textContent.trim() === 'Open WorldScrawl GUI' && getComputedStyle(b).whiteSpace === 'nowrap'; }));
     // NPCs: cast file, remember card, a fact stamp's bar, and 12-hour waits parsed with no extra model call.
     const cast0 = await (await stFetch('/cast')).json();
-    check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 2) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
+    check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 5 && !n.problems?.length) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
     const reqsBeforeNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     // The remember call is prefetched as soon as the card shows, so its answer is queued first.
     await queue([{ content: '{"name":"Maren","unknownAs":"the knife-grinder","personality":{"summary":"A traveling knife-grinder with a squeaky cart."},"appearance":{"summary":"wiry woman with a cart","outfit":"a patched smock"},"invented":["grey eyes"]}' }]);
