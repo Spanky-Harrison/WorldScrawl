@@ -238,7 +238,9 @@ test('canary inbound: the player says a name the narrator only mentioned: learne
     say(c, `Evening, ${CANARY}. A room for the night?`);
     const id = reply(c, 'The landlady grunts and slides a key across the bar.');
     await onReplyForFlags(id);
-    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'tracker']], JSON.stringify(callNotes(c.chat[id])));
+    // P1: the player's line learns it first (she is here, no tracker needed); the tracker's name item is then moot.
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'player line']], JSON.stringify(callNotes(c.chat[id])));
+    assert.ok(callNotes(c.chat[id]).some(n => n.kind === 'name learn' && /tracker: .*already knows/.test(n.reason)), 'the tracker item is skipped, not stamped twice');
     assert.equal(known(c), true);
     say(c, 'I take the key.');
     assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
@@ -328,17 +330,87 @@ test('canary inbound N1: not learned: the narrator\'s plain text alone, a name t
     ext.settings().flagNpcs = true;
 });
 
-test('canary inbound N1: present, the player-line learn stays out of it (the tracker\'s path); masked until learned', async () => {
-    const { c, blocks } = boot({ tracker: EMPTY });
+// P1: someone here: the player's line learns the name the narrator wrote, without the tracker.
+test('canary inbound P1: present, the player says the name the narrator wrote: learned from the line, no tracker needed', async () => {
+    const { c, blocks, calls } = boot({ tracker: EMPTY }); // the tracker names no one
     say(c, 'I look around.');
-    reply(c, `${CANARY} wipes down the bar.`);
+    reply(c, `${CANARY} wipes down the bar.`); // plain text, not dialogue
     say(c, `Evening, ${CANARY}.`);
     const id = reply(c, 'The landlady grunts.');
+    assert.ok(scene.castPack().npcs.some(p => p.id === 'hesk'));
     await onReplyForFlags(id);
-    assert.deepEqual(nameStamps(c.chat[id]), [], 'here, only the tracker learns (it named no one)');
+    const [s, ...more] = nameStamps(c.chat[id]);
+    assert.deepEqual([s?.id, s?.source, s?.override, more.length], ['hesk', 'player line', undefined, 0], JSON.stringify(callNotes(c.chat[id])));
+    assert.equal(known(c), true);
+    assert.equal(npcAt(c.chat, id, scene.castPack().npcs, 'hesk').rel.player.by, 'said by the player');
+    assert.ok(calls.some(x => /Reply with JSON only:\n\{"place"/.test(x.prompt)), 'the tracker still ran (and named no one)');
     say(c, 'I order an ale.');
-    const f = await facts(blocks);
-    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`), 'still masked');
+    assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
+    // The same reply read again (a re-run on that swipe): still one stamp.
+    await onReplyForFlags(id);
+    assert.equal(nameStamps(c.chat[id]).length, 1);
+});
+
+test('canary inbound P1: present, an alias the narrator gave in dialogue, said back in any case: learned from the line', async () => {
+    const { c } = boot({ tracker: EMPTY });
+    say(c, 'Who runs this place?');
+    reply(c, `"${CANARY_ALIAS} does," a docker says, nodding at the landlady.`);
+    say(c, `${CANARY_ALIAS.toLowerCase()}, a room please.`);
+    const id = reply(c, 'The landlady slides a key across.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'player line']]);
+});
+
+test('canary inbound P1: present, not learned: a name the narrator never wrote, only lowercased, only after the line, the narrator\'s text alone, or People changes off', async () => {
+    // The player types the card's name; the narrator never wrote it.
+    let r = boot({ tracker: EMPTY });
+    say(r.c, `Evening, ${CANARY}.`);
+    let id = reply(r.c, 'The landlady grunts.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    // The narrator wrote it only lowercased (not as a name).
+    r = boot({ tracker: EMPTY });
+    say(r.c, 'I look around.');
+    reply(r.c, `A sign reads ${CANARY.toLowerCase()} ales.`);
+    say(r.c, `Evening, ${CANARY}.`);
+    id = reply(r.c, 'The landlady grunts.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    // The narrator writes it only in the reply after the player's line (plain text, so the tracker path has nothing either).
+    r = boot({ tracker: EMPTY });
+    say(r.c, `Evening, ${CANARY}.`);
+    id = reply(r.c, `${CANARY} grunts.`);
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    // The narrator names her; the player never says it.
+    r = boot({ tracker: EMPTY });
+    say(r.c, 'I look around.');
+    reply(r.c, `${CANARY} wipes down the bar.`);
+    say(r.c, 'I order an ale.');
+    id = reply(r.c, 'The landlady pours.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    assert.equal(known(r.c), false);
+    // People changes off.
+    r = boot({ tracker: EMPTY });
+    ext.settings().flagNpcs = false;
+    say(r.c, 'I look around.');
+    reply(r.c, `${CANARY} wipes down the bar.`);
+    say(r.c, `Evening, ${CANARY}.`);
+    id = reply(r.c, 'The landlady grunts.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    ext.settings().flagNpcs = true;
+    say(r.c, 'I order an ale.');
+    assert.match(await facts(r.blocks), new RegExp(`the landlady \\[${handle()}\\]:`), 'still masked');
+});
+
+test('canary inbound P1: present, a name said only in dialogue (not by the player) still comes from the tracker', async () => {
+    const r = boot({ tracker: () => nameItem(handle())() });
+    say(r.c, 'I ask her name.');
+    const id = reply(r.c, `"${CANARY}," she says.`);
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'tracker']]);
 });
 
 test('portal N1: judgeLearn saidOnly needs no presence and counts only the player\'s line; saidNameOf wants the narrator\'s exact case', () => {
