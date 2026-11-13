@@ -289,7 +289,8 @@ export const PLACE_EXPIRED_KIND = 'place_expired';
 export const isPlaceExpiryNotice = m => isPlaceExpiry(m) || m?.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIND;
 const touches = (o, address) => o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address);
 const opWhere = o => String(o?.loc ?? o?.area ?? o?.into ?? '');
-/** The change whose temporary op ran out under the party: the server resolver's pick (the latest one touching that room). */
+/** The change whose temporary op ran out under the party: the server resolver's pick (the latest one touching that room).
+ *  `ran`: its ops that ran out at the same moment as the room (not a shorter one that ran out earlier with its own card). */
 export function expiredPatchAt(chat, id) {
     const msg = chat?.[id];
     if (!isPlaceExpiry(msg) || typeof patchShared.opActive !== 'function') return null;
@@ -297,8 +298,12 @@ export function expiredPatchAt(chat, id) {
     const p = chatChanges(chat.slice(0, id)).reverse().find(c => c?.type === 'patch' && c.off !== true && Array.isArray(c.ops)
         && c.ops.some(o => !patchShared.opActive(o, c, now) && touches(o, address)));
     if (!p) return null;
-    const ran = p.ops.filter(o => !patchShared.opActive(o, p, now));
-    const made = ran.find(o => o.op === 'create_place' && touches(o, address));
+    // Only what ran out together with the room: a shorter timed op of the same change ran out earlier and had its own card.
+    const endOf = o => { try { return Number(p.at) + patchShared.parseLasts(o.lasts); } catch { return NaN; } };
+    const out = p.ops.filter(o => !patchShared.opActive(o, p, now) && 'lasts' in o && Number.isFinite(endOf(o)));
+    const made = out.find(o => o.op === 'create_place' && touches(o, address));
+    const roomEnd = made ? endOf(made) : Math.max(-Infinity, ...out.filter(o => touches(o, address)).map(endOf));
+    const ran = out.filter(o => endOf(o) === roomEnd);
     return { patch: p, address, now, ran, name: made?.name || p.names?.[address] || p.note || address };
 }
 /**

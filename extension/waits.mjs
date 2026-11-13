@@ -335,8 +335,8 @@ const placeItems = m => (m?.extra?.worldscrawl_notice_kind === PLACE_EXPIRED_KIN
 /**
  * The place expiry cards of the whole chat, by the collapse rule (C.groupExpiries): timed text changes that wrote the
  * same text on one notice share a card, and so does everything one change ran out at the same time, across notices:
- * the vanished room it made (the passage sealing) and its text changes elsewhere. Each card shows on the first notice
- * of its group. Returns Map(notice id -> [[entry, ...], ...]); an entry is {notice, room: true} or {notice, item}.
+ * the vanished room it made (the passage sealing) and its text changes elsewhere. Each card shows on the newest notice
+ * of its group (so it lands where the player is reading; deleting that notice moves it back to the next newest). Returns Map(notice id -> [[entry, ...], ...]); an entry is {notice, room: true} or {notice, item}.
  */
 function placeExpiryPlan(ch) {
     const entries = [];
@@ -346,8 +346,9 @@ function placeExpiryPlan(ch) {
     });
     const plan = new Map();
     for (const g of C.groupExpiries(entries, e => e.keys)) {
-        if (!plan.has(g[0].notice)) plan.set(g[0].notice, []);
-        plan.get(g[0].notice).push(g);
+        const host = Math.max(...g.map(e => e.notice)); // a group's card sits on its newest notice
+        if (!plan.has(host)) plan.set(host, []);
+        plan.get(host).push(g);
     }
     return plan;
 }
@@ -355,7 +356,7 @@ function placeExpiryPlan(ch) {
 function placeCardView(ch, id, group) {
     const items = group.filter(e => e.item), rooms = group.filter(e => e.room).map(e => e.notice);
     const got = items.length || rooms.some(r => r !== id) ? expiryView(ch, id, items.map(e => e.item), rooms) : expiryView(ch, id);
-    return got ? { ...got, textNotice: items[0]?.notice ?? id } : null;
+    return got ? { ...got, textNotice: items[0]?.notice ?? id, notices: [...new Set([id, ...group.map(e => e.notice)])] } : null;
 }
 /** Does an expiry notice item cover this rebuild job? A person's by its id; a place text's by the text it wrote. */
 const covers = (p, job) => (job.domain === 'place' ? (p.targets ?? []).includes(job.id) : p?.kind === 'appearance' && p.id === job.id);
@@ -408,7 +409,8 @@ function expiredPlaceEl(msg, id, got) {
     const ch = ctx().chat ?? [];
     const item = got.item ?? null, group = got.items ?? [];
     const key = item ? `${id}|expiry|${item.key}@${item.ends}` : `${id}|expiry`, form = openForms.get(key);
-    const edited = patchesOn(msg).some(p => p.source === 'expiry_edit' && (!item || group.some(it => p.expiry === it.key)));
+    // An edit kept from this card may sit on an older notice of its group (the card moves to the newest one).
+    const edited = (got.notices ?? [id]).some(n => patchesOn(ch[n]).some(p => p.source === 'expiry_edit' && (!item || group.some(it => p.expiry === it.key))));
     const { host, jobs } = item ? cardJobs(ch, got.textNotice ?? id, group) : { host: -1, jobs: [] };
     const name = castPack()?.labels?.[got.address] || got.name || got.preview?.after?.[got.address]?.name || '';
     const desc = C.placeExpiry({ key, name, room: got.room ? castPack()?.labels?.[got.roomAddress] || got.room : '', whats: item ? group.map(it => it.what ?? '') : undefined, preview: form?.lastPreview ?? got.preview, loadError: got.error, editing: !!form && !edited, intent: got.note ?? got.patch.note ?? '', edited,
