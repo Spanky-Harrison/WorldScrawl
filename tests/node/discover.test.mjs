@@ -115,22 +115,17 @@ test('expandable: an area-level false refuses discoveries; set_expandable edits 
     assert.throws(() => applyPatch(structuredClone(raw0), patch([{ op: 'set_expandable', target: 'nowhere:x', value: true }])), /is not a room, subregion/);
 });
 
-test('undescribed doors: prompts allow a door that plausibly fits, the intent offers it, the narration asks for the flag only if it fits', async () => {
+test('undescribed doors: prompts allow a door that plausibly fits, the intent offers it, the narration opens it only if it fits', async () => {
     const { readFileSync } = await import('node:fs');
     const src = extSource();
     const { DEFAULT_PROMPTS } = await import('./useprompts.mjs');
     const pt = id => DEFAULT_PROMPTS.prompts.find(e => e.id === id).text;
-    const hint = pt('narration.discover_strict');
-    assert.match(hint, /plausibly fits the room/);
-    assert.match(hint, /If no such door fits, there is none: do not flag it/);
     const sys = pt('discover.system');
     assert.match(sys, /does not mention but that plausibly fits the room/);
     assert.match(src, /NEW_DOOR = 'try another door'/);
     assert.match(src, /canNewDoor = DOOR_OPEN_RE\.test\(msg\.mes \?\? ''\) && loc\.expandable !== false/);
-    const line = pt('narration.new_door') + pt('narration.new_door_tools') + pt('narration.new_door_tags');
+    const line = pt('narration.new_door');
     assert.match(line, /If such a door plausibly fits/);
     assert.match(line, /If no such door fits, narrate that there is none/);
-    assert.match(line, /\[ws_flag: discover \| which door\]/);
-    assert.match(line, /action "discover"/);
     assert.equal(load_world(RIVERTON).locations.get(UP).expandable, true);
 });
