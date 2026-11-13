@@ -192,3 +192,54 @@ test('a full rewrite is never held to the keep check; a one-sentence field (Outf
     assert.equal(r.calls.length, 1);
     assert.equal(ownerOn(r.c).candidate.phase, 'review');
 });
+
+// ---- N2: the light-touch edit question is its own prompt manager entry; a saved profile reaches it, and the rebuild
+// question's override stays with full rewrites. Through the real /prompts handler (the one the map window's Prompt
+// Editor and the extension's /prompts/active load use) and the real compose path.
+test('prompt manager: the light-touch edit question is its own entry; a saved profile edits it for light touches only, the rebuild override for full rewrites only', async () => {
+    const os = await import('node:os'), path = await import('node:path');
+    const { handlePrompts } = await import('../../plugin/prompts.mjs');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wsn2-'));
+    const editor = handlePrompts('GET', '/prompts', null, root).body;
+    const light = editor.prompts.find(e => e.id === 'npc.appearance_edit_light'), rebuild = editor.prompts.find(e => e.id === 'npc.appearance_rebuild');
+    assert.equal(light?.title, 'People: appearance light-touch edit question');
+    assert.equal(light.group, 'npc');
+    assert.match(light.description, /instead of the rebuild question when every active change is a light touch/);
+    assert.equal(rebuild?.title, 'People: appearance rebuild question');
+    assert.match(rebuild.description, /full rewrite/);
+    assert.equal(editor.prompts.filter(e => e.title === light.title).length, 1, 'one entry with that title');
+    assert.deepEqual(light.placeholders.map(p => p.name), rebuild.placeholders.map(p => p.name));
+    // A profile that edits both questions (as the Prompt Editor saves them).
+    assert.equal(handlePrompts('POST', '/prompts/profile', { action: 'new', name: 'Mine' }, root).status, 200);
+    const MY_LIGHT = 'Touch up {{fields}} for {{name}} (MY LIGHT): keep the base, change only what the intents name.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields.';
+    const MY_FULL = 'Redo {{fields}} for {{name}} (MY FULL).\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields.';
+    const saved = handlePrompts('POST', '/prompts/override', { profile: 'Mine', id: 'npc.appearance_edit_light', text: MY_LIGHT }, root);
+    assert.ok(saved.body.profiles.Mine.overrides['npc.appearance_edit_light'], 'saved in the profile');
+    handlePrompts('POST', '/prompts/override', { profile: 'Mine', id: 'npc.appearance_rebuild', text: MY_FULL }, root);
+    const active = handlePrompts('GET', '/prompts/active', null, root).body;
+    assert.equal(active.profile, 'Mine');
+    // A light touch asks the saved light-touch question, never the rebuild one.
+    let r = boot();
+    ext.setPrompts(active.prompts);
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'apron wet', fields: 'outfit', scope: 'light' }] });
+    assert.equal(r.calls.length, 1);
+    assert.match(r.calls[0].prompt, /^Touch up outfit for Hesk \(MY LIGHT\)/);
+    assert.doesNotMatch(r.calls[0].prompt, /MY FULL|^Edit /);
+    assert.match(r.calls[0].system, LIGHT_SYS);
+    assert.equal(ownerOn(r.c).candidate.phase, 'review');
+    // A full rewrite asks the saved rebuild question, never the light one.
+    r = boot(() => JSON.stringify({ body: REWRITTEN }));
+    ext.setPrompts(active.prompts);
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'turned into someone else', fields: 'body', scope: 'heavy' }] });
+    assert.equal(r.calls.length, 1);
+    assert.match(r.calls[0].prompt, /^Redo body for Hesk \(MY FULL\)/);
+    assert.doesNotMatch(r.calls[0].prompt, /MY LIGHT/);
+    assert.match(r.calls[0].system, FULL_SYS);
+    // Only the rebuild question edited: light touches keep the default edit wording.
+    handlePrompts('POST', '/prompts/reset', { profile: 'Mine', id: 'npc.appearance_edit_light' }, root);
+    r = boot();
+    ext.setPrompts(handlePrompts('GET', '/prompts/active', null, root).body.prompts);
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'apron wet', fields: 'outfit', scope: 'light' }] });
+    assert.match(r.calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./);
+    ext.setPrompts(PROMPTS);
+});
