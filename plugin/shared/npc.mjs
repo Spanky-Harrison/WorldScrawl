@@ -108,11 +108,18 @@ export function parseHm(text) {
 // percent odds; every other entry is "is at" (certain). Every roll is seeded by the person, the entry and an actual
 // start time (absolute game minutes: day * minutes-per-day + minute of the day), so swipes and reloads change nothing.
 
-/** FNV-1a of the seed, unsigned 32-bit. Stable for the same seed. */
+/**
+ * FNV-1a of the seed with a final mix (murmur3's fmix32), unsigned 32-bit. Stable for the same seed. The final mix matters:
+ * plain FNV-1a barely spreads a change early in the seed into the low digits, so two entries that differ only in their
+ * activity rolled the same numbers block after block.
+ */
 export function hashScore(seed) {
     let h = 2166136261;
     const s = String(seed);
     for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
     return h >>> 0;
 }
 /** 0-99, stable for the same seed. */
