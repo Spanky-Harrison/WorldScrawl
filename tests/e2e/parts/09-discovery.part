@@ -64,6 +64,13 @@
     // A manual flag never ends silently: an empty {"ops": []} reply, an unreadable answer, a model error.
     const empty = await changeFlag([{ content: JSON.stringify({ rooms: [UPST] }) }, { content: JSON.stringify({ ops: [] }) }]);
     check('manual flag: an empty {"ops": []} reply shows "no map change found" with Check again', empty.status === 'nothing' && /No map change found/.test(empty.card) && /Check again/.test(empty.card), JSON.stringify(empty));
+    const noop = await page.evaluate(async ([mod, id]) => {
+        const m = await import(mod), c = SillyTavern.getContext();
+        c.chat.push({ name: 'User', is_user: true, mes: 'I head on.', extra: {} }); await c.saveChat();
+        await c.reloadCurrentChat(); await new Promise(r => setTimeout(r, 1500)); m.renderPatchCards();
+        return { status: c.chat[id].extra.worldscrawl_flag?.status, card: document.querySelector(`.mes[mesid="${id}"] .worldscrawl_patchcard`)?.textContent ?? '' };
+    }, [wsMod, empty.id]);
+    check('no-op card: gone once the player sends another line (the flag stays stored)', noop.status === 'nothing' && !/No map change found/.test(noop.card), JSON.stringify(noop));
     await page.evaluate(async n => { const c = SillyTavern.getContext(); c.chat.splice(n); await c.saveChat(); await c.reloadCurrentChat(); }, empty.id); await settle(1500);
     const junk = await changeFlag([{ content: 'I cannot help with portals.' }]);
     check('manual flag: an unreadable answer shows an error in the bar with Check again', junk.status === 'error' && /Map change failed: .*not JSON/.test(junk.card) && /Check again/.test(junk.card), JSON.stringify(junk));

@@ -221,6 +221,15 @@ test('canary inbound: the player\'s [name] always lands, and the skipped rule is
     assert.match((await scene.learnNameOn(nobody, 'Elara')).reason, /No saved person is called "Elara"/);
 });
 
+test('canary inbound: found and named in one tracker answer: found applies first, so the name is learned', async () => {
+    const { c } = boot({ card: ASLEEP_CARD, tracker: () => JSON.stringify({ place: null, people: [{ id: handle(), action: 'found', name: 'the landlady' }, { id: handle(), action: 'name', name: CANARY }], wait: null }) });
+    say(c, 'I knock on her door.');
+    const id = reply(c, `The landlady opens up, bleary-eyed. "${CANARY}. And it's the middle of the night."`);
+    await onReplyForFlags(id);
+    assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.id === 'hesk'), JSON.stringify(callNotes(c.chat[id])));
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => s.id), ['hesk'], JSON.stringify(callNotes(c.chat[id])));
+});
+
 // ---- Narrator outbound (S2): the facts block is the prompt choke point.
 const GATE = new RegExp(`^.*If the landlady is introduced or called by name in spoken dialogue, their name is ${CANARY}\\..*$`, 'm');
 const leaks = text => [CANARY, CANARY_ALIAS, '[hesk]', '(hesk)'].filter(w => text.includes(w));
