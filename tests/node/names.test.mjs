@@ -252,8 +252,105 @@ test('canary inbound: the player says a name the narrator only mentioned: learne
     const id = reply(c, 'The landlady stumbles out, scowling, a shawl round her shoulders.');
     await onReplyForFlags(id);
     assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.id === 'hesk'), JSON.stringify(callNotes(c.chat[id])));
-    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'tracker']], JSON.stringify(callNotes(c.chat[id])));
+    // N1: she was off the map when the line was read, so the player's line learns it first; the tracker's item is then moot.
+    assert.deepEqual(nameStamps(c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'player line']], JSON.stringify(callNotes(c.chat[id])));
     assert.equal(known(c), true);
+});
+
+// N1: someone off the map, not found in that exchange: the player saying the name the narrator gave learns it.
+const EMPTY = () => '{"place": null, "people": [], "wait": null}';
+test('canary inbound N1: off the map and not found, the player says the name the narrator wrote in plain text: learned', async () => {
+    const { c, blocks } = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(c, 'I ask the cook where the landlady is.');
+    reply(c, `"Asleep," the cook says. ${CANARY} keeps late hours.`); // the narrator lets the name slip, outside dialogue
+    say(c, `Is ${CANARY} always this lazy?`);
+    const id = reply(c, 'The cook shrugs and goes back to his pots.');
+    await onReplyForFlags(id);
+    assert.ok(!(c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found'), 'nobody was found');
+    const [s, ...more] = nameStamps(c.chat[id]);
+    assert.deepEqual([s?.id, s?.source, s?.override, more.length], ['hesk', 'player line', undefined, 0], JSON.stringify(callNotes(c.chat[id])));
+    assert.equal(known(c), true);
+    assert.match(stampSummary(s, CANARY), new RegExp(`learned ${CANARY}'s name$`));
+    assert.equal(npcAt(c.chat, id, scene.castPack().npcs, 'hesk').rel.player.by, 'said by the player');
+    say(c, 'I wait for her.');
+    const f = await facts(blocks);
+    assert.match(f, new RegExp(`${CANARY}: asleep, elsewhere`), 'the narrator now gets her name, still elsewhere');
+});
+
+test('canary inbound N1: a name the narrator gave in dialogue, said back by the player (any case, an alias): learned', async () => {
+    let r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(r.c, 'Who runs this place?');
+    reply(r.c, `"${CANARY} does," the cook says. "She's abed."`);
+    say(r.c, `tell ${CANARY.toLowerCase()} I asked after her.`);
+    let id = reply(r.c, 'The cook nods.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'player line']]);
+    r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(r.c, 'Who runs this place?');
+    reply(r.c, `The cook jerks a thumb upstairs. Everyone calls her ${CANARY_ALIAS}.`);
+    say(r.c, `Is ${CANARY_ALIAS} up yet?`);
+    id = reply(r.c, 'The cook shakes his head.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]).map(s => [s.id, s.source]), [['hesk', 'player line']]);
+});
+
+test('canary inbound N1: not learned: the narrator\'s plain text alone, a name the narrator never wrote, the name in a later reply only, or People changes off', async () => {
+    // The narrator names her in plain text; the player never says it.
+    let r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(r.c, 'I ask the cook where the landlady is.');
+    reply(r.c, `"Asleep," the cook says. ${CANARY} keeps late hours.`);
+    say(r.c, 'I sit down and wait.');
+    let id = reply(r.c, `The fire crackles. ${CANARY} does not come down.`);
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    assert.equal(known(r.c), false);
+    // The player says a name the narrator never wrote (read off the card): not learned.
+    r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(r.c, `Is ${CANARY} awake?`);
+    id = reply(r.c, 'The cook shrugs.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    // The narrator writes it only in the reply after the player's line: the player's line came first, nothing learned.
+    r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    say(r.c, `Is ${CANARY} awake?`);
+    id = reply(r.c, `"${CANARY}? Asleep," the cook says.`);
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]).filter(s => s.source === 'player line'), []);
+    // People changes off: no player-line learn.
+    r = boot({ card: ASLEEP_CARD, tracker: EMPTY });
+    ext.settings().flagNpcs = false;
+    say(r.c, 'Who runs this place?');
+    reply(r.c, `${CANARY} runs it, the cook says.`);
+    say(r.c, `Is ${CANARY} up?`);
+    id = reply(r.c, 'The cook shakes his head.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(r.c.chat[id]), []);
+    ext.settings().flagNpcs = true;
+});
+
+test('canary inbound N1: present, the player-line learn stays out of it (the tracker\'s path); masked until learned', async () => {
+    const { c, blocks } = boot({ tracker: EMPTY });
+    say(c, 'I look around.');
+    reply(c, `${CANARY} wipes down the bar.`);
+    say(c, `Evening, ${CANARY}.`);
+    const id = reply(c, 'The landlady grunts.');
+    await onReplyForFlags(id);
+    assert.deepEqual(nameStamps(c.chat[id]), [], 'here, only the tracker learns (it named no one)');
+    say(c, 'I order an ale.');
+    const f = await facts(blocks);
+    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`), 'still masked');
+});
+
+test('portal N1: judgeLearn saidOnly needs no presence and counts only the player\'s line; saidNameOf wants the narrator\'s exact case', () => {
+    const base = { person: P, present: [], heard: 'Hesk' };
+    assert.equal(N.judgeLearn({ ...base, saidOnly: true, said: 'Where is Hesk?' }).ok, true);
+    assert.match(N.judgeLearn({ ...base, saidOnly: true, said: 'Hello.', story: '"I\'m Hesk."' }).reason, /player did not say/);
+    assert.match(N.judgeLearn({ ...base, said: 'Where is Hesk?' }).reason, /not here/, 'other sources still need presence');
+    assert.equal(N.saidNameOf(P, 'where is hesk', ['Hesk sleeps.']), 'Hesk');
+    assert.equal(N.saidNameOf(P, 'Is Hessy up?', ['"Hessy!" a docker yells.']), 'Hessy');
+    assert.equal(N.saidNameOf(P, 'where is hesk', ['the hesk of the river']), '', 'not as the narrator wrote a name');
+    assert.equal(N.saidNameOf(P, 'Where is Hesk?', []), '');
+    assert.equal(N.saidNameOf(named, 'Where is Hesk?', ['Hesk sleeps.']), '', 'already known');
 });
 
 // ---- Narrator outbound (S2): the facts block is the prompt choke point.
