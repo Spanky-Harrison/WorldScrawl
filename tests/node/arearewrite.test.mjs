@@ -14,6 +14,8 @@ const { renderPatchCards } = await import('../../extension/waits.mjs');
 const { applyTrackerResult, flagMessage } = await import('../../extension/discovery.mjs');
 const { readTrackerAnswer, readPlace } = await import('../../extension/tracker.mjs');
 const { analyzeFlag, swapRewrite } = await import('../../extension/carriers.mjs');
+const { callNotes } = await import('../../extension/calllog.mjs');
+const textLib = await import('../../plugin/shared/text.mjs');
 const rr = await import('../../extension/arearewrite.mjs');
 const patchesExt = await import('../../extension/patches.mjs');
 patchesExt.useDiffLib(await import('../../plugin/ui/diffview.mjs'));
@@ -161,7 +163,8 @@ test('a light swap rewrites only the listed text: sentences the note does not na
     assert.equal(calls2.length, 1, 'one call, and not the which-rooms or patch steps');
     assert.match(calls2[0].prompt, /1\. the description of Common Room \(riverton:drowned_rat\/common_room\)\. Answer with \{"op":"set_description"/);
     assert.ok(calls2[0].prompt.includes(`Before the change: ${COMMON_WAS}`));
-    assert.ok(calls2[0].prompt.includes(`As proposed now: ${PALACE}`));
+    assert.ok(!calls2[0].prompt.includes('As proposed now') && !calls2[0].prompt.includes(PALACE), 'the switch never shows the proposal it replaces (the model would echo it)');
+    assert.match(calls2[0].prompt, /The texts this change rewrites, as they were before the change:/);
     assert.match(calls2[0].prompt, /How much to rewrite: light touch/);
     assert.match(calls2[0].sys, /Never add other ops, never change an address, an exit name or how long anything lasts/);
     assert.match(calls2[0].sys, /about the place, not the characters/, 'the description rule and "not the characters" still apply');
@@ -425,4 +428,100 @@ test('prompts: the tracker judges rewrite by the result; the patch and rewrite p
     assert.match(text('npc.tracker'), /rewrite is exactly "light" or "full", nothing else, and why gives only the reason, without repeating the word/);
     assert.equal(rr.areaRewrite('heavy'), 'full'); assert.equal(rr.areaRewrite('Light'), 'light');
     assert.equal(rr.areaRewrite('medium'), '', 'an unclear word is not judged'); assert.equal(rr.areaRewrite(undefined), '');
+});
+
+// ---- B4: one text edit per target, the switch from the text before the change, the light touch on an appended text,
+// visible failures for an echo or a light touch that drops most of the text, and a stale card click.
+const appendOp = (text, extra = {}) => ({ op: 'append_description', loc: TAVERN, text, ...extra });
+
+test('collapseTextOps: last wins per text and lasts; an append before a set is dropped, after it folds in; other ops keep their order', () => {
+    const r = rr.collapseTextOps([appendOp('Dust.'), blockBack, descOp(BOARDS), appendOp('Splinters glint.'), appendOp('Smoke.', { lasts: '1h' }), { op: 'append_lore', area: 'riverton:drowned_rat', text: 'A.' }, { op: 'append_lore', area: 'riverton:drowned_rat', text: 'B.' }]);
+    assert.equal(r.merged, 3);
+    assert.deepEqual(r.ops, [blockBack, descOp(`${BOARDS} Splinters glint.`), appendOp('Smoke.', { lasts: '1h' }), { op: 'append_lore', area: 'riverton:drowned_rat', text: 'A. B.' }]);
+    assert.deepEqual(rr.collapseTextOps([descOp('one'), descOp('two')]), { ops: [descOp('two')], merged: 1 }, 'a later set replaces an earlier one');
+    assert.deepEqual(rr.collapseTextOps([descOp('one'), blockBack]), { ops: [descOp('one'), blockBack], merged: 0 });
+});
+
+test('a patch answer with two edits of one text becomes one edit (noted), so the switch can rewrite it', async () => {
+    const { f, c } = await proposed({ note: 'the stool splintered the floorboards', rewrite: 'light', why: 'only the floor' },
+        ops([appendOp('Dust hangs in the air.'), descOp(BOARDS), appendOp('Splinters glint by the bar.'), blockBack]));
+    assert.deepEqual(f.proposal.ops.map(o => o.op), ['set_description', 'block_exit']);
+    assert.equal(f.proposal.ops[0].text, `${BOARDS} Splinters glint by the bar.`);
+    assert.ok(callNotes(c.chat[1]).some(n => /merged 2 duplicate text edits/.test(n.reason ?? '')), JSON.stringify(callNotes(c.chat[1])));
+    assert.ok(byText(draw(), 'Make it a full rewrite'), 'one target: the switch is offered');
+});
+
+test('the switch: an answer that only echoes the proposal fails visibly and keeps it', async () => {
+    const { f, c } = await proposed({ note: 'the inn became a palace', rewrite: 'full', why: 'remade' }, ops([descOp(PALACE), blockBack]));
+    const old = structuredClone(f.proposal);
+    model({ rewrite: ops([descOp(`  ${PALACE.replace('. ', '.  ')} `)]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    const g = flagOf();
+    assert.deepEqual(g.proposal, old);
+    assert.equal(g.rewrite, 'full');
+    assert.match(g.rewriteError, /Couldn't switch to a light touch: the model gave back the same text\. The change is as it was\./);
+    assert.ok(callNotes(c.chat[1]).some(n => n.kind === 'map rewrite' && n.status === 'failed' && /same text/.test(n.reason)));
+});
+
+test('the switch to a light touch: an answer that drops most of the old text fails; one that keeps half passes', async () => {
+    assert.equal(textLib.keepShare(COMMON_WAS, 'A gilded throne hall.'), 0);
+    assert.equal(textLib.keepShare(COMMON_WAS, BOARDS), 0.5);
+    assert.equal(textLib.keepShare('One sentence only.', 'Something else.'), 1, 'a one-sentence text is exempt');
+    assert.equal(textLib.keepShare('A b c. D e f. G h i.', 'a B c! Then more. D e f'), 2 / 3, 'case and punctuation aside');
+    const { f } = await proposed({ note: 'the inn became a palace', rewrite: 'full', why: 'remade' }, ops([descOp(PALACE)]));
+    const old = structuredClone(f.proposal);
+    model({ rewrite: ops([descOp('A gilded hall, newly swept. The bar is gone.')]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    const g = flagOf();
+    assert.deepEqual(g.proposal, old);
+    assert.match(g.rewriteError, /Couldn't switch to a light touch: the light touch dropped most of the description of Common Room\. The change is as it was\./);
+    // The full rewrite is never held to it.
+    await proposed({ note: 'boards', rewrite: 'light' }, ops([descOp(BOARDS)]));
+    model({ rewrite: ops([descOp(PALACE)]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    assert.equal(flagOf().rewrite, 'full', flagOf().rewriteError); assert.equal(flagOf().proposal.ops[0].text, PALACE);
+});
+
+test('a light touch on an appended text asks for the added part only and keeps it an append', async () => {
+    const ADDED = 'Gold leaf now covers every beam, and a throne stands where the hearth was.';
+    const { f } = await proposed({ note: 'the stool splintered the floorboards', rewrite: 'full', why: 'judged big' }, ops([appendOp(ADDED), blockBack]));
+    assert.equal(f.proposal.ops[0].op, 'append_description');
+    const calls = model({ rewrite: ops([appendOp('Splintered boards lie by a knocked-over stool.')]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    assert.equal(calls.length, 1);
+    const q = calls[0].prompt;
+    assert.match(q, /Answer with \{"op":"append_description","loc":"riverton:drowned_rat\/common_room","text":"\.\.\."\}/);
+    assert.ok(q.includes(`Before the change: ${COMMON_WAS}`));
+    assert.ok(q.includes(`The change adds: ${ADDED}`));
+    assert.match(q, /Answer with the added part only; the text before it stays as it is\./);
+    const g = flagOf();
+    assert.equal(g.rewrite, 'light', g.rewriteError);
+    assert.deepEqual(g.proposal.ops[0], appendOp('Splintered boards lie by a knocked-over stool.'));
+    assert.ok(g.proposal.after[TAVERN].description.startsWith(COMMON_WAS), 'the old text is all still there');
+    // A full rewrite of the same append asks for the whole text, as a set.
+    const calls2 = model({ rewrite: ops([descOp(PALACE)]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    assert.match(calls2[0].prompt, /Answer with \{"op":"set_description"/);
+    assert.ok(!calls2[0].prompt.includes('The change adds'));
+    assert.equal(flagOf().proposal.ops[0].op, 'set_description');
+});
+
+test('a place card drawn before the proposal changed is stale: its Approve keeps nothing', async () => {
+    await proposed({ note: 'the inn became a palace', rewrite: 'full', why: 'remade' }, ops([descOp(PALACE)]));
+    const oldDoc = draw();
+    model({ rewrite: ops([descOp(BOARDS)]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    assert.equal(flagOf().proposal.ops[0].text, BOARDS);
+    byText(oldDoc, 'Approve').click();
+    await flush(60);
+    assert.equal(flagOf().status, 'review', 'the click on the old drawing did nothing');
+    byText(draw(), 'Approve').click();
+    await flush(60);
+    assert.equal(flagOf().status, 'kept');
 });
