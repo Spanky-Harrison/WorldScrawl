@@ -4,7 +4,7 @@ import { messageActivity } from './activity.mjs';
 import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once } from './notices.mjs';
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
+import { authorRecord, freeId, nameIn, normName, passingThrough, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
@@ -117,7 +117,7 @@ export async function refreshLivePlaces() {
             return;
         }
         const labels = w.place_labels && typeof w.place_labels === 'object' && !Array.isArray(w.place_labels) ? w.place_labels : {};
-        livePlaces = { key, pack: { ...base, places: new Set(places), subs: new Set(Array.isArray(w.subs) ? w.subs : []), regions: new Set(Array.isArray(w.regions) ? w.regions : []), elsewhere: Array.isArray(w.elsewhere) ? w.elsewhere : base.elsewhere, names: Array.isArray(w.place_names) ? w.place_names : base.names, labels: { ...base.labels, ...labels } } };
+        livePlaces = { key, pack: { ...base, places: new Set(places), subs: new Set(Array.isArray(w.subs) ? w.subs : []), regions: new Set(Array.isArray(w.regions) ? w.regions : []), elsewhere: Array.isArray(w.elsewhere) ? w.elsewhere : base.elsewhere, names: Array.isArray(w.place_names) ? w.place_names : base.names, labels: { ...base.labels, ...labels }, privates: new Set(Array.isArray(w.private_places) ? w.private_places : []) } };
     } catch (e) { console.warn('[WorldScrawl] live places', e.message); }
 }
 function castPack() {
@@ -168,7 +168,7 @@ function npcEnv(chat, loc) {
         index: pack ? {
             rooms: addresses, subs: pack.subs ?? new Set(), regions: pack.regions ?? new Set(),
             stubs: new Map((pack.elsewhere ?? []).map(s => [s.id, s])),
-            nameOf: a => pack.labels?.[a] || a, exists, relocate,
+            nameOf: a => pack.labels?.[a] || a, exists, relocate, privates: pack.privates ?? new Set(),
         } : null,
     };
 }
@@ -557,6 +557,15 @@ async function keepRememberNow(c, msg, card, id, edited) {
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
         ...Object.fromEntries(['looks', 'body', 'outfit', 'history', 'unknownAs'].filter(k => got[k]).map(k => [k, got[k]])), facts: got.facts, ...(got.invented?.length ? { invented: got.invented } : {}) });
     if (got.disposition) addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: got.disposition.value, reason: got.disposition.reason ?? '', dramatic: true });
+    // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
+    // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
+    const at = Math.max(0, chat.indexOf(msg));
+    let room = '';
+    try { room = npcEnv(chat, await currentLocation().catch(() => null)).playerAt(at) || ''; } catch { room = ''; }
+    if (room) {
+        addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: passingThrough(room, npcClock(chat, at).minutes ?? 0) });
+        addNpcStamp(msg, { type: 'npc_stay', id: newId, place: room });
+    } else noteCall(at, { kind: 'schedule', status: 'skipped', reason: `no room for ${got.name}, so no schedule or stay was written` });
     card.status = 'kept'; card.name = got.name;
     const d = decisionOf(msg, card.nid); if (d) d.text = `remembered ${got.name}`;
     syncSwipeExtra(msg);

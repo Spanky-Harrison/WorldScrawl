@@ -235,7 +235,7 @@ export class World {
             name: loc.name,
             display_name: World.place_label(loc.name, sub.name),
             description: loc.description,
-            lore: loc.lore ?? null, effective_lore: this.effective_lore(loc), lore_chain: this.lore_chain(loc), expandable: loc.expandable !== false,
+            lore: loc.lore ?? null, effective_lore: this.effective_lore(loc), lore_chain: this.lore_chain(loc), expandable: loc.expandable !== false, private: loc.private === true,
             exits: loc.exits.map(e => this._exit_dict(e, loc)),
             views: loc.views.map(a => this.view_dict(a)),
             weather: this.place_weather(loc),
@@ -427,6 +427,7 @@ export function build_world(worldJson, rawRegions) {
     const startRegion = requireStr(worldJson, 'start_region', 'world.json');
     if (has(worldJson, 'living') && typeof worldJson.living !== 'boolean') throw new WorldError('world.json: "living" must be true or false');
     const worldExpandable = optionalBool(worldJson, 'expandable', 'world.json');
+    const worldPrivate = optionalBool(worldJson, 'private', 'world.json');
     let weather;
     try {
         const cal = checkCalendar(worldJson.calendar, 'world.json: calendar');
@@ -449,7 +450,7 @@ export function build_world(worldJson, rawRegions) {
         checkSlug(rid, `${fname}: region id (file name)`);
         if (has(data, 'id') && data.id !== rid) throw new WorldError(`${fname}: region id ${repr(data.id)} must match the file name (${repr(rid)})`);
         const region = { id: rid, name: requireStr(data, 'name', fname), lore: requireStr(data, 'lore', fname, true), entrance: '',
-            stays_open: optionalBool(data, 'stays_open', fname), expandable: optionalBool(data, 'expandable', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
+            stays_open: optionalBool(data, 'stays_open', fname), expandable: optionalBool(data, 'expandable', fname), private: optionalBool(data, 'private', fname), weather_region: weather.regionOf[rid], place: place(data, fname) };
         if (region.place.exposure) anyExposure = true;
         regions.set(rid, region);
         const start = requireStr(data, 'start', fname);
@@ -474,7 +475,7 @@ export function build_world(worldJson, rawRegions) {
                 id: sid, name: requireStr(sub, 'name', swhere), lore: requireStr(sub, 'lore', swhere, true),
                 inherit_lore: inherit === null ? true : inherit, entrance: `${rid}:${sid}/${entrance}`,
                 label_rooms: Boolean(optionalBool(sub, 'label_rooms', swhere)), stays_open: optionalBool(sub, 'stays_open', swhere),
-                expandable: optionalBool(sub, 'expandable', swhere),
+                expandable: optionalBool(sub, 'expandable', swhere), private: optionalBool(sub, 'private', swhere),
                 place: place(sub, swhere),
             });
             if (subregions.get(`${rid}:${sid}`).place.exposure) anyExposure = true;
@@ -515,7 +516,9 @@ export function build_world(worldJson, rawRegions) {
                 locations.set(address, {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), lore: requireStr(loc, 'lore', where, true), exits,
                     inherit_region_lore: optionalBool(loc, 'inherit_region_lore', where), inherit_subregion_lore: optionalBool(loc, 'inherit_subregion_lore', where),
-                    expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true, views: [], pos: optionalPos(loc, where), place: place(loc, where),
+                    expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true,
+                    // "private": people only turn up here when a schedule names the room (an area pick skips it). Inherited like expandable; default public.
+                    private: [optionalBool(loc, 'private', where), subregions.get(`${rid}:${sid}`).private, region.private, worldPrivate].find(v => v !== null) ?? false, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
                 if (locations.get(address).place.exposure) anyExposure = true;
             }

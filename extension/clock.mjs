@@ -17,7 +17,7 @@ const worldTimes = new Map(); // id -> {calendar, start_date} (from GET /worlds 
 const worldCasts = new Map(); // id -> { npcs, places: Set, names, labels }
 const rememberWorlds = body => {
     if (body?.default) defaultWorldId = body.default;
-    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); if (Array.isArray(w.cast)) worldCasts.set(w.id, { npcs: w.cast, places: new Set(w.places ?? []), subs: new Set(w.subs ?? []), regions: new Set(w.regions ?? []), elsewhere: w.elsewhere ?? [], names: w.place_names ?? [], labels: w.place_labels ?? {} }); } }
+    if (body?.worlds) { listedWorlds.clear(); for (const w of body.worlds) { listedWorlds.add(w.id); missingWorlds.delete(w.id); worldNames.set(w.id, w.name); worldLiving.set(w.id, !!w.living); if (w.start_date) worldTimes.set(w.id, { calendar: w.calendar, start_date: w.start_date, weather: w.weather }); if (Array.isArray(w.cast)) worldCasts.set(w.id, { npcs: w.cast, places: new Set(w.places ?? []), subs: new Set(w.subs ?? []), regions: new Set(w.regions ?? []), elsewhere: w.elsewhere ?? [], names: w.place_names ?? [], labels: w.place_labels ?? {}, privates: new Set(w.private_places ?? []) }); } }
 };
 
 // ---- Game clock. Travel and waiting take time: each move or wait stamps its seconds on its message (move.seconds, wait.seconds), so swipes keep

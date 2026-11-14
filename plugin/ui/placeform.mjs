@@ -28,6 +28,7 @@ export const ROOM_FIELDS = [
     { k: 'description', type: 'textarea', label: 'Description', required: true, ai: true },
     { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
     { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
+    { k: 'private', type: 'bool', label: 'Private (people turn up here only when their schedule names it)', dflt: false },
     { k: 'inherit_region_lore', type: 'bool', label: 'Uses the region lore' },
     { k: 'inherit_subregion_lore', type: 'bool', label: 'Uses the subregion lore' },
     { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
@@ -41,6 +42,7 @@ export const AREA_FIELDS = {
         { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
+    { k: 'private', type: 'bool', label: 'Private (people turn up here only when their schedule names it)', dflt: false },
         { k: 'inherit_lore', type: 'bool', label: 'Rooms use the region lore' },
         { k: 'label_rooms', type: 'bool', label: 'Room names carry the subregion name', dflt: false },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },
@@ -54,6 +56,7 @@ export const AREA_FIELDS = {
         { k: 'lore', type: 'textarea', label: 'Lore (background knowledge)', ai: true },
         { k: 'entrance', type: 'choice', label: 'Entrance', options: 'entrances' },
         { k: 'expandable', type: 'bool', label: 'New rooms can be discovered here' },
+    { k: 'private', type: 'bool', label: 'Private (people turn up here only when their schedule names it)', dflt: false },
         { k: 'stays_open', type: 'bool', label: 'Doors stay open' },
         { k: 'exposure', type: 'choice', label: 'Exposure', options: ENUMS.exposure },
         { k: 'insulation', type: 'choice', label: 'Insulation', options: ENUMS.insulation },
@@ -144,6 +147,7 @@ function createOps(ctx, state) {
     }
     const ops = [{ op: 'create_place', area, id, name, description: str(o.description), exits }];
     if (o.expandable !== undefined) ops.push({ op: 'set_expandable', target: a, value: o.expandable });
+    if (o.private !== undefined) ops.push({ op: 'set_private', target: a, value: o.private });
     const f = fieldDiff({}, o, FIELD_KEYS.room);
     for (const k of Object.keys(f)) if (f[k] === null) delete f[k];
     if (Object.keys(f).length) ops.push({ op: 'set_fields', target: a, fields: f });
@@ -162,6 +166,7 @@ export function placeOps(ctx, state) {
     if (str(o.name) && str(o.name) !== str(b.name)) ops.push({ op: 'set_name', loc: a, text: str(o.name) });
     if (str(o.description) && str(o.description) !== str(b.description)) ops.push({ op: 'set_description', loc: a, text: str(o.description) });
     if (!same(b.expandable, o.expandable)) ops.push({ op: 'set_expandable', target: a, value: o.expandable ?? null });
+    if (!same(b.private, o.private)) ops.push({ op: 'set_private', target: a, value: o.private ?? null });
     const f = fieldDiff(b, o, FIELD_KEYS.room);
     if (Object.keys(f).length) ops.push({ op: 'set_fields', target: a, fields: f });
     const orig = new Map((ctx.exits ?? []).map(e => [e.direction, e]));
@@ -200,6 +205,7 @@ export function areaOps(ctx, state) {
     const name = str(o.name) !== str(b.name) && str(o.name), notes = str(o.lore) !== str(b.lore) && str(o.lore);
     if (name || notes) ops.push({ op: 'update_area', area, ...(name ? { name } : {}), ...(notes ? { notes } : {}) });
     if (!same(b.expandable, o.expandable)) ops.push({ op: 'set_expandable', target: area, value: o.expandable ?? null });
+    if (!same(b.private, o.private)) ops.push({ op: 'set_private', target: area, value: o.private ?? null });
     const f = fieldDiff(b, o, FIELD_KEYS[ctx.kind]);
     if (Object.keys(f).length) ops.push({ op: 'set_fields', target: area, fields: f });
     return ops;

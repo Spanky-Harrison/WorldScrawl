@@ -18,11 +18,15 @@ export function validateRecord(raw, { file = 'npc', places = null, nearIndex = n
     const errors = [];
     const fail = m => { problems.push(m); errors.push(m); };
     const note = m => problems.push(m);
+    // Warnings load and save (a hand-written overlap, a single-word off-map name, a place not on the map yet, a field that
+    // is ignored); every other problem blocks a save from the editor.
+    const warnings = [];
+    const warn = m => { problems.push(m); warnings.push(m); };
     if (!isObj(raw)) return { ok: false, id: '', name: '', line: '', problems: [`${file}: not an object`], schedule: [], from: 'cast' };
     const id = typeof raw.id === 'string' ? raw.id.trim() : '';
     if (!NPC_ID.test(id)) fail(`${file}: "id" must be a lowercase slug (letters, digits, dashes or underscores)`);
     const stem = String(file).replace(/\.json$/i, '');
-    if (id && stem && stem !== id && stem !== 'npc') note(`${file}: file name should match "id" (${id})`);
+    if (id && stem && stem !== id && stem !== 'npc') warn(`${file}: file name should match "id" (${id})`);
     const name = str(raw.name, 80);
     if (!name) fail(`${file}: "name" is required`);
     const sub = (obj, key, max, label) => {
@@ -68,20 +72,20 @@ export function validateRecord(raw, { file = 'npc', places = null, nearIndex = n
     const schedule = [];
     if (raw.schedule != null) {
         if (!Array.isArray(raw.schedule)) fail(`${file}: "schedule" must be a list`);
-        else raw.schedule.forEach((e, i) => schedule.push(isObj(e) && Array.isArray(e.might) ? validateMight(e, `${file} schedule[${i}]`, places, note, nearIndex) : validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex)));
-        overlapNotes(schedule, `${file} schedule`, note);
+        else raw.schedule.forEach((e, i) => schedule.push(isObj(e) && Array.isArray(e.might) ? validateMight(e, `${file} schedule[${i}]`, places, note, nearIndex, warn) : validateEntry(e, `${file} schedule[${i}]`, places, note, nearIndex, warn)));
+        overlapNotes(schedule, `${file} schedule`, warn);
     }
     // The old one-off sighting is gone; might-be-at entries replace it.
-    if (raw.seen_at !== undefined) note(`${file}: unknown field "seen_at" (ignored; use a "might" schedule entry instead)`);
+    if (raw.seen_at !== undefined) warn(`${file}: unknown field "seen_at" (ignored; use a "might" schedule entry instead)`);
     const deep = cleanDeep(raw.deep, file, fail);
     if (history) deep.history = history;
     const facts = Array.isArray(raw.facts) ? raw.facts.map(f => (typeof f === 'string' ? f.trim() : '')).filter(Boolean).slice(0, 24) : [];
     const memory = Array.isArray(raw.memory) ? raw.memory.map(f => (typeof f === 'string' ? f.trim() : isObj(f) ? str(f.note, 240) : '')).filter(Boolean).slice(-MEMORY_CAP) : [];
     const ok = errors.length === 0 && !!id && !!name && !!line;
-    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, aliases, disposition, schedule, deep, facts, memory, problems, from: 'cast' };
+    return { ok, id, name: name ?? '', line: line ?? '', manner, voice, looks, body, outfit, unknownAs, aliases, disposition, schedule, deep, facts, memory, problems, warnings, from: 'cast' };
 }
 
-function validateEntry(e, where, places, fail, nearIndex = null) {
+function validateEntry(e, where, places, fail, nearIndex = null, warn = fail) {
     if (!isObj(e)) { fail(`${where}: must be an object`); return { place: '', activity: '', broken: true, problem: 'not an object' }; }
     const place = str(e.place, 200) ?? '';
     const activity = str(e.activity, 200) ?? '';
@@ -112,7 +116,7 @@ function validateEntry(e, where, places, fail, nearIndex = null) {
         const resolved = resolveNear(near, nearIndex);
         if (resolved.kind === 'text' && resolved.warn === 'typo') {
             nearNote = 'probably a typo';
-            fail(`${where}: near "${near}" matches no place and no stub region (a single word; probably a typo)`);
+            warn(`${where}: near "${near}" matches no place and no stub region (a single word; probably a typo)`);
         } else if (resolved.kind === 'text') nearNote = 'not in the list';
     }
     let broken = problems.length > 0;
@@ -150,14 +154,14 @@ export function mightOptionKind(text, places = null, nearIndex = null) {
  * table: the roll resolves it against the live map (a room made in play counts), and until it exists that share is away.
  * Every option unknown is not broken either: the whole block is away until one exists. Both get a note that does not block loading.
  */
-function validateMight(e, where, places, note, nearIndex = null) {
-    const { entry, problems, warnings } = readMightEntry(e);
-    for (const w of warnings) note(`${where}: ${w}`);
+function validateMight(e, where, places, note, nearIndex = null, warn = note) {
+    const { entry, warnings } = readMightEntry(e);
+    for (const w of warnings) warn(`${where}: ${w}`);
     if (!entry.broken && (places || nearIndex)) {
         const unknown = entry.options.filter(o => mightOptionKind(o.text, places, nearIndex) === 'unknown');
-        if (unknown.length && unknown.length === entry.options.length) note(`${where}: no might option is on the map yet (${unknown.map(o => o.text).join(', ')}); the whole block is away until one exists`);
-        else for (const o of unknown) note(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
-        for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) note(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
+        if (unknown.length && unknown.length === entry.options.length) warn(`${where}: no might option is on the map yet (${unknown.map(o => o.text).join(', ')}); the whole block is away until one exists`);
+        else for (const o of unknown) warn(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
+        for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) warn(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
     }
     if (entry.broken) note(`${where}: ${entry.problem}`);
     return entry;

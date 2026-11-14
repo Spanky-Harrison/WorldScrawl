@@ -9,7 +9,7 @@ export const OP_LABELS = {
     set_description: 'Rewrite description', append_description: 'Add to description', set_name: 'Rename place',
     set_lore: 'Rewrite area lore', update_area: 'Rename area / rewrite its lore', append_lore: 'Add to area lore',
     block_exit: 'Exit: block', open_exit: 'Exit: open', lock_exit: 'Exit: lock', unlock_exit: 'Exit: unlock', break_exit: 'Exit: break open', remove_exit: 'Exit: remove', set_exit_description: 'Exit: rewrite its description (this side)', set_travel_time: 'Exit: travel time (both ways)',
-    remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms',
+    remove_location: 'Remove place', merge: 'Merge places', discover: 'New room behind a door', set_expandable: 'Allow / forbid discovered rooms', set_private: 'Public / private / inherit',
     set_fields: 'Change settings', set_exit: 'Exit: change settings', add_exit: 'Exit: add (with the way back)', move_location: 'Move place to another subregion', move_area: 'Move subregion to another region',
     create_place: 'Create place', create_subregion: 'Create subregion', create_region: 'Create region', remove_area: 'Delete subregion / region',
 };
@@ -27,6 +27,7 @@ export const OP_FIELDS = {
     merge: [['locs', 1], ['into', 0], ['name', 0], ['description', 0], ['area', 0]],
     discover: [['loc', 1], ['direction', 1], ['name', 1], ['description', 1], ['return_direction', 0], ['exit_description', 0], ['return_description', 0], ['id', 0]],
     set_expandable: [['target', 1], ['value', 1]],
+    set_private: [['target', 1], ['value', 1]],
     set_fields: [['target', 1], ['fields', 1]],
     set_exit: [['loc', 1], ['direction', 1], ['fields', 1]],
     add_exit: [['loc', 1], ['direction', 1], ['to', 1], ['return_direction', 0], ['travel_time', 0], ['description', 0], ['return_description', 0], ['door', 0]],

@@ -261,6 +261,31 @@ export function readMightEntry(e) {
 }
 export const isMight = e => !!e && Array.isArray(e.might);
 
+const hourText = h => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
+/**
+ * The passing-through schedule Remember writes for someone met in `room` at minute-of-day `minutes`: one normal might
+ * block, the met room at 50% (the rest nowhere), from an hour before the met hour (rounded down) to an hour after; home
+ * 20:00-07:00 off the map, clipped around the block (so engine-made entries never overlap); the rest of the day about
+ * their own business, off the map. Met at 16:17: 15:00-17:00, home 20:00-07:00. At 21:00: 20:00-22:00, home 22:00-07:00.
+ */
+export function passingThrough(room, minutes) {
+    const h = Math.floor((((minutes ?? 0) % 1440) + 1440) % 1440 / 60);
+    const block = new Set([(h + 23) % 24, h]);
+    const home = new Set([20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6].filter(x => !block.has(x)));
+    const runs = [];
+    for (const start of [20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6]) {
+        if (!home.has(start) || home.has((start + 23) % 24)) continue; // a run starts where the hour before is not home
+        let end = start;
+        while (home.has((end + 1) % 24) && (end + 1) % 24 !== start) end = (end + 1) % 24;
+        runs.push({ activity: 'at home', where: 'home', from: hourText(start), to: hourText(end + 1) });
+    }
+    return [
+        { might: [`${room}(50)`], activity: 'out and about', from: hourText(h - 1), to: hourText(h + 1) },
+        ...runs,
+        { activity: 'about their own business' },
+    ];
+}
+
 
 /** A clean cast file from a played NPC (base fields plus facts, memory and disposition). Following stays in the chat. */
 export function exportRecord(npc) {

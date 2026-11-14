@@ -21,6 +21,8 @@
 //       its region's, else world.json's; default true). Written as if it was always there.
 //   {op: "set_expandable", target, value}   target: a room, "region:sub" or "region"; value true, false or null
 //       (null / "inherit": drop the setting so the next level up decides).
+//   {op: "set_private", target, value}   the same targets and values: "private" (people only turn up there when a
+//       schedule names the room; an area pick skips it). Inherited like expandable; default public.
 //   {op: "set_fields", target, fields: {key: value | null}}   the map's Edit forms: plain settings of a room, subregion
 //       ("region:sub") or region ("region"); null drops the setting (inherit / default). Allowed keys: FIELD_KEYS.
 //   {op: "set_exit", loc, direction, fields: {key: value | null}}   one exit's settings. Per side (only this side changes):
@@ -47,7 +49,7 @@ import { parseDuration } from './calendar.mjs';
 import { flipBar } from './doorbar.mjs';
 import { render as P } from './prompts.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_lore', 'append_lore', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable', 'set_private',
     'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
 /** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
 export const FIELD_KEYS = {
@@ -186,7 +188,7 @@ export function normalizeOp(raw, op) {
     if (o.op === 'create_place') Object.assign(o, fixExits(o));
     if (o.op === 'create_subregion') o.place = fixExits(o.place);
     if (o.op === 'create_region' && isObj(o.subregion)) o.subregion = { ...o.subregion, place: fixExits(o.subregion.place) };
-    if (o.op === 'set_expandable') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
+    if (o.op === 'set_expandable' || o.op === 'set_private') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
     if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
     if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
     if (o.op === 'merge' && typeof o.id === 'string' && o.id.trim()) {
@@ -354,6 +356,15 @@ function applyOp(raw, op, w, out, world = null) {
             out.touched.push(t);
             return `${obj.name ?? t}: ${v === null ? 'discoveries follow the level above' : v ? 'new rooms can be discovered' : 'no new rooms can be discovered'}`;
         }
+        case 'set_private': {
+            const t = str(op.target), p = split(t), [rid, sid] = p ?? t.split(':');
+            const obj = p ? getRoom(raw, t) : sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+            if (!isObj(obj) || !rid) throw new PatchError(`${w}: "target" ${JSON.stringify(op.target)} is not a room, subregion ("region:subregion") or region ("region")`);
+            const v = expandValue(op.value, w);
+            if (v === null) delete obj.private; else obj.private = v;
+            out.touched.push(t);
+            return `${obj.name ?? t}: ${v === null ? 'public or private follows the level above' : v ? 'private' : 'public'}`;
+        }
         case 'set_fields': return fieldsOp(raw, op, w, out);
         case 'set_exit': return setExitOp(raw, op, w, out);
         case 'add_exit': return addExitOp(raw, op, w, out);
@@ -373,6 +384,7 @@ function applyOp(raw, op, w, out, world = null) {
             }
             const a = createPlace(raw, str(op.area), op, w, out, true), r = getRoom(raw, a);
             (out.created ??= new Set()).add(a);
+            if (op.story === true && typeof r.private !== 'boolean' && privateByName(r.name)) r.private = true;
             const ex = op.exits?.length === 1 ? op.exits[0] : null;
             if (op.story === true && ex) return `${getRoom(raw, ex.to)?.name ?? ex.to} ${ex.return_direction}: leads to ${r.name} (a newly found room)`;
             return `${r.name}: new place in ${sub.name ?? op.area}`;
@@ -519,6 +531,20 @@ function addExitOp(raw, op, w, out) {
     return `${r.name} ${dir}: new exit to ${t.name}${back ? ` (back: ${back})` : ' (one way)'}`;
 }
 
+/** Last words of a room name that make a room found in play private (bedroom, servants' quarters...). Never house or home. */
+export const PRIVATE_WORDS = ['bedroom', 'bedchamber', 'quarters', 'cottage', 'apartment', 'bath', 'privy', 'cell'];
+/** Whether a room name's last word is on the private list ("Guest Bedroom" yes; "Bath Street", "Bathhouse", "Old House" no). */
+export function privateByName(name) {
+    const words = String(name ?? '').toLowerCase().replace(/[’']s\b/g, '').match(/[a-z]+/g) ?? [];
+    return PRIVATE_WORDS.includes(words.at(-1) ?? '');
+}
+/** "private" for a room: its own setting, else its subregion's, else its region's, else world.json's; default false (public). */
+export function privateOf(raw, address, world = null) {
+    const p = split(address); if (!p) return false;
+    const reg = raw[p[0]], sub = reg?.subregions?.[p[1]], room = sub?.locations?.[p[2]];
+    for (const o of [room, sub, reg, world]) if (isObj(o) && typeof o.private === 'boolean') return o.private;
+    return false;
+}
 /** "expandable" for a room: its own setting, else its subregion's, else its region's, else world.json's; default true. */
 export function expandableOf(raw, address, world = null) {
     const p = split(address); if (!p) return true;
@@ -944,6 +970,7 @@ export const OP_DOCS = {
     remove_location: '{"op":"remove_location","loc":ADDR} (the place is gone)',
     merge: '{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (existing rooms become one; never for making new rooms)',
     set_expandable: '{"op":"set_expandable","target":ADDR or AREA,"value":true|false|"inherit"} (whether new rooms can be found there)',
+    set_private: '{"op":"set_private","target":ADDR or AREA,"value":true|false|"inherit"} (private: people turn up there only when their schedule names the room)',
     set_fields: '{"op":"set_fields","target":ADDR or AREA,"fields":{"exposure":"outdoor|sheltered|enclosed|fixed","insulation":"drafty|normal|cozy","indoor_temp":20,...}} (plain settings; null drops one)',
     set_exit: '{"op":"set_exit","loc":ADDR,"direction":"exit name","fields":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))',
     add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two rooms that already exist before this patch; not for a room made by create_place, whose exits already join it)',

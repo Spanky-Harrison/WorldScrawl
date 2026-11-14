@@ -8,7 +8,7 @@ import { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged
 import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyEffect, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
 
-const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NOWHERE, exportRecord, authorRecord, areaPick, blockSpan, blockStartOf, isMight, isNowhere, isObj, matchEnum, mightKey, nameIn, normName, npcTokenIds, pickFromTable, readMightEntry, resolveNear, resolveSchedulePlace, str, wanderChain } = npc;
+const { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, NOWHERE, exportRecord, authorRecord, areaPick, blockSpan, blockStartOf, isMight, isNowhere, isObj, matchEnum, mightKey, nameIn, normName, npcTokenIds, parseHm, pickFromTable, readMightEntry, resolveNear, resolveSchedulePlace, str, wanderChain } = npc;
 
 export const NPC_KEY = 'worldscrawl_npc';
 
@@ -128,8 +128,8 @@ const hhmmOf = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${Strin
 
 /**
  * Where a might option puts someone for a block or segment starting at absolute minute `s`: {address, offmap, how, near?, area?, note?}.
- * A room goes through the usual redirects (gone: away, with a note). An area picks its highest-scoring live room (every room
- * counts as public for now). A stub place or plain text is off the map. Nowhere is away.
+ * A room goes through the usual redirects (gone: away, with a note). An area picks its highest-scoring live public room
+ * (none: away, with a note). A stub place or plain text is off the map. Nowhere is away.
  */
 function mightPlace(opt, base, s, env) {
     const away = note => ({ address: null, offmap: true, how: 'nowhere', near: { kind: 'none' }, ...(note ? { note } : {}) });
@@ -143,10 +143,11 @@ function mightPlace(opt, base, s, env) {
     if (scope) {
         const area = { kind: 'map', scope, address: text };
         const live = env?.exists ?? idx.exists;
-        const rooms = [...(idx.rooms ?? [])].filter(a => (!live || live(a)) && withinNear(a, area)).sort();
+        // Only public rooms: a private one (upstairs, the cellar) needs the schedule to name it.
+        const rooms = [...(idx.rooms ?? [])].filter(a => (!live || live(a)) && withinNear(a, area) && !idx.privates?.has?.(a)).sort();
         const name = idx.nameOf?.(text) ?? text;
         const hit = areaPick(base, s, rooms);
-        if (!hit) return away(`No room in ${name} to pick, so away this time.`);
+        if (!hit) return away(`No public room in ${name} to pick, so away this time.`);
         return { address: hit.address, offmap: false, how: 'area', area: { address: text, name, of: hit.of } };
     }
     const stub = idx?.stubs?.get?.(text);
@@ -497,8 +498,10 @@ function applyStamp(state, s, index, elapsed = null) {
                 if (near) x.near = near;
             }
             const from = str(e.from, 8), to = str(e.to, 8), importance = str(e.importance, 20);
-            if (from) x.from = from;
-            if (to) x.to = to;
+            // The minutes too, as the server's validateEntry gives a cast entry: without them a timed chat entry acted untimed.
+            const fromMin = parseHm(from), toMin = parseHm(to);
+            if (from && fromMin != null) { x.from = from; x.fromMin = fromMin; }
+            if (to && toMin != null) { x.to = to; x.toMin = toMin; }
             if (importance) x.importance = importance;
             return x;
         }).filter(Boolean);
@@ -925,7 +928,7 @@ function mightPointsAt(e, place, env) {
         if (r.ok) return r.address === place;
         const idx = env?.index;
         const scope = idx?.subs?.has?.(o.text) ? 'subregion' : idx?.regions?.has?.(o.text) ? 'region' : null;
-        return !!scope && withinNear(place, { kind: 'map', scope, address: o.text });
+        return !!scope && !idx.privates?.has?.(place) && withinNear(place, { kind: 'map', scope, address: o.text });
     });
 }
 

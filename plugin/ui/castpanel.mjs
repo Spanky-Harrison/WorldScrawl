@@ -6,7 +6,7 @@
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses),
 //       decideNpc({identity, decisionRev, action, card, ref, seen, values, to}) -> {ok, error, stale} (a Changes card click, run by the chat's card handler) }
-import { permanentProblem, liveSchedule, mightText } from './castdata.mjs';
+import { permanentProblem, liveSchedule, mightText, placeResolver, mightOptionsShown, toggleRowKind, formWarnings, MIGHT_HELP } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 import { stampCard } from './castdata.mjs';
@@ -328,6 +328,8 @@ export function castPanel(doc, io) {
         const form = $('div', { class: `castform castform-${ed.mode}`, 'data-mode': ed.mode });
         const errs = new Map();
         const err = key => { const e = $('div', { class: 'cf-err', 'data-for': key }); errs.set(key, e); return e; };
+        const warns = new Map();
+        const warnEl = key => { const e = $('div', { class: 'cf-warn muted', 'data-for': key }); warns.set(key, e); return e; };
         const fieldRow = (key, label, input, help = null) => $('div', { class: 'cf-row', 'data-field': key }, $('label', { class: 'pf-label' }, label), input, help ? $('div', { class: 'muted' }, help) : null, err(key));
         const text = (key, { area = false, ph = '' } = {}) => {
             const i = $(area ? 'textarea' : 'input', { ...(area ? { rows: 2 } : { type: 'text' }), class: 'pf-input', placeholder: ph });
@@ -359,10 +361,31 @@ export function castPanel(doc, io) {
         dsel.value = f.disposition; dsel.addEventListener('change', () => { f.disposition = dsel.value; check(); });
         form.append(fieldRow('disposition', 'Starts toward the player', dsel), fieldRow('reason', 'Because', text('reason')));
         const schedBox = $('div', { class: 'cf-schedule' });
+        const rctx = { resolve: placeResolver(data) };
+        const kindSel = (e, i) => {
+            const k = $('select', { class: 'pf-input cf-kind', title: 'Is at: one place for the hours. Might be at: places with odds.' }, $('option', { value: 'at' }, 'Is at'), $('option', { value: 'might' }, 'Might be at'));
+            k.value = e.kind === 'might' ? 'might' : 'at';
+            k.addEventListener('change', () => { f.schedule[i] = toggleRowKind(e, k.value, rctx.resolve); drawSched(); check(); });
+            return k;
+        };
+        const tm = (e, k) => { const t = $('input', { type: 'time', class: `pf-input cf-${k}` }); t.value = e[k]; t.addEventListener('input', () => { e[k] = t.value; check(); }); t.addEventListener('change', () => { e[k] = t.value; check(); }); return t; };
+        const impSel = e => { const imp = $('select', { class: 'pf-input cf-importance' }, $('option', { value: '' }, 'importance'), ...IMPORTANCE.map(x => $('option', { value: x }, x))); imp.value = e.importance; imp.addEventListener('change', () => { e.importance = imp.value; check(); }); return imp; };
+        const xBtn = i => $('button', { type: 'button', class: 'pf-x cf-schedx', title: 'Remove this entry', onclick: () => { f.schedule.splice(i, 1); drawSched(); check(); } }, '✕');
         const drawSched = () => {
             schedBox.replaceChildren(...(f.schedule ?? []).map((e, i) => {
-                if (e.mightRow) return $('div', { class: 'cf-sched cf-might', 'data-i': i }, $('div', { class: 'cf-schedtop' }, $('span', {}, `${mightText(e.mightRow, placeName)} · ${e.mightRow.activity ?? ''}`)),
-                    $('div', { class: 'muted' }, 'A might-be-at entry. It is kept exactly as written; editing it here comes later.'));
+                if (e.kind === 'might') {
+                    // Shown by name where the name is unique; typed names are matched back to addresses on save.
+                    if (!e.shown) { e.options = mightOptionsShown(e.options, rctx.resolve); e.shown = true; }
+                    const opts = $('input', { type: 'text', class: 'pf-input cf-options', placeholder: 'Market Lane, General Store, nowhere(80)' }); opts.value = e.options;
+                    opts.addEventListener('input', () => { e.options = opts.value; check(); });
+                    const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
+                    const wand = $('input', { type: 'checkbox', class: 'cf-wandering' }); wand.checked = !!e.wandering; wand.addEventListener('change', () => { e.wandering = wand.checked; check(); });
+                    return $('div', { class: 'cf-sched cf-might', 'data-i': i }, $('div', { class: 'cf-schedtop' }, kindSel(e, i), opts, xBtn(i)),
+                        err(`schedule.${i}.options`),
+                        $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e), $('label', { class: 'cf-wandlabel', title: 'Moves among the places every 15 to 60 minutes' }, wand, ' Wandering')),
+                        err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
+                        warnEl(`schedule.${i}.warn`));
+                }
                 const off = $('input', { type: 'checkbox', class: 'cf-offmap' }); off.checked = !!e.offmap;
                 off.addEventListener('change', () => { e.offmap = off.checked; if (off.checked) e.place = ''; drawSched(); check(); });
                 const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.offmap ? '' : e.place });
@@ -370,19 +393,19 @@ export function castPanel(doc, io) {
                 const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
                 const wh = $('input', { type: 'text', class: 'pf-input cf-where', placeholder: 'where (her own room)' }); wh.value = e.where; wh.addEventListener('input', () => { e.where = wh.value; check(); });
                 const nr = $('input', { type: 'text', class: 'pf-input cf-near', placeholder: 'near (a place, a stub, or words)' }); nr.value = e.near; nr.addEventListener('input', () => { e.near = nr.value; check(); });
-                const tm = k => { const t = $('input', { type: 'time', class: `pf-input cf-${k}` }); t.value = e[k]; t.addEventListener('input', () => { e[k] = t.value; check(); }); t.addEventListener('change', () => { e[k] = t.value; check(); }); return t; };
-                const imp = $('select', { class: 'pf-input cf-importance' }, $('option', { value: '' }, 'importance'), ...IMPORTANCE.map(x => $('option', { value: x }, x))); imp.value = e.importance; imp.addEventListener('change', () => { e.importance = imp.value; check(); });
-                return $('div', { class: 'cf-sched', 'data-i': i }, $('div', { class: 'cf-schedtop' }, $('label', { class: 'cf-offlabel' }, off, ' Off the map'), pk, $('button', { type: 'button', class: 'pf-x cf-schedx', title: 'Remove this entry', onclick: () => { f.schedule.splice(i, 1); drawSched(); check(); } }, '✕')),
+                return $('div', { class: 'cf-sched', 'data-i': i }, $('div', { class: 'cf-schedtop' }, kindSel(e, i), $('label', { class: 'cf-offlabel' }, off, ' Off the map'), pk, xBtn(i)),
                     err(`schedule.${i}.place`),
                     e.offmap ? $('div', { class: 'cf-schedrow' }, wh, nr) : null,
-                    $('div', { class: 'cf-schedrow' }, act, tm('from'), '–', tm('to'), imp),
-                    err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`));
-            }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
+                    $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e)),
+                    err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
+                    warnEl(`schedule.${i}.warn`));
+            }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ kind: 'at', place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
         };
         drawSched();
         form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, chatMode
             ? 'A change here is stamped on the latest message and applies only in this chat. It is not written to the cast file.'
-            : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'), schedBox);
+            : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'),
+            $('details', { class: 'cf-mighthelp' }, $('summary', {}, 'About Might be at'), $('p', { class: 'muted' }, MIGHT_HELP)), schedBox);
         const relBox = $('div', { class: 'cf-rels' });
         const drawRels = () => relBox.replaceChildren(...(f.relationships ?? []).map((x, i) => {
             const w = $('input', { type: 'text', class: 'pf-input cf-relwho', placeholder: 'who' }); w.value = x.who; w.addEventListener('input', () => { x.who = w.value; check(); });
@@ -404,10 +427,10 @@ export function castPanel(doc, io) {
         function review() {
             if (Object.keys(check()).length) return;
             let lines = [], notes = [];
-            if (chatMode) { const c = chatStamps(ed.seed, f); ed.stamps = c.stamps; lines = chatStampLines(c.stamps); notes = c.cannot.map(x => `Can't ${x}.`); }
+            if (chatMode) { const c = chatStamps(ed.seed, f, rctx); ed.stamps = c.stamps; lines = chatStampLines(c.stamps); notes = c.cannot.map(x => `Can't ${x}.`); }
             else {
                 const before = ed.mode === 'update' && current()?.rec ? recordFromForm(formFromRecord(current().rec)) : recordFromForm(formFromRecord(null));
-                lines = recordChanges(before, recordFromForm(f)).map(x => `${x.field}: ${x.from || '(none)'} → ${x.to || '(none)'}`);
+                lines = recordChanges(before, recordFromForm(f, rctx)).map(x => `${x.field}: ${x.from || '(none)'} → ${x.to || '(none)'}`);
             }
             reviewBox.replaceChildren($('div', { class: 'cast-diff' }, $('b', {}, chatMode ? 'Stamps to add in this chat' : `This will be written to cast/${fileName()}`),
                 lines.length ? $('ul', {}, ...lines.map(l => $('li', {}, l))) : $('p', { class: 'muted' }, 'Nothing changed.'),
@@ -419,12 +442,15 @@ export function castPanel(doc, io) {
             reviewBox.replaceChildren();
             const places = chatMode ? null : new Set(data?.places ?? []);
             const ids = chatMode ? new Set() : takenIds(ownId());
-            const p = formProblems(f, { places, ids });
+            const p = formProblems(f, { places, ids, resolve: rctx.resolve });
             for (const [k, e] of errs) e.textContent = p[k] ?? '';
+            // Warnings (overlap, not on the map yet, a probable typo) are shown but never block saving.
+            const w = formWarnings(f, { resolve: rctx.resolve });
+            for (const [k, e] of warns) e.textContent = w[k] ?? '';
             form.querySelectorAll('.cf-row, .cf-sched').forEach(x => x.classList.remove('bad'));
             for (const k of Object.keys(p)) errs.get(k)?.parentElement?.classList.add('bad');
             save.disabled = Object.keys(p).length > 0;
-            raw.textContent = JSON.stringify(recordFromForm(f), null, 2);
+            raw.textContent = JSON.stringify(recordFromForm(f, rctx), null, 2);
             return p;
         }
         async function doSave() {
@@ -440,8 +466,8 @@ export function castPanel(doc, io) {
                 return;
             }
             try {
-                const res = await io.save(recordFromForm(f), ed.original, ed.originalFile);
-                say(`Saved cast/${res.file}.`);
+                const res = await io.save(recordFromForm(f, rctx), ed.original, ed.originalFile);
+                say(`Saved cast/${res.file}.${res.warnings?.length ? ` Notes: ${res.warnings.join(' ')}` : ''}`);
                 drafts.delete(ed.key); if (editing === ed) editing = null; tab = 'resolved';
                 await refresh(`file:${res.file}`);
             } catch (e) { say(`Not saved: ${e.message}`, true); save.disabled = false; }
