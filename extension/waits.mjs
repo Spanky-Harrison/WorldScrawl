@@ -22,6 +22,7 @@ import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
 import { busyLines, onCallChange, onWorkChange, workingOn } from './work.mjs';
+import { prefetchSchedule, scheduleErrors, scheduleFields, scheduleView } from './schedulepick.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -260,10 +261,11 @@ function personNoteEl(msg, id, s, who) {
         if (editing) { const v = C.rememberValues(s); fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` })); }
         if (!s.off) rows = [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']].filter(([k]) => s[k]).map(([k, label]) => ({ field: k, label, before: '', after: s[k] }));
         if (!s.off && s.invented?.length) invented = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it here (Edit) before you export.`;
-    } else if (NOTE_FIELD[s.type] && editing) { const [k, label] = NOTE_FIELD[s.type]; fields = [{ key: k, label, value: s[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
+    } else if (s.type === 'npc_schedule' && s.pick && editing) fields = scheduleFields(s.pick); // a remembered person's daily pattern: Pattern / Job / Home / Favorites
+    else if (NOTE_FIELD[s.type] && editing) { const [k, label] = NOTE_FIELD[s.type]; fields = [{ key: k, label, value: s[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
     if (pending) rows = [{ field: 'text', label: 'Fact', before: '', after: s.text ?? '' }];
     const title = pending ? `Lasting change for ${who}: ${s.text}` : s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`;
-    const desc = C.personNote({ key, state: pending ? 'review' : s.off ? 'off' : 'kept', title, who, editing, editable: !s.off && (pending || s.type === 'npc_create' || !!NOTE_FIELD[s.type]), fields: s.off ? [] : fields, rows, tag: s.type === 'npc_create' ? 'new person' : 'person', invented });
+    const desc = C.personNote({ key, state: pending ? 'review' : s.off ? 'off' : 'kept', title, who, editing, editable: !s.off && (pending || s.type === 'npc_create' || !!NOTE_FIELD[s.type] || (s.type === 'npc_schedule' && !!s.pick)), fields: s.off ? [] : fields, rows, tag: s.type === 'npc_create' ? 'new person' : 'person', invented });
     return drawCard(desc, 'personNote', ticketFor('personNote', { id, msg, s, key }));
 }
 /** A person found at a place: the shared card; Edit opens the room box. */
@@ -280,8 +282,11 @@ function rememberEl(msg, id, remember) {
     const prop = remember.proposal?.name === remember.name ? remember.proposal : null;
     if (!prop && !saving) queueMicrotask(() => prefetchRemember(id));
     const phase = prop?.got ? 'review' : prop?.failed ? 'failed' : 'working';
+    if (prop?.got && !saving && !remember.schedule?.status) queueMicrotask(() => prefetchSchedule(id)); // the daily pattern, once the card is ready
     const editing = phase === 'review' && !saving && !!editLib()?.editorOpen(key);
-    const desc = C.rememberReview({ key, name: remember.name, suggested: !!remember.suggested, phase, saving, got: prop?.got ?? null, editing });
+    const schedule = scheduleView(remember);
+    const desc = C.rememberReview({ key, name: remember.name, suggested: !!remember.suggested, phase, saving, got: prop?.got ?? null, editing,
+        schedule, scheduleError: scheduleErrors.get(key) ?? '', scheduleFields: editing && schedule ? scheduleFields(remember.schedule?.pick ?? null) : [] });
     return drawCard(desc, 'remember', ticketFor('remember', { id, msg, card: remember }));
 }
 /** A kept person (appearance or base text) change: the shared card; Edit opens the same Body/Outfit editor as its review. */

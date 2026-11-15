@@ -10,7 +10,8 @@ export const ACTIONS = {
     // A failed rebuild for what the change went back to adds the job card's Check again (the same action and handler).
     expiry: { info: ['again', 'edit', 'close', 'save'] },
     // Approve while it is still preparing saves the card as soon as it is ready (the call in flight, never a second one).
-    remember: { working: ['approve', 'discard'], review: ['again', 'edit', 'close', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'] },
+    // extra:schedule is Check schedule again: it asks only the daily pattern question again.
+    remember: { working: ['approve', 'discard'], review: ['again', 'edit', 'close', 'extra:schedule', 'rewrite', 'approve', 'discard'], failed: ['again', 'discard'] },
     fact: { review: ['edit', 'close', 'approve', 'discard'], kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
     found: { kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
     wait: { review: ['edit', 'close', 'approve', 'discard'] },
@@ -212,8 +213,10 @@ export function inventedAfter(got = {}, changed = []) {
 }
 
 /**
- * The Remember card. v: {key, name, suggested, phase ('working'|'review'|'failed'), saving, got, editing, values, intent}.
- * The panel is a new person (empty befores); made-up details are marked ⚠ on their fields.
+ * The Remember card. v: {key, name, suggested, phase ('working'|'review'|'failed'), saving, got, editing, values, intent,
+ * schedule: {phase ('working'|'ok'|'failed'), text, reason} | null, scheduleFields: [editor boxes], scheduleError}.
+ * The panel is a new person (empty befores); made-up details are marked ⚠ on their fields. The schedule line is the
+ * daily pattern question: working, the pick, or passing through; Edit adds its Pattern / Job / Home / Favorites boxes.
  */
 export function rememberReview(v) {
     const phase = v.saving ? 'working' : v.phase || 'working', got = v.got;
@@ -228,9 +231,15 @@ export function rememberReview(v) {
         panel = { type: 'fields', title: got.name, tag: 'new person', rows: REMEMBER_FIELDS.filter(([k]) => k !== 'name').map(([k, label]) => ({ field: k, label: `${label}${inv.fields[k] ? ` ⚠ made up: ${inv.fields[k].join('; ')}` : ''}`, before: '', after: vals[k] })) };
         if (got.invented?.length) notes.push({ text: `Made up to fill gaps (not in the story): ${got.invented.map(x => `⚠ ${x}`).join('; ')}`, tone: 'warn', cls: 'worldscrawl_invented' });
     }
+    const sch = v.schedule;
+    if (sch) notes.push(sch.phase === 'working' ? { text: sch.text, tone: 'busy', cls: 'worldscrawl_schedule_working' }
+        : sch.phase === 'failed' ? { text: `Schedule: ${sch.text}${sch.reason ? ` (${sch.reason})` : ''}`, tone: 'warn', cls: 'worldscrawl_schedule_failed' }
+        : { text: `Schedule: ${sch.text}`, tone: 'info', cls: 'worldscrawl_schedule' });
+    if (v.scheduleError) notes.push({ text: `⚠ ${v.scheduleError}`, tone: 'error', cls: 'worldscrawl_schedule_error' });
     const actions = [];
     if (phase === 'review' || phase === 'failed') actions.push(act('again', 'Ask the model again', true));
     if (phase === 'review') actions.push(v.editing ? act('close', 'Forget the edits') : act('edit', 'Change any part of this card before saving it'));
+    if (phase === 'review' && sch && sch.phase !== 'working') actions.push(act('extra:schedule', 'Ask again only for the daily pattern (job, home and favorite spots)'));
     if (phase === 'review' && v.editing) actions.push(act('rewrite', 'Ask again with the Change note: every field you typed stays as you typed it, the model fills only the rest', true));
     if (phase !== 'failed') actions.push(act('approve', phase === 'working' ? `Remember ${v.name} (saves the card as soon as it is ready)` : v.editing ? 'Save the card exactly as typed in the boxes' : `Save ${got?.name ?? v.name} as shown`, true));
     actions.push(act('discard', 'Not this scene. You can be asked again after the scene changes.', true));
@@ -240,7 +249,7 @@ export function rememberReview(v) {
         title: v.suggested ? `Remember ${v.name}? They have come up a few times.` : `Remember ${v.name}?`,
         summary, notes, panel,
         editor: v.editing && phase === 'review' ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_remember_intent', title: 'A note for Rewrite with this, e.g. "older, and she runs the ferry"' },
-            fields: REMEMBER_FIELDS.map(([k, label, kind]) => ({ key: k, label, value: vals[k] ?? '', kind, cls: `worldscrawl_remember_${k}`, ...(k === 'starts' ? { placeholder: 'hostile, unfriendly, indifferent, friendly or helpful — why' } : {}) })) } : null,
+            fields: [...REMEMBER_FIELDS.map(([k, label, kind]) => ({ key: k, label, value: vals[k] ?? '', kind, cls: `worldscrawl_remember_${k}`, ...(k === 'starts' ? { placeholder: 'hostile, unfriendly, indifferent, friendly or helpful — why' } : {}) })), ...(v.scheduleFields ?? [])] } : null,
         actions: within('remember', phase, actions),
     };
 }

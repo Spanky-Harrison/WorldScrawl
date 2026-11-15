@@ -1488,7 +1488,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_appearance_cache') return '';
     if (s.type === 'npc_schedule') {
         const n = Array.isArray(s.schedule) ? s.schedule.length : 0;
-        return `${who}: schedule (${n} ${n === 1 ? 'entry' : 'entries'})`;
+        return `${who}: schedule${typeof s.about === 'string' && s.about ? ` — ${s.about}` : ''} (${n} ${n === 1 ? 'entry' : 'entries'})`;
     }
     return who;
 }

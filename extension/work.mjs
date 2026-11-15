@@ -35,7 +35,7 @@ export function workingOn(msg) {
 // card in `shown`; every other call shows on the shared busy line under the latest message (waits.mjs drawBusy):
 // "WorldScrawl: reading your move…". Live only, like the jobs above.
 /** Where a call already shows, so the busy line leaves it out: 'card' (its card says working: a rebuild's expiry, job
- *  or proposal card, a map change card, the Remember card), 'marker' (the tracked marker's "tracking…"), 'map' (the
+ *  or proposal card, a map change card, the Remember card and its schedule line), 'marker' (the tracked marker's "tracking…"), 'map' (the
  *  map window's own button). */
 export const CALL_SHOWN = ['card', 'marker', 'map'];
 const CALL_LABELS = [
@@ -48,6 +48,7 @@ const CALL_LABELS = [
     [/^discovery \/ dig$/, 'working out the new opening'],
     [/^wait amount$/, 'working out how long you wait'],
     [/^remember/, 'preparing a person to remember'],
+    [/^schedule$/, 'working out a schedule'],
     [/^tracker$/, 'reading the reply for changes'],
     [/^map edit/, 'preparing a map change'],
     [/^map expand$/, 'writing text for the map editor'],

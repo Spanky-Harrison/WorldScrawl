@@ -8,7 +8,7 @@ import { buildCardEditor } from './cardedit.mjs';
 /** The canonical button order. Adapters list actions; the card sorts them into this order. */
 export const ORDER = ['again', 'edit', 'close', 'scope', 'extra', 'rewrite', 'approve', 'save', 'off', 'on', 'undo', 'discard'];
 const LABELS = { again: 'Check again', edit: 'Edit', close: 'Close editor', rewrite: 'Rewrite with this', approve: 'Approve', save: 'Approve edited', off: 'Turn off', on: 'Turn on', undo: 'Undo', discard: 'Discard' };
-const EXTRA_LABELS = { newroom: 'Make it a new room instead' };
+const EXTRA_LABELS = { newroom: 'Make it a new room instead', schedule: 'Check schedule again' };
 const baseOf = id => (String(id).startsWith('extra:') ? 'extra' : String(id));
 
 /** The label the card gives an action. Approve reads "Approve edited" while the editor is open; Discard reads
