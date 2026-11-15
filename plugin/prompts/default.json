@@ -82,6 +82,7 @@
     "scrap": "The short list the tracker sees: this place, the people here with the appearance already on the card, and the known weather.",
     "kind": "what kind of place it is: \"region\", \"area\" or \"room\"",
     "label": "the name of a place the player already knows about",
+    "found": "the saved people the player's [find] just brought to this room, as the narrator may call them (comma-separated), e.g. The landlady",
     "lines": "saved people who came or went since the last reply, one per line with the game time, e.g. [14:20] The landlady arrives.",
     "mentions": "other world text that names a changed place (from the Map changes piece), or empty",
     "name": "the name of the place or person being written about",
@@ -1543,6 +1544,19 @@
       "placeholders": [
         {
           "name": "lines"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_found",
+      "title": "Narration: someone the player went looking for",
+      "description": "Alongside, inside {{npcs_present}}, on the turn the player's [find] brought a saved person to this room: who has just come in.",
+      "group": "narration",
+      "locked": "The game fills the names from the [find] it accepted; the person is in the people-here list above.",
+      "text": "{{found}} has just come in.",
+      "placeholders": [
+        {
+          "name": "found"
         }
       ]
     },

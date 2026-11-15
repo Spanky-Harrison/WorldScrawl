@@ -579,9 +579,11 @@ export function renderPatchCards() {
             card.append(personNoteEl(msg, id, s, who));
         }
         for (const s of npcStamps) if (s.type === 'npc_found') card.append(foundEl(msg, id, s, npcNames.get(s.id) || s.id, foundNotes));
-        for (const fnd of foundNotes) if (!fnd.ok) {
-            const d = line(`Couldn't find ${fnd.name || 'them'}: ${fnd.reason}`);
-            d.className = 'worldscrawl_found_rejected';
+        for (const fnd of foundNotes) {
+            // [find]: right here (nothing changed), found (they come here for the rest of the block), or couldn't find them.
+            const d = !fnd.ok ? line(`Couldn't find ${fnd.name || 'them'}: ${fnd.reason}`) : (fnd.here && fnd.source === 'bracket') || fnd.moved ? line(fnd.reason) : null;
+            if (!d) continue; // a placeless find draws its own card above; the tracker's "right here" says nothing
+            d.className = !fnd.ok ? 'worldscrawl_found_rejected' : fnd.here ? 'worldscrawl_found_here' : 'worldscrawl_found_moved';
             card.append(d);
         }
         // A carrier (a run of map-window edits) is one small line, collapsed; it opens to list each change with its buttons.
