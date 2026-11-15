@@ -389,7 +389,7 @@ test('Hesk loads with no warnings and her day follows the plan (fixed seed: the 
     const two = s('14:00');
     assert.equal(two.how, 'area');
     assert.equal(two.address, 'riverton:drowned_rat/courtyard');
-    assert.equal(two.area.of, 6);
+    assert.equal(two.area.of, 3, 'the cellar, kitchens and upstairs are private, so the pick is among the public rooms');
     assert.equal(s('15:30').address, CELLAR);
     assert.equal(s('20:00').address, BAR);
     assert.equal(s('20:00').activity, 'pouring drinks');
@@ -454,18 +454,18 @@ test('who\'s here, why and cast panel lines for both block kinds; export writes 
 });
 
 // ---- 13. Editor round trip.
-test('editor: might rows show read-only and a save through the form leaves the file byte-identical', async () => {
+test('editor: might rows are editable Might be at rows and a save through the form with nothing changed leaves the file byte-identical', async () => {
     const { server, dir } = boot({ time: '09:00', cards: [TAM, BRYN] });
     const file = path.join(dir, 'cast', 'hesk.json');
     const bytes = fs.readFileSync(file, 'utf8');
     const rec = server.get('/cast').json().npcs.find(n => n.id === 'hesk');
     const f = formFromRecord(rec);
-    assert.deepEqual(f.schedule.filter(e => e.mightRow).map(e => e.mightRow), JSON.parse(bytes).schedule.filter(e => e.might));
+    assert.deepEqual(f.schedule.filter(e => e.kind === 'might').map(e => e.authored), JSON.parse(bytes).schedule.filter(e => e.might));
     assert.deepEqual(formProblems(f, { places: new Set(server.get('/cast').json().places), ids: new Set() }), {});
     const r = server.post('/cast/save?world=riverton', { json: { npc: recordFromForm(f), original: 'hesk' } });
     assert.equal(r.status_code, 200, JSON.stringify(r.json()));
     assert.equal(fs.readFileSync(file, 'utf8'), bytes, 'byte-identical');
-    // The panel's editor: the might rows are read-only text, and Save as new writes them unchanged.
+    // The panel's editor: the might rows are Might be at rows (options by name), and Save as new writes them unchanged.
     const doc = makeDoc();
     const saved = [];
     const panel = castPanel(doc, {
@@ -479,8 +479,9 @@ test('editor: might rows show read-only and a save through the form leaves the f
     saveAs.click();
     const rows = panel.el.querySelectorAll('.cf-might');
     assert.equal(rows.length, 2);
-    assert.match(rows[0].textContent, /^might be at riverton:streets\/market_lane 20%, riverton:general_store\/shop 20%, riverton:streets\/square 20% \(wandering\), 10:00–13:00 · buying for the inn/);
-    assert.equal(rows[0].querySelectorAll('input').length + rows[0].querySelectorAll('select').length, 0, 'read-only');
+    assert.equal(rows[0].querySelectorAll('.cf-kind')[0].value, 'might');
+    assert.equal(rows[0].querySelectorAll('.cf-options')[0].value, 'Market Lane, riverton:general_store/shop, Village Square, nowhere(40)');
+    assert.equal(rows[0].querySelectorAll('.cf-wandering')[0].checked, true);
     assert.ok(!panel.el.querySelectorAll('.cf-seen').length, 'the Sighting box is gone');
     panel.el.querySelectorAll('.cast-save')[0].click();
     const confirm = panel.el.querySelectorAll('.cast-confirm')[0];

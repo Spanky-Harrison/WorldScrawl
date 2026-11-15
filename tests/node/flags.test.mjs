@@ -9,8 +9,7 @@ import { messageActivity } from '../../extension/activity.mjs';
 
 // ---- from flagreply.test.mjs
 {
-// Flagging the player's own message checks the narrator's reply with it; Proactive room discovery (off by default,
-// overridable per scene) decides whether rooms the narration only mentions may be discovered.
+// Flagging the player's own message checks the narrator's reply with it. The old Proactive room discovery setting is gone.
 
 
 
@@ -32,19 +31,15 @@ test('flagging a player message flags the reply from that message on (no "flag t
     assert.match(src, /if \(r >= 0\) return flagMessage\(r, \{ note, hint, start: id, source, kind \}\)/);
     assert.match(src, /pendingUserFlag = \{ chat: chatKey\(\), start: id/);
 });
-test('Proactive room discovery: off by default', () => {
-    assert.match(src, /proactiveDiscovery: false/);
+test('the dead Proactive room discovery setting is gone (settings, defaults, export, scene override)', () => {
+    assert.doesNotMatch(src, /proactiveDiscovery|worldscrawl_proactive_discovery|Proactive room discovery/);
     assert.doesNotMatch(src, /reviewDiscoveries/);
-    assert.equal(ext.proactiveDiscovery(), false);
-});
-test('a scene override (for a story engine) wins over the setting, and null falls back', () => {
-    const c = SillyTavern.getContext();
-    assert.equal(ext.setSceneOverride('proactiveDiscovery', true), true);
-    assert.equal(ext.proactiveDiscovery(), true);
-    assert.deepEqual(c.chatMetadata[ext.SCENE_KEY], { proactiveDiscovery: true });
-    ext.setSceneOverride('proactiveDiscovery', null);
-    assert.equal(ext.proactiveDiscovery(), false);
-    assert.equal(typeof globalThis.worldscrawlScene.set, 'function');
+    assert.equal(ext.proactiveDiscovery, undefined);
+    assert.equal(ext.setSceneOverride, undefined);
+    assert.equal(globalThis.worldscrawlScene, undefined);
+    assert.ok(!('proactiveDiscovery' in ext.settings()), 'not in the defaults');
+    const readme = fs.readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+    assert.doesNotMatch(readme, /Proactive room discovery/);
 });
 test('a discovery asked for is kept at once; the tracker\'s own waits for Approve unless Auto-keep (real handlers: discoveryhygiene.test.mjs)', () => {
     assert.match(src, /if \(f\.source !== TRACKER_SOURCE \|\| settings\(\)\.autoKeep\) await keepFlag\(id, \{ quiet: true \}\);/);
