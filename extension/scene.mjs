@@ -349,6 +349,20 @@ function foundNow(chat, present) {
     const ids = new Set(stampsOn(chat[ui], swipeOf(chat[ui])).filter(s => s.type === 'npc_appear' && s.whole === true).map(s => s.id));
     return present.filter(p => ids.has(p.id)).map(p => capFirst(shownName(p)));
 }
+/**
+ * Shown names of saved people the player's latest line looked for with [find] and did not find (any reason; never "right
+ * here"), who are not in the scene now: the narrator is told, in-world, that they are not around.
+ */
+function notFoundNow(chat, cast, present) {
+    const ui = lastUserIndex(chat);
+    if (ui < 0) return [];
+    const swipe = swipeOf(chat[ui]);
+    const ids = [...new Set((chat[ui].extra?.[FOUND_KEY] ?? []).filter(d => d && (d.swipe ?? 0) === swipe && d.source === 'bracket' && !d.ok && d.id).map(d => d.id))];
+    if (!ids.length) return [];
+    const here = new Set(present.map(p => p.id));
+    const last = framesOf(chat, ui, cast ?? []).at(-1);
+    return ids.filter(id => !here.has(id) && last?.get(id)).map(id => capFirst(shownName(last.get(id))));
+}
 // The gated name lines this pass put in the facts block, as rendered: the one place a real name may be (the leak check skips them).
 let gateLines = [];
 /** People-here text for the narrator. Empty when nobody saved is in the scene, so turns without them stay as they were. */
@@ -367,6 +381,7 @@ function npcPromptBits(loc) {
         if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
         const found = foundNow(chat, present);
         if (found.length) absent.unshift(P('narration.npc_found', { found: found.join(', ') }));
+        for (const who of notFoundNow(chat, pack.npcs, present).reverse()) absent.unshift(P('narration.npc_not_found', { not_found: who }));
         if (!present.length && !absent.length) return {};
         if (elsewhere) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };

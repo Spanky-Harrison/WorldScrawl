@@ -264,7 +264,8 @@ who wanders. Nothing is rolled:
   is told they have just come in.
 - **Nowhere or off the map this block** (a wandering block: this stretch), **your room not one of its options**, an
   **is at** entry anywhere else (including asleep off the map), following someone else or told to stay elsewhere: they
-  can't be found, and the message says why.
+  can't be found, and the message says why. The narrator is told only that they aren't around here right now and
+  the characters don't find them.
 
 Adjacent blocks each roll on their own, so their chances add up: three back-to-back hourly rows at 20%, 50% and 20% give
 roughly a 70% chance of meeting them at some point in those three hours (1 − 0.8 × 0.5 × 0.8 = 68%). There is no gradient
