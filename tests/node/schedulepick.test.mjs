@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir } from './helpers.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { FAVORITES_MAX, PATTERNS, PICK_PATTERNS, SCHEDULE_FIELDS, expandPattern, passingThrough, pickFromValues, pickSummary, pickValues, readSchedulePick, spotShares } from '../../plugin/shared/npc.mjs';
+import { FAVORITES_MAX, PATTERNS, PICK_PATTERNS, SCHEDULE_FIELDS, expandPattern, metSpotBlock, spotsCover, passingThrough, pickFromValues, pickSummary, pickValues, readSchedulePick, spotShares } from '../../plugin/shared/npc.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 const ext = await import('../../extension/index.js');
@@ -185,6 +185,39 @@ test('passing through is the pattern of that name and the Remember default: pass
     assert.equal(src.match(/out and about/g).length, 2, 'one free-time builder for the shifts, one block for passing through: no copy of the expander');
 });
 
+test('met-place guard: met inside a free-time block in a room the spots do not cover, that room joins that block (and only that block); covered, at work or passing through: nothing added', () => {
+    const evening = (pick, room, minutes) => expandPattern(pick, { room, minutes }).find(e => e.from === '18:30').might;
+    const lunch = (pick, room, minutes) => expandPattern(pick, { room, minutes }).find(e => e.from === '12:00').might;
+    // A day-shifter met at 19:00 in the general store, favorites the square and the lane: the store joins the evening.
+    assert.deepEqual(evening(PICK, STORE, H(19)), [`${SQ}(14)`, `${LANE}(13)`, `${STORE}(13)`]);
+    assert.deepEqual(lunch(PICK, STORE, H(19)), [`${SQ}(15)`, `${LANE}(15)`], 'the other block is untouched');
+    assert.deepEqual(lunch(PICK, STORE, H(12, 30)), [`${SQ}(10)`, `${LANE}(10)`, `${STORE}(10)`], 'met at lunch: the lunch block');
+    assert.deepEqual(metSpotBlock(PICK, { room: STORE, minutes: H(19) }), ['18:30', '20:00']);
+    // Covered: the room itself, or an area holding it (a favorite area, or the default job-room area).
+    assert.deepEqual(evening(PICK, SQ, H(19)), [`${SQ}(20)`, `${LANE}(20)`]);
+    assert.deepEqual(evening({ ...PICK, favorites: ['riverton:streets'] }, LANE, H(19)), ['riverton:streets(40)']);
+    assert.deepEqual(evening({ ...PICK, favorites: [] }, YARD, H(19)), [`${RAT}(40)`], 'no favorites: the job room\'s area covers the courtyard');
+    assert.deepEqual(evening({ ...PICK, favorites: [] }, SQ, H(19)), [`${RAT}(20)`, `${SQ}(20)`], 'but not the square');
+    assert.ok(spotsCover([RAT], YARD) && !spotsCover([RAT], SQ) && !spotsCover(['riverton:drowned'], YARD));
+    // At work, at home or off-shift hours: nothing added.
+    for (const m of [H(9), H(15), H(17, 30), H(20), H(3)]) assert.equal(metSpotBlock(PICK, { room: STORE, minutes: m }), null, String(m));
+    assert.deepEqual(expandPattern(PICK, { room: STORE, minutes: H(9) }), expandPattern(PICK, { room: SQ, minutes: H(9) }));
+    // Night shift: the break and the afternoon.
+    const night = { pattern: 'night shift', job: BAR, favorites: [SQ] };
+    assert.deepEqual(expandPattern(night, { room: STORE, minutes: H(22, 30) }).find(e => e.from === '22:00').might, [`${SQ}(15)`, `${STORE}(15)`]);
+    assert.deepEqual(expandPattern(night, { room: STORE, minutes: H(15) }).find(e => e.from === '14:30').might, [`${SQ}(20)`, `${STORE}(20)`]);
+    assert.equal(metSpotBlock(night, { room: STORE, minutes: H(19) }), null, 'at work');
+    // Passing through is unaffected.
+    assert.equal(metSpotBlock({ pattern: 'passing through', favorites: [SQ] }, { room: STORE, minutes: H(12, 30) }), null);
+    assert.deepEqual(expandPattern({ pattern: 'passing through', favorites: [SQ] }, { room: STORE, minutes: H(12, 30) }), passingThrough(STORE, H(12, 30)));
+    // Engine-made still: no overlap notes; and the summary names the met room too.
+    const v = validateRecord({ id: 'x', name: 'X', line: 'Someone.', schedule: expandPattern(PICK, { room: STORE, minutes: H(19) }) }, { file: 'x.json', places: new Set([BAR, SQ, LANE, STORE]) });
+    assert.deepEqual([v.problems, v.warnings], [[], []]);
+    const names = { [BAR]: 'Common Room', [SQ]: 'Village Square', [LANE]: 'Market Lane', [STORE]: "Marlow's General Store" };
+    assert.match(pickSummary(PICK, { nameOf: a => names[a], room: STORE, minutes: H(19) }), /free time around Village Square, Market Lane, Marlow's General Store$/);
+    assert.match(pickSummary(PICK, { nameOf: a => names[a], room: STORE, minutes: H(9) }), /free time around Village Square, Market Lane$/);
+});
+
 // ---- 2. Reading the answer.
 const PLACES = {
     rooms: new Map([[BAR, { name: 'Common Room' }], [SQ, { name: 'Village Square' }], [LANE, { name: 'Market Lane' }], [STORE, { name: "Marlow's General Store" }], [UP, { name: 'Upstairs', private: true }], ['riverton:gilded_goose/common_room', { name: 'Common Room' }]]),
@@ -212,6 +245,14 @@ test('readSchedulePick (the model): matchEnum leniency, unsure is passing throug
     assert.deepEqual(r.pick.favorites, [SQ, RAT, LANE], 'private and unknown dropped, then at most 3');
     assert.equal(FAVORITES_MAX, 3);
     assert.equal(r.warnings.length, 3);
+    // A bad home (an area, unknown, ambiguous, too long) is off the map with a warning; a bad job is still an error.
+    for (const home of [RAT, 'riverton:nope/room', 'Common Room', `offmap: ${'x'.repeat(81)}`, 7]) {
+        const h = ok({ pattern: 'day shift', job: BAR, home });
+        assert.equal(h.pick.home, null, String(home));
+        assert.match(h.warnings.join(' '), /^home dropped \(off the map instead\): home[ :]/, String(home));
+        assert.match(readSchedulePick({ pattern: 'day shift', job: BAR, home }, PLACES, { strict: true }).error, /^home/, `typed ${home} stays an error`);
+    }
+    assert.match(readSchedulePick({ pattern: 'day shift', job: RAT, home: RAT }, PLACES).error, /job "riverton:drowned_rat" is an area/);
     const nojob = ok({ pattern: 'night shift', job: null, favorites: [SQ] });
     assert.equal(nojob.pick.pattern, 'passing through');
     assert.match(nojob.warnings.join(' '), /night shift with no job, so passing through/);
@@ -219,6 +260,7 @@ test('readSchedulePick (the model): matchEnum leniency, unsure is passing throug
 test('readSchedulePick (the player\'s typed edit, strict): each lenient drop is an error instead, so a bad name shows on the card', () => {
     const strict = raw => readSchedulePick(raw, PLACES, { strict: true });
     assert.match(strict({ pattern: 'day shift', job: null }).error, /a day shift needs a job/);
+    assert.match(strict({ pattern: 'day shift', job: BAR, home: 'Nowhereville' }).error, /home "Nowhereville" is not in the list/);
     assert.match(strict({ pattern: 'day shift', job: BAR, favorites: 'Village Square, Nowhereville' }).error, /favorites: "Nowhereville" is not in the list/);
     assert.match(strict({ pattern: 'day shift', job: BAR, favorites: 'Upstairs' }).error, /"Upstairs" is private/);
     assert.deepEqual(strict({ pattern: 'day shift', job: BAR, favorites: 'Village Square; Market Lane' }).pick.favorites, [SQ, LANE]);
@@ -276,6 +318,7 @@ test('Remember asks the pattern once the card is ready: shown on the card while 
     const m = c.chat[1];
     const [sch] = stampsOf(m, 'npc_schedule');
     assert.deepEqual(sch.schedule, expandPattern(PICK, { room: BAR, minutes: H(10) }));
+    assert.deepEqual(sch.schedule.find(e => e.from === '18:30').might, [`${SQ}(20)`, `${LANE}(20)`], 'met at work (10:00): the met room is not added');
     assert.deepEqual([sch.pick, sch.met], [PICK, { room: BAR, minutes: H(10) }]);
     assert.match(sch.about, /^Day shift at Common Room/);
     assert.deepEqual(stampsOf(m, 'npc_stay').map(s => s.place), [BAR], 'the stay still holds them where they were met');
@@ -291,7 +334,8 @@ test('the question: the met room first, nearest rooms (at most 40, private marke
     assert.match(p, /^Choose a daily pattern for Maren, met in Common Room at 10:00\.\nA knife-grinder who works for the landlady\. Looks: wiry woman with a whetstone\n/);
     assert.doesNotMatch(p, /Hesk/, 'the name portal masks the unknown landlady');
     assert.match(p, /The story since they showed up:\nMaren, the knife-grinder, works the wheel by the fire\./);
-    const list = p.slice(p.indexOf('Places (KEY: name):\n') + 20, p.indexOf('\n\nReply with JSON only.')).split('\n');
+    assert.match(p, /\n\nThey were met here, in Common Room, at 10:00: pick a pattern that fits them being here then \(at work if this is their job, otherwise in their free time; the game keeps this place among their free-time spots at that hour\)\.\n\nReply with JSON only\.$/);
+    const list = p.slice(p.indexOf('Places (KEY: name):\n') + 20, p.indexOf('\n\nThey were met here')).split('\n');
     assert.equal(list[0], `- ${BAR}: Common Room (The Drowned Rat)`);
     const rooms = list.slice(0, list.indexOf('Areas (anywhere public inside):'));
     assert.ok(rooms.length > 5 && rooms.length <= SP.PICK_ROOMS, String(rooms.length));
@@ -334,6 +378,76 @@ test('a bad answer is asked once more with the error, then fits; two bad answers
     const [w] = scheduleNotes(r.c.chat[1]);
     assert.equal(w.status, 'ok');
     assert.match(w.reason, /is private/);
+});
+
+test('met-place guard through the real card: met at 19:00 in the common room by a day-shifter whose favorites miss it, it joins the evening (card, stamp, typed edit, Check again); a favorite area covering it adds nothing', async () => {
+    let r = await rememberCard({ time: '19:00' });
+    assert.match(r.calls.pick[0], /They were met here, in Common Room, at 19:00:/);
+    assert.match(remEl(r.doc).querySelector('.worldscrawl_schedule').textContent, /free time around Village Square, Market Lane, Common Room$/);
+    byText(remEl(r.doc), 'Approve').click();
+    await flush(80);
+    let [sch] = stampsOf(r.c.chat[1], 'npc_schedule');
+    assert.deepEqual(sch.met, { room: BAR, minutes: H(19) });
+    assert.deepEqual(sch.schedule.find(e => e.from === '18:30').might, [`${SQ}(14)`, `${LANE}(13)`, `${BAR}(13)`]);
+    assert.deepEqual(sch.schedule.find(e => e.from === '12:00').might, [`${SQ}(15)`, `${LANE}(15)`]);
+    // Present in the evening options: on some evenings she is rolled into the common room.
+    const p = playPerson(r.c, stampsOf(r.c.chat[1], 'npc_create')[0].id), env = envOf(r.c), D = day0(r.c);
+    const seen = new Set(); for (let d = 1; d <= 200; d++) seen.add(scheduleAt(p, { day: D + d, minutes: H(19) }, env).address);
+    assert.ok(seen.has(BAR) && seen.has(SQ) && seen.has(LANE), [...seen].join(','));
+    // Covered by a favorite area (the Drowned Rat holds the common room): nothing added.
+    r = await rememberCard({ time: '19:00', pick: () => ({ ...PICK, favorites: [RAT] }) });
+    byText(remEl(r.doc), 'Approve').click();
+    await flush(80);
+    [sch] = stampsOf(r.c.chat[1], 'npc_schedule');
+    assert.deepEqual(sch.schedule.find(e => e.from === '18:30').might, [`${RAT}(40)`]);
+    // A typed edit gets the same rule.
+    r = await rememberCard({ time: '19:00' });
+    byText(remEl(r.doc), 'Edit').click();
+    await flush(10);
+    type(box(r.doc, 'sched_favorites'), 'Market Lane');
+    byText(remEl(r.doc), 'Approve edited').click();
+    await flush(80);
+    [sch] = stampsOf(r.c.chat[1], 'npc_schedule');
+    assert.deepEqual(sch.schedule.find(e => e.from === '18:30').might, [`${LANE}(20)`, `${BAR}(20)`]);
+    assert.equal(r.calls.pick.length, 1);
+    // Check schedule again: the new answer gets it too.
+    r = await rememberCard({ time: '19:00', pick: n => (n <= 2 ? 'nope' : { ...PICK, favorites: [STORE] }) });
+    byText(remEl(r.doc), 'Check schedule again').click();
+    await flush(80);
+    assert.match(remEl(r.doc).querySelector('.worldscrawl_schedule').textContent, /free time around Marlow's General Store, Common Room$/);
+    byText(remEl(r.doc), 'Approve').click();
+    await flush(80);
+    assert.deepEqual(stampsOf(r.c.chat[1], 'npc_schedule')[0].schedule.find(e => e.from === '18:30').might, [`${STORE}(20)`, `${BAR}(20)`]);
+});
+
+test('home: a bad home from the model keeps the pick with home off the map and a warning (no retry); a bad job still retries then passes through; a typed bad home is an error on the card', async () => {
+    let r = await rememberCard({ pick: () => ({ ...PICK, home: RAT }) });
+    assert.equal(r.calls.pick.length, 1, 'no retry for a bad home');
+    assert.deepEqual(r.card().schedule.pick, { ...PICK, home: null });
+    const [n] = scheduleNotes(r.c.chat[1]);
+    assert.equal(n.status, 'ok');
+    assert.match(n.reason, /home dropped \(off the map instead\): home "riverton:drowned_rat" is an area/);
+    assert.match(remEl(r.doc).querySelector('.worldscrawl_schedule').textContent, /, home off the map;/);
+    byText(remEl(r.doc), 'Approve').click();
+    await flush(80);
+    assert.deepEqual(stampsOf(r.c.chat[1], 'npc_schedule')[0].schedule.at(-1), { activity: 'at home', where: 'home', from: '20:00', to: '08:00' });
+    // A bad job (with a bad home): retried, then passing through.
+    r = await rememberCard({ pick: () => ({ ...PICK, job: 'riverton:nope/room', home: 'nowhere at all' }) });
+    assert.equal(r.calls.pick.length, 2);
+    assert.match(r.calls.pick[1], /Your last answer did not fit: job "riverton:nope\/room" is not in the list/);
+    assert.equal(r.card().schedule.status, 'failed');
+    byText(remEl(r.doc), 'Approve').click();
+    await flush(80);
+    assert.deepEqual(stampsOf(r.c.chat[1], 'npc_schedule')[0].schedule, passingThrough(BAR, H(10)));
+    // Typed: strict.
+    r = await rememberCard();
+    byText(remEl(r.doc), 'Edit').click();
+    await flush(10);
+    type(box(r.doc, 'sched_home'), 'Nowhereville');
+    byText(remEl(r.doc), 'Approve edited').click();
+    await flush(60);
+    assert.equal(stampsOf(r.c.chat[1], 'npc_create').length, 0);
+    assert.match(remEl(r.doc).querySelector('.worldscrawl_schedule_error').textContent, /⚠ Schedule: home "Nowhereville" is not in the list/);
 });
 
 test('Check schedule again asks only the pattern question again (not the card)', async () => {
