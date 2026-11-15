@@ -586,6 +586,22 @@ async function keepRememberNow(c, msg, card, id, edited) {
     }
     if (!got) got = await askRemember(id, name);
     if (!got) got = { ...REMEMBER_BLANK, name, line: 'Met in this scene.' };
+    // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
+    // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
+    // The schedule is the daily pattern the card picked (or the player typed: Approve edited), expanded by the engine;
+    // passing through when the question failed. Approve waits for the question in flight and never asks a second time;
+    // it is settled before anything is written, so the person, their attitude and their schedule land together.
+    const at = Math.max(0, chat.indexOf(msg));
+    let room = '';
+    try { room = npcEnv(chat, await currentLocation().catch(() => null)).playerAt(at) || ''; } catch { room = ''; }
+    let pick = null, minutes = 0;
+    if (room) {
+        minutes = npcClock(chat, at).minutes ?? 0;
+        let sched = edited?.schedule ? { status: 'ok', pick: edited.schedule } : card.schedule?.status ? card.schedule : null;
+        if (!sched && scheduleFlight(card)) sched = await scheduleFlight(card);
+        if (!sched) sched = await askSchedule(at, { name: got.name, got }).catch(() => null);
+        pick = sched?.status === 'ok' && sched.pick ? sched.pick : { pattern: 'passing through', job: null, job_activity: null, home: null, favorites: [] };
+    }
     const taken = new Set(knownNpcNames(chat));
     const newId = freeId(got.name, taken);
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
@@ -594,19 +610,7 @@ async function keepRememberNow(c, msg, card, id, edited) {
     // No attitude in the answer: the first-meeting rule (unknown becomes indifferent, "just met"), so the next reply does
     // not ask a first-attitude question for someone the player has already met.
     else addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: 'indifferent', reason: 'just met' });
-    // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
-    // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
-    // The schedule is the daily pattern the card picked (or the player typed: Approve edited), expanded by the engine;
-    // passing through when the question failed. Approve waits for the question in flight and never asks a second time.
-    const at = Math.max(0, chat.indexOf(msg));
-    let room = '';
-    try { room = npcEnv(chat, await currentLocation().catch(() => null)).playerAt(at) || ''; } catch { room = ''; }
-    if (room) {
-        const minutes = npcClock(chat, at).minutes ?? 0;
-        let sched = edited?.schedule ? { status: 'ok', pick: edited.schedule } : card.schedule?.status ? card.schedule : null;
-        if (!sched && scheduleFlight(card)) sched = await scheduleFlight(card);
-        if (!sched) sched = await askSchedule(at, { name: got.name, got }).catch(() => null);
-        const pick = sched?.status === 'ok' && sched.pick ? sched.pick : { pattern: 'passing through', job: null, job_activity: null, home: null, favorites: [] };
+    if (pick) {
         const about = Npc.pickSummary(pick, { nameOf: a => castPack()?.labels?.[a] || a, room });
         addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: Npc.expandPattern(pick, { room, minutes }), pick, met: { room, minutes }, about });
         addNpcStamp(msg, { type: 'npc_stay', id: newId, place: room });
