@@ -323,34 +323,38 @@ test('wait: an arrival is timed at the segment start, and nextTurnUp finds the f
     assert.match(await factsText(b.blocks), /\[09:00\] Bryn arrives\./);
 });
 
-// ---- 7. [find].
-test('[find]: accepted only where they are now, rejected elsewhere with a reason, no seek stamp; the off-map path is unchanged', async () => {
+// ---- 7. [find] (F1; the full set is in find-f1.test.mjs).
+test('[find]: right here is a notice with no stamp; from a listed room on the square stretch he comes for the rest of the block; asleep off the map can\'t be found', async () => {
     const { c } = boot({ time: '10:10' });
     const m = say(c, '[find] Tam');
     await bracketIntent(m, parseBracket(m.mes));
     const d = m.extra[FOUND_KEY].find(x => x.id === 'tam');
     assert.equal(d.ok, true, d.reason);
-    assert.equal(d.reason, 'Accepted: Tam is here right now.');
+    assert.equal(d.here, true);
+    assert.equal(d.reason, 'Tam is right here.');
     assert.match(d.detail, /^Wandering 09:00–12:00: .* 10:00–10:30 \(rolled \d+\)/);
-    assert.ok(appears(m).some(s => s.id === 'tam' && s.place === BAR && s.source === 'bracket'));
+    assert.ok(!appears(m).some(s => s.source === 'bracket'), 'right here: nothing stamped');
     assert.ok(!(m.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_seek'), 'no by-name roll');
+    await scene.prepareNpcs(m);
     assert.ok(presentIds(c).includes('tam'));
     const b = boot({ time: '10:40' });
     const n = say(b.c, '[find] Tam');
     await bracketIntent(n, parseBracket(n.mes));
     const r = n.extra[FOUND_KEY].find(x => x.id === 'tam');
-    assert.equal(r.ok, false);
-    assert.equal(r.reason, "Tam isn't around here right now.");
+    assert.equal(r.ok, true, r.reason);
+    assert.equal(r.moved, true);
+    assert.equal(r.reason, 'Found: Tam comes here, until 12:00.');
     assert.match(r.detail, /Village Square|square/i);
-    assert.ok(!appears(n).length && !(n.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_seek'));
-    // Hesk asleep off the map (02:00-10:00, near the inn): the old placeless [find] path.
+    assert.ok(appears(n).some(s => s.id === 'tam' && s.place === BAR && s.whole === true && s.source === 'bracket'));
+    assert.ok(presentIds(b.c).includes('tam'));
+    // Hesk asleep off the map (02:00-10:00, near the inn): off the map counts as nowhere for the player's [find].
     const h = boot({ time: '08:00' });
     const q = say(h.c, '[find] Hesk');
     await bracketIntent(q, parseBracket(q.mes));
     const hd = q.extra[FOUND_KEY].find(x => x.id === 'hesk');
-    assert.equal(hd.ok, true, hd.reason);
-    assert.equal(hd.where, 'her own room');
-    assert.ok((q.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.id === 'hesk' && s.where === 'her own room'));
+    assert.equal(hd.ok, false);
+    assert.match(hd.reason, /nowhere to be found right now/);
+    assert.ok(!(q.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found'));
 });
 
 // ---- 8. Overlaps and fallback.
