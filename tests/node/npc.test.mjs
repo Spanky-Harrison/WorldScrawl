@@ -590,9 +590,10 @@ test('live places include a room discovered in this chat; found, presence and th
     assert.equal(live.place_labels[NEW], "Hesk's Room");
     const env = envFrom(live, NEW), baseEnv = envFrom(base, NEW);
     const n = validateRecord({ id: 'hesk', name: 'Hesk', line: 'The landlady.', schedule: [{ activity: 'resting', where: 'her own room', near: RAT }] }, { file: 'hesk.json', places: new Set(live.places), nearIndex: env.index });
-    const j = judgeFound(n, { minutes: 480 }, NEW, env);
+    const j = judgeFound(n, { minutes: 480 }, NEW, env, { player: false }); // the tracker's found (the player's [find] treats off the map as nowhere)
     assert.equal(j.ok, true, j.reason);
-    const chat = [{ mes: 'found', is_user: true, extra: { [NPC_KEY]: [{ type: 'npc_found', id: 'hesk', where: 'her own room', place: NEW, source: 'bracket', swipe: 0 }] } }];
+    assert.equal(judgeFound(n, { minutes: 480 }, NEW, env).ok, false, 'the player\'s [find] never reaches an off-map entry');
+    const chat = [{ mes: 'found', is_user: true, extra: { [NPC_KEY]: [{ type: 'npc_found', id: 'hesk', where: 'her own room', place: NEW, source: 'tracker', swipe: 0 }] } }];
     assert.deepEqual(presentAt(chat, 0, [n], env).map(p => p.id), ['hesk']);
     assert.deepEqual(presentAt(chat, 0, [n], baseEnv).map(p => p.id), [], 'the old base-only lookup lost her');
     assert.equal(foundEditOk(n, 'her own room', NEW, env).ok, true);

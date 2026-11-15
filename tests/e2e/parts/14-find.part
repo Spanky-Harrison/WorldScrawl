@@ -1,0 +1,57 @@
+    // ---- F1 [find]: in a fresh Riverton chat at the General Store, 11:10 (Hesk's wandering errand block, 10:00-13:00;
+    // on the start date this stretch is Market Lane and the store is one of the block's options). Typed [find] Hesk: she
+    // comes to the store for the rest of the block, the notice says so, and the narrator is told she has just come in
+    // (in-world words only). A second [find] says she is right here and stamps nothing.
+    {
+        const pickedWorld = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.world);
+        await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = 'riverton'; s.dispatchEvent(new Event('change')); });
+        await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+        await settle(4000);
+        const STORE = 'riverton:general_store/shop';
+        await page.evaluate(async store => {
+            const c = SillyTavern.getContext(), now = Date.now();
+            c.extensionSettings.worldscrawl.autoKeepWaits = true;
+            c.chat.push({ name: c.name1, is_user: true, mes: 'I step into the store.', send_date: now, swipe_id: 0, extra: { worldscrawl_intent_checked: true } },
+                { name: c.name2, is_user: false, mes: 'Shelves of flour and lamp oil.', send_date: now, swipe_id: 0, swipes: ['Shelves of flour and lamp oil.'], swipe_info: [{ extra: {} }],
+                    extra: { worldscrawl_mid: `m${now}`, worldscrawl_location: store } });
+            await c.saveChat(); await c.reloadCurrentChat();
+        }, STORE);
+        await settle(3000);
+        const storyReqs = async from => (await reqsOf()).slice(from).filter(r => r.messages.some(m => /Current location:/.test(String(m.content))));
+        const reply = async (text, act) => {
+            await queue([{ content: text }]);
+            await act();
+            await page.waitForFunction(t => SillyTavern.getContext().chat.at(-1)?.mes === t && !jQuery('#mes_stop').is(':visible'), text, { timeout: 30000 });
+            await settle(3000);
+        };
+        const typed = text => async () => { await page.fill('#send_textarea', text); await page.click('#send_but'); };
+        await reply('The morning wears on among the shelves.', typed('[wait] 3h10m'));
+        const clock = await page.evaluate(() => document.querySelector('#worldscrawl_clock, .worldscrawl_clock')?.textContent ?? '');
+        const from = (await reqsOf()).length;
+        await reply('The bell over the door rings.', typed('[find] Hesk'));
+        const got = await page.evaluate(() => {
+            const ch = SillyTavern.getContext().chat;
+            const u = ch.findLast(m => m.is_user);
+            const d = (u.extra?.worldscrawl_found ?? []).find(x => x.source === 'bracket') ?? null;
+            const s = (u.extra?.worldscrawl_npc ?? []).filter(x => x.type === 'npc_appear' && x.source === 'bracket');
+            const note = [...document.querySelectorAll('#chat .worldscrawl_found_moved')].map(e => e.textContent);
+            return { d, s, note };
+        });
+        check('[find] Hesk mid-errand from a listed room: she comes here for the rest of the block (whole-block stamp, the store)',
+            got.d?.ok === true && got.d?.moved === true && got.s.length === 1 && got.s[0].whole === true && got.s[0].place === STORE, JSON.stringify({ clock, ...got }));
+        check('[find]: the player sees the found notice with the block end', got.note.some(t => /comes here, until 13:00\./.test(t)), JSON.stringify(got.note));
+        const reqs = await storyReqs(from);
+        const told = reqs.map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
+        const line = told.split('\n').filter(l => /has just come in/.test(l));
+        check('[find]: one narrator call, told she has just come in, in-world words only (her shown name, no engine words)', reqs.length === 1 && line.length === 1 && line[0] === 'The landlady has just come in.',
+            JSON.stringify({ n: reqs.length, line }));
+        await reply('She is still sorting through the sacks.', typed('[find] Hesk'));
+        const again = await page.evaluate(() => {
+            const u = SillyTavern.getContext().chat.findLast(m => m.is_user);
+            return { d: (u.extra?.worldscrawl_found ?? []).find(x => x.source === 'bracket') ?? null, s: (u.extra?.worldscrawl_npc ?? []).filter(x => x.type === 'npc_appear' && x.source === 'bracket').length,
+                note: [...document.querySelectorAll('#chat .worldscrawl_found_here')].map(e => e.textContent) };
+        });
+        check('[find] again: a "right here" notice, nothing stamped', again.d?.here === true && again.s === 0 && again.note.some(t => /is right here\./.test(t)), JSON.stringify(again));
+        await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
+        await settle(2000);
+    }

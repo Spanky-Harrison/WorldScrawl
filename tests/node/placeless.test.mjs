@@ -97,15 +97,22 @@ test('found is accepted only inside a map near, and the where-label stamp covers
         { place: BAR, activity: 'pouring drinks', from: '16:00', to: '02:00' },
     ]);
     const chat = [msg('hello')];
-    assert.equal(judgeFound(n, { minutes: 18 * 60 }, BAR, env(BAR, 18)).ok, false);
-    assert.match(judgeFound(n, { minutes: 8 * 60 }, SQUARE, env(SQUARE, 8)).reason, /not within/);
-    const asleep = judgeFound(n, { minutes: 8 * 60 }, UP, env(UP, 8));
+    // The story's found (the tracker or a flag): the placeless path. The player's [find] treats off the map as nowhere.
+    const story = { player: false };
+    const atBar = judgeFound(n, { minutes: 18 * 60 }, BAR, env(BAR, 18), story);
+    assert.equal(atBar.here, true, 'on the map in this very room: right here, nothing to place');
+    assert.equal(judgeFound(n, { minutes: 18 * 60 }, SQUARE, env(SQUARE, 18), story).ok, false);
+    assert.match(judgeFound(n, { minutes: 8 * 60 }, SQUARE, env(SQUARE, 8), story).reason, /not within/);
+    const mine = judgeFound(n, { minutes: 8 * 60 }, UP, env(UP, 8));
+    assert.equal(mine.ok, false);
+    assert.equal(mine.reason, 'Hesk is nowhere to be found right now.');
+    const asleep = judgeFound(n, { minutes: 8 * 60 }, UP, env(UP, 8), story);
     assert.equal(asleep.ok, true, asleep.reason);
     assert.equal(asleep.where, 'her own room');
     const john = validateRecord({ id: 'john', name: 'John', line: 'A farmer.', schedule: [{ activity: 'at home', where: 'at home', near: 'wickerton' }] }, { file: 'john.json', places: rooms, nearIndex: index });
-    assert.match(judgeFound(john, { minutes: 8 * 60 }, BAR, env(BAR)).reason, /not on the map/);
+    assert.match(judgeFound(john, { minutes: 8 * 60 }, BAR, env(BAR), story).reason, /not on the map/);
     const ned = validateRecord({ id: 'ned', name: 'Ned', line: 'A fisher.', schedule: [{ activity: 'fishing', where: 'the camp', near: 'a fishing camp up the river' }] }, { file: 'ned.json', places: rooms, nearIndex: index });
-    assert.match(judgeFound(ned, { minutes: 8 * 60 }, BAR, env(BAR)).reason, /not near a mapped place/);
+    assert.match(judgeFound(ned, { minutes: 8 * 60 }, BAR, env(BAR), story).reason, /not near a mapped place/);
     const stamped = [msg('found her', { [NPC_KEY]: [{ type: 'npc_found', id: 'hesk', where: 'her own room', place: UP, source: 'flag', swipe: 0 }], [FOUND_KEY]: [{ swipe: 0, name: 'Hesk', id: 'hesk', ok: true, reason: asleep.reason, where: 'her own room', place: UP, source: 'flag' }] })];
     const morning = scheduleAt(framesOf(stamped, 0, [n])[0].get('hesk'), { minutes: 8 * 60 }, env(UP, 8));
     const midday = scheduleAt(framesOf(stamped, 0, [n])[0].get('hesk'), { minutes: 12 * 60 }, env(UP, 12));
@@ -158,7 +165,7 @@ test('a stub id resolves onto a real region with the same id, and nothing in the
     const n = validateRecord({ id: 'john', name: 'John', line: 'A farmer.', schedule: [{ activity: 'at home', where: 'at home', near: 'wickerton' }] }, { file: 'john.json', places: rooms, nearIndex: built });
     assert.equal(n.schedule[0].near, 'wickerton');
     const live = { ...env('wickerton:green/inn'), index: built, exists: a => rooms.has(a) };
-    const j = judgeFound(n, { minutes: 8 * 60 }, 'wickerton:green/inn', live);
+    const j = judgeFound(n, { minutes: 8 * 60 }, 'wickerton:green/inn', live, { player: false });
     assert.equal(j.ok, true, j.reason);
     const shadowed = load_world(RIVERTON);
     assert.equal(shadowed.elsewhere.get('wickerton').name, 'Wickerton');
