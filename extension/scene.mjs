@@ -5,7 +5,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, passingThrough, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
@@ -304,9 +304,11 @@ async function setRelOn(msg, arg) {
     return { ok: true, name: n.name, state }; // name-ok: result for the inspector
 }
 /**
- * [found] / [find] / [ws_flag: found | Name]: put them in the current room when that room is within the placeless entry's near
- * (the stamp is keyed by the entry's where label), or, for a might block, when this is where they actually are right now (an
- * appearance stamp; there is no by-name roll). Accepted and rejected both stay on the message, so the notice and the activity log can say why.
+ * [find] / [found] (the player), the tracker's found proposal and [ws_flag: found | Name]: judgeFound decides. Already here:
+ * a "right here" notice, nothing stamped. A might block whose options include this room: a whole-block appearance stamp
+ * (they come here until the block ends; the narrator is told they have just come in). The tracker and flags keep the
+ * placeless path (a found room for the entry's where label). Accepted and rejected both stay on the message, so the notice
+ * and the activity log can say why.
  */
 async function applyFound(msg, names, source) {
     const list = [...new Set((names ?? []).map(n => String(n ?? '').trim()).filter(Boolean))];
@@ -316,18 +318,20 @@ async function applyFound(msg, names, source) {
     const at = Math.max(0, chat.indexOf(msg));
     const loc = await currentLocation();
     const env = npcEnv(chat, loc);
-    const folded = [...(framesOf(chat, at, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     const swipe = swipeOf(msg);
     msg.extra = msg.extra ?? {};
     msg.extra[NPC_KEY] = (msg.extra[NPC_KEY] ?? []).filter(s => !((s?.type === 'npc_found' || s?.type === 'npc_appear') && (s.swipe ?? 0) === swipe && s.source === source));
+    // Folded after this source's earlier stamps on this message are gone: a re-run judges from where they were before it.
+    const folded = [...(framesOf(chat, at, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     const prev = (msg.extra[FOUND_KEY] ?? []).filter(f => (f?.swipe ?? 0) !== swipe || f.source !== source);
     const decisions = [];
     for (const nm of list) {
         const n = findPerson(nm, folded);
         if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '' }); continue; }
-        const j = judgeFound(n, env.clock(at), env.playerAt(at), env);
-        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
-        // A might block: accepted where they are right now, as an appearance stamp. An off-map entry: a found room for its where label.
+        const j = judgeFound(n, env.clock(at), env.playerAt(at), env, { at, player: source === 'bracket' });
+        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, ...(j.here ? { here: true } : {}), ...(j.moved ? { moved: true } : {}), reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
+        // Right here: nothing to stamp. A might block: a whole-block appearance stamp. An off-map entry (tracker, flag): a found room for its where label.
+        if (j.here) continue;
         if (j.ok && j.appear) addNpcStamp(msg, { type: 'npc_appear', id: n.id, ...j.appear, source });
         else if (j.ok) addNpcStamp(msg, { type: 'npc_found', id: n.id, where: j.where ?? '', place: j.place, source });
     }
@@ -337,6 +341,27 @@ async function applyFound(msg, names, source) {
     await c.saveChat?.();
     try { broadcastMapState(); } catch { /* map window may not be open */ }
     return decisions;
+}
+/** Shown names of people the player's latest line brought here with [find] (a whole-block appearance stamp) who are in the scene now. */
+function foundNow(chat, present) {
+    const ui = lastUserIndex(chat);
+    if (ui < 0) return [];
+    const ids = new Set(stampsOn(chat[ui], swipeOf(chat[ui])).filter(s => s.type === 'npc_appear' && s.whole === true).map(s => s.id));
+    return present.filter(p => ids.has(p.id)).map(p => capFirst(shownName(p)));
+}
+/**
+ * Shown names of saved people the player's latest line looked for with [find] and did not find (any reason; never "right
+ * here"), who are not in the scene now: the narrator is told, in-world, that they are not around.
+ */
+function notFoundNow(chat, cast, present) {
+    const ui = lastUserIndex(chat);
+    if (ui < 0) return [];
+    const swipe = swipeOf(chat[ui]);
+    const ids = [...new Set((chat[ui].extra?.[FOUND_KEY] ?? []).filter(d => d && (d.swipe ?? 0) === swipe && d.source === 'bracket' && !d.ok && d.id).map(d => d.id))];
+    if (!ids.length) return [];
+    const here = new Set(present.map(p => p.id));
+    const last = framesOf(chat, ui, cast ?? []).at(-1);
+    return ids.filter(id => !here.has(id) && last?.get(id)).map(id => capFirst(shownName(last.get(id))));
 }
 // The gated name lines this pass put in the facts block, as rendered: the one place a real name may be (the leak check skips them).
 let gateLines = [];
@@ -354,6 +379,9 @@ function npcPromptBits(loc) {
         const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present, onOffmap: () => { elsewhere = true; } });
         const comings = comingsAndGoings(chat, chat.length - 1, pack.npcs, env);
         if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
+        const found = foundNow(chat, present);
+        if (found.length) absent.unshift(P('narration.npc_found', { found: found.join(', ') }));
+        for (const who of notFoundNow(chat, pack.npcs, present).reverse()) absent.unshift(P('narration.npc_not_found', { not_found: who }));
         if (!present.length && !absent.length) return {};
         if (elsewhere) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
@@ -418,7 +446,7 @@ async function prepareNpcs(userMsg) {
             const sched = scheduleAt(n, clock, env);
             if (sched?.kind !== 'might' || !sched.address || sched.address !== here) continue;
             const wandering = !!sched.entry.wandering;
-            if ((n.appearances ?? []).some(a => a.blockStart === sched.blockStart && (!wandering || a.segStart === sched.segStart))) continue;
+            if (appearanceFor(n, sched)) continue; // already stamped (a turn-up for this segment, or a [find] for the whole block)
             addNpcStamp(userMsg, { type: 'npc_appear', id: n.id, place: here, blockStart: sched.blockStart, ...(wandering ? { segStart: sched.segStart } : {}) });
         }
         let present = presentAt(chat, index, pack.npcs, env);

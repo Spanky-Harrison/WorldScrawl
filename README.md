@@ -255,6 +255,18 @@ when it starts and that answer holds for the whole block; `"wandering": true` mo
 stretch rolling its own place. Every roll is seeded from the person, the entry and the actual start time, so swipes and
 reloads never change it. Someone in your scene stays until the block ends.
 
+**Finding someone: `[find] Name`** (or `[found] Name`, `/ws-found Name`). Use it when you really want to talk to someone
+who wanders. Nothing is rolled:
+- **Already in your room** (where Who's here and the cast panel put them): nothing changes; a notice says they are right here.
+- **Somewhere on the map this block, and your room is one of the block's options** (a room the entry names, private or
+  not, or a public room of an area it names, on this chat's live map): they come to your room and stay there until the
+  block ends, then their schedule carries on as usual. On a wandering block they stay through every stretch. The narrator
+  is told they have just come in.
+- **Nowhere or off the map this block** (a wandering block: this stretch), **your room not one of its options**, an
+  **is at** entry anywhere else (including asleep off the map), following someone else or told to stay elsewhere: they
+  can't be found, and the message says why. The narrator is told only that they aren't around here right now and
+  the characters don't find them.
+
 Adjacent blocks each roll on their own, so their chances add up: three back-to-back hourly rows at 20%, 50% and 20% give
 roughly a 70% chance of meeting them at some point in those three hours (1 − 0.8 × 0.5 × 0.8 = 68%). There is no gradient
 or peak shorthand: to make someone likely across a span, write one block with the odds you want.
@@ -646,6 +658,6 @@ Duplicate-room guard: when a map change would add a new room whose name closely 
 
 ### Activity log
 
-**Debug > Activity log** (top bar of the map window) opens its own full view, like the tools, so it never shares the side pane with Cast or the Editor (clicking Cast, Editor or Close leaves it). It picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, sighting and by-name rolls, stamps written (map, positions, people, wait/clock), cards and their outcome, and every model call's outcome. All of it is read from the message itself, so it survives a reload.
+**Debug > Activity log** (top bar of the map window) opens its own full view, like the tools, so it never shares the side pane with Cast or the Editor (clicking Cast, Editor or Close leaves it). It picks a message (latest by default) and lists what happened there: `ws_flag`s parsed, `[find]` results, stamps written (map, positions, people, wait/clock), cards and their outcome, and every model call's outcome. All of it is read from the message itself, so it survives a reload.
 
 **Model-call notes.** Every model call the extension makes (the narrator reply and each side call: intent, discovery/dig, wait amount, Remember, pick-one prompts, map edits) leaves a small debug note in `msg.extra.worldscrawl_calls`, keyed by swipe: the call kind, `ok` / `failed` / `skipped` with the reason, the number of tries, a short answer, and for the narrator reply the `ws_flag`s and tags it emitted, or "narrator made no tool call". Side calls are noted on the message being handled (usually the latest). It is capped at 12 notes per swipe with text truncated, and is not a stamp: undo, rebuilds and snapshots never read it. Failed narrator generations themselves are not noted (no message is made). It is read-only. New flag types plug in with `registerActivity(extraKey, collect)` in `extension/activity.mjs` and, for custom display, `registerRenderer(kind, fn)` in `plugin/ui/activitylog.mjs`; unknown `worldscrawl_*` keys still show with a generic line.

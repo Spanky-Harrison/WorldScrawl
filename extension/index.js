@@ -685,8 +685,8 @@ function registerSlashCommands() {
             renderPatchCards();
             return '';
         }),
-        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person you found, e.g. Hesk', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-        helpString: 'WorldScrawl: you found someone who is off the map, in this room, when this room is within their "near". Delete the message to undo.',
+        unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person to look for, e.g. Hesk', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
+        helpString: 'WorldScrawl: look for someone (the same as [find]): when their current "might be at" stretch puts them somewhere and this room is one of its places, they come here until it ends. Already here: a notice. Nowhere, off the map or a fixed entry elsewhere: they can\'t be found. Delete the message to undo.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));
