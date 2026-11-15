@@ -13,7 +13,8 @@ const src = extSource();
 const c = client(RIVERTON);
 
 test('change prompt: every editor op is documented, generated from OPS (create_place included)', () => {
-    for (const o of OPS) if (o !== 'discover') assert.ok(OP_DOCS[o], `no prompt line for ${o}`);
+    for (const o of OPS) if (o !== 'discover' && o !== 'set_private') assert.ok(OP_DOCS[o], `no prompt line for ${o}`);
+    assert.ok(!OP_DOCS.set_private && !/set_private/.test(opDocs()), 'private is the player\'s or author\'s call: not offered to the change model');
     const d = opDocs();
     for (const o of ['create_place', 'create_subregion', 'create_region', 'add_exit', 'move_location', 'remove_area', 'set_exit']) assert.match(d, new RegExp(`"op":"${o}"`));
     assert.doesNotMatch(d, /"op":"discover"/);

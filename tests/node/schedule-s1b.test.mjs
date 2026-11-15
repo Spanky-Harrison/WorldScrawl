@@ -88,7 +88,7 @@ const factsText = async (blocks) => { await scene.applyFacts(); return Object.va
 const waitFor = async (c, text) => { const m = say(c, text); const r = await bracketIntent(m, parseBracket(text)); assert.notEqual(r.kind, 'bracket_failed', r.note); return m; };
 const appears = m => (m.extra?.[NPC_KEY] ?? []).filter(s => s.type === 'npc_appear');
 
-import { applyPatch, getRoom, privateByName, privateOf, PRIVATE_WORDS } from '../../plugin/shared/patches.mjs';
+import { applyPatch, getRoom, privateByName, privateOf, PRIVATE_WORDS, OP_DOCS, opDocs, readChangeAnswer, refusedOpWarning } from '../../plugin/shared/patches.mjs';
 import { build_world, read_world_raw } from '../../plugin/world.mjs';
 import { initialState, placeOps, areaOps, ROOM_FIELDS, AREA_FIELDS } from '../../plugin/ui/placeform.mjs';
 import { passingThrough } from '../../plugin/shared/npc.mjs';
@@ -97,8 +97,8 @@ import { formWarnings, placeResolver, mightFormRow, toggleRowKind, MIGHT_HELP } 
 const KITCH = 'riverton:drowned_rat/kitchens', YARD = 'riverton:drowned_rat/courtyard', STABLE = 'riverton:drowned_rat/stable';
 const GOOSE_UP = 'riverton:gilded_goose/upstairs', CATA = 'riverton:temple/catacombs', TUNNEL = 'riverton:secret_tunnel/tunnel';
 const isRemember = p => /Remember this person/.test(p);
-const ELARA = { name: 'Elara', personality: { summary: 'A traveller with a lute.', manner: 'Easy.', speech: 'Soft.' }, appearance: { summary: 'tall woman with a lute' }, facts: [], invented: [], disposition: { value: 'friendly', reason: 'You bought her a drink.' } };
-const PIP = { ...ELARA, name: 'Pip', personality: { summary: 'A potgirl hiding from work.' } };
+const ELARA = { name: 'Elara', personality: { summary: 'A traveller with a lute.', manner: 'Easy.', speech: 'Soft.' }, appearance: { summary: 'tall woman with a lute' }, facts: [], invented: [] };
+const PIP = { ...ELARA, name: 'Pip', personality: { summary: 'A potgirl hiding from work.' }, disposition: { value: 'friendly', reason: 'You kept her secret.' } };
 /** The fake model: the Remember answer for `card`, and an empty tracker read for everything else. */
 const fakeModel = (c, card) => { c.generateRaw = async args => { const p = String(args?.prompt ?? ''); return isRemember(p) ? JSON.stringify(card) : '{"place": null, "people": [], "wait": null}'; }; };
 const stampsOf = (m, type) => (m.extra?.[NPC_KEY] ?? []).filter(s => s.type === type);
@@ -182,6 +182,27 @@ test('map editor: the Private control on rooms and areas, with its inherited val
     assert.equal(pre.status_code, 200, JSON.stringify(pre.json()));
 });
 
+test('the change model cannot set private: not in its op list; a set_private op or a "private" field it writes is refused with a warning', () => {
+    assert.equal(OP_DOCS.set_private, undefined);
+    assert.doesNotMatch(opDocs(), /set_private|private/);
+    const r = readChangeAnswer({ ops: [
+        { op: 'set_private', target: BAR, value: true },
+        { op: 'set_description', loc: BAR, text: 'Smoky.' },
+        { op: 'create_place', area: RAT, name: 'Old Shed', private: false, description: 'A shed.', exits: [{ direction: 'shed', to: YARD, return_direction: 'yard' }] },
+        { op: 'create_subregion', region: 'riverton', name: 'Docks', place: { name: 'Pier', description: 'Planks.', private: true } },
+    ] });
+    assert.deepEqual(r.ops.map(o => o.op), ['set_description', 'create_place', 'create_subregion'], 'set_private is dropped');
+    assert.ok(r.ops.every(o => !('private' in o) && !('private' in (o.place ?? {}))), 'no private field reaches the patch');
+    assert.equal(r.ops[1].story, true, 'the word list still decides for a room the story made');
+    assert.deepEqual(r.refused.map(x => x.op), ['set_private', 'create_place private', 'create_subregion private']);
+    assert.match(refusedOpWarning(r.refused), /^Warning: the story can't make a place private or public \(riverton:drowned_rat\/common_room, Old Shed, Docks\)\. That edit was not made; use the map editor\.$/);
+    assert.deepEqual(readChangeAnswer({ ops: [{ op: 'set_private', target: BAR, value: true }] }), { nothing: true, refused: [{ op: 'set_private', target: BAR }] }, 'only a refused op: nothing to preview');
+    assert.equal(readChangeAnswer({ ops: [{ op: 'set_description', loc: BAR, text: 'x' }] }).refused, undefined);
+    // The real carrier wires the warning onto the flag card like the person-claim guard.
+    const src = fs.readFileSync(new URL('../../extension/carriers.mjs', import.meta.url), 'utf8');
+    assert.match(src, /ans\?\.refused\?\.length && pl\.refusedOpWarning \? pl\.refusedOpWarning\(ans\.refused\)/);
+});
+
 // ---- 2. Area picks skip private rooms.
 const GUS = { id: 'gus', name: 'Gus', personality: { summary: 'A loafer.' }, schedule: [{ might: [RAT], activity: 'loafing', from: '09:00', to: '12:00' }] };
 const MOLE = { id: 'mole', name: 'Mole', personality: { summary: 'A rat-catcher.' }, schedule: [{ might: [CELLAR], activity: 'catching rats', from: '09:00', to: '12:00' }] };
@@ -247,8 +268,17 @@ test('Remember (real handlers, fake model): npc_create, then a passing-through n
     assert.deepEqual(sch[0].schedule, passingThrough(BAR, scene.npcClock(c.chat, 1).minutes));
     assert.deepEqual([sch[0].schedule[0].from, sch[0].schedule[0].to], ['15:00', '17:00']);
     assert.deepEqual(stampsOf(m, 'npc_stay').map(s => [s.id, s.place]), [[id, BAR]]);
+    // No attitude in the answer: the first-meeting rule stamps indifferent at once, so the next reply asks nothing.
+    assert.deepEqual(stampsOf(m, 'npc_disposition').map(s => [s.id, s.value, s.reason]), [[id, 'indifferent', 'just met']]);
     assert.ok(presentAt(c.chat, c.chat.length - 1, cast(), envOf(c)).some(n => n.id === id), 'still here after Approve');
     // The next day at 16:20, inside the block: present or away by the roll, and [find] judges where she is.
+    const asked = [];
+    const gr = c.generateRaw;
+    c.generateRaw = async args => { if (/How does .* feel about/.test(String(args?.prompt ?? ''))) asked.push(args.prompt); return gr(args); };
+    const next = say(c, 'I listen to her play.');
+    await scene.prepareNpcs(next);
+    assert.deepEqual(asked, [], 'no first-attitude question on the next reply');
+    assert.ok(!stampsOf(next, 'npc_disposition').length);
     await waitFor(c, '[wait] until 08:00');
     await waitFor(c, '[wait] until 16:20');
     const env = envOf(c);
@@ -282,6 +312,7 @@ test('Remember in a room made in play (the Storage Nook): the schedule and stay 
     const id = stampsOf(m, 'npc_create')[0].id;
     assert.deepEqual(stampsOf(m, 'npc_schedule')[0].schedule[0].might, [`${NOOK}(50)`]);
     assert.deepEqual(stampsOf(m, 'npc_stay').map(s => s.place), [NOOK]);
+    assert.deepEqual(stampsOf(m, 'npc_disposition').map(s => [s.value, s.reason]), [['friendly', 'You kept her secret.']], 'an attitude in the answer is used, no indifferent on top');
     const env = envOf(c);
     const pip = playPerson(c, id);
     const picks = new Set();

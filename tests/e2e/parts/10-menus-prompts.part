@@ -223,10 +223,8 @@
     const actPre = await page.evaluate(async () => { const { callNotes } = await import('/scripts/extensions/third-party/WorldScrawl/calllog.mjs'); return SillyTavern.getContext().chat.flatMap(m => callNotes(m)).map(n => n.kind).filter(k => /prefetch/.test(k)); });
     check('remember prefetch: logged in the model-calls activity log', actPre.length >= 2, JSON.stringify(actPre));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
-    // Maren and Corwin stay after Remember (a passing-through schedule and a stay), so each one's first attitude is asked
-    // (after the intent, before the reply) the first time a reply is written with them here.
-    await queue([{ content: 'stay' }, { content: 'indifferent' }, { content: 'indifferent' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
-    await send('I look at Maren\'s hands.', 4);
+    await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
+    await send('I look at Maren\'s hands.', 2);
     // A lasting model fact waits for Approve (no lasts given), then becomes the bar.
     const pend = page.locator('.worldscrawl_npcpending', { hasText: 'a scar' });
     const pendShown = await pend.count() > 0;

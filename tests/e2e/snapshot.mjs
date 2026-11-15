@@ -52,8 +52,7 @@ try {
     await slash('/ws-npc Corwin', [{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}' }]);
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ }).last().click().catch(() => {});
     await settle(); await mark('remember');
-    // Corwin stays after Remember (a passing-through schedule and a stay), so his first attitude is asked before the reply.
-    await send('[lore] The Drowned Rat', [{ content: 'indifferent' }, { content: 'You recall its history.' }]); await mark('lore');
+    await send('[lore] The Drowned Rat', [{ content: 'You recall its history.' }]); await mark('lore');
 
     const all = await reqs();
     let from = 0;
