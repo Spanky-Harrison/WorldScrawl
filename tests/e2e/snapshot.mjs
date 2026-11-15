@@ -1,4 +1,4 @@
-// Prompt snapshot: a fixed scripted chat (a move, a wait, a found, a remember, a lore request) in a real SillyTavern,
+// Prompt snapshot: a fixed scripted chat (a move, a wait, a found, a remember with its pattern question, a lore request) in a real SillyTavern,
 // capturing the exact messages sent to the model on every call, diffed against tests/e2e/prompts.golden.json.
 // Run: E2E_SCRIPT=snapshot.mjs tests/e2e/run.sh   (UPDATE_SNAPSHOT=1 rewrites the golden file)
 import fs from 'node:fs';
@@ -49,7 +49,9 @@ try {
     await settle(); await mark('wait');
     await send('I look for the barkeep.', [{ content: 'stay' }, { content: 'Hesk comes out of the back. [ws_flag: found | Hesk]' }]); await mark('found');
     await send('I nod to her.', [{ content: 'stay' }, { content: 'She nods back.' }]); await mark('after found');
-    await slash('/ws-npc Corwin', [{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}' }]);
+    // The card's answer, then the daily-pattern question that follows it.
+    await slash('/ws-npc Corwin', [{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}' },
+        { content: '{"pattern":"night shift","job":"riverton:drowned_rat/common_room","job_activity":"serving drinks","home":"offmap: a hut by the ferry","favorites":["riverton:streets/square"]}' }]);
     await page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ }).last().click().catch(() => {});
     await settle(); await mark('remember');
     await send('[lore] The Drowned Rat', [{ content: 'You recall its history.' }]); await mark('lore');

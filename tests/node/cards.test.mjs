@@ -530,7 +530,8 @@ test('Remember review: the new-person panel marks made-up details; Edit opens ev
     await flush(60);
     let el = remEl(doc);
     assert.equal(el.dataset.state, 'review');
-    assert.deepEqual(btns(el), ['Check again', 'Edit', 'Approve', 'Discard']);
+    // The pattern question has answered (badly here, so passing through): Check schedule again sits beside Edit.
+    assert.deepEqual(btns(el), ['Check again', 'Edit', 'Check schedule again', 'Approve', 'Discard']);
     const panel = el.querySelector('.worldscrawl_diff').textContent;
     assert.match(panel, /new person/);
     assert.match(panel, /Body ⚠ made up: grey eyes/);
@@ -539,7 +540,7 @@ test('Remember review: the new-person panel marks made-up details; Edit opens ev
     byText(el, 'Edit').click();
     await flush(10);
     el = remEl(doc);
-    assert.deepEqual(btns(el), ['Check again', 'Close editor', 'Rewrite with this', 'Approve edited', 'Discard']);
+    assert.deepEqual(btns(el), ['Check again', 'Close editor', 'Check schedule again', 'Rewrite with this', 'Approve edited', 'Discard']);
     const box = k => remEl(doc).querySelector(`.worldscrawl_remember_${k}`);
     assert.deepEqual(['name', 'line', 'looks', 'manner', 'voice', 'body', 'outfit', 'history', 'starts', 'facts'].map(k => box(k)?.value),
         ['Maren', 'A knife-grinder.', 'wiry woman', 'Brisk.', 'Clipped.', 'Wiry, with grey eyes.', 'A patched smock.', MAREN.history, 'friendly — You paid.', 'Sharpens knives in the square']);

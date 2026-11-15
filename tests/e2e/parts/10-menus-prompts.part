@@ -141,18 +141,23 @@
     const cast0 = await (await stFetch('/cast')).json();
     check('cast: Hesk loads from worlds/riverton/cast', cast0.npcs?.some(n => n.id === 'hesk' && n.ok && n.schedule?.length === 5 && !n.problems?.length) && !cast0.problems?.length, JSON.stringify(cast0.problems ?? []));
     const reqsBeforeNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    // The remember call is prefetched as soon as the card shows, so its answer is queued first.
-    await queue([{ content: '{"name":"Maren","unknownAs":"the knife-grinder","personality":{"summary":"A traveling knife-grinder with a squeaky cart."},"appearance":{"summary":"wiry woman with a cart","outfit":"a patched smock"},"invented":["grey eyes"]}' }]);
+    // The remember call is prefetched as soon as the card shows, so its answer is queued first; the daily-pattern
+    // question follows once that answer is in (an off-map job, so it fits wherever the player stands).
+    await queue([{ content: '{"name":"Maren","unknownAs":"the knife-grinder","personality":{"summary":"A traveling knife-grinder with a squeaky cart."},"appearance":{"summary":"wiry woman with a cart","outfit":"a patched smock"},"invented":["grey eyes"]}' },
+        { content: '{"pattern":"day shift","job":"offmap: the grinding yard by the mill","job_activity":"grinding knives","home":"offmap: a cart by the east road","favorites":[]}' }]);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Maren'));
     await settle(500);
     await page.waitForFunction(() => !!document.querySelector('.worldscrawl_remembercard .worldscrawl_remember_proposal'), null, { timeout: 10000 }).catch(() => {});
+    await page.waitForFunction(() => !!document.querySelector('.worldscrawl_remembercard .worldscrawl_schedule'), null, { timeout: 10000 }).catch(() => {});
     const prop = await page.evaluate(() => {
         const card = [...document.querySelectorAll('.worldscrawl_remembercard')].pop();
         const m = [...SillyTavern.getContext().chat].reverse().find(x => x.extra?.worldscrawl_remember);
-        return { head: card?.querySelector('.worldscrawl_card_summary')?.textContent ?? '', panel: card?.querySelector('.worldscrawl_diff')?.textContent ?? '', invented: card?.querySelector('.worldscrawl_invented')?.textContent ?? '', cached: !!m?.extra?.worldscrawl_remember?.proposal?.got };
+        return { head: card?.querySelector('.worldscrawl_card_summary')?.textContent ?? '', panel: card?.querySelector('.worldscrawl_diff')?.textContent ?? '', invented: card?.querySelector('.worldscrawl_invented')?.textContent ?? '', cached: !!m?.extra?.worldscrawl_remember?.proposal?.got,
+            schedule: card?.querySelector('.worldscrawl_schedule')?.textContent ?? '', scheduleCached: m?.extra?.worldscrawl_remember?.schedule?.status ?? '' };
     });
     const reqsPrefetched = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /New person: Maren — A traveling knife-grinder with a squeaky cart/.test(prop.head) && /Shown as "the knife-grinder"/.test(prop.head) && /wiry woman with a cart/.test(prop.panel) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 1, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
+    check('remember prefetch: the card shows the proposed person (name, unknownAs, summaries, invented marked), cached on the message, one call', /New person: Maren — A traveling knife-grinder with a squeaky cart/.test(prop.head) && /Shown as "the knife-grinder"/.test(prop.head) && /wiry woman with a cart/.test(prop.panel) && /⚠ grey eyes/.test(prop.invented) && prop.cached && reqsPrefetched === reqsBeforeNpc + 2, JSON.stringify({ ...prop, calls: reqsPrefetched - reqsBeforeNpc }));
+    check('remember: the daily-pattern question follows the card (one more call) and shows its pick on the card, cached', /^Schedule: Day shift at the grinding yard by the mill .*grinding knives/.test(prop.schedule) && prop.scheduleCached === 'ok', JSON.stringify(prop));
     await page.evaluate(async () => { const m = await import('/scripts/extensions/third-party/WorldScrawl/index.js'); m.renderPatchCards(); m.renderPatchCards(); });
     await settle(500);
     check('remember prefetch: redraws do not call again', (await (await fetch(`${FAKE}/__requests`)).json()).length === reqsPrefetched);
@@ -170,7 +175,7 @@
             rowLast: !!row && card.lastElementChild === row, allInRow: btns.length > 0 && btns.every(b => row?.contains(b)), right: row ? getComputedStyle(row).justifyContent : '',
             labels: btns.map(b => b.textContent) };
     });
-    check('notices: the Remember card waits on you, with one right-aligned button row at the end (Check again / Edit / Approve / Discard)', look.pending && look.rowLast && look.allInRow && look.right === 'flex-end' && look.labels.join('|') === 'Check again|Edit|Approve|Discard', JSON.stringify(look));
+    check('notices: the Remember card waits on you, with one right-aligned button row at the end (Check again / Edit / Check schedule again / Approve / Discard)', look.pending && look.rowLast && look.allInRow && look.right === 'flex-end' && look.labels.join('|') === 'Check again|Edit|Check schedule again|Approve|Discard', JSON.stringify(look));
     await page.locator('.worldscrawl_remembercard').last().scrollIntoViewIfNeeded();
     await page.locator('.worldscrawl_remembercard').last().screenshot({ path: process.env.E2E_SHOTS ? `${process.env.E2E_SHOTS}/notice-pending.png` : `${process.env.E2E_TMP ?? '/tmp'}/notice-pending.png` }).catch(() => {});
     const approveBtn = page.locator('.worldscrawl_remembercard .worldscrawl_card_btn', { hasText: /^Approve$/ });
@@ -178,7 +183,7 @@
     await approveBtn.dblclick();
     const saving = await page.evaluate(() => window.__wsSaw);
     await page.evaluate(() => { const b = [...document.querySelectorAll('.worldscrawl_remembercard .worldscrawl_card_btn')].find(x => x.textContent === 'Approve'); b?.click(); b?.click(); });
-    for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 1; i++) await settle(250);
+    for (let i = 0; i < 40 && (await (await fetch(`${FAKE}/__requests`)).json()).length < reqsBeforeNpc + 2; i++) await settle(250);
     await settle(1500);
     const dbl = await page.evaluate(() => {
         const ch = SillyTavern.getContext().chat;
@@ -186,15 +191,15 @@
         const res = [...document.querySelectorAll('.worldscrawl_resolved')].map(e => e.textContent);
         return { creates: ch.flatMap(x => x.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Maren').length,
             lines: [...document.querySelectorAll('.worldscrawl_npcchange')].filter(e => /Maren remembered/.test(e.textContent)).length,
-            // Remember also writes her passing-through schedule and a stay where she was met: one note each.
-            sched: [...document.querySelectorAll('.worldscrawl_npcchange')].filter(e => /maren: schedule \(|Maren: schedule \(/.test(e.textContent)).length,
+            // Remember also writes her daily pattern (the day shift picked above) and a stay where she was met: one note each.
+            sched: [...document.querySelectorAll('.worldscrawl_npcchange')].filter(e => /Maren: schedule — Day shift at the grinding yard by the mill/.test(e.textContent)).length,
             stay: [...document.querySelectorAll('.worldscrawl_npcchange')].filter(e => /Maren stays/.test(e.textContent)).length,
             decided: Object.entries(m?.extra?.worldscrawl_decided ?? {}).filter(([k]) => k.startsWith('remember_')).map(([, d]) => d.action), pendingLeft: !!document.querySelector('.worldscrawl_remembercard.worldscrawl_pending'), res };
     });
     await page.evaluate(() => window.__wsObs?.disconnect());
     const reqsAfterNpc = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('notices: first click locks the row', saving.locked, JSON.stringify(saving));
-    check('notices: double-clicking Approve (plus extra clicks) writes one line, one decision, and no model call beyond the prefetch', dbl.creates === 1 && dbl.lines === 1 && dbl.sched === 1 && dbl.stay === 1 && dbl.decided.join() === 'approve' && reqsAfterNpc === reqsBeforeNpc + 1, JSON.stringify({ ...dbl, calls: reqsAfterNpc - reqsBeforeNpc }));
+    check('notices: double-clicking Approve (plus extra clicks) writes one line, one decision, and no model call beyond the prefetch', dbl.creates === 1 && dbl.lines === 1 && dbl.sched === 1 && dbl.stay === 1 && dbl.decided.join() === 'approve' && reqsAfterNpc === reqsBeforeNpc + 2, JSON.stringify({ ...dbl, calls: reqsAfterNpc - reqsBeforeNpc }));
     check('notices: once answered the highlight goes and the notice shows its resolved state', !dbl.pendingLeft && dbl.res.some(t => /✓ Approved: remembered Maren/.test(t)), JSON.stringify(dbl));
     const act = await page.evaluate(async () => { const { messageActivity } = await import('/scripts/extensions/third-party/WorldScrawl/activity.mjs'); const ch = SillyTavern.getContext().chat; const i = ch.findLastIndex(x => x.extra?.worldscrawl_decided); return messageActivity(ch[i], i).filter(e => /notice answered/.test(e.label)).map(e => `${e.label}: ${e.status}`); });
     check('notices: the answer shows in the activity log', act.includes('remember notice answered: approve'), JSON.stringify(act));
@@ -205,9 +210,10 @@
         return stamps.find(s => s.type === 'npc_create');
     });
     check('Approve saves the prefetched card as an npc_create stamp', created?.id === 'maren' && /knife-grinder/.test(created.line ?? '') && created.unknownAs === 'the knife-grinder' && created.outfit === 'a patched smock', JSON.stringify(created));
-    // Approve while the prefetch is still running: Preparing…, then Saving…, then exactly one model call.
+    // Approve while the prefetch is still running: Preparing…, then Saving…, then exactly one model call (plus the one
+    // pattern question, which Approve waits for).
     const reqsBeforeSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }]);
+    await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }, { content: '{"pattern":"passing through","job":null,"home":null,"favorites":[]}' }]);
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Corwin'));
     const lastCardText = () => page.evaluate(() => [...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '');
     await page.waitForFunction(() => /Remember Corwin\?/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '') && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
@@ -219,7 +225,7 @@
     await settle(1000);
     const slow = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Corwin').map(s => s.line));
     const reqsAfterSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    check('remember prefetch: Approve during the prefetch shows Preparing… then Saving…, waits, and makes exactly one call', preparing && savingSlow && slow.length === 1 && slow[0] === 'A ferry hand.' && reqsAfterSlow === reqsBeforeSlow + 1, JSON.stringify({ preparing, savingSlow, slow, calls: reqsAfterSlow - reqsBeforeSlow }));
+    check('remember prefetch: Approve during the prefetch shows Preparing… then Saving…, waits, and makes exactly one call', preparing && savingSlow && slow.length === 1 && slow[0] === 'A ferry hand.' && reqsAfterSlow === reqsBeforeSlow + 2, JSON.stringify({ preparing, savingSlow, slow, calls: reqsAfterSlow - reqsBeforeSlow }));
     const actPre = await page.evaluate(async () => { const { callNotes } = await import('/scripts/extensions/third-party/WorldScrawl/calllog.mjs'); return SillyTavern.getContext().chat.flatMap(m => callNotes(m)).map(n => n.kind).filter(k => /prefetch/.test(k)); });
     check('remember prefetch: logged in the model-calls activity log', actPre.length >= 2, JSON.stringify(actPre));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
