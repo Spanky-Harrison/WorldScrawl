@@ -4,7 +4,7 @@ import { messageActivity } from './activity.mjs';
 import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once } from './notices.mjs';
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { authorRecord, freeId, nameIn, normName, passingThrough, resolveSchedulePlace } from './shared.mjs';
+import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
@@ -22,6 +22,7 @@ import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMap
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
 import { renderPatchCards, waitFacts } from './waits.mjs';
+import { askSchedule, prefetchSchedule, scheduleFlight } from './schedulepick.mjs';
 
 /** Everyone in the cast as they are at the end of the chat (names, aliases, rel): what the portal masks against. */
 export function peopleNow() {
@@ -519,11 +520,15 @@ function rememberWith(got, values = {}, changed = []) {
 }
 const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
 /** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
+/** The story since `name` showed up, up to message `id` (the Remember read-back excerpt, at most 6000 characters). */
+function rememberStory(chat, id, name) {
+    const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
+    return back.messages.map(m => m.text).join('\n').slice(0, 6000);
+}
 async function askRemember(id, name, { prefetch = false, hint = '', keep = null } = {}) {
     const chat = ctx().chat ?? [];
     const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
-    const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
-    const story = back.messages.map(m => m.text).join('\n').slice(0, 6000);
+    const story = rememberStory(chat, id, name);
     const kept = Object.entries(keep ?? {}).filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => `- ${C.REMEMBER_FIELDS.find(([f]) => f === k)?.[1] ?? k}: ${String(v).trim()}`);
     const again = hint || kept.length ? `\n\n${P('npc.remember_again', { hint: hint || '(none)', kept: kept.join('\n') || '(none)' })}` : '';
     const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' }) + again;
@@ -553,6 +558,7 @@ function prefetchRemember(id, ask = {}) {
         syncSwipeExtra(msg);
         ctx().saveChat?.();
         renderPatchCards();
+        if (got) prefetchSchedule(id); // the daily pattern question, once the card is ready (it reads the card's line and looks)
         return got;
     }).finally(() => { if (rememberFlights.get(card.nid) === p) rememberFlights.delete(card.nid); });
     rememberFlights.set(card.nid, p);
@@ -580,6 +586,22 @@ async function keepRememberNow(c, msg, card, id, edited) {
     }
     if (!got) got = await askRemember(id, name);
     if (!got) got = { ...REMEMBER_BLANK, name, line: 'Met in this scene.' };
+    // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
+    // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
+    // The schedule is the daily pattern the card picked (or the player typed: Approve edited), expanded by the engine;
+    // passing through when the question failed. Approve waits for the question in flight and never asks a second time;
+    // it is settled before anything is written, so the person, their attitude and their schedule land together.
+    const at = Math.max(0, chat.indexOf(msg));
+    let room = '';
+    try { room = npcEnv(chat, await currentLocation().catch(() => null)).playerAt(at) || ''; } catch { room = ''; }
+    let pick = null, minutes = 0;
+    if (room) {
+        minutes = npcClock(chat, at).minutes ?? 0;
+        let sched = edited?.schedule ? { status: 'ok', pick: edited.schedule } : card.schedule?.status ? card.schedule : null;
+        if (!sched && scheduleFlight(card)) sched = await scheduleFlight(card);
+        if (!sched) sched = await askSchedule(at, { name: got.name, got }).catch(() => null);
+        pick = sched?.status === 'ok' && sched.pick ? sched.pick : { pattern: 'passing through', job: null, job_activity: null, home: null, favorites: [] };
+    }
     const taken = new Set(knownNpcNames(chat));
     const newId = freeId(got.name, taken);
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
@@ -588,13 +610,9 @@ async function keepRememberNow(c, msg, card, id, edited) {
     // No attitude in the answer: the first-meeting rule (unknown becomes indifferent, "just met"), so the next reply does
     // not ask a first-attitude question for someone the player has already met.
     else addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: 'indifferent', reason: 'just met' });
-    // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
-    // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
-    const at = Math.max(0, chat.indexOf(msg));
-    let room = '';
-    try { room = npcEnv(chat, await currentLocation().catch(() => null)).playerAt(at) || ''; } catch { room = ''; }
-    if (room) {
-        addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: passingThrough(room, npcClock(chat, at).minutes ?? 0) });
+    if (pick) {
+        const about = Npc.pickSummary(pick, { nameOf: a => castPack()?.labels?.[a] || a, room, minutes });
+        addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: Npc.expandPattern(pick, { room, minutes }), pick, met: { room, minutes }, about });
         addNpcStamp(msg, { type: 'npc_stay', id: newId, place: room });
     } else noteCall(at, { kind: 'schedule', status: 'skipped', reason: `no room for ${got.name}, so no schedule or stay was written` });
     card.status = 'kept'; card.name = got.name;
@@ -1076,4 +1094,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, rememberStory, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

@@ -550,7 +550,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         },
         'POST /nearby': ({ q, body }) => {
             needBody(body);
-            const from = field(body, 'from', 'str'), depth = field(body, 'depth', [1, 6], 3), limit = field(body, 'limit', [1, 30], 12), changes = field(body, 'changes', 'list', []);
+            const from = field(body, 'from', 'str'), depth = field(body, 'depth', [1, 6], 3), limit = field(body, 'limit', [1, 40], 12), changes = field(body, 'changes', 'list', []);
             const w = world_for(q('world'), changes, nowOf(body));
             const start = find(w, from);
             const dist = new Map([[start.address, 0]]);

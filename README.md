@@ -284,9 +284,25 @@ checkbox. A row you did not change is saved exactly as written. Over 100%, a nam
 missing times block saving; an overlap with another entry, an option not on the map yet or a single-word off-map option
 (probably a typo) is shown as a note and does not.
 
-**Remember** gives the new person a passing-through schedule at the place you met: one Might be at block, 50% there,
-from an hour before to an hour after the hour you met, at home from 20:00 to 07:00 outside that block, and about their own
-business the rest of the day. It works in a room made in play too (it uses this chat's map).
+**Remember** gives the new person a daily pattern. Once the card is ready, one small question picks it: **day shift**,
+**night shift** or **passing through**, plus a job and a home (a nearby room, or a few words for a place off the map) and
+up to three favorite public spots. The card shows "Working out a schedule…", then the result ("Day shift at Forge
+(08:00–17:00), home off the map; free time around Market Lane"), or "Couldn't decide, so passing through".
+**Check schedule again** asks only that question again. **Edit** adds Pattern, Job, Home and Favorites boxes (a room or
+area by name or address, or `offmap: the tannery`); Approve edited reads them against this chat's map with no model call,
+and a bad name shows on the card. The game expands the pattern; the narrator never sees it:
+
+- **Day shift:** at the job 08:00–12:00 and 13:00–17:00; home 17:00–18:30 and 20:00–08:00; lunch 12:00–13:00 at the
+  favorite spots (30% in all); evening 18:30–20:00 wandering the spots (40% in all).
+- **Night shift:** at the job 18:00–22:00 and 23:00–03:00; home 03:00–14:30 and 16:00–18:00; a break 22:00–23:00 at the
+  spots (30%); afternoon 14:30–16:00 wandering the spots (40%).
+- **Passing through** (also the fallback): one Might be at block, 50% at the place you met, from an hour before to an
+  hour after the hour you met; at home from 20:00 to 07:00 outside that block; about their own business the rest of the day.
+
+With no favorites, the spots are the area of their job (or of where you met). If you met them during one of their
+free-time blocks somewhere the spots don't cover, that place joins that block's spots, so they can still turn up where you
+met them. A home the model gets wrong is simply off the map (a typed one must be right). It works in a room made in play too (it uses
+this chat's map). After Approve the kept "schedule" note has Edit (the same four boxes) and Undo.
 
 Two read-only views are recomputed from the chat: **What the narrator was told** (the exact `{{npcs_present}}` and
 `{{npc_focus}}` text for the latest reply, or one you pick, with who was listed, at which detail level, and which

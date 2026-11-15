@@ -63,7 +63,7 @@ function swipeOk(msg, identity) {
 }
 
 export function policyFor(type) {
-    const edit = ['npc_fact', 'npc_memory', 'npc_disposition', 'npc_create', 'npc_found', 'npc_appearance', 'npc_baseline'];
+    const edit = ['npc_fact', 'npc_memory', 'npc_disposition', 'npc_create', 'npc_found', 'npc_appearance', 'npc_baseline', 'npc_schedule'];
     const approve = ['npc_fact', 'npc_appearance', 'npc_baseline'];
     return {
         approve: approve.includes(type),
@@ -432,6 +432,11 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
             if (payload.card.invented?.length) stamp.invented = payload.card.invented; else delete stamp.invented;
         } else if (stamp.type === 'npc_create' && payload.line) stamp.line = payload.line;
         else if (stamp.type === 'npc_found' && payload.place) stamp.place = payload.place;
+        else if (stamp.type === 'npc_schedule' && Array.isArray(payload.schedule)) { // a remembered person's daily pattern, typed again (no model call)
+            stamp.schedule = payload.schedule;
+            if (payload.pick) stamp.pick = payload.pick;
+            if (payload.about) stamp.about = payload.about;
+        }
         return { ok: true, rev: stamp.decisionRev };
     }
     return { ok: false, error: 'unsupported' };

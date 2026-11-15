@@ -262,13 +262,92 @@ export function readMightEntry(e) {
 export const isMight = e => !!e && Array.isArray(e.might);
 
 const hourText = h => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
+
+// ---- Daily patterns (docs/npc-design.md). Remember gives a new person one of these, expanded by the engine into ordinary
+// is-at entries and might-be-at blocks. A pick is {pattern, job, job_activity, home, favorites}: job and home are a place
+// KEY (a room address, or a stub id from elsewhere.json), "offmap: short text", or null; favorites are up to 3 public room
+// or area keys. Engine-made schedules never overlap.
+export const PATTERNS = ['day shift', 'night shift', 'passing through'];
+export const PICK_PATTERNS = [...PATTERNS, 'unsure'];
+export const OFFMAP_MAX = 80;
+export const FAVORITES_MAX = 3;
+const OFFMAP_RE = /^\s*off[\s-]?map\s*:\s*/i;
+/** "offmap: the tannery" -> "the tannery"; null when the text is not off-map text. */
+export const offmapText = v => (typeof v === 'string' && OFFMAP_RE.test(v) ? v.replace(OFFMAP_RE, '').trim() : null);
+/** The area (subregion, else region) holding room address `a`. */
+export const areaOfRoom = a => { const s = String(a ?? ''); return s.includes('/') ? s.slice(0, s.indexOf('/')) : s; };
+/** `total` percent split evenly over `spots`, written on each ("a(10)", "b(10)", "c(10)"); the rounding remainder goes to the first. */
+export function spotShares(spots, total) {
+    const list = (spots ?? []).filter(Boolean);
+    if (!list.length) return [];
+    const each = Math.floor(total / list.length), rest = total - each * list.length;
+    return list.map((s, i) => `${s}(${each + (i === 0 ? rest : 0)})`);
+}
+/** An is-at entry at place value `v` (a room address, a stub id, "offmap: text" or null) for this window. */
+function atEntry(v, activity, from, to, { home = false, importance = null } = {}) {
+    const imp = importance ? { importance } : {};
+    const off = offmapText(v);
+    if (typeof v === 'string' && v && off == null && v.includes(':')) return { place: v, activity, from, to, ...imp };
+    const near = off ?? (typeof v === 'string' && v ? v : null);
+    return { activity, ...(home ? { where: 'home' } : {}), ...(near ? { near } : {}), from, to, ...imp };
+}
+/** Free-time spots: the favorites, or with none the area of the job room (on the map), else of the room they were met in. */
+function spotsOf(pick, room) {
+    if (pick?.favorites?.length) return pick.favorites.slice(0, FAVORITES_MAX);
+    const job = pick?.job;
+    const onMap = typeof job === 'string' && offmapText(job) == null && job.includes(':');
+    const area = areaOfRoom(onMap ? job : room);
+    return area ? [area] : [];
+}
+/** The free-time blocks of each shift: [from, to, total %, wandering]. */
+const FREE_BLOCKS = {
+    'day shift': [['12:00', '13:00', 30, false], ['18:30', '20:00', 40, true]],
+    'night shift': [['14:30', '16:00', 40, true], ['22:00', '23:00', 30, false]],
+};
+const hhmm = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+/** Whether `spots` cover `room`: the room itself, or an area (any address above it) holding it. */
+export const spotsCover = (spots, room) => spots.some(a => a === room || String(room).startsWith(`${a}/`));
 /**
- * The passing-through schedule Remember writes for someone met in `room` at minute-of-day `minutes`: one normal might
- * block, the met room at 50% (the rest nowhere), from an hour before the met hour (rounded down) to an hour after; home
- * 20:00-07:00 off the map, clipped around the block (so engine-made entries never overlap); the rest of the day about
- * their own business, off the map. Met at 16:17: 15:00-17:00, home 20:00-07:00. At 21:00: 20:00-22:00, home 22:00-07:00.
+ * The met-place guard: when they were met (`room`, `minutes`) inside one of the shift's free-time blocks and the spots
+ * do not already cover that room, it joins that block's options; the block's [from, to] or null. Passing through: null.
  */
-export function passingThrough(room, minutes) {
+export function metSpotBlock(pick, { room = '', minutes = null } = {}) {
+    const blocks = pick?.job ? FREE_BLOCKS[pick.pattern] : null;
+    if (!blocks || !room || minutes == null) return null;
+    const m = ((minutes % 1440) + 1440) % 1440;
+    const b = blocks.find(([from, to]) => m >= hhmm(from) && m < hhmm(to));
+    if (!b || spotsCover(spotsOf(pick, room), room)) return null;
+    return [b[0], b[1]];
+}
+/**
+ * The schedule entries for a pick (docs/npc-design.md, "Daily patterns"). Day shift: the job 08:00-12:00 and 13:00-17:00
+ * (high), home 17:00-18:30 and 20:00-08:00, lunch 12:00-13:00 at the spots (30% in all, normal), evening 18:30-20:00 at the
+ * spots (40% in all, wandering). Night shift: the job 18:00-22:00 and 23:00-03:00 (high), home 03:00-14:30 and 16:00-18:00,
+ * a break 22:00-23:00 at the spots (30%, normal), afternoon 14:30-16:00 at the spots (40%, wandering). Anything else (passing
+ * through, unsure, no pick) is passingThrough at the met `room` and minute of the day. `room` is where they were met.
+ * The met-place guard: met inside a free-time block in a room the spots do not cover, that room joins that block's spots.
+ */
+export function expandPattern(pick, { room = '', minutes = 0 } = {}) {
+    const pattern = pick?.pattern;
+    if ((pattern === 'day shift' || pattern === 'night shift') && pick.job) {
+        const work = pick.job_activity || 'working', spots = spotsOf(pick, room), met = metSpotBlock(pick, { room, minutes });
+        const job = (from, to) => atEntry(pick.job, work, from, to, { importance: 'high' });
+        const home = (from, to) => atEntry(pick.home ?? null, 'at home', from, to, { home: true });
+        const free = (total, from, to, wandering) => ({ might: spotShares(met?.[0] === from ? [...spots, room] : spots, total), activity: 'out and about', from, to, ...(wandering ? { wandering: true } : {}) });
+        const [a, b] = FREE_BLOCKS[pattern];
+        if (pattern === 'day shift') return [job('08:00', '12:00'), free(a[2], a[0], a[1], a[3]), job('13:00', '17:00'), home('17:00', '18:30'), free(b[2], b[0], b[1], b[3]), home('20:00', '08:00')];
+        return [home('03:00', '14:30'), free(a[2], a[0], a[1], a[3]), home('16:00', '18:00'), job('18:00', '22:00'), free(b[2], b[0], b[1], b[3]), job('23:00', '03:00')];
+    }
+    return passingThrough(room, minutes, pick);
+}
+/**
+ * The passing-through schedule (the Remember default, and the pattern of that name): one normal might block, the met room
+ * at 50% (the rest nowhere), from an hour before the met hour (rounded down) to an hour after; home 20:00-07:00, clipped
+ * around the block (so engine-made entries never overlap), at the pick's home when it has one, else off the map; the rest
+ * of the day about their own business, off the map. Met at 16:17: 15:00-17:00, home 20:00-07:00. At 21:00: 20:00-22:00,
+ * home 22:00-07:00.
+ */
+export function passingThrough(room, minutes, pick = null) {
     const h = Math.floor((((minutes ?? 0) % 1440) + 1440) % 1440 / 60);
     const block = new Set([(h + 23) % 24, h]);
     const home = new Set([20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6].filter(x => !block.has(x)));
@@ -277,7 +356,7 @@ export function passingThrough(room, minutes) {
         if (!home.has(start) || home.has((start + 23) % 24)) continue; // a run starts where the hour before is not home
         let end = start;
         while (home.has((end + 1) % 24) && (end + 1) % 24 !== start) end = (end + 1) % 24;
-        runs.push({ activity: 'at home', where: 'home', from: hourText(start), to: hourText(end + 1) });
+        runs.push(atEntry(pick?.home ?? null, 'at home', hourText(start), hourText(end + 1), { home: true }));
     }
     return [
         { might: [`${room}(50)`], activity: 'out and about', from: hourText(h - 1), to: hourText(h + 1) },
@@ -286,6 +365,123 @@ export function passingThrough(room, minutes) {
     ];
 }
 
+/**
+ * Read a pattern pick (the model's JSON answer, or the Remember card's typed fields) against `places`:
+ * {rooms: Map(address -> {name, private}), areas: Map(address -> name), stubs: Map(id -> name)}. A key or an exact name
+ * (any case) is accepted; job and home are a room or a stub, "offmap: short text" (at most 80 characters), or empty;
+ * favorites are rooms or areas. {pick, warnings} or {error}. Lenient (the model): unknown or private favorites and any past
+ * three are dropped with a warning, a home that is not a room, a stub or off-map text becomes null (off the map) with a
+ * warning, a shift with no job becomes passing through, unsure is passing through; a bad job is still an error. Strict (the
+ * player's typed edit): each of those is an error instead, so a bad name shows on the card.
+ */
+export function readSchedulePick(raw, places = {}, { strict = false } = {}) {
+    if (!isObj(raw)) return { error: 'the answer is not a JSON object' };
+    const rooms = places.rooms ?? new Map(), areas = places.areas ?? new Map(), stubs = places.stubs ?? new Map();
+    const warnings = [];
+    let pattern = matchEnum(raw.pattern, PICK_PATTERNS);
+    if (!pattern) return { error: `pattern must be one of ${PICK_PATTERNS.join(', ')}` };
+    if (pattern === 'unsure') pattern = 'passing through';
+    const byName = (text, kinds) => {
+        const t = String(text).trim(), n = normName(t);
+        if (kinds.includes('room') && rooms.has(t)) return t;
+        if (kinds.includes('area') && areas.has(t)) return t;
+        if (kinds.includes('stub') && stubs.has(t)) return t;
+        const hits = [];
+        if (kinds.includes('room')) for (const [a, r] of rooms) if (normName(r?.name) === n) hits.push(a);
+        if (kinds.includes('area')) for (const [a, name] of areas) if (normName(name) === n) hits.push(a);
+        if (kinds.includes('stub')) for (const [a, name] of stubs) if (normName(name) === n) hits.push(a);
+        return hits.length === 1 ? hits[0] : hits.length > 1 ? { ambiguous: hits } : null;
+    };
+    const place = (label, v) => {
+        if (v == null) return { value: null };
+        if (typeof v !== 'string') return { error: `${label} must be a place key, "offmap: a few words", or null` };
+        const t = v.trim();
+        if (!t || /^(null|none|nowhere|unknown|-)$/i.test(t)) return { value: null };
+        const off = offmapText(t);
+        if (off != null) {
+            if (!off) return { error: `${label}: say where after "offmap:"` };
+            if (off.length > OFFMAP_MAX) return { error: `${label}: off-map text is at most ${OFFMAP_MAX} characters` };
+            return { value: `offmap: ${off}` };
+        }
+        const hit = byName(t, ['room', 'stub']);
+        if (typeof hit === 'string') return { value: hit };
+        if (hit?.ambiguous) return { error: `${label} "${t}" matches ${hit.ambiguous.join(', ')}; use the key` };
+        if (byName(t, ['area'])) return { error: `${label} "${t}" is an area; name one room in it` };
+        return { error: `${label} "${t}" is not in the list (use a key, or "offmap: a few words" for a place off the map)` };
+    };
+    const job = place('job', raw.job);
+    if (job.error) return { error: job.error };
+    let home = place('home', raw.home);
+    if (home.error) {
+        if (strict) return { error: home.error };
+        warnings.push(`home dropped (off the map instead): ${home.error}`);
+        home = { value: null };
+    }
+    const favRaw = Array.isArray(raw.favorites) ? raw.favorites : typeof raw.favorites === 'string' ? raw.favorites.split(/[,;\n]/) : raw.favorites == null ? [] : null;
+    if (!favRaw) return { error: 'favorites must be a list of place keys' };
+    const favorites = [];
+    for (const f of favRaw) {
+        const t = typeof f === 'string' ? f.trim() : '';
+        if (!t) continue;
+        const hit = byName(t, ['room', 'area']);
+        const why = typeof hit !== 'string' ? (hit?.ambiguous ? `"${t}" matches ${hit.ambiguous.join(', ')}; use the key` : `"${t}" is not in the list`)
+            : rooms.get(hit)?.private ? `"${t}" is private; free time goes to public places` : favorites.includes(hit) ? null : favorites.length >= FAVORITES_MAX ? `"${t}": at most ${FAVORITES_MAX} favorites` : '';
+        if (why === null) continue;
+        if (why) { if (strict) return { error: `favorites: ${why}` }; warnings.push(`favorite dropped: ${why}`); continue; }
+        favorites.push(hit);
+    }
+    if ((pattern === 'day shift' || pattern === 'night shift') && !job.value) {
+        if (strict) return { error: `a ${pattern} needs a job: a room, or "offmap: a few words"` };
+        warnings.push(`${pattern} with no job, so passing through`);
+        pattern = 'passing through';
+    }
+    const act = str(raw.job_activity, OFFMAP_MAX);
+    return { pick: { pattern, job: job.value, job_activity: act && !/^null$/i.test(act) ? act : null, home: home.value, favorites }, warnings };
+}
+
+/** A place value as the player reads it: a room or area by name, a stub by name, off-map text, or `none`. */
+function placeWords(v, nameOf, none) {
+    if (!v) return none;
+    const off = offmapText(v);
+    if (off != null) return `${off} (off the map)`;
+    return nameOf(v) || v;
+}
+/** One line for the Remember card and the kept note: "Day shift at Common Room, home off the map; free time around Market Lane". */
+export function pickSummary(pick, { nameOf = a => a, room = '', minutes = null } = {}) {
+    if (!pick) return '';
+    const home = `home ${placeWords(pick.home, nameOf, 'off the map')}`;
+    if (pick.pattern === 'day shift' || pick.pattern === 'night shift') {
+        const met = metSpotBlock(pick, { room, minutes });
+        const spots = [...spotsOf(pick, room), ...(met ? [room] : [])].map(a => nameOf(a) || a).join(', ');
+        const hours = pick.pattern === 'day shift' ? '08:00–17:00' : '18:00–03:00';
+        return `${capWord(pick.pattern)} at ${placeWords(pick.job, nameOf, 'work')} (${hours}${pick.job_activity ? `, ${pick.job_activity}` : ''}), ${home}; free time around ${spots || 'nowhere in particular'}`;
+    }
+    return `Passing through: maybe around ${room ? nameOf(room) || room : 'where they were met'} for an hour either side of the time they were met, ${home}`;
+}
+const capWord = s => s.charAt(0).toUpperCase() + s.slice(1);
+/** The Remember card's schedule boxes for a pick: [key, label, value, placeholder]. Names show where one place has that name. */
+export const SCHEDULE_FIELDS = [
+    ['sched_pattern', 'Pattern', 'day shift, night shift or passing through'],
+    ['sched_job', 'Job', 'a room, or offmap: a few words (empty for none)'],
+    ['sched_home', 'Home', 'a room, or offmap: a few words (empty: off the map)'],
+    ['sched_favorites', 'Favorites', 'up to 3 public rooms or areas, comma separated'],
+];
+/** A pick as the editor's text: {sched_pattern, sched_job, sched_home, sched_favorites}. `label` gives a place's shown text. */
+export function pickValues(pick, label = a => a) {
+    const one = v => (!v ? '' : offmapText(v) != null ? v : label(v) || v);
+    return { sched_pattern: pick?.pattern ?? 'passing through', sched_job: one(pick?.job), sched_home: one(pick?.home), sched_favorites: (pick?.favorites ?? []).map(one).join(', ') };
+}
+/** The editor's text back to a raw pick (then readSchedulePick, strict). Unchanged boxes keep the pick's own values. */
+export function pickFromValues(pick, values = {}, changed = []) {
+    const has = k => changed.includes(k);
+    return {
+        pattern: has('sched_pattern') ? String(values.sched_pattern ?? '') : pick?.pattern ?? 'passing through',
+        job: has('sched_job') ? String(values.sched_job ?? '') : pick?.job ?? null,
+        job_activity: has('sched_job') ? null : pick?.job_activity ?? null,
+        home: has('sched_home') ? String(values.sched_home ?? '') : pick?.home ?? null,
+        favorites: has('sched_favorites') ? String(values.sched_favorites ?? '') : [...(pick?.favorites ?? [])],
+    };
+}
 
 /** A clean cast file from a played NPC (base fields plus facts, memory and disposition). Following stays in the chat. */
 export function exportRecord(npc) {
