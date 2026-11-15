@@ -295,13 +295,14 @@ export function judgeFound(npc, clock, room, env, { at = null, player = true } =
     const name = npc ? capFirst(shownName(npc)) : 'They';
     let due = null;
     if (Number.isInteger(at)) { try { due = duePlace(npc, at, env); } catch { due = null; } }
-    if (room && due?.address === room) return { ok: true, here: true, where: '', place: room, reason: `${name} is right here.` };
+    const sched = scheduleAt(npc, clock, env);
+    const why = sched?.kind === 'might' ? { detail: mightWhy(npc, sched, env) } : {};
+    if (room && due?.address === room) return { ok: true, here: true, where: '', place: room, reason: `${name} is right here.`, ...why };
     if (due?.kind === 'follow') return { ok: false, where: '', reason: `${name} is with someone else right now.` };
     if (due?.kind === 'stay') return { ok: false, where: '', reason: `${name} is waiting somewhere else right now.` };
-    const sched = scheduleAt(npc, clock, env);
     if (!sched) return { ok: false, reason: `${name} has no schedule in force.` };
     if (sched.kind === 'might') {
-        const detail = mightWhy(npc, sched, env);
+        const detail = why.detail;
         if (!room) return { ok: false, where: '', reason: 'There is no current room to find them in.', detail };
         const now = appearanceFor(npc, sched)?.place ?? sched.address;
         if (now && now === room) return { ok: true, here: true, where: '', place: room, reason: `${name} is right here.`, detail };
