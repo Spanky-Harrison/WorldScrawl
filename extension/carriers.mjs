@@ -218,7 +218,10 @@ async function analyzeFlag(id, { note } = {}) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
             const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
             if (stale()) return;
-            if (ans?.personClaims?.length && pl.personClaimWarning) f.personWarning = pl.personClaimWarning(ans.personClaims);
+            // Guards on the model's answer: a person-card write, or a player-only setting (private), is not applied and is named.
+            const warns = [ans?.personClaims?.length && pl.personClaimWarning ? pl.personClaimWarning(ans.personClaims) : '', ans?.refused?.length && pl.refusedOpWarning ? pl.refusedOpWarning(ans.refused) : ''].filter(Boolean);
+            if (ans?.refused?.length) noteCall(id, { kind: 'the change', status: 'ok', reason: `refused ${ans.refused.map(r => r.op).join(', ')} (player-only)` });
+            if (warns.length) f.personWarning = warns.join(' ');
             else if (ans) delete f.personWarning;
             if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
             if (ans?.nothing) { f.status = 'nothing'; return; }

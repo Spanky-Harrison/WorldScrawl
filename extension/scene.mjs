@@ -557,6 +557,9 @@ async function keepRememberNow(c, msg, card, id, edited) {
     addNpcStamp(msg, { type: 'npc_create', id: newId, name: got.name, line: got.line, manner: got.manner, voice: got.voice,
         ...Object.fromEntries(['looks', 'body', 'outfit', 'history', 'unknownAs'].filter(k => got[k]).map(k => [k, got[k]])), facts: got.facts, ...(got.invented?.length ? { invented: got.invented } : {}) });
     if (got.disposition) addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: got.disposition.value, reason: got.disposition.reason ?? '', dramatic: true });
+    // No attitude in the answer: the first-meeting rule (unknown becomes indifferent, "just met"), so the next reply does
+    // not ask a first-attitude question for someone the player has already met.
+    else addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: 'indifferent', reason: 'just met' });
     // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
     // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
     const at = Math.max(0, chat.indexOf(msg));

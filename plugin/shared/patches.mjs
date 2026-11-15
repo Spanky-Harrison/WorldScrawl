@@ -970,7 +970,6 @@ export const OP_DOCS = {
     remove_location: '{"op":"remove_location","loc":ADDR} (the place is gone)',
     merge: '{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (existing rooms become one; never for making new rooms)',
     set_expandable: '{"op":"set_expandable","target":ADDR or AREA,"value":true|false|"inherit"} (whether new rooms can be found there)',
-    set_private: '{"op":"set_private","target":ADDR or AREA,"value":true|false|"inherit"} (private: people turn up there only when their schedule names the room)',
     set_fields: '{"op":"set_fields","target":ADDR or AREA,"fields":{"exposure":"outdoor|sheltered|enclosed|fixed","insulation":"drafty|normal|cozy","indoor_temp":20,...}} (plain settings; null drops one)',
     set_exit: '{"op":"set_exit","loc":ADDR,"direction":"exit name","fields":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))',
     add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two rooms that already exist before this patch; not for a room made by create_place, whose exits already join it)',
@@ -1007,11 +1006,21 @@ export function personClaimWarning(claims) {
     const names = who.length ? ` (${who.join(', ')})` : '';
     return `Warning: a place change does not update a person's card${names}. That update was not written.`;
 }
+// Ops and fields the change model may not write: whether a place is private is the player's or author's call (the map
+// editor's checkbox, a world file, the word list for rooms made in play). A model op is refused and named in a warning.
+const MODEL_REFUSED_OPS = new Set(['set_private']);
+const PLAYER_ONLY_FIELDS = ['private'];
+const stripPlayerOnly = o => { const out = { ...o }; let hit = false; for (const k of PLAYER_ONLY_FIELDS) if (k in out) { delete out[k]; hit = true; } return [out, hit]; };
+/** Warning when a model answer tried a player-only setting. */
+export function refusedOpWarning(refused) {
+    return `Warning: the story can't make a place private or public (${[...new Set((refused ?? []).map(r => r.target || r.op).filter(Boolean))].join(', ')}). That edit was not made; use the map editor.`;
+}
 /**
  * The model's answer to the change call, normalized: {ops} to preview, {nothing: true}, or {cant: "why"} when the story
  * changed the map in a way no op can express (shown to the player plainly instead of forcing a wrong edit). Ops made by
  * the story get story: true on create_place (engine-made id, "expandable" respected) and lose any id the model wrote.
- * Person-card claims are removed from the ops and returned as personClaims. They are not applied.
+ * Person-card claims are removed from the ops and returned as personClaims. They are not applied. A player-only op
+ * (set_private) or a "private" field on a made place is removed and returned as refused [{op, target}].
  */
 export function readChangeAnswer(ans) {
     if (!isObj(ans)) return null;
@@ -1020,14 +1029,23 @@ export function readChangeAnswer(ans) {
     const claims = personClaimsOf(ans);
     const withClaims = r => (claims.length ? { ...r, personClaims: claims } : r);
     if (!Array.isArray(ans.ops)) return claims.length ? withClaims({ nothing: true }) : null;
-    const placeOps = ans.ops.filter(o => !(isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? ''))));
-    if (!placeOps.length) return withClaims({ nothing: true });
+    const refused = [];
+    const withGuards = r => withClaims(refused.length ? { ...r, refused } : r);
+    const placeOps = ans.ops.filter(o => !(isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? '')))).filter(o => {
+        if (!isObj(o) || !MODEL_REFUSED_OPS.has(String(o.op ?? ''))) return true;
+        refused.push({ op: String(o.op), target: str(o.target) });
+        return false;
+    });
+    if (!placeOps.length) return withGuards({ nothing: true });
     const ops = placeOps.map(o => {
         if (!isObj(o)) return o;
-        if (o.op === 'create_place') { const { id, ...rest } = o; return { ...rest, story: true }; }
-        return o;
+        let [x, hit] = stripPlayerOnly(o);
+        if (isObj(x.place)) { const [p, h2] = stripPlayerOnly(x.place); x.place = p; hit = hit || h2; }
+        if (hit) refused.push({ op: `${x.op} private`, target: str(x.name ?? x.place?.name ?? '') });
+        if (x.op === 'create_place') { const { id, ...rest } = x; return { ...rest, story: true }; }
+        return x;
     });
-    return withClaims({ ops });
+    return withGuards({ ops });
 }
 
 /** A kept change's one-line text for the Changes tab: " · note: summary", with repeats dropped (a note that is just one of
