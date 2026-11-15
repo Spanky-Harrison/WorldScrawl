@@ -21,6 +21,8 @@
 //       its region's, else world.json's; default true). Written as if it was always there.
 //   {op: "set_expandable", target, value}   target: a room, "region:sub" or "region"; value true, false or null
 //       (null / "inherit": drop the setting so the next level up decides).
+//   {op: "set_private", target, value}   the same targets and values: "private" (people only turn up there when a
+//       schedule names the room; an area pick skips it). Inherited like expandable; default public.
 //   {op: "set_fields", target, fields: {key: value | null}}   the map's Edit forms: plain settings of a room, subregion
 //       ("region:sub") or region ("region"); null drops the setting (inherit / default). Allowed keys: FIELD_KEYS.
 //   {op: "set_exit", loc, direction, fields: {key: value | null}}   one exit's settings. Per side (only this side changes):
@@ -47,7 +49,7 @@ import { parseDuration } from './calendar.mjs';
 import { flipBar } from './doorbar.mjs';
 import { render as P } from './prompts.mjs';
 export const OPS = ['set_description', 'append_description', 'set_name', 'set_lore', 'append_lore', 'update_area',
-    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable',
+    'block_exit', 'open_exit', 'lock_exit', 'unlock_exit', 'break_exit', 'remove_exit', 'set_exit_description', 'set_travel_time', 'remove_location', 'merge', 'discover', 'set_expandable', 'set_private',
     'set_fields', 'set_exit', 'add_exit', 'move_location', 'move_area', 'create_place', 'create_subregion', 'create_region', 'remove_area'];
 /** What set_fields may change at each level (name, description, notes and expandable have their own ops). */
 export const FIELD_KEYS = {
@@ -186,7 +188,7 @@ export function normalizeOp(raw, op) {
     if (o.op === 'create_place') Object.assign(o, fixExits(o));
     if (o.op === 'create_subregion') o.place = fixExits(o.place);
     if (o.op === 'create_region' && isObj(o.subregion)) o.subregion = { ...o.subregion, place: fixExits(o.subregion.place) };
-    if (o.op === 'set_expandable') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
+    if (o.op === 'set_expandable' || o.op === 'set_private') { if (typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target); try { o.value = expandValue(o.value, ''); } catch { /* reported by applyOp */ } }
     if (Array.isArray(o.locs)) o.locs = o.locs.map(x => (typeof x === 'string' ? resolveRoom(raw, x) : x));
     if (typeof o.area === 'string') o.area = o.area.trim().toLowerCase().replace(/\/.*$/, '');
     if (o.op === 'merge' && typeof o.id === 'string' && o.id.trim()) {
@@ -354,6 +356,15 @@ function applyOp(raw, op, w, out, world = null) {
             out.touched.push(t);
             return `${obj.name ?? t}: ${v === null ? 'discoveries follow the level above' : v ? 'new rooms can be discovered' : 'no new rooms can be discovered'}`;
         }
+        case 'set_private': {
+            const t = str(op.target), p = split(t), [rid, sid] = p ?? t.split(':');
+            const obj = p ? getRoom(raw, t) : sid ? raw[rid]?.subregions?.[sid] : raw[rid];
+            if (!isObj(obj) || !rid) throw new PatchError(`${w}: "target" ${JSON.stringify(op.target)} is not a room, subregion ("region:subregion") or region ("region")`);
+            const v = expandValue(op.value, w);
+            if (v === null) delete obj.private; else obj.private = v;
+            out.touched.push(t);
+            return `${obj.name ?? t}: ${v === null ? 'public or private follows the level above' : v ? 'private' : 'public'}`;
+        }
         case 'set_fields': return fieldsOp(raw, op, w, out);
         case 'set_exit': return setExitOp(raw, op, w, out);
         case 'add_exit': return addExitOp(raw, op, w, out);
@@ -373,6 +384,7 @@ function applyOp(raw, op, w, out, world = null) {
             }
             const a = createPlace(raw, str(op.area), op, w, out, true), r = getRoom(raw, a);
             (out.created ??= new Set()).add(a);
+            if (op.story === true && typeof r.private !== 'boolean' && privateByName(r.name)) r.private = true;
             const ex = op.exits?.length === 1 ? op.exits[0] : null;
             if (op.story === true && ex) return `${getRoom(raw, ex.to)?.name ?? ex.to} ${ex.return_direction}: leads to ${r.name} (a newly found room)`;
             return `${r.name}: new place in ${sub.name ?? op.area}`;
@@ -519,6 +531,20 @@ function addExitOp(raw, op, w, out) {
     return `${r.name} ${dir}: new exit to ${t.name}${back ? ` (back: ${back})` : ' (one way)'}`;
 }
 
+/** Last words of a room name that make a room found in play private (bedroom, servants' quarters...). Never house or home. */
+export const PRIVATE_WORDS = ['bedroom', 'bedchamber', 'quarters', 'cottage', 'apartment', 'bath', 'privy', 'cell'];
+/** Whether a room name's last word is on the private list ("Guest Bedroom" yes; "Bath Street", "Bathhouse", "Old House" no). */
+export function privateByName(name) {
+    const words = String(name ?? '').toLowerCase().replace(/[’']s\b/g, '').match(/[a-z]+/g) ?? [];
+    return PRIVATE_WORDS.includes(words.at(-1) ?? '');
+}
+/** "private" for a room: its own setting, else its subregion's, else its region's, else world.json's; default false (public). */
+export function privateOf(raw, address, world = null) {
+    const p = split(address); if (!p) return false;
+    const reg = raw[p[0]], sub = reg?.subregions?.[p[1]], room = sub?.locations?.[p[2]];
+    for (const o of [room, sub, reg, world]) if (isObj(o) && typeof o.private === 'boolean') return o.private;
+    return false;
+}
 /** "expandable" for a room: its own setting, else its subregion's, else its region's, else world.json's; default true. */
 export function expandableOf(raw, address, world = null) {
     const p = split(address); if (!p) return true;
@@ -980,11 +1006,21 @@ export function personClaimWarning(claims) {
     const names = who.length ? ` (${who.join(', ')})` : '';
     return `Warning: a place change does not update a person's card${names}. That update was not written.`;
 }
+// Ops and fields the change model may not write: whether a place is private is the player's or author's call (the map
+// editor's checkbox, a world file, the word list for rooms made in play). A model op is refused and named in a warning.
+const MODEL_REFUSED_OPS = new Set(['set_private']);
+const PLAYER_ONLY_FIELDS = ['private'];
+const stripPlayerOnly = o => { const out = { ...o }; let hit = false; for (const k of PLAYER_ONLY_FIELDS) if (k in out) { delete out[k]; hit = true; } return [out, hit]; };
+/** Warning when a model answer tried a player-only setting. */
+export function refusedOpWarning(refused) {
+    return `Warning: the story can't make a place private or public (${[...new Set((refused ?? []).map(r => r.target || r.op).filter(Boolean))].join(', ')}). That edit was not made; use the map editor.`;
+}
 /**
  * The model's answer to the change call, normalized: {ops} to preview, {nothing: true}, or {cant: "why"} when the story
  * changed the map in a way no op can express (shown to the player plainly instead of forcing a wrong edit). Ops made by
  * the story get story: true on create_place (engine-made id, "expandable" respected) and lose any id the model wrote.
- * Person-card claims are removed from the ops and returned as personClaims. They are not applied.
+ * Person-card claims are removed from the ops and returned as personClaims. They are not applied. A player-only op
+ * (set_private) or a "private" field on a made place is removed and returned as refused [{op, target}].
  */
 export function readChangeAnswer(ans) {
     if (!isObj(ans)) return null;
@@ -993,14 +1029,23 @@ export function readChangeAnswer(ans) {
     const claims = personClaimsOf(ans);
     const withClaims = r => (claims.length ? { ...r, personClaims: claims } : r);
     if (!Array.isArray(ans.ops)) return claims.length ? withClaims({ nothing: true }) : null;
-    const placeOps = ans.ops.filter(o => !(isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? ''))));
-    if (!placeOps.length) return withClaims({ nothing: true });
+    const refused = [];
+    const withGuards = r => withClaims(refused.length ? { ...r, refused } : r);
+    const placeOps = ans.ops.filter(o => !(isObj(o) && PERSON_CARD_OPS.has(String(o.op ?? '')))).filter(o => {
+        if (!isObj(o) || !MODEL_REFUSED_OPS.has(String(o.op ?? ''))) return true;
+        refused.push({ op: String(o.op), target: str(o.target) });
+        return false;
+    });
+    if (!placeOps.length) return withGuards({ nothing: true });
     const ops = placeOps.map(o => {
         if (!isObj(o)) return o;
-        if (o.op === 'create_place') { const { id, ...rest } = o; return { ...rest, story: true }; }
-        return o;
+        let [x, hit] = stripPlayerOnly(o);
+        if (isObj(x.place)) { const [p, h2] = stripPlayerOnly(x.place); x.place = p; hit = hit || h2; }
+        if (hit) refused.push({ op: `${x.op} private`, target: str(x.name ?? x.place?.name ?? '') });
+        if (x.op === 'create_place') { const { id, ...rest } = x; return { ...rest, story: true }; }
+        return x;
     });
-    return withClaims({ ops });
+    return withGuards({ ops });
 }
 
 /** A kept change's one-line text for the Changes tab: " · note: summary", with repeats dropped (a note that is just one of

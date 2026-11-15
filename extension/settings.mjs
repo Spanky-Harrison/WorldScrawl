@@ -1,5 +1,4 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { discoveryChanged } from './carriers.mjs';
 import { defaultWorldId } from './clock.mjs';
 import { applyNudge, applyTools } from './expiry.mjs';
 import { exitsCache, renderAllExits } from './footer.mjs';
@@ -36,7 +35,6 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Map changes</div>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Approve map changes without asking (skip the Approve / Discard card)</label>
-      <label class="checkbox_label" title="Off: a room is only discovered when a door that isn't on the map is actually opened or entered. On: rooms the narration mentions (a hallway lined with guest rooms) may be added too."><input id="worldscrawl_proactive_discovery" type="checkbox"> Proactive room discovery (add rooms the narration mentions)</label>
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes</label>
       <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes</label>
@@ -88,9 +86,6 @@ function addSettingsPanel() {
     const akw = document.getElementById('worldscrawl_auto_keep_waits');
     akw.checked = !!settings().autoKeepWaits;
     akw.addEventListener('change', () => { settings().autoKeepWaits = akw.checked; ctx().saveSettingsDebounced(); });
-    const proDisc = document.getElementById('worldscrawl_proactive_discovery');
-    proDisc.checked = !!settings().proactiveDiscovery;
-    proDisc.addEventListener('change', () => { settings().proactiveDiscovery = proDisc.checked; ctx().saveSettingsDebounced(); discoveryChanged(); });
     const flagTags = document.getElementById('worldscrawl_flag_tags');
     flagTags.checked = !!settings().flagTags;
     flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });

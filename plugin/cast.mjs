@@ -27,8 +27,10 @@ export function worldPlaces(world) {
     for (const [id, s] of world?.subregions?.entries?.() ?? []) { subs.push(id); if (s?.name) { names.push(s.name); labels[id] = s.name; } }
     const regions = [];
     for (const [id, r] of world?.regions?.entries?.() ?? []) { regions.push(id); if (r?.name) { names.push(r.name); labels[id] = r.name; } }
+    // Private rooms: an area pick never lands there (a schedule must name the room).
+    const privates = [...(world?.locations?.values?.() ?? [])].filter(l => l?.private === true).map(l => l.address);
     const elsewhere = [...(world?.elsewhere?.values?.() ?? [])].map(s => ({ id: s.id, name: s.name, about: s.about ?? '', ...(s.lore ? { lore: s.lore } : {}), shadowed: !!world?.regions?.has?.(s.id) }));
-    return { addresses, names: [...new Set(names)], labels, subs, regions, elsewhere };
+    return { addresses, names: [...new Set(names)], labels, subs, regions, elsewhere, privates };
 }
 
 /**
@@ -221,7 +223,9 @@ export function saveCastNpc(root, raw, { original = null, originalFile = null, p
     const ownBase = oldFile ? path.basename(oldFile, '.json') : null;
     if (record.id !== original && taken.has(record.id) && record.id !== ownBase) throw new Error(`id ${record.id} is already taken`);
     const checked = validateRecord(record, { file: `${record.id}.json`, places, nearIndex });
-    const problems = checked.problems;
+    // Only real errors block a save; warnings (an overlap, a single-word off-map name, a place not on the map yet) do not.
+    const warnings = new Set(checked.warnings ?? []);
+    const problems = checked.problems.filter(p => !warnings.has(p));
     if (!checked.ok || problems.length) throw new Error(problems.join('; ') || 'the NPC record is not valid');
     const dir = path.join(root, 'cast');
     fs.mkdirSync(dir, { recursive: true });
@@ -229,7 +233,7 @@ export function saveCastNpc(root, raw, { original = null, originalFile = null, p
     const file = keepName ? oldFile : path.join(dir, `${record.id}.json`);
     fs.writeFileSync(file, JSON.stringify(record, null, 2) + '\n');
     if (oldFile && oldFile !== file) fs.rmSync(oldFile);
-    return { id: record.id, file: path.basename(file), record };
+    return { id: record.id, file: path.basename(file), record, warnings: [...warnings] };
 }
 
 /** Delete one cast file, by the id inside it or (for a broken file) by its file name. */

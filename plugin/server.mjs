@@ -85,7 +85,7 @@ class LoadedWorld {
         return { id: this.id, name: this.name, start_region: this.world.start.split(':')[0], start: this.world.start,
             map_version: this.version, has_knowledge: this.knowledge !== null, living: this.living, ...this.time(),
             cast: this.cast.npcs, cast_problems: this.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels,
-            subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
+            subs: places.subs, regions: places.regions, elsewhere: places.elsewhere, private_places: places.privates };
     }
     /** The world's calendar (default Gregorian) and start_date (missing fields filled in). */
     time() {
@@ -318,12 +318,12 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         'GET /cast': ({ q }) => {
             const lw = get_world(q('world'));
             const places = worldPlaces(lw.world);
-            return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
+            return { world: lw.id, npcs: lw.cast.npcs, problems: lw.cast.problems, places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere, private_places: places.privates };
         },
         'POST /cast/places': ({ q, body }) => { // the live map's places: the world with this chat's changes applied
             needBody(body);
             const places = worldPlaces(world_for(q('world'), field(body, 'changes', 'list', []), nowOf(body)));
-            return { places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere };
+            return { places: [...places.addresses], place_names: places.names, place_labels: places.labels, subs: places.subs, regions: places.regions, elsewhere: places.elsewhere, private_places: places.privates };
         },
         'POST /cast/export': ({ q, body }) => {
             needBody(body);
@@ -347,7 +347,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             try { wrote = saveCastNpc(lw.root, body.npc, { original, originalFile, places: worldPlaces(lw.world).addresses, nearIndex: nearIndexFrom(lw.world) }); } catch (e) { throw new HttpError(422, e.message); }
             const fresh = new LoadedWorld(lw.id, lw.root);
             worlds.set(lw.id, fresh);
-            return { ok: true, id: wrote.id, file: wrote.file, record: wrote.record, map_version: fresh.version };
+            return { ok: true, id: wrote.id, file: wrote.file, record: wrote.record, warnings: wrote.warnings ?? [], map_version: fresh.version };
         },
         'POST /cast/delete': ({ q, body }) => {
             needBody(body);

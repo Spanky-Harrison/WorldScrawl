@@ -164,19 +164,6 @@ export function replyAfter(chat, id) {
     for (let i = Number(id) + 1; i < (chat?.length ?? 0); i++) { const m = chat[i]; if (!m || m.is_system) continue; return m.is_user ? -1 : i; }
     return -1;
 }
-/** Scene overrides: a future story engine can flip settings for the current scene (stored on the chat, so they follow it).
- * setSceneOverride('proactiveDiscovery', true|false), or null to fall back to the setting. */
-export const SCENE_KEY = 'worldscrawl_scene';
-export function sceneOverrides() { try { return ctx().chatMetadata?.[SCENE_KEY] ?? {}; } catch { return {}; } }
-export function setSceneOverride(key, value) {
-    const c = ctx(); if (!c.chatMetadata) return false;
-    const o = { ...(c.chatMetadata[SCENE_KEY] ?? {}) };
-    if (value == null) delete o[key]; else o[key] = value;
-    c.chatMetadata[SCENE_KEY] = o; c.saveMetadata?.(); discoveryChanged(); return true;
-}
-globalThis.worldscrawlScene = { get: sceneOverrides, set: setSceneOverride };
-/** Proactive room discovery for this scene: the scene override wins, then the setting (off by default). */
-export function proactiveDiscovery() { const o = sceneOverrides().proactiveDiscovery; return typeof o === 'boolean' ? o : !!settings().proactiveDiscovery; }
 function discoveryChanged() { try { if (hasPrompts() && isOn()) { applyTools(); applyNudge(); } } catch (e) { console.warn('[WorldScrawl]', e?.message); } } // a flagged player message waiting for the narrator's reply
 // ---- Stale results: each analysis or rewrite of a flag takes a ticket; a newer one, a swipe, Discard or Approve makes it stale,
 // and a stale one writes nothing (the flag object is replaced on a new flag, deleted on Discard, and kept on Approve).
@@ -231,7 +218,10 @@ async function analyzeFlag(id, { note } = {}) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
             const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
             if (stale()) return;
-            if (ans?.personClaims?.length && pl.personClaimWarning) f.personWarning = pl.personClaimWarning(ans.personClaims);
+            // Guards on the model's answer: a person-card write, or a player-only setting (private), is not applied and is named.
+            const warns = [ans?.personClaims?.length && pl.personClaimWarning ? pl.personClaimWarning(ans.personClaims) : '', ans?.refused?.length && pl.refusedOpWarning ? pl.refusedOpWarning(ans.refused) : ''].filter(Boolean);
+            if (ans?.refused?.length) noteCall(id, { kind: 'the change', status: 'ok', reason: `refused ${ans.refused.map(r => r.op).join(', ')} (player-only)` });
+            if (warns.length) f.personWarning = warns.join(' ');
             else if (ans) delete f.personWarning;
             if (ans?.cant) { f.status = 'cant'; f.error = ans.cant; return; }
             if (ans?.nothing) { f.status = 'nothing'; return; }

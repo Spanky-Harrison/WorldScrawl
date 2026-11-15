@@ -48,6 +48,6 @@ export const { calendar, patches, doorbar, weather, prompts, npc, exits, ids, ca
 // Prompt text helpers, used everywhere in the extension.
 export const { render, setPrompts, hasPrompts } = S.prompts;
 // NPC record helpers the server uses too (cast files, exports, ids).
-export const { exportRecord, authorRecord, freeId, nameIn, normName, resolveSchedulePlace } = S.npc;
+export const { exportRecord, authorRecord, freeId, nameIn, normName, passingThrough, resolveSchedulePlace } = S.npc;
 export const { revealsDestination } = S.exits;
 export const { slug } = S.ids;

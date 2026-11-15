@@ -36,6 +36,7 @@
         },
         "cellar": {
           "name": "Cellar",
+          "private": true,
           "exposure": "enclosed",
           "description": "A cold, low cellar under the courtyard, lined with ale casks and racks of dusty bottles. Water drips somewhere in the dark, and the air smells of damp stone and old beer.",
           "exits": [
@@ -45,6 +46,7 @@
         },
         "kitchens": {
           "name": "Kitchens",
+          "private": true,
           "indoor_temp": 78,
           "description": "Hot, smoky kitchens where a buxom, flour-dusted cook and two pretty scullery maids keep a stew pot bubbling over the fire. Strings of onions and hams hang from the rafters.",
           "exits": [
@@ -63,6 +65,7 @@
         },
         "upstairs": {
           "name": "Upstairs Rooms",
+          "private": true,
           "description": "A narrow, quiet hallway with four plain guest rooms. The floorboards groan underfoot, the noise of the bar is only a murmur, and the window at the end looks out over the river.",
           "inherit_subregion_lore": false,
           "exits": [
@@ -89,6 +92,7 @@
         },
         "upstairs": {
           "name": "Upstairs Rooms",
+          "private": true,
           "description": "The Goose's second floor: a carpeted corridor of well-kept rooms with brass numbers on the doors and a vase of river lilies on a side table.",
           "exits": [
             { "direction": "down", "to": "common_room", "travel_time": "30s", "description": "The carpeted staircase down to the common room." }
@@ -190,6 +194,7 @@
         },
         "catacombs": {
           "name": "Temple Catacombs",
+          "private": true,
           "exposure": "enclosed",
           "description": "Narrow vaults cut into the hill beneath the temple. Niches of old bones line the walls, faded tide-marks are painted over the arches, and the candle smoke from above never quite reaches this deep.",
           "exits": [
@@ -201,6 +206,7 @@
     },
     "secret_tunnel": {
       "name": "Secret Tunnel",
+      "private": true,
       "exposure": "enclosed",
       "lore": "A forgotten smugglers' passage under the village. Few living folk know it exists.",
       "inherit_lore": false,

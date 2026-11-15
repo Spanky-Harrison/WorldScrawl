@@ -46,33 +46,24 @@ There is never a single "party" entity. The player and companions are **individu
 - **Explicit:** the player can ask at any time with `[remember]` in a message (e.g. "I'm going to [remember] Maren") or `/ws-npc`.
 - **A "no" is remembered for the current scene** (stamped on the message, so it's undoable), and the card isn't offered again for that person until the scene changes.
 - **Keeping reads back, not a blank stub.** Keeping pulls the name, appearance and stated facts from **every message since the person first appeared**, like the flag step reading a range of messages. The record starts with what the story already said.
-- **No stand-ins.** A saved NPC appears only via their schedule, by following the player, or when the player seeks them by name. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
+- **No stand-ins.** A saved NPC appears only via their schedule (including a might-be-at roll), by following the player, or when the player finds them where their schedule puts them. They are never reused as a random stranger ("a guard" is never secretly the guard you saved last week).
   - **Future story-engine hook:** a story engine (never the default engine) may *deliberately* place a saved NPC as an anonymous figure ("a guard") and reveal them later, as a twist. By default, saved NPCs are never reused as strangers by accident.
-- **One-offs get a sighting, not a schedule.** A saved NPC met once gets a "seen at" entry instead of a schedule: `{ place, hour, chance }`: the place and the hour they were met, and the peak chance. They are still never auto-picked as an anonymous extra. This avoids writing full schedules for incidental NPCs who may narratively be somewhere that isn't on the map.
-  - **Graduated by hour.** The time they were met rounds down to its hour: seen at 4:17 PM peaks from 4 to 5 PM. The chance drops sharply per hour away from the peak, when the player is in that area:
-
-    | Hours from the peak hour | Chance |
-    |---|---|
-    | 0 (peak) | ~50% |
-    | 1 | ~20% |
-    | 2 | ~5% |
-    | 3 or more | ~2% |
-
-    Quarter-hour granularity was considered and rejected as too complex.
-  - **One roll per day.** Each NPC gets one roll (0-99) per game day, seeded deterministically from the NPC id, the place and the game day (from `clockAt`), and reused all day. Every check compares that same roll to the current hour's chance. So with a roll of 30, showing up an hour early (20%) misses her, while the same roll succeeds during the peak hour (50%). Swiping or regenerating can't flip a result.
-  - **Looking for them by name** adds a second roll for the day, seeded separately (per NPC per game day, not per attempt), and the better (lower) of the two rolls is used from then on. Searching again the same day changes nothing.
-  - **Stays for the hour.** Once she appears, the appearance is stamped on the message and she stays for the rest of that hour, so leaving and coming back doesn't make her vanish. Deleting the message undoes the appearance.
-  - **No vanishing mid-scene.** An NPC in the current scene doesn't vanish when her hour ends; see *Leaving a scene*.
-  - A one-off who gets a real schedule later (written by a creator or via Export to cast) stops using the sighting.
+- **One-offs get a passing-through schedule (might be at).** The one-off "seen at" sighting (`seen_at`, the hourly curve and the by-name roll) is gone. A schedule has two kinds of entry: **is at** (certain; every older entry is one, unchanged) and **might be at**, a time block with options and percent odds:
 
   ```json
-  { "id": "maren", "name": "Maren", "line": "A traveling knife-grinder with a squeaky cart.",
-    "seen_at": { "place": "riverton/market-square", "hour": 16, "chance": 0.5 } }
+  { "might": ["riverton:streets/market_lane", "riverton:general_store/shop", "nowhere(80)"], "activity": "running errands", "from": "10:00", "to": "12:00", "wandering": false }
   ```
+
+  - **Options.** A room; an area (a subregion or region: it picks one of its public rooms, never a private one); a stub place or plain words (off the map); or `nowhere`. A `(N)` is a percent; options without one split what is left of 100; a total under 100 leaves the rest as nowhere; over 100 breaks the entry. An option not on the map yet is kept and its share is away until the room exists in this chat's map.
+  - **Rolls.** A normal block rolls once when it starts and holds for the whole block; `wandering: true` moves them every 15 to 60 minutes, each stretch rolling its own place. Every roll is seeded from the person, the entry and the actual start time, so swipes and reloads never change it. There is no by-name roll: `[find]` checks where they actually are now and is rejected with a plain reason if that is not here.
+  - **Chances add up.** Adjacent blocks each roll on their own: three hourly rows at 20%, 50% and 20% give roughly a 70% chance of meeting them at some point in those three hours (1 − 0.8 × 0.5 × 0.8 = 68%). To make someone likely across a span, write one block with the odds you want.
+  - **Remember writes one.** A person kept with Remember gets a passing-through schedule at the room where they were met (this chat's live map, so a room made in play works): one might block `[room(50)]` from an hour before to an hour after the hour they were met ("out and about"), `at home` from 20:00 to 07:00 outside that block, and an open "about their own business" entry for the rest of the day. A `stay` stamp holds them in the scene where they were met. A creator can rewrite it in the Cast editor (Is at / Might be at per row) or via Export to cast.
+  - **Private rooms.** `"private": true` on a room (or inherited from its subregion, region or world) keeps area picks out of it; a schedule that names the room still uses it. An area with no public room is away, with an inspector note.
+  - **No vanishing mid-scene.** Someone in the current scene stays until the block ends; see *Leaving a scene*.
 
 ### Following
 
-A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the actor they follow is (usually the player), overriding their schedule, until told to stay or wait. A **stay** stamp holds them at the place they are in when told, and does not send them back to the schedule. The hold lasts until the next schedule entry starts (or, for a one-off with no schedule, until that sighting hour ends), or until the player leaves and comes back to them, or until they are asked to follow again. Only then do they return to the schedule. The leaving-a-scene rule still applies, so when the hold ends while the player is with them they do not vanish; the narrator gets the overdue note instead.
+A simple **`following`** tag in phase 1: an NPC told to come along (stamp) is present wherever the actor they follow is (usually the player), overriding their schedule, until told to stay or wait. A **stay** stamp holds them at the place they are in when told, and does not send them back to the schedule. The hold lasts until the next schedule entry starts (a might-be-at block counts as an entry), or until the player leaves and comes back to them, or until they are asked to follow again. Only then do they return to the schedule. The leaving-a-scene rule still applies, so when the hold ends while the player is with them they do not vanish; the narrator gets the overdue note instead.
 
 **Invented details.** The model will make up small facts (a scar, a sister's name, a favorite drink). With the long history gone, these must be saved or they get contradicted later. After each reply, the same flag step the map uses (`ws_flag`) lets the narrator report new facts about present NPCs; the engine stamps them as `npc_fact` on the reply. A "Character changed here" bar (Edit / Turn off / Undo) shows them, like "Map changed here".
 
@@ -175,9 +166,9 @@ A schedule is a list of entries: `{ place, activity, from?, to? }`. A stationary
 
 ### Leaving a scene
 
-This applies to schedules in general and to one-off sightings.
+This applies to every schedule entry, is at and might be at.
 
-- **The engine never removes an NPC who is in the current scene.** When their schedule (or their sighting hour) says they're due elsewhere, the narrator gets a one-line note instead, e.g. `Hesk is due at the forge (work)`.
+- **The engine never removes an NPC who is in the current scene.** When their schedule (or the end of a might-be-at block) says they're due elsewhere, the narrator gets a one-line note instead, e.g. `Hesk is due at the forge (work)`.
 - **The note escalates** the more overdue she is: `Hesk is due at the forge (work)` becomes `Hesk is an hour late for work`, so a narrator can't keep her lingering forever. Persuasion or a `staying` stamp has to keep up with it (staying more than a little while past her time takes fresh persuasion).
 - **Importance.** Schedule entries take an optional `importance` field: `low` / `normal` / `high` (text keys, lenient matching). If it's left out, the model judges from the activity: "go to work" is insistent, "chill at home" is easygoing.
 - **The narrator decides** whether the NPC lingers, mentions needing to go, or excuses herself. Leaving is a stamp (`npc_leave`) on that reply, so deleting or swiping it brings her back.
@@ -203,11 +194,11 @@ While that entry is in force the person is off the map: never present in any sce
 { "wickerton": { "name": "Wickerton", "about": "a farming town three hours' ride north of Riverton", "lore": "optional" } }
 ```
 
-The narrator gets `about` when it is relevant (an absent line, a rejected find). Optional `lore` is served exactly like place lore: only when the narrator asks with `[ws_flag: lore | Wickerton]` or the player writes `[lore] Wickerton`. If a real region with the same id is later built, references resolve onto the map and nothing is rewritten. Travel time between a stub and the map is out of scope (the future off-screen-life phase).
+The narrator gets `about` when it is relevant (an absent line, a rejected find). Optional `lore` is served exactly like place lore: only when the player writes `[lore] Wickerton` (or a `[ws_flag: lore | Wickerton]` tag is pasted into a reply); the narrator is not told to write tags. If a real region with the same id is later built, references resolve onto the map and nothing is rewritten. Travel time between a stub and the map is out of scope (the future off-screen-life phase).
 
-**Finding someone.** The narrator's `[ws_flag: found | Name]` and the player's `[found] Name` (or `/ws-found Name`) put that person in the current room for their current placeless entry. It is accepted only when `near` is a map address and the current room is within it. A stub or plain-text `near` is rejected, with the reason shown on the message. The stamp is keyed to the entry's `where` label, not to one entry: every entry of that person with the same `where` then resolves to that room in this chat. The message shows a notice with Edit and Undo, the same shape as a discovered room. In the Cast editor, **Make this permanent** writes that room into the base schedule as a normal placed entry. Deleting the message undoes the find.
+**Finding someone.** The after-reply tracker's found proposal and the player's `[found] Name` (or `/ws-found Name`) put that person in the current room for their current placeless entry. It is accepted only when `near` is a map address and the current room is within it. A stub or plain-text `near` is rejected, with the reason shown on the message. The stamp is keyed to the entry's `where` label, not to one entry: every entry of that person with the same `where` then resolves to that room in this chat. The message shows a notice with Edit and Undo, the same shape as a discovered room. In the Cast editor, **Make this permanent** writes that room into the base schedule as a normal placed entry. Deleting the message undoes the find.
 
-The narrator is told (in `narration.offmap_found`, added under the people list whenever it names someone off the map) that if it narrates such a person as actually present with the characters it must flag found for them in that same reply, and otherwise must not narrate them present. This is the model's judgment only; the engine never scans the text for names. A room discovered during play inside the near place counts as within it (addresses under the near subregion).
+The narrator is told (in `narration.offmap_found`, added under the people list whenever it names someone off the map) that anyone listed as elsewhere is not with the characters unless they have actually come here; when the story brings such a person in, the after-reply tracker proposes the find. This is the models' judgment only; the engine never scans the text for names. A room discovered during play inside the near place counts as within it (addresses under the near subregion).
 
 A later **cast import tool / schedule wizard** helps adapt broken entries to a new world.
 
@@ -219,11 +210,11 @@ Real movement over time comes in phase 4, using the game clock (`clockAt`) to pi
 
 ## Waiting until (to-do, likely alongside phase 1)
 
-Waiting until an NPC shows up is the natural partner to sightings and schedules.
+Waiting until an NPC shows up is the natural partner to might-be-at blocks and schedules.
 
 - **`[wait]` always requires a duration or an end time.** A wait with no time gets a note asking how long (nothing is stamped).
 - **Optional end conditions can only end it early,** never extend it:
-  - **a specific NPC shows up:** step hour by hour through the deterministic sighting/schedule rolls (the same seeded rolls as normal play, so the result matches what would have happened by walking in at that hour);
+  - **a specific NPC shows up:** step hour by hour through the deterministic might-be-at/schedule rolls (the same seeded rolls as normal play, so the result matches what would have happened by walking in at that hour);
   - **a weather condition** (seeded, same hour-by-hour loop);
   - **a temporary change ends:** `lasts` expiries are known exactly, so jump straight to them.
 - **Interruptions stop it early too,** such as an expiry or an arrival, as the wait already does today.
@@ -305,10 +296,10 @@ A stamp (on the message where it happened, per swipe, next to location and patch
 4. **Memory cap:** how many highlights per NPC before older ones are summarized, and who summarizes?
 5. **Depth decision:** a separate pick-one question, or folded into the existing intent call to save a round trip?
 6. **Export conflicts (decided):** a person who already came from a cast file with the same id is **Update &lt;name&gt;**: a diff, then write that file in place on confirm. A person created in play never overwrites. A genuine clash with a different NPC (the id is taken) gets `id-2`, `id-3`, and so on. Play-created ids are name slugs.
-7. **Following and stay (decided):** told to stay or wait, they hold the place they are in. They do not go back to the schedule until the next schedule entry starts, a one-off's sighting hour ends, the player leaves and comes back, or they are asked to follow again. The leaving-a-scene rule still applies when the hold ends. They do not drift (that is phase 4).
+7. **Following and stay (answered):** told to stay or wait, they hold the place they are in. They do not go back to the schedule until the next schedule entry starts (a might-be-at block counts), the player leaves and comes back, or they are asked to follow again. The leaving-a-scene rule still applies when the hold ends. They do not drift (that is phase 4).
 8. **Expired-place fallback:** if every entry is expired, is the NPC off-map, or placed at the nearest surviving neighbour like the player resolver does?
-9. **Sighting area and curve:** what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the player isn't at the sighting place (e.g. asking around for her elsewhere)?
-10. **Sighting place expired:** if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
+9. **Sighting area and curve (answered: no sighting):** replaced by might-be-at blocks; an area option picks one public room, the odds are written per block, and there is no by-name roll. Was: what counts as "in that area" (the same room, or the same subregion?) when the chance applies at all? Are the hourly chances (~50/20/5/2%) fixed, or per-NPC/creator settings? And should the by-name roll also apply when the player isn't at the sighting place (e.g. asking around for her elsewhere)?
+10. **Sighting place expired (answered: no sighting):** might options resolve like any schedule place (redirects, then the live map); an option not on the map yet is away until it exists. Was: if a one-off's sighting place is merged or removed, follow redirects like schedules, and if it's truly gone, does the NPC become "by name only"?
 11. **Phase 4 schedule check:** run the check when the map change is made (one call per change) or lazily the first time an affected NPC would appear?
 
 ### Activity log
@@ -345,8 +336,8 @@ A cast file carries:
    - the player looks at them ("I look at Hesk", `[look] Hesk`), or
    - they are the focus, or
    - they are following the player, or
-   - the narrator flagged them (`ws_flag npc`) in the last 3 replies.
-3. **Topical**: adds `history`. This happens only when a lore request in the current scene names them (`[lore] Hesk`, or the narrator's `[ws_flag: lore | Hesk]`). The `ws_flag` tool's lore action also returns that history.
+   - the after-reply tracker flagged them in the last 3 replies.
+3. **Topical**: adds `history`. This happens only when a lore request in the current scene names them (the player's `[lore] Hesk`, or a pasted `[ws_flag: lore | Hesk]` tag).
 
 The focus slice still adds facts, the full memory and, at deep focus, secrets and relationships.
 

@@ -1,7 +1,7 @@
 // The cast browser and editor's data side (pure, no DOM): the list (cast files plus people created in play), search and
 // filters, the editor form <-> cast record, inline validation, the in-play view's rows, and the map's NPC markers.
 // The server validates again on save (plugin/npc.mjs validateRecord); these checks are for showing problems inline.
-import { NPC_ID, authorRecord, isNowhere, mightTable, parseMightOption } from '../shared/npc.mjs';
+import { NPC_ID, authorRecord, isNowhere, mightTable, normName, parseHm, parseMightOption, windowsOverlap } from '../shared/npc.mjs';
 import * as C from '../shared/cards.mjs';
 export const DISPOSITIONS = ['hostile', 'unfriendly', 'indifferent', 'friendly', 'helpful'];
 export const IMPORTANCE = ['low', 'normal', 'high'];
@@ -103,14 +103,80 @@ export function formFromRecord(rec = null) {
         facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], memory: Array.isArray(raw.memory) ? raw.memory.map(x => (typeof x === 'string' ? x : x?.note ?? '')) : [],
         disposition: s(d.value) || '', reason: s(d.reason),
         others: Object.fromEntries(Object.entries(raw.disposition ?? {}).filter(([k]) => k !== 'player')),
-        // A might-be-at row is read-only here: it is carried through as written (editing it comes later).
-        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => (Array.isArray(e?.might) ? { mightRow: writtenMight(e) } : {
-            place: s(e?.place), offmap: !s(e?.place) && !!(s(e?.activity) || s(e?.where) || s(e?.near)),
+        // Each row is Is at (kind 'at') or Might be at (kind 'might'). A might row keeps the entry as written (`authored`), so
+        // saving a row nobody changed writes it back exactly.
+        schedule: (Array.isArray(raw.schedule) ? raw.schedule : []).map(e => (Array.isArray(e?.might) ? mightFormRow(writtenMight(e)) : {
+            kind: 'at', place: s(e?.place), offmap: !s(e?.place) && !!(s(e?.activity) || s(e?.where) || s(e?.near)),
             activity: s(e?.activity), where: s(e?.where), near: s(e?.near), from: s(e?.from), to: s(e?.to), importance: s(e?.importance),
         })),
     };
 }
-export function recordFromForm(f) {
+/** A might-be-at form row from an entry as written: options as one comma-separated line ("Market Lane, nowhere(80)"). */
+export function mightFormRow(m) {
+    const list = Array.isArray(m?.might) ? m.might.map(String) : [];
+    return { kind: 'might', options: list.join(', '), activity: s(m?.activity), from: s(m?.from), to: s(m?.to), wandering: m?.wandering === true,
+        importance: s(m?.importance), authored: JSON.parse(JSON.stringify(m ?? {})) };
+}
+/** Turn a row to the other kind, keeping what carries over (activity, times, importance; the place becomes the one option). */
+export function toggleRowKind(e, kind, resolve = null) {
+    if ((e.kind ?? 'at') === kind) return e;
+    if (kind === 'might') return { kind: 'might', options: e.offmap ? s(e.where) : s(e.place), activity: s(e.activity), from: s(e.from), to: s(e.to), wandering: false, importance: s(e.importance) };
+    const first = splitOptions(e.options)[0];
+    const hit = first?.text && !isNowhere(first.text) ? (resolve ? resolve(first.text) : { address: first.text, kind: first.text.includes(':') ? 'room' : 'text' }) : null;
+    const place = hit && hit.kind === 'room' ? hit.address : '';
+    return { kind: 'at', place, offmap: !place, activity: s(e.activity), where: place || !first || isNowhere(first.text) ? '' : first.text, near: '', from: s(e.from), to: s(e.to), importance: s(e.importance) };
+}
+/** "Market Lane, the store(20), nowhere(80)" -> [{raw, text, pct}] (a token that is not "words (N)" has text null). */
+export function splitOptions(line) {
+    return String(line ?? '').split(',').map(x => x.trim()).filter(Boolean).map(raw => { const o = parseMightOption(raw); return { raw, text: o?.text ?? null, pct: o?.pct ?? null }; });
+}
+/**
+ * The lenient place matcher for typed might options, from the /cast answer: an address as is; else a room, subregion,
+ * region or stub whose name matches (case and punctuation ignored); a name two places share is ambiguous; anything else
+ * is plain off-map words. -> (text) => {address, kind: 'room'|'area'|'stub'|'text'|'unknown'|'ambiguous', matches?}
+ */
+export function placeResolver(data) {
+    const rooms = new Set(data?.places ?? []), areas = new Set([...(data?.subs ?? []), ...(data?.regions ?? [])]);
+    const stubs = new Set((data?.elsewhere ?? []).map(x => x.id));
+    const byName = new Map();
+    const add = (name, address) => { const k = normName(name); if (!k) return; const l = byName.get(k) ?? []; if (!l.includes(address)) l.push(address); byName.set(k, l); };
+    for (const [a, n] of Object.entries(data?.place_labels ?? {})) add(n, a);
+    for (const x of data?.elsewhere ?? []) { add(x.name, x.id); add(x.id, x.id); }
+    const kindOf = a => (rooms.has(a) ? 'room' : areas.has(a) ? 'area' : stubs.has(a) ? 'stub' : null);
+    const fn = text => {
+        const t = String(text ?? '').trim();
+        if (kindOf(t)) return { address: t, kind: kindOf(t) };
+        const hit = byName.get(normName(t)) ?? [];
+        if (hit.length === 1) return { address: hit[0], kind: kindOf(hit[0]) ?? 'room' };
+        if (hit.length > 1) return { address: t, kind: 'ambiguous', matches: hit };
+        return { address: t, kind: t.includes(':') ? 'unknown' : 'text' };
+    };
+    fn.label = a => data?.place_labels?.[a] ?? (data?.elsewhere ?? []).find(x => x.id === a)?.name ?? a;
+    fn.nameUnique = a => { const n = fn.label(a); return n !== a && (byName.get(normName(n)) ?? []).length === 1; };
+    return fn;
+}
+/** A might row's options line with addresses shown by name where the name is unique (for the editor box). */
+export function mightOptionsShown(line, resolve) {
+    if (!resolve?.label) return String(line ?? '');
+    return splitOptions(line).map(o => (o.text && !isNowhere(o.text) && resolve.nameUnique(o.text) ? `${resolve.label(o.text)}${o.pct != null ? `(${o.pct})` : ''}` : o.raw)).join(', ');
+}
+/** A might form row back to an entry. An untouched row is its authored entry, unchanged; typed names become addresses. */
+function mightFromRow(e, resolve) {
+    const opts = splitOptions(e.options).map(o => {
+        if (!o.text) return o.raw;
+        const t = isNowhere(o.text) ? 'nowhere' : (resolve ? resolve(o.text).address : o.text);
+        return `${t}${o.pct != null ? `(${o.pct})` : ''}`;
+    });
+    const x = { might: opts, activity: s(e.activity), from: s(e.from), to: s(e.to) };
+    if (e.wandering) x.wandering = true;
+    if (s(e.importance)) x.importance = s(e.importance);
+    const a = e.authored;
+    if (a && JSON.stringify(a.might ?? []) === JSON.stringify(opts) && s(a.activity) === x.activity && s(a.from) === x.from && s(a.to) === x.to
+        && (a.wandering === true) === !!e.wandering && s(a.importance) === s(e.importance)) return JSON.parse(JSON.stringify(a));
+    return x;
+}
+/** `ctx.resolve`: placeResolver(...) for typed might options (names -> addresses). */
+export function recordFromForm(f, ctx = {}) {
     const out = { id: s(f.id), name: s(f.name) };
     if (s(f.unknownAs)) out.unknownAs = s(f.unknownAs);
     const aliases = String(f.aliases ?? '').split(',').map(x => x.trim()).filter(Boolean);
@@ -128,7 +194,7 @@ export function recordFromForm(f) {
     if (s(f.disposition)) disp.player = { value: s(f.disposition), ...(s(f.reason) ? { reason: s(f.reason) } : {}) };
     if (Object.keys(disp).length) out.disposition = disp;
     const sched = (f.schedule ?? []).map(e => {
-        if (e.mightRow) return JSON.parse(JSON.stringify(e.mightRow)); // unchanged
+        if (e.kind === 'might') return mightFromRow(e, ctx.resolve);
         const placed = !e.offmap && !!s(e.place);
         const x = { activity: s(e.activity) };
         if (placed) x.place = s(e.place);
@@ -141,7 +207,7 @@ export function recordFromForm(f) {
         if (s(e.importance)) x.importance = s(e.importance);
         if (x.place) { const { place, activity, ...rest } = x; return { place, activity, ...rest }; }
         return x;
-    }).filter(e => e.activity || Array.isArray(e.might));
+    }).filter(e => e.activity || (Array.isArray(e.might) && e.might.length));
     if (sched.length) out.schedule = sched;
     const deep = {};
     const secrets = (f.secrets ?? []).map(s).filter(Boolean);
@@ -164,10 +230,11 @@ export function slugFor(name, taken = new Set()) {
 }
 
 /**
- * Inline problems: {field: message} with keys like 'id', 'name', 'schedule.0.place'. A read-only might row is not checked here.
- * `places` is a Set of this world's addresses; `ids` the ids other cast files use (not this one's own).
+ * Inline problems that block saving: {field: message} with keys like 'id', 'name', 'schedule.0.place', 'schedule.1.options'.
+ * `places` is a Set of this world's addresses; `ids` the ids other cast files use (not this one's own); `resolve` the
+ * might-option matcher (placeResolver). Warnings that do not block are formWarnings.
  */
-export function formProblems(f, { places = null, ids = new Set() } = {}) {
+export function formProblems(f, { places = null, ids = new Set(), resolve = null } = {}) {
     const p = {};
     const id = s(f.id);
     if (!id) p.id = 'An id is required.';
@@ -177,7 +244,22 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
     if (!s(f.line)) p.line = 'One line about who they are is required.';
     if (s(f.disposition) && !DISPOSITIONS.includes(s(f.disposition))) p.disposition = `One of ${DISPOSITIONS.join(', ')}.`;
     (f.schedule ?? []).forEach((e, i) => {
-        if (e.mightRow) return;
+        if (e.kind === 'might') {
+            const opts = splitOptions(e.options);
+            if (!opts.length) p[`schedule.${i}.options`] = 'List where they might be, like: Market Lane, General Store, nowhere(80).';
+            else if (opts.some(o => !o.text)) p[`schedule.${i}.options`] = `Not an option: ${opts.filter(o => !o.text).map(o => o.raw).join(', ')} (a place, words, or nowhere, with an optional (percent) up to 100).`;
+            else {
+                const total = opts.reduce((a, o) => a + (o.pct ?? 0), 0);
+                const amb = resolve ? opts.filter(o => !isNowhere(o.text) && resolve(o.text).kind === 'ambiguous') : [];
+                if (total > 100) p[`schedule.${i}.options`] = `The odds add up to ${total}%, over 100.`;
+                else if (amb.length) p[`schedule.${i}.options`] = `${amb.map(o => `"${o.text}" matches ${resolve(o.text).matches.join(', ')}`).join('; ')}. Use the address.`;
+            }
+            if (!s(e.activity)) p[`schedule.${i}.activity`] = 'What are they doing when they turn up?';
+            if (!hmOk(e.from)) p[`schedule.${i}.from`] = s(e.from) ? 'A time like 10:00.' : 'A start time is required.';
+            if (!hmOk(e.to)) p[`schedule.${i}.to`] = s(e.to) ? 'A time like 13:00.' : 'An end time is required.';
+            if (s(e.importance) && !IMPORTANCE.includes(s(e.importance))) p[`schedule.${i}.importance`] = 'low, normal or high.';
+            return;
+        }
         if (e.offmap) { /* a placeless entry: off the map, place not required */ }
         else if (!s(e.place)) p[`schedule.${i}.place`] = 'Choose a place on the map, or tick Off the map.';
         else if (places && !places.has(s(e.place))) p[`schedule.${i}.place`] = `${e.place} is not in this world. Choose another place.`;
@@ -189,6 +271,33 @@ export function formProblems(f, { places = null, ids = new Set() } = {}) {
     (f.relationships ?? []).forEach((r, i) => { if (s(r.text) && !s(r.who)) p[`relationships.${i}.who`] = 'Who is this about?'; });
     return p;
 }
+/**
+ * Inline warnings that do not block saving (the load notes the server gives too): a might block overlapping another timed
+ * row, a might option not on the map yet, a single-word off-map option (probably a typo). {field: message}, keys 'schedule.N.warn'.
+ */
+export function formWarnings(f, { resolve = null } = {}) {
+    const w = {};
+    const rows = f.schedule ?? [];
+    const add = (i, m) => { const k = `schedule.${i}.warn`; w[k] = w[k] ? `${w[k]} ${m}` : m; };
+    rows.forEach((e, i) => {
+        if (e.kind !== 'might') return;
+        const opts = splitOptions(e.options).filter(o => o.text && !isNowhere(o.text));
+        if (resolve) {
+            const unknown = opts.filter(o => resolve(o.text).kind === 'unknown');
+            if (unknown.length && unknown.length === opts.length) add(i, `None of these is on the map yet (${unknown.map(o => o.text).join(', ')}): the whole block is away until one exists.`);
+            else for (const o of unknown) add(i, `${o.text} is not on the map yet: that share is away until it exists.`);
+            for (const o of opts) if (resolve(o.text).kind === 'text' && !/\s/.test(o.text)) add(i, `"${o.text}" matches no place (a single word; probably a typo), so it reads as off the map.`);
+        }
+    });
+    const timed = rows.map((e, i) => ({ e, i, a: parseHm(e.from), b: parseHm(e.to) })).filter(x => x.a != null && x.b != null && (x.e.kind === 'might' || s(x.e.activity)));
+    for (const x of timed) for (const y of timed) {
+        if (y.i <= x.i || !(x.e.kind === 'might' || y.e.kind === 'might')) continue;
+        if (windowsOverlap(x.a, x.b, y.a, y.b)) { const m = x.e.kind === 'might' ? x : y, o = m === x ? y : x; add(m.i, `Overlaps entry ${o.i + 1} (${s(o.e.from)}–${s(o.e.to)}); this might-be-at block is used there.`); }
+    }
+    return w;
+}
+/** The editor help for might-be-at rows (the authoring note). */
+export const MIGHT_HELP = 'Might be at: a time block with places and odds, like "Market Lane, General Store, nowhere(80)". A (number) is a percent; places without one split what is left of 100, and anything under 100 is nowhere. A normal block rolls once when it starts; Wandering moves them every 15 to 60 minutes. Adjacent rows each roll on their own, so their chances add up: three hourly rows at 20%, 50% and 20% give about a 70% chance of meeting them at some point in those three hours. To make someone likely across a span, write one block with the odds you want.';
 
 const KIND = { follow: 'following', stay: 'staying', might: 'turned up', schedule: 'on schedule', scene: 'here' };
 /**
@@ -383,13 +492,13 @@ export function formFromPlay(play) {
 }
 /** A cast editor form (not a play record): relationships are [{who, text}] and disposition is a string. */
 const isForm = x => !!x && Array.isArray(x.relationships) && typeof x.disposition === 'string' && Array.isArray(x.schedule);
-const scheduleJson = f => JSON.stringify(recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f?.schedule ?? [] }).schedule ?? null);
+const scheduleJson = (f, ctx = {}) => JSON.stringify(recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f?.schedule ?? [] }, ctx).schedule ?? null);
 /**
  * The stamps that make the chat match the form, diffed against the opening seed (a form) or, if given a play
  * record, against that record as it is now. Unchanged fields, including appearance the user did not edit, are not stamped.
  * Removals of facts, secrets and memories cannot be stamped; they are reported. A schedule change is one npc_schedule stamp.
  */
-export function chatStamps(playOrSeed, f) {
+export function chatStamps(playOrSeed, f, ctx = {}) {
     const base = isForm(playOrSeed) ? playOrSeed : formFromPlay(playOrSeed);
     const stamps = [], cannot = [];
     for (const [k, field] of Object.entries(FORM_FIELDS)) if (s(f[k]) !== s(base[k])) {
@@ -408,10 +517,10 @@ export function chatStamps(playOrSeed, f) {
         if (s(f.disposition)) stamps.push({ type: 'npc_disposition', who: 'player', value: s(f.disposition), reason: s(f.reason), dramatic: true });
         else cannot.push('set disposition back to unknown');
     }
-    if (scheduleJson(f) !== scheduleJson(base)) stamps.push({ type: 'npc_schedule', schedule: recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f.schedule ?? [] }).schedule ?? [] });
+    if (scheduleJson(f, ctx) !== scheduleJson(base, ctx)) stamps.push({ type: 'npc_schedule', schedule: recordFromForm({ id: 'x', name: 'x', line: 'x', schedule: f.schedule ?? [] }, ctx).schedule ?? [] });
     return { stamps, cannot };
 }
-const stampText = x => (x.type === 'npc_memory' ? `memory: ${x.note}` : x.type === 'npc_disposition' ? `toward the player: ${x.value}${x.reason ? ` (${x.reason})` : ''}` : x.type === 'npc_schedule' ? `schedule: ${(x.schedule ?? []).map(e => `${e.place || e.where || 'off the map'} — ${e.activity || ''}`).join('; ') || '(none)'}` : `${x.field === 'fact' ? 'fact' : x.field}: ${x.text}`);
+const stampText = x => (x.type === 'npc_memory' ? `memory: ${x.note}` : x.type === 'npc_disposition' ? `toward the player: ${x.value}${x.reason ? ` (${x.reason})` : ''}` : x.type === 'npc_schedule' ? `schedule: ${(x.schedule ?? []).map(e => `${Array.isArray(e.might) ? `might be at ${e.might.join(', ')}` : e.place || e.where || 'off the map'} — ${e.activity || ''}`).join('; ') || '(none)'}` : `${x.field === 'fact' ? 'fact' : x.field}: ${x.text}`);
 export const chatStampLines = stamps => stamps.map(stampText);
 
 /** Latest found room per `where` label (off stamps are ignored; a later stamp for the same label wins). */
