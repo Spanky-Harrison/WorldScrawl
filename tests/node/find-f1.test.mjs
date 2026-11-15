@@ -114,7 +114,9 @@ test('already here: a "right here" notice, nothing stamped, nothing moves; the n
     assert.equal(m.extra.worldscrawl_bracket.status, 'ok');
     await scene.prepareNpcs(m); // the turn's own pass: she turns up as usual (her roll put her here)
     assert.ok(presentIds(c).includes('bryn'));
-    assert.doesNotMatch(await factsText(blocks), /has just come in/);
+    const t = await factsText(blocks);
+    assert.doesNotMatch(t, /has just come in/);
+    assert.doesNotMatch(t, /isn't around here right now/, 'right here: no not-found line');
 });
 
 test('nowhere this block: can\'t be found, even where an option points; no stamp', async () => {
@@ -174,6 +176,7 @@ test('a room the block lists directly: she comes here, guaranteed, until the blo
     assert.ok(presentIds(c).includes('vera'));
     const text = await factsText(blocks);
     assert.match(text, /Vera has just come in\./);
+    assert.doesNotMatch(text, /isn't around here right now/, 'found: no not-found line');
     assert.doesNotMatch(text, /%|\broll|might be at|nowhere|wander|\bblock\b|segment|\[find\]/i, 'in-world facts only');
     // Who's here for the common room agrees with the cast panel.
     assert.ok(whoAt(c.chat, c.chat.length - 1, cast(), envOf(c), BAR).some(r => r.id === 'vera' && r.here));
@@ -282,4 +285,24 @@ test('unknown name and the tracker path: no saved person is a plain rejection; t
     const got = await scene.applyFound(m, ['Hesk'], 'tracker');
     assert.equal(got[0].ok, true, got[0].reason);
     assert.ok((m.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.where === 'her own room' && s.place === UP));
+});
+
+test('a turned-down [find] puts one in-world "not around" line in the narrator\'s facts (nowhere, not an option, is-at elsewhere, off the map), no reason or mechanics', async () => {
+    const line = name => `${name} isn't around here right now; the characters don't find them.`;
+    const bad = /%|\broll|might be at|nowhere|wander|\bblock\b|segment|\[find\]|schedule|option/i;
+    const cases = [['10:00', BAR, 'Nell', 'Nell'], ['10:00', BAR, 'Sol', 'Sol'], ['15:30', BAR, 'Hesk', 'The landlady'], ['10:00', BAR, 'Odo', 'Odo'], ['08:00', UP, 'Hesk', 'The landlady']];
+    for (const [time, here, who, shown] of cases) {
+        const { c, blocks } = boot({ time, here });
+        const { d, m } = await find(c, who);
+        assert.equal(d.ok, false, `${who}: ${d.reason}`);
+        await scene.prepareNpcs(m);
+        const text = await factsText(blocks);
+        const hits = text.split('\n').filter(l => /isn't around here right now; the characters/.test(l));
+        assert.deepEqual(hits, [line(shown)], `${who} at ${time}`);
+        assert.doesNotMatch(hits[0], bad);
+        assert.ok(!text.includes(d.reason), 'the reason stays on the player\'s notice');
+        reply(c, 'Nobody comes.');
+        say(c, 'I order a drink.');
+        assert.doesNotMatch(await factsText(blocks), /the characters don't find them/, `${who}: only on the turn of the [find]`);
+    }
 });
