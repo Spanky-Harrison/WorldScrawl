@@ -299,7 +299,9 @@ and a bad name shows on the card. The game expands the pattern; the narrator nev
 - **Passing through** (also the fallback): one Might be at block, 50% at the place you met, from an hour before to an
   hour after the hour you met; at home from 20:00 to 07:00 outside that block; about their own business the rest of the day.
 
-With no favorites, the spots are the area of their job (or of where you met). It works in a room made in play too (it uses
+With no favorites, the spots are the area of their job (or of where you met). If you met them during one of their
+free-time blocks somewhere the spots don't cover, that place joins that block's spots, so they can still turn up where you
+met them. A home the model gets wrong is simply off the map (a typed one must be right). It works in a room made in play too (it uses
 this chat's map). After Approve the kept "schedule" note has Edit (the same four boxes) and Undo.
 
 Two read-only views are recomputed from the chat: **What the narrator was told** (the exact `{{npcs_present}}` and

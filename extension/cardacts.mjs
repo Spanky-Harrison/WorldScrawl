@@ -288,7 +288,7 @@ function noteEdit(s, v) {
         const r = scheduleWith(s.pick, v.fields, v.dirty.filter(isScheduleBox));
         if (r.error) return { error: r.error };
         const met = s.met ?? {};
-        return { payload: { pick: r.pick, schedule: Npc.expandPattern(r.pick, { room: met.room ?? '', minutes: met.minutes ?? 0 }), about: Npc.pickSummary(r.pick, { nameOf: a => castPack()?.labels?.[a] || a, room: met.room ?? '' }) } };
+        return { payload: { pick: r.pick, schedule: Npc.expandPattern(r.pick, { room: met.room ?? '', minutes: met.minutes ?? 0 }), about: Npc.pickSummary(r.pick, { nameOf: a => castPack()?.labels?.[a] || a, room: met.room ?? '', minutes: met.minutes ?? null }) } };
     }
     const k = NOTE_KEYS[s.type], text = String(v.fields[k] ?? '').trim();
     if (!k) return { error: 'This note has nothing to edit.' };

@@ -159,5 +159,5 @@ export function scheduleView(card) {
     if (!s?.status) return scheduleFlight(card) ? { phase: 'working', text: 'Working out a schedule…' } : null;
     if (s.status === 'skipped') return null;
     if (s.status === 'failed') return { phase: 'failed', text: "Couldn't decide, so passing through", reason: s.reason ?? '' };
-    return { phase: 'ok', text: Npc.pickSummary(s.pick, { nameOf: placeName, room: s.room }) };
+    return { phase: 'ok', text: Npc.pickSummary(s.pick, { nameOf: placeName, room: s.room, minutes: s.minutes }) };
 }

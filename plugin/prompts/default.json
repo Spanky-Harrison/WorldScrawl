@@ -1871,7 +1871,7 @@
       "description": "Step 1 of 1: the daily pattern question. It gets the person, where and when they were met, the story since they showed up, and the nearest rooms and areas with their keys (private rooms marked), then places off the map.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys.",
-      "text": "Choose a daily pattern for {{name}}, met in {{place}} at {{time}}.\n{{about}}\n\nThe story since they showed up:\n{{story}}\n\nPlaces (KEY: name):\n{{place_list}}\n\nReply with JSON only.",
+      "text": "Choose a daily pattern for {{name}}, met in {{place}} at {{time}}.\n{{about}}\n\nThe story since they showed up:\n{{story}}\n\nPlaces (KEY: name):\n{{place_list}}\n\nThey were met here, in {{place}}, at {{time}}: pick a pattern that fits them being here then (at work if this is their job, otherwise in their free time; the game keeps this place among their free-time spots at that hour).\n\nReply with JSON only.",
       "placeholders": [
         {
           "name": "name"

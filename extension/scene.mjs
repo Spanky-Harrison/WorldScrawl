@@ -611,7 +611,7 @@ async function keepRememberNow(c, msg, card, id, edited) {
     // not ask a first-attitude question for someone the player has already met.
     else addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: 'indifferent', reason: 'just met' });
     if (pick) {
-        const about = Npc.pickSummary(pick, { nameOf: a => castPack()?.labels?.[a] || a, room });
+        const about = Npc.pickSummary(pick, { nameOf: a => castPack()?.labels?.[a] || a, room, minutes });
         addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: Npc.expandPattern(pick, { room, minutes }), pick, met: { room, minutes }, about });
         addNpcStamp(msg, { type: 'npc_stay', id: newId, place: room });
     } else noteCall(at, { kind: 'schedule', status: 'skipped', reason: `no room for ${got.name}, so no schedule or stay was written` });
