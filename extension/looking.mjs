@@ -6,7 +6,7 @@ import { askValid, baseReply, gen, narrativeDig, nearbyRooms } from './dig.mjs';
 import { barrierOf, barrierWord, changesOf, currentLocation, doorCandidates, doorChange, doorOverrides, ensurePrompts, isStuck, openChanges, sightOf, soundOf, stuckWhy, viewOf } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
 import { CHANGE_KEY, ctx } from './index.js';
-import { BREAK_RE, ELSEWHERE, OPEN, STAY, UNCLEAR, cleanAnswer, destLabel, discoveredTargets, displayName, engineMove, engineTravel, exitLabel, exitLabels, hereAreas, keyFor, keyWords, matchCandidates, matchKey, namedInText, nearestWaysOut, normKey, optionLines, parseIntentAnswer, parseYesNo, partyText, pickKey, previousAddress, sameName, stamp, travelCandidates, trimAnswer, words } from './movement.mjs';
+import { BREAK_RE, ELSEWHERE, OPEN, STAY, UNCLEAR, cleanAnswer, destLabel, discoveredTargets, displayName, engineMove, engineTravel, exitLabel, exitLabels, hereAreas, keyFor, keyWords, matchCandidates, matchKey, namedInText, nearestWaysOut, normKey, optionLines, parseIntentAnswer, parseYesNo, partyText, pickKey, previousAddress, sameName, stamp, stuckAttempt, travelCandidates, trimAnswer, words } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
 
 // ---- Looking and doors (the party never moves).
@@ -87,6 +87,8 @@ async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
     console.log(`[WorldScrawl] look: ${JSON.stringify(look).slice(0, 160)}`);
     return { kind: 'look', loc };
 }
+/** The "which door?" failure (typed or bracket, no clear pick among several doors). */
+export const whichDoorText = (verb, list) => `Which door? Doors you can ${verb} here: ${list.map(x => x.direction).join(', ')}.`;
 export const doorOptions = list => { const taken = new Set(); return list.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })); };
 export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: partyText(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: optionLines(doorOptions(list)) });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
@@ -96,7 +98,8 @@ async function narrativeDoor(msg, loc, list, type) {
     if (!e) {
         e = (await askValid('door', doorPickPrompt(loc, said, list, type), pickKey(doorOptions(list))))?.exit ?? null;
     }
-    if (!e) return { kind: STAY, loc };
+    // Several doors and no pick: an outright failure (the narrator must not guess a door).
+    if (!e) return { kind: 'bracket_failed', loc, verb: type === 'open_door' ? 'open' : 'close', note: whichDoorText(type === 'open_door' ? 'open' : 'close', list) };
     if (type === 'open_door' && isStuck(e)) { msg.extra.worldscrawl_door = { type: 'stuck', direction: e.direction, why: stuckWhy(e) }; return { kind: 'door', loc }; }
     msg.extra[CHANGE_KEY] = [...changesOf(msg), ...(type === 'open_door' ? openChanges(loc, e) : [doorChange(type, loc, e)])];
     msg.extra.worldscrawl_door = { type, direction: e.direction };
@@ -221,6 +224,7 @@ async function parseIntent(msg) {
     const nearArea = !dirs.includes(choice) && cands.find(x => x.label === choice && x.area);
     if (nearArea && hereAreas(loc).some(a => sameName(a.name, nearArea.name))) return { kind: 'already', loc, name: nearArea.name };
     const res = place ? await engineTravel(place.address, place.prefix ?? null) : await engineMove(choice);
+    if (!res.ok && res.stuck) { stuckAttempt(msg, res.stuck); return { kind: 'door', loc }; } // a stuck door: the attempt is narrated
     if (!res.ok) return { kind: ELSEWHERE, loc, noRoute: place?.label ?? null };
     stamp(msg, res.to, res.move);
     return { kind: 'move', loc: res.to };

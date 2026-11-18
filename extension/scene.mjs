@@ -10,7 +10,7 @@ import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, 
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
-import { LOOK_AROUND_RE, arrivalReminder, factsText } from './brackets.mjs';
+import { LOOK_AROUND_RE, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
 import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
@@ -305,13 +305,13 @@ async function setRelOn(msg, arg) {
     return { ok: true, name: n.name, state }; // name-ok: result for the inspector
 }
 /**
- * [find] / [found] (the player), the tracker's found proposal and [ws_flag: found | Name]: judgeFound decides. Already here:
+ * [find] / /ws-find (the player), the tracker's found proposal and [ws_flag: found | Name]: judgeFound decides. Already here:
  * a "right here" notice, nothing stamped. A might block whose options include this room: a whole-block appearance stamp
  * (they come here until the block ends; the narrator is told they have just come in). The tracker and flags keep the
  * placeless path (a found room for the entry's where label). Accepted and rejected both stay on the message, so the notice
  * and the activity log can say why.
  */
-async function applyFound(msg, names, source) {
+async function applyFound(msg, names, source, { slash = false } = {}) {
     const list = [...new Set((names ?? []).map(n => String(n ?? '').trim()).filter(Boolean))];
     if (!list.length) return [];
     const c = ctx();
@@ -328,20 +328,33 @@ async function applyFound(msg, names, source) {
     const decisions = [];
     for (const nm of list) {
         const n = findPerson(nm, folded);
-        if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '' }); continue; }
+        if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '', ...(slash ? { slash: true } : {}) }); continue; }
         const j = judgeFound(n, env.clock(at), env.playerAt(at), env, { at, player: source === 'bracket' });
-        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, ...(j.here ? { here: true } : {}), ...(j.moved ? { moved: true } : {}), reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '' }); // name-ok: found card (player-facing)
+        decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, ...(j.here ? { here: true } : {}), ...(j.moved ? { moved: true } : {}), reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '', ...(slash ? { slash: true } : {}) }); // name-ok: found card (player-facing)
         // Right here: nothing to stamp. A might block: a whole-block appearance stamp. An off-map entry (tracker, flag): a found room for its where label.
         if (j.here) continue;
         if (j.ok && j.appear) addNpcStamp(msg, { type: 'npc_appear', id: n.id, ...j.appear, source });
         else if (j.ok) addNpcStamp(msg, { type: 'npc_found', id: n.id, where: j.where ?? '', place: j.place, source });
     }
     msg.extra[FOUND_KEY] = [...prev, ...decisions];
-    if (source === 'bracket') msg.extra.worldscrawl_bracket = { verb: 'found', target: list.join(', '), status: decisions.every(d => d.ok) ? 'ok' : 'rejected', reason: decisions.map(d => d.reason).join(' ') };
+    if (source === 'bracket') msg.extra.worldscrawl_bracket = { verb: 'find', target: list.join(', '), status: decisions.every(d => d.ok) ? 'ok' : 'rejected', reason: decisions.map(d => d.reason).join(' ') };
     syncSwipeExtra(msg);
     await c.saveChat?.();
     try { broadcastMapState(); } catch { /* map window may not be open */ }
     return decisions;
+}
+/**
+ * [find] and /ws-find: the player's find through applyFound, classified. {outcome, reason, decision}: 'empty' (no name),
+ * 'unknown' (no saved person by that name), 'here' (right here), 'found' (they come here), 'absent' (known, not around).
+ * via 'slash': the decision is stamped slash (no reply follows it, so the narrator never gets its not-found line).
+ */
+async function runFind(msg, target, { via = 'bracket' } = {}) {
+    const name = String(target ?? '').trim();
+    if (!name) return { outcome: 'empty', reason: '[find] needs a name.' };
+    const [d] = await applyFound(msg, [name], 'bracket', { slash: via === 'slash' });
+    if (!d) return { outcome: 'empty', reason: '[find] needs a name.' };
+    const outcome = !d.id ? 'unknown' : d.here ? 'here' : d.ok ? 'found' : 'absent';
+    return { outcome, reason: d.reason, decision: d };
 }
 /** Shown names of people the player's latest line brought here with [find] (a whole-block appearance stamp) who are in the scene now. */
 function foundNow(chat, present) {
@@ -358,11 +371,49 @@ function notFoundNow(chat, cast, present) {
     const ui = lastUserIndex(chat);
     if (ui < 0) return [];
     const swipe = swipeOf(chat[ui]);
-    const ids = [...new Set((chat[ui].extra?.[FOUND_KEY] ?? []).filter(d => d && (d.swipe ?? 0) === swipe && d.source === 'bracket' && !d.ok && d.id).map(d => d.id))];
+    const ids = [...new Set((chat[ui].extra?.[FOUND_KEY] ?? []).filter(d => d && (d.swipe ?? 0) === swipe && d.source === 'bracket' && !d.slash && !d.ok && d.id).map(d => d.id))];
     if (!ids.length) return [];
     const here = new Set(present.map(p => p.id));
     const last = framesOf(chat, ui, cast ?? []).at(-1);
-    return ids.filter(id => !here.has(id) && last?.get(id)).map(id => capFirst(shownName(last.get(id))));
+    return ids.filter(id => !here.has(id) && last?.get(id)).map(id => last.get(id));
+}
+const IMPORTANCE_RANK = { high: 3, normal: 2, low: 1 };
+/** "The Drowned Rat" for a room of it (its building's label), a building's own label, or '' (castPack labels). */
+function buildingLabel(address) {
+    const labels = castPack()?.labels ?? {}, a = String(address ?? '');
+    if (!a) return '';
+    return labels[a.split('/')[0]] || labels[a] || '';
+}
+/**
+ * Who a saved person is, for the line after the not-found line: their unknownAs and a place. The place is their saved job
+ * spot (a remembered person's daily pattern), else the building of their most important "Is at" entry, else none. No " of X"
+ * when the unknownAs already names that place. '' when there is no unknownAs or the player does not know the name yet
+ * (the not-found line already calls them by the unknownAs).
+ */
+function identityRole(p) {
+    const as = String(p?.unknownAs ?? '').trim();
+    if (!as || normName(shownName(p)) !== normName(p.name ?? '')) return ''; // name-ok: only compares, the name is not sent
+    let place = '';
+    const job = String(p.job ?? '').trim();
+    if (job) place = /^offmap:/i.test(job) ? job.replace(/^offmap:\s*/i, '').trim() : buildingLabel(job);
+    if (!place) {
+        const at = (p.schedule ?? []).filter(e => e?.place).map((e, i) => ({ e, i, r: IMPORTANCE_RANK[e.importance] ?? IMPORTANCE_RANK.normal }));
+        const best = at.sort((a, b) => b.r - a.r || a.i - b.i)[0];
+        if (best) place = buildingLabel(best.e.place);
+    }
+    const lc = t => t.toLowerCase();
+    if (!place || lc(as).includes(lc(place).replace(/^the\s+/, '')) || lc(place).includes(lc(as).replace(/^the\s+/, ''))) return as;
+    return `${as} of ${place.replace(/^The\s/, 'the ')}`;
+}
+/** The not-found line and, when the player knows who they are, one identity line, for each person a [find] turned down. */
+function notFoundLines(chat, cast, present) {
+    const out = [];
+    for (const p of notFoundNow(chat, cast, present)) {
+        out.push(P('narration.npc_not_found', { party: partyText(), not_found: capFirst(shownName(p)) }));
+        const role = identityRole(p);
+        if (role) out.push(P('narration.npc_identity', { shown: capFirst(shownName(p)), role }));
+    }
+    return out;
 }
 // The gated name lines this pass put in the facts block, as rendered: the one place a real name may be (the leak check skips them).
 let gateLines = [];
@@ -382,10 +433,11 @@ function npcPromptBits(loc) {
         if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
         const found = foundNow(chat, present);
         if (found.length) absent.unshift(P('narration.npc_found', { found: found.join(', ') }));
-        for (const who of notFoundNow(chat, pack.npcs, present).reverse()) absent.unshift(P('narration.npc_not_found', { not_found: who }));
-        if (!present.length && !absent.length) return {};
+        // Not found: after the player's message (applyFacts' after-message slot), not in the people-here block.
+        const after = notFoundLines(chat, pack.npcs, present);
+        if (!present.length && !absent.length) return { after };
         if (elsewhere) absent.push(P('narration.offmap_found'));
-        if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '' };
+        if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '', after };
         const ui = lastUserIndex(chat);
         const stored = ui >= 0 ? chat[ui]?.extra?.[FOCUS_KEY] : null;
         const said = ui >= 0 ? chat[ui]?.mes ?? '' : '';
@@ -393,7 +445,7 @@ function npcPromptBits(loc) {
         const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
         const gate = p => { gateLines.push(P('narration.name_gate', { shown: shownName(p), name: p.name })); return P('narration.name_gate', { shown: shownName(p), name: `{{npc!:${p.id}}}` }); }; // name-ok: the gated line itself
         const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc, gate });
-        return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}) };
+        return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}), after };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
 const DRAMATIC_RE = /\b(attacks?|stab(?:s|bed)?|rescues?|sav(?:e|es|ed)|kills?)\b/i;
@@ -480,13 +532,14 @@ async function offerRemember(msg, name) {
     const chat = ctx().chat ?? [];
     let who = String(name ?? '').trim();
     if (!who) who = flaggedInScene(chat, chat.length - 1)[0]?.name ?? ''; // bare [remember]: the most recently flagged unsaved person
-    if (!who) { toastr.info('WorldScrawl: say who to remember, e.g. /ws-npc Maren'); return; }
+    if (!who) { toastr.info('WorldScrawl: say who to remember, e.g. /ws-npc Maren'); return { ok: false, reason: 'Say who to remember, e.g. [remember] Maren (nobody was flagged to remember).' }; }
     const known = knownNpcNames(chat);
-    if (known.some(n => normName(n) === normName(who) || nameIn(who, n))) { toastr.info(`WorldScrawl: ${who} is already remembered.`); return; }
+    if (known.some(n => normName(n) === normName(who) || nameIn(who, n))) { toastr.info(`WorldScrawl: ${who} is already remembered.`); return { ok: false, reason: `${who} is already remembered.` }; }
     msg.extra = msg.extra ?? {};
     msg.extra[REMEMBER_KEY] = { swipe: swipeOf(msg), name: who, status: 'review', nid: newNoticeId('remember') };
     await ctx().saveChat?.();
     renderPatchCards();
+    return { ok: true, name: who };
 }
 /** Approve on the Remember card. `edited` = {card}: the card exactly as the player typed it (Approve edited). */
 async function keepRemember(id, edited = null) {
@@ -513,12 +566,12 @@ function rememberWith(got, values = {}, changed = []) {
         disposition = value ? { value, reason: String(m[2] ?? '').trim() } : null;
     }
     const out = readRememberAnswer({ name: v.name, unknownAs: got.unknownAs ?? '', personality: { summary: v.line, manner: v.manner, speech: v.voice }, appearance: { summary: v.looks, body: v.body, outfit: v.outfit },
-        history: v.history, facts: v.facts.split('\n').map(x => x.trim()).filter(Boolean), invented: C.inventedAfter(got, keys), disposition });
+        history: v.history, facts: v.facts.split('\n').map(x => x.trim()).filter(Boolean), memory: String(v.memory ?? '').split('\n').map(x => x.trim()).filter(Boolean), invented: C.inventedAfter(got, keys), disposition });
     if (!out) return { error: 'A remembered person needs a name and a line.' };
     if (!disposition) delete out.disposition;
     return { got: out };
 }
-const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] };
+const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], memory: [], invented: [] };
 /** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
 /** The story since `name` showed up, up to message `id` (the Remember read-back excerpt, at most 6000 characters). */
 function rememberStory(chat, id, name) {
@@ -535,7 +588,7 @@ async function askRemember(id, name, { prefetch = false, hint = '', keep = null 
     const kind = prefetch ? 'remember (prefetch)' : 'remember';
     let got = null;
     for (let t = 0; t < 2 && !got; t++) {
-        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json') }), responseLength: 900 }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
+        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), memory_rules: P('npc.memory_rules') }), responseLength: 900 }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
         if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
     }
     if (got && keep) got = rememberWith(got, keep, Object.keys(keep)).got ?? got; // what the player typed stays exactly
@@ -610,6 +663,8 @@ async function keepRememberNow(c, msg, card, id, edited) {
     // No attitude in the answer: the first-meeting rule (unknown becomes indifferent, "just met"), so the next reply does
     // not ask a first-attitude question for someone the player has already met.
     else addNpcStamp(msg, { type: 'npc_disposition', id: newId, who: PLAYER, value: 'indifferent', reason: 'just met' });
+    // What they already remember from the story: the same npc_memory note the tracker writes (editable and deletable as one).
+    for (const note of (got.memory ?? []).slice(0, Npc.MEMORY_CAP)) addNpcStamp(msg, { type: 'npc_memory', id: newId, note });
     if (pick) {
         const about = Npc.pickSummary(pick, { nameOf: a => castPack()?.labels?.[a] || a, room, minutes });
         addNpcStamp(msg, { type: 'npc_schedule', id: newId, schedule: Npc.expandPattern(pick, { room, minutes }), pick, met: { room, minutes }, about });
@@ -623,6 +678,7 @@ async function keepRememberNow(c, msg, card, id, edited) {
     await c.saveChat?.();
     await applyFacts();
     renderPatchCards();
+    broadcastMapState(); // the Cast pane and the map window list the new person without a refresh
 }
 async function discardRemember(id) {
     const c = ctx(), msg = c.chat?.[id], card = msg?.extra?.[REMEMBER_KEY];
@@ -802,8 +858,10 @@ async function applyFacts({ carry = false, type = 'normal' } = {}) {
         await loadCalendar();
         const d = gameDate();
         const moveTools = toolsOn();
-        text = factsText(loc, move, moveTools, { date: d ? calendarLib.describeDate(d) : '', weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) });
-        reminder = arrivalReminder(loc, move);
+        const facts = { date: d ? calendarLib.describeDate(d) : '', weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
+        text = factsText(loc, move, moveTools, facts);
+        // After the player's message, in this order: where the turn ends, a failed attempt's result, then who was not found.
+        reminder = [arrivalReminder(loc, move), ...attemptLines(loc, move, facts), ...(facts.after ?? [])].filter(Boolean).join('\n');
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { if (carry) ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
         // A reply that told an expiry, written again (swipe, regenerate, continue): the line from its host, no new run.
@@ -1094,4 +1152,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, rememberStory, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, runFind, rememberStory, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

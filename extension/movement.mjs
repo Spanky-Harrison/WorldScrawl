@@ -10,7 +10,9 @@ import { DEFAULTS, MOVE_KEY, ctx, engineBusy, goTarget, revealedAddresses, setti
 import { mapCtx, relocateFrom } from './patches.mjs';
 import { castPack } from './scene.mjs';
 
-const lastUserIndex = chat => { for (let i = chat.length - 1; i >= 0; i--) if (chat[i]?.is_user && !chat[i]?.is_system) return i; return -1; };
+/** The player's latest line. A command WorldScrawl hid (/hide, flagged worldscrawl_cmd) still counts: it is the player's line
+ *  and its stamps are this turn's; a line the player hid by hand does not. */
+const lastUserIndex = chat => { for (let i = chat.length - 1; i >= 0; i--) { const m = chat[i]; if (m?.is_user && (!m.is_system || m.extra?.worldscrawl_cmd)) return i; } return -1; };
 
 function stamp(msg, loc, move) {
     msg.extra = msg.extra ?? {};
@@ -19,11 +21,18 @@ function stamp(msg, loc, move) {
     if (move) msg.extra[MOVE_KEY] = move;
 }
 
+/** A move into a stuck door (engineMove's `stuck`): no move, no time; the attempt is narrated (narration.door_stuck_move). */
+function stuckAttempt(msg, stuck) {
+    msg.extra = msg.extra ?? {};
+    msg.extra.worldscrawl_door = { type: 'stuck', direction: stuck.direction, why: stuckWhy(stuck), attempt: 'move' };
+}
+
 /** Move through an exit of the current location. Returns {ok, to, move} or {ok:false, error, valid}. */
 async function engineMove(direction) {
     const from = await currentLocation();
     const exit = from.exits.find(e => e.direction.toLowerCase() === String(direction).trim().toLowerCase());
-    if (exit && isStuck(exit)) return { ok: false, error: `The ${exit.direction} ${stuckWhy(exit)}.`, valid: from.exits.filter(e => !isStuck(e)).map(e => e.direction) };
+    // A stuck door (locked, blocked, barred) is reported with the exit: the caller narrates the attempt instead of refusing it.
+    if (exit && isStuck(exit)) return { ok: false, stuck: exit, error: `The ${exit.direction} ${stuckWhy(exit)}.`, valid: from.exits.filter(e => !isStuck(e)).map(e => e.direction) };
     const r = await api('/move', { method: 'POST', body: JSON.stringify({ from: from.address, direction: String(direction).trim(), ...mapCtx() }) });
     if (!r.ok) {
         const d = r.body?.detail ?? {};
@@ -491,4 +500,4 @@ export function cleanAnswer(answer) {
 export const parseIntentAnswer = (answer, options) => parseChoice(cleanAnswer(answer), [...options, STAY, ELSEWHERE, UNCLEAR]);
 export const parseYesNo = answer => parseChoice(cleanAnswer(answer), ['yes', 'no']);
 
-export { chatAddresses, discoveredPlaces, discoveredTargets, doorFetched, doorInfo, engineMove, engineTravel, goAction, hereAreas, keyWords, lastUserIndex, nearestWaysOut, revealedDoors, sameName, stamp, stoodInAddresses, travelCandidates, words };
+export { chatAddresses, discoveredPlaces, discoveredTargets, doorFetched, doorInfo, engineMove, stuckAttempt, engineTravel, goAction, hereAreas, keyWords, lastUserIndex, nearestWaysOut, revealedDoors, sameName, stamp, stoodInAddresses, travelCandidates, words };

@@ -46,8 +46,13 @@ export async function modelWait(amount, cal = null, lib = calendarLib) {
     } catch (e) { console.warn('[WorldScrawl] wait amount', e.message); }
     return null;
 }
-/** Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped. */
-export async function planWait(args, sleep = false, reason = '') {
+/**
+ * Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped.
+ * An "until" time today that is right now: from the player ([wait], /ws-wait, the Wait menu, Approve edited) it is an error
+ * (same minute; one minute ahead works, an earlier time means tomorrow). From the narrator (options.narrator: the tracker and
+ * the wait tags) a time up to NEAR_NOW behind means it is already that time: {seconds: 0, passed: true} (dropped as short).
+ */
+export async function planWait(args, sleep = false, reason = '', { narrator = false } = {}) {
     if (!(await loadCalendar())) return { error: 'the game clock is unavailable' };
     const t = worldTimes.get(activeWorld || defaultWorldId), cal = t?.calendar ?? null;
     args = String(args ?? '').trim();
@@ -61,7 +66,14 @@ export async function planWait(args, sleep = false, reason = '') {
     let seconds = p.seconds;
     if (p.until) {
         let sun = null; try { sun = sunFor(await currentLocation()); } catch {}
-        try { seconds = calendarLib.untilSeconds(now, p.until, t?.start_date ?? null, cal, sun); } catch (e) { return { error: e.message }; }
+        const hhmm = () => { try { const d = calendarLib.dateAt(now, t?.start_date ?? null, cal); return `${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}`; } catch { return p.until; } };
+        try {
+            if (narrator) {
+                const behind = calendarLib.untilBehind(now, p.until, t?.start_date ?? null, cal, sun);
+                if (behind != null && behind <= calendarLib.NEAR_NOW) return { seconds: 0, passed: true, sleep, until: p.until, label: `no time (already ${hhmm()})`, afterText: '', reason: waitReason(reason) };
+            } else if (calendarLib.untilNow(now, p.until, t?.start_date ?? null, cal, sun)) return { error: `it is already ${hhmm()}; say how long or a later time` };
+            seconds = calendarLib.untilSeconds(now, p.until, t?.start_date ?? null, cal, sun);
+        } catch (e) { return { error: e.message }; }
     }
     const dur = calendarLib.formatDuration(seconds);
     const label = `${sleep ? 'slept' : 'waited'} ${dur}${p.until ? ` (until ${p.until})` : ''}`;
@@ -258,9 +270,11 @@ function personNoteEl(msg, id, s, who) {
     const pending = s.pending === true && !s.off;
     let fields = [], rows = [], invented = '';
     if (s.type === 'npc_create') {
-        if (editing) { const v = C.rememberValues(s); fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` })); }
-        if (!s.off) rows = [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']].filter(([k]) => s[k]).map(([k, label]) => ({ field: k, label, before: '', after: s[k] }));
-        if (!s.off && s.invented?.length) invented = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it here (Edit) before you export.`;
+        // Memory is not edited here: Approve wrote it as separate npc_memory notes, edited as such.
+        if (editing) { const v = C.rememberValues(s); fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts' && k !== 'memory').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` })); }
+        // Kept: title and buttons only, like the other kept cards; the rows and the made-up note show while Edit is open.
+        if (!s.off && editing) rows = [['looks', 'Looks'], ['body', 'Body'], ['outfit', 'Wearing'], ['history', 'History']].filter(([k]) => s[k]).map(([k, label]) => ({ field: k, label, before: '', after: s[k] }));
+        if (!s.off && editing && s.invented?.length) invented = `Made up to fill gaps (not in the story): ${s.invented.join('; ')}. Change any of it here (Edit) before you export.`;
     } else if (s.type === 'npc_schedule' && s.pick && editing) fields = scheduleFields(s.pick); // a remembered person's daily pattern: Pattern / Job / Home / Favorites
     else if (NOTE_FIELD[s.type] && editing) { const [k, label] = NOTE_FIELD[s.type]; fields = [{ key: k, label, value: s[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
     if (pending) rows = [{ field: 'text', label: 'Fact', before: '', after: s.text ?? '' }];
@@ -585,6 +599,7 @@ export function renderPatchCards() {
         }
         for (const s of npcStamps) if (s.type === 'npc_found') card.append(foundEl(msg, id, s, npcNames.get(s.id) || s.id, foundNotes));
         for (const fnd of foundNotes) {
+            if (!fnd.ok && msg.extra?.worldscrawl_cmd?.failed) continue; // a failed [find] command: its notice already says why
             // [find]: right here (nothing changed), found (they come here for the rest of the block), or couldn't find them.
             const d = !fnd.ok ? line(`Couldn't find ${fnd.name || 'them'}: ${fnd.reason}`) : (fnd.here && fnd.source === 'bracket') || fnd.moved ? line(fnd.reason) : null;
             if (!d) continue; // a placeless find draws its own card above; the tracker's "right here" says nothing

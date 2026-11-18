@@ -94,7 +94,7 @@ export function trackerScrap({ placeName = '', displayName = '', placeDescriptio
     ].join('\n');
 }
 export const trackerSys = () => P('npc.tracker_system');
-export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000) });
+export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000), memory_rules: P('npc.memory_rules') });
 
 /** A why that only restates that something was updated ("door status updated", "changed"). */
 const STATUS_WHY_RE = /^(?:[\w-]+\s+){0,2}(?:status|state)?\s*(?:updated|changed)\.?$/i;

@@ -251,7 +251,7 @@ async function applyProposedWait(id, w, source = '') {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg || !w) return;
     const what = narratorWaitAction(c.chat.slice(0, id), w, !!settings().autoKeepWaits);
-    if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `${what}${w.reason ? `; why: ${w.reason}` : ''}` }); return; }
+    if (what !== 'card' && what !== 'keep') { console.log(`[WorldScrawl] narrator wait ignored (${what}): ${w.label}`); noteCall(id, { kind: `narrator wait ${w.label}`, status: 'skipped', reason: `${w.passed ? w.label.replace(/^no time \((.*)\)$/, '$1') : what}${w.reason ? `; why: ${w.reason}` : ''}` }); return; }
     if (what === 'keep') {
         noteCall(id, { kind: `narrator wait ${w.label}`, status: 'ok', reason: `kept (Auto-keep waits); why: ${w.reason || '(no reason given)'}` });
         stampWait(msg, w);
@@ -404,7 +404,7 @@ export async function applyTrackerResult(id, parsed) {
         const said = calendarLib?.untilClockIn?.(playerLineBefore(c.chat, id)) ?? null;
         if (said && (gated.wait.until || '').trim() !== said) noteCall(id, { kind: 'tracker wait', status: 'ok', reason: `until ${said} from the player's line (the tracker read ${gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration})` });
         const args = said ? `until ${said}` : gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
-        const w = await planWait(args, gated.wait.sleep, gated.wait.reason);
+        const w = await planWait(args, gated.wait.sleep, gated.wait.reason, { narrator: true });
         if (w.error) noteCall(id, { kind: 'tracker wait', status: 'failed', reason: w.error });
         else await applyProposedWait(id, w, TRACKER_SOURCE);
     }
@@ -452,6 +452,7 @@ async function trackReply(id) {
     const genNo = bumpTracker(msg);
     const swipe = swipeOf(msg), story = msg.mes ?? '';
     let status = null; // what the marker ends on (null: skipped or stale, nothing shown for this read)
+    let personChanged = false;
     try {
         await ensurePrompts();
         let loc = null;
@@ -472,7 +473,9 @@ async function trackReply(id) {
         const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
+        const before = (msg.extra?.[NPC_KEY] ?? []).length;
         await applyTrackerResult(id, parsed);
+        personChanged = (msg.extra?.[NPC_KEY] ?? []).length !== before; // a person stamp landed: the Cast pane needs the new state
         if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = hasTrackerCard(msg) ? 'carded' : 'tracked';
     } catch (e) {
         console.warn('[WorldScrawl] tracker', e?.message || e);
@@ -482,6 +485,7 @@ async function trackReply(id) {
         markTracked(msg, genNo, status);
         if (status) { syncSwipeExtra(msg); try { await ctx().saveChat?.(); } catch (e) { console.warn('[WorldScrawl] save', e?.message || e); } }
         renderPatchCards();
+        if (personChanged) try { broadcastMapState(); } catch { /* map window may not be open */ } // debounced: one post per tick
     }
 }
 /** A swipe drops the tracker stamps of the story just left, then reads the swipe now showing. A swipe that is still
@@ -567,7 +571,7 @@ export async function onReplyForFlags(id) {
         const kind = hint.trim().toLowerCase();
         emitted.push(`ws_flag ${kind}`);
         if ((kind === 'wait' || kind === 'sleep') && !pendingWait) {
-            const tg = parseWaitTag(rest.join('|')); const w = await planWait(tg.args, kind === 'sleep' || tg.sleep, tg.reason);
+            const tg = parseWaitTag(rest.join('|')); const w = await planWait(tg.args, kind === 'sleep' || tg.sleep, tg.reason, { narrator: true });
             if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: `ws_flag ${kind}`, status: 'failed', reason: w.error }); }
         } else if (kind === 'discover') flag ??= { kind: 'discover', hint: '', note: rest.join('|').trim(), source: 'tag' };
         else flag ??= { hint: rest.length ? hint.trim() : '', note: (rest.length ? rest.join('|') : hint).trim(), source: 'tag' };
@@ -579,7 +583,7 @@ export async function onReplyForFlags(id) {
         msg.mes = msg.mes.replace(WAIT_TAG, '').trimEnd();
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
-        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep, tg.reason); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
+        if (!pendingWait) { const tg = parseWaitTag(wt[1]); const w = await planWait(tg.args, tg.sleep, tg.reason, { narrator: true }); if (!w.error) pendingWait = w; else { console.warn('[WorldScrawl] wait tag:', w.error); noteCall(id, { kind: 'wait tag', status: 'failed', reason: w.error }); } }
         await c.saveChat?.();
     }
     if (pendingWait) { const w = pendingWait; pendingWait = null; await applyProposedWait(id, w); }

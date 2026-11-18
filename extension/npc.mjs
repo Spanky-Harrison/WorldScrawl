@@ -89,6 +89,8 @@ export function claimWarnings(npc, stamps) {
 
 const DAY_MINUTES = 1440;
 
+/** Remember's memory lines: one short line each (240, like an npc_memory stamp), no empty or repeated lines, at most MEMORY_CAP. */
+const memoryList = v => (Array.isArray(v) ? [...new Set(v.map(x => (typeof x === 'string' ? x.trim().slice(0, 240).trim() : '')).filter(Boolean))].slice(0, MEMORY_CAP) : []);
 const cleanList = (v, cap) => (Array.isArray(v) ? v.map(x => (typeof x === 'string' ? x.trim().slice(0, 200) : '')).filter(Boolean).slice(0, cap) : []);
 
 const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
@@ -308,8 +310,7 @@ export function judgeFound(npc, clock, room, env, { at = null, player = true } =
         if (now && now === room) return { ok: true, here: true, where: '', place: room, reason: `${name} is right here.`, detail };
         if (!now) return { ok: false, where: '', reason: `${name} is nowhere to be found right now.`, detail };
         if (!(sched.entry.options ?? []).some(o => optionHas(o, room, env))) return { ok: false, where: '', reason: `${name} wouldn't be around here right now.`, detail };
-        const until = hhmmOf(((sched.blockEnd % dayOf(env)) + dayOf(env)) % dayOf(env));
-        return { ok: true, moved: true, where: '', place: room, appear: { place: room, blockStart: sched.blockStart, whole: true }, reason: `Found: ${name} comes here, until ${until}.`, detail };
+        return { ok: true, moved: true, where: '', place: room, appear: { place: room, blockStart: sched.blockStart, whole: true }, reason: `Found: ${name} comes here.`, detail };
     }
     const placeless = sched.offmap || sched.how === 'found';
     if (player || !placeless) {
@@ -521,6 +522,7 @@ function applyStamp(state, s, index, elapsed = null) {
     }
     if (s.type === 'npc_schedule') {
         if (!Array.isArray(s.schedule)) return;
+        n.job = str(s.pick?.job, 200) ?? ''; // the remembered person's job spot (a room, or "offmap: ..."): who they are, for the identity line
         n.schedule = s.schedule.filter(e => e && typeof e === 'object').map(e => {
             if (Array.isArray(e.might)) return readMightEntry(e).entry; // shared with the server's validateEntry
             const activity = str(e.activity, 200) ?? '';
@@ -1442,7 +1444,7 @@ export function takeNpcTags(text) {
 
 /**
  * JSON from the remember question: {name, unknownAs, personality: {summary, manner, speech}, appearance: {summary, body,
- * outfit}, history, disposition: {value, reason}, facts: [], invented: []}. Name and personality.summary are required.
+ * outfit}, history, disposition: {value, reason}, facts: [], memory: [], invented: []}. Name and personality.summary are required.
  * `invented` lists details the model made up to fill gaps (not in the story), shown when the card is reviewed.
  * Returned flat, in the stamp's field names: {name, line, manner, voice, looks, body, outfit, history, unknownAs, ...}.
  */
@@ -1456,7 +1458,9 @@ export function readRememberAnswer(ans) {
     const out = { name, line, manner: str(pers.manner, 400) ?? '', voice: str(pers.speech, 400) ?? '',
         looks: str(app.summary, 240) ?? '', body: str(app.body, APPEARANCE_MAX) ?? '', outfit: str(app.outfit, APPEARANCE_MAX) ?? '',
         history: str(ans.history, HISTORY_MAX) ?? '', unknownAs: str(ans.unknownAs, 80) ?? '',
-        facts: cleanList(ans.facts, 8), invented: cleanList(ans.invented, 12) };
+        facts: cleanList(ans.facts, 8), memory: memoryList(ans.memory), invented: cleanList(ans.invented, 12) };
+    // A memory is never made up: an invented entry that is one of the memory lines goes (the prompt says so; this enforces it).
+    if (out.memory.length) { const mem = new Set(out.memory.map(m => m.toLowerCase())); out.invented = out.invented.filter(x => !mem.has(x.toLowerCase())); }
     const d = isObj(ans.disposition) ? ans.disposition : typeof ans.disposition === 'string' ? { value: ans.disposition } : null;
     const value = d ? matchEnum(d.value, DISPOSITIONS) : null;
     if (value) out.disposition = { value, reason: str(d.reason, 240) ?? '' };

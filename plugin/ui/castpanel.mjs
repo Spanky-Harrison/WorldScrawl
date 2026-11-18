@@ -168,7 +168,7 @@ export function castPanel(doc, io) {
         const app = cardAppearance(r.rec, r.play);
         const landedLooks = ['Looks', app.looks];
         const card = resolvedCard(r.rec, r.play).map(row => row.key === 'Looks' && row.landed ? { ...row, value: landedLooks[1] } : row);
-        pane.append(sourcedTable(card), appearanceRetry(r.play), ...scheduleBlock(r));
+        pane.append(...[sourcedTable(card), appearanceRetry(r.play), ...scheduleBlock(r)].filter(Boolean)); // native append writes null as "null"
     }
     function paintEffective(box, play, rec) {
         if (!play) { box.hidden = true; box.replaceChildren(); return; }
@@ -178,10 +178,10 @@ export function castPanel(doc, io) {
         const summaryPending = !pending && (play.looksHow === 'pending' || play.looksHow === 'failed');
         const line = (label, text) => $('div', {}, $('b', {}, label), ' ', pending ? 'pending rebuild' : (label === 'Looks' && summaryPending ? 'pending summary' : (text || '—')));
         const stale = pending && ['looks', 'body', 'outfit'].some(k => (play[k] ?? '') !== (play.base?.[k] ?? ''));
-        box.replaceChildren($('b', {}, 'Narrator now (read-only)'), line('Looks', app.looks), line('Body', app.body), line('Outfit', app.outfit),
+        box.replaceChildren(...[$('b', {}, 'Narrator now (read-only)'), line('Looks', app.looks), line('Body', app.body), line('Outfit', app.outfit),
             pending ? $('div', { class: 'cast-pending' }, 'pending rebuild — not narrator text yet') : null,
             appearanceRetry(play),
-            stale ? $('div', { class: 'muted' }, 'An older preview is stale.') : null);
+            stale ? $('div', { class: 'muted' }, 'An older preview is stale.') : null].filter(Boolean)); // native replaceChildren writes null as "null"
     }
     function permanentBox(r) {
         const founds = r.play ? activeFounds(r.play) : [];

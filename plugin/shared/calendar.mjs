@@ -287,26 +287,48 @@ export function untilClockIn(text, cal = GREGORIAN) {
     if (!m) return null;
     try { return untilTarget(m[1].trim().toLowerCase(), cal); } catch { return null; }
 }
+/** Second of the day `target` (a WAIT_TARGETS word or "HH:MM") falls on, for the day starting at `day0` (see untilSeconds). */
+function targetOfDay(day0, target, spd, cal, sunAt) {
+    const frac = f => Math.round(f * spd);
+    let sun = null; try { sun = sunAt?.(Math.max(0, day0 + spd / 2)) ?? null; } catch { sun = null; }
+    const okSun = sun && Number.isFinite(sun.sunrise) && Number.isFinite(sun.sunset) && sun.sunset > sun.sunrise;
+    const at = { dawn: okSun ? sun.sunrise : frac(6 / 24), morning: okSun ? Math.min(sun.sunrise + 3600, frac(0.5)) : frac(7 / 24),
+        noon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
+        ?? parseClock(target, cal);
+    return Math.round(at);
+}
+/** Game time (elapsed seconds) of today's `target`, and the start of today. */
+function todayTarget(elapsed, target, start, cal, sunAt) {
+    cal = checkCalendar(cal);
+    const spd = secondsPerDay(cal), d = dateAt(elapsed, start, cal);
+    const sod = d.hour * 3600 + d.minute * 60 + d.second, dayStart = Math.max(0, Math.floor(elapsed)) - sod;
+    return { t: dayStart + targetOfDay(dayStart, target, spd, cal, sunAt), dayStart, spd, cal };
+}
 /**
  * Seconds from game time `elapsed` until the next `target` (a WAIT_TARGETS word or "HH:MM") - always in the future,
  * rolling to the next day when today's has passed. sunAt(elapsedNearNoonOfThatDay) may return {sunrise, sunset}
  * (seconds of the day, from the weather's daylight); without it dawn/dusk use the day-part boundaries.
  */
 export function untilSeconds(elapsed, target, start = null, cal = null, sunAt = null) {
-    cal = checkCalendar(cal);
-    const spd = secondsPerDay(cal), d = dateAt(elapsed, start, cal);
-    const sod = d.hour * 3600 + d.minute * 60 + d.second, dayStart = Math.max(0, Math.floor(elapsed)) - sod;
-    const frac = f => Math.round(f * spd);
+    const { dayStart, spd, cal: c } = todayTarget(elapsed, target, start, cal, sunAt);
     for (let k = 0; k < 3; k++) {
         const day0 = dayStart + k * spd;
-        let sun = null; try { sun = sunAt?.(Math.max(0, day0 + spd / 2)) ?? null; } catch { sun = null; }
-        const okSun = sun && Number.isFinite(sun.sunrise) && Number.isFinite(sun.sunset) && sun.sunset > sun.sunrise;
-        const at = { dawn: okSun ? sun.sunrise : frac(6 / 24), morning: okSun ? Math.min(sun.sunrise + 3600, frac(0.5)) : frac(7 / 24),
-            noon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
-            ?? parseClock(target, cal);
-        const t = day0 + Math.round(at);
+        const t = day0 + targetOfDay(day0, target, spd, c, sunAt);
         if (t > elapsed) return t - Math.floor(elapsed);
     }
     throw new Error(`could not find the next ${target}`);
+}
+/** A narrator "until" this close behind now means it is already that time (no wait), not the same time tomorrow. */
+export const NEAR_NOW = 5 * 60;
+/** How many seconds today's `target` is behind game time `elapsed` (0 when it is now), or null when it is still ahead. */
+export function untilBehind(elapsed, target, start = null, cal = null, sunAt = null) {
+    const { t } = todayTarget(elapsed, target, start, cal, sunAt);
+    const behind = Math.floor(elapsed) - t;
+    return behind >= 0 ? behind : null;
+}
+/** Is today's `target` in the same minute as game time `elapsed` (a player's "until 17:15" at 17:15 or 17:15:40)? */
+export function untilNow(elapsed, target, start = null, cal = null, sunAt = null) {
+    const { t } = todayTarget(elapsed, target, start, cal, sunAt);
+    return Math.floor(Math.floor(elapsed) / 60) === Math.floor(t / 60);
 }
 

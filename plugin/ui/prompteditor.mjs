@@ -82,12 +82,12 @@ export function promptEditor(root, io, ui = {}) {
             await act('/prompts/select', { profile: sel.value }, `Now using "${sel.value}".`);
         } }, [st.default_profile, ...Object.keys(st.profiles)].map(n => h('option', { value: n, ...(n === st.selected ? { selected: true } : {}) }, n === st.default_profile ? `${n} (read-only)` : n)));
         const ro = readOnly();
-        head.replaceChildren(h('label', {}, 'Profile in use: ', sel),
+        head.replaceChildren(...[h('label', {}, 'Profile in use: ', sel),
             h('button', { type: 'button', class: 'crumb pe-new', onclick: () => newProfile() }, 'New'),
             h('button', { type: 'button', class: 'crumb pe-dup', onclick: () => newProfile(st.selected) }, 'Duplicate'),
             h('button', { type: 'button', class: 'crumb pe-rename', disabled: ro, onclick: () => { const n = askName(`New name for "${st.selected}":`, st.selected); if (n && n !== st.selected) act('/prompts/profile', { action: 'rename', from: st.selected, name: n }, `Renamed to "${n}".`); } }, 'Rename'),
             h('button', { type: 'button', class: 'crumb pe-delete', disabled: ro, onclick: () => { if (ui.confirm(`Delete the profile "${st.selected}"? Its edits are lost. The Default prompts are used again.`)) act('/prompts/profile', { action: 'delete', name: st.selected }, 'Profile deleted; using Default.'); } }, 'Delete'),
-            ro ? h('span', { class: 'pe-ro-note' }, 'Default is read-only. Start editing and you will be asked to make a profile.') : null);
+            ro ? h('span', { class: 'pe-ro-note' }, 'Default is read-only. Start editing and you will be asked to make a profile.') : null].filter(Boolean)); // native replaceChildren writes null as "null"
     }
     function card(e) {
         const locked = isLocked(e, ui.unlocked());
