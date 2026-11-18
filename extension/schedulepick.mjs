@@ -56,7 +56,8 @@ export async function pickPlaces(room) {
         if (!a || rooms.has(a) || rooms.size >= PICK_ROOMS || !live.rooms.has(a)) return;
         const area = Npc.areaOfRoom(a);
         rooms.set(a, { ...live.rooms.get(a), area: live.areas.get(area) ?? '' });
-        if (area && area !== a && live.areas.has(area) && !areas.has(area)) areas.set(area, live.areas.get(area));
+        // An area is offered only when it has a public room listed: a job or favorite area with none could never resolve.
+        if (area && area !== a && live.areas.has(area) && !areas.has(area) && !live.rooms.get(a).private) areas.set(area, live.areas.get(area));
     };
     add(room);
     try {
@@ -143,10 +144,12 @@ export function retrySchedule(id) {
 
 /** A typed edit's problem, shown on its card until the next try (card key -> text). */
 export const scheduleErrors = new Map();
-/** The typed Pattern / Job / Home / Favorites over `pick` (changed boxes only), read strictly against the live map: {pick} or {error}. */
+/** A typed edit's warning (it still saves), shown on its card and as a toast (card key -> text). */
+export const scheduleWarnings = new Map();
+/** The typed Pattern / Job / Home / Favorites over `pick` (changed boxes only), read strictly against the live map: {pick, warnings} or {error}. */
 export function scheduleWith(pick, values = {}, changed = []) {
     const r = Npc.readSchedulePick(Npc.pickFromValues(pick, values, changed), livePlaceIndex(), { strict: true });
-    return r.error ? { error: `Schedule: ${r.error}.` } : { pick: r.pick };
+    return r.error ? { error: `Schedule: ${r.error}.` } : { pick: r.pick, warnings: r.warnings };
 }
 /** The editor boxes for a pick. */
 export function scheduleFields(pick) {

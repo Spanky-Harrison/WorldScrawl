@@ -380,9 +380,10 @@ export function castPanel(doc, io) {
                     opts.addEventListener('input', () => { e.options = opts.value; check(); });
                     const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
                     const wand = $('input', { type: 'checkbox', class: 'cf-wandering' }); wand.checked = !!e.wandering; wand.addEventListener('change', () => { e.wandering = wand.checked; check(); });
+                    const any = $('input', { type: 'checkbox', class: 'cf-anywhere' }); any.checked = !!e.anywhere; any.addEventListener('change', () => { e.anywhere = any.checked; check(); });
                     return $('div', { class: 'cf-sched cf-might', 'data-i': i }, $('div', { class: 'cf-schedtop' }, kindSel(e, i), opts, xBtn(i)),
                         err(`schedule.${i}.options`),
-                        $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e), $('label', { class: 'cf-wandlabel', title: 'Moves among the places every 15 to 60 minutes' }, wand, ' Wandering')),
+                        $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e), $('label', { class: 'cf-wandlabel', title: 'Moves among the places every 15 to 60 minutes' }, wand, ' Wandering'), $('label', { class: 'cf-wandlabel', title: 'Area options include private rooms too' }, any, ' Anywhere')),
                         err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
                         warnEl(`schedule.${i}.warn`));
                 }

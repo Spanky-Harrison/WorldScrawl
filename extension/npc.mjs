@@ -131,11 +131,11 @@ const hhmmOf = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${Strin
 /**
  * What a might option can put someone in on the live map, before any roll: {kind: 'room', address, how} (a room, after the
  * usual redirects; a private room named outright counts), {kind: 'area', address, name, rooms} (the live public rooms of
- * that subregion or region: a private one needs the schedule to name it), {kind: 'offmap', near} (a stub place or plain
+ * that subregion or region: a private one needs the schedule to name it, unless `anywhere` is set on the block), {kind: 'offmap', near} (a stub place or plain
  * text), or {kind: 'away', note?} (nowhere, a gone room, an unknown address). The one resolver the roll (mightPlace),
  * [find] and Who's here share.
  */
-function optionRooms(opt, env) {
+function optionRooms(opt, env, anywhere = false) {
     if (!opt || isNowhere(opt.text)) return { kind: 'away' };
     const text = opt.text;
     const r = resolveSchedulePlace(text, env ?? {});
@@ -146,7 +146,7 @@ function optionRooms(opt, env) {
     if (scope) {
         const area = { kind: 'map', scope, address: text };
         const live = env?.exists ?? idx.exists;
-        const rooms = [...(idx.rooms ?? [])].filter(a => (!live || live(a)) && withinNear(a, area) && !idx.privates?.has?.(a)).sort();
+        const rooms = [...(idx.rooms ?? [])].filter(a => (!live || live(a)) && withinNear(a, area) && (anywhere || !idx.privates?.has?.(a))).sort();
         return { kind: 'area', address: text, name: idx.nameOf?.(text) ?? text, rooms };
     }
     const stub = idx?.stubs?.get?.(text);
@@ -154,21 +154,21 @@ function optionRooms(opt, env) {
     if (text.includes(':')) return { kind: 'away', note: `${text} is not on the map, so away this time.` };
     return { kind: 'offmap', near: { kind: 'text', text } };
 }
-/** True when might option `opt` can put someone in room `place` (optionRooms: the room itself, or one of an area's public rooms). */
-const optionHas = (opt, place, env) => { const o = optionRooms(opt, env); return o.kind === 'room' ? o.address === place : o.kind === 'area' && o.rooms.includes(place); };
+/** True when might option `opt` can put someone in room `place` (optionRooms: the room itself, or one of an area's public rooms; any room with `anywhere`). */
+const optionHas = (opt, place, env, anywhere = false) => { const o = optionRooms(opt, env, anywhere); return o.kind === 'room' ? o.address === place : o.kind === 'area' && o.rooms.includes(place); };
 
 /**
  * Where a might option puts someone for a block or segment starting at absolute minute `s`: {address, offmap, how, near?, area?, note?}.
  * A room goes through the usual redirects (gone: away, with a note). An area picks its highest-scoring live public room
  * (none: away, with a note). A stub place or plain text is off the map. Nowhere is away.
  */
-function mightPlace(opt, base, s, env) {
+function mightPlace(opt, base, s, env, anywhere = false) {
     const away = note => ({ address: null, offmap: true, how: 'nowhere', near: { kind: 'none' }, ...(note ? { note } : {}) });
-    const o = optionRooms(opt, env);
+    const o = optionRooms(opt, env, anywhere);
     if (o.kind === 'room') return { address: o.address, offmap: false, how: o.how };
     if (o.kind === 'area') {
         const hit = areaPick(base, s, o.rooms);
-        if (!hit) return away(`No public room in ${o.name} to pick, so away this time.`);
+        if (!hit) return away(`No ${anywhere ? '' : 'public '}room in ${o.name} to pick, so away this time.`);
         return { address: hit.address, offmap: false, how: 'area', area: { address: o.address, name: o.name, of: hit.of } };
     }
     if (o.kind === 'offmap') return { address: null, offmap: true, how: 'offmap', near: o.near };
@@ -192,7 +192,7 @@ export function mightAt(npc, entry, now, env) {
     } else roll = hashRoll(`block|${base}|${blockStart}`);
     const opt = pickFromTable(entry.options ?? [], roll); // an option not on the live map yet resolves to away in mightPlace
     return { kind: 'might', entry, key, blockStart, blockEnd, segStart, segEnd, roll, pick: opt && !isNowhere(opt.text) ? opt.text : NOWHERE,
-        activity: entry.activity, where: '', ...mightPlace(opt, base, segStart, env) };
+        activity: entry.activity, where: '', ...mightPlace(opt, base, segStart, env, entry.anywhere === true) };
 }
 
 /**
@@ -286,7 +286,7 @@ export function offMapReport(play, elsewhere = []) {
  * Who's here and the cast panel show (follow, a stay, an appearance stamp, the roll).
  * - Already in `room`: {ok, here}: nothing changes, the player is told they are right here.
  * - A might block whose current pick (wandering: this segment's) puts them somewhere on the map, and `room` is one of the
- *   block's options (optionRooms: a room named outright, private or not, or a public room of a named area): {ok, appear}
+ *   block's options (optionRooms: a room named outright, private or not, or a public room of a named area, any room when the entry is anywhere): {ok, appear}
  *   with a whole-block appearance stamp, so they are here, guaranteed, until the block ends. No roll.
  * - Nowhere or off the map this block, `room` not one of its options, an "is at" entry elsewhere, following someone else,
  *   told to stay elsewhere, or no schedule: rejected with a plain reason.
@@ -309,7 +309,7 @@ export function judgeFound(npc, clock, room, env, { at = null, player = true } =
         const now = appearanceFor(npc, sched)?.place ?? sched.address;
         if (now && now === room) return { ok: true, here: true, where: '', place: room, reason: `${name} is right here.`, detail };
         if (!now) return { ok: false, where: '', reason: `${name} is nowhere to be found right now.`, detail };
-        if (!(sched.entry.options ?? []).some(o => optionHas(o, room, env))) return { ok: false, where: '', reason: `${name} wouldn't be around here right now.`, detail };
+        if (!(sched.entry.options ?? []).some(o => optionHas(o, room, env, sched.entry.anywhere === true))) return { ok: false, where: '', reason: `${name} wouldn't be around here right now.`, detail };
         return { ok: true, moved: true, where: '', place: room, appear: { place: room, blockStart: sched.blockStart, whole: true }, reason: `Found: ${name} comes here.`, detail };
     }
     const placeless = sched.offmap || sched.how === 'found';
@@ -948,7 +948,11 @@ function mightLabel(sched, env) {
 export function mightWhy(npc, sched, env) {
     const e = sched.entry, D = dayOf(env);
     const t = m => hhmmOf(((m % D) + D) % D);
-    const tail = [sched.area ? `Area: ${placeLabel(env, sched.address)}, highest of ${sched.area.of} room${sched.area.of === 1 ? '' : 's'} in ${sched.area.name}.` : '', sched.note ?? ''].filter(Boolean).join(' ');
+    const any = e.anywhere === true;
+    const areaWhy = sched.area ? (sched.area.of === 1
+        ? `Area: ${placeLabel(env, sched.address)}, its only ${any ? '' : 'public '}room in ${sched.area.name}${any ? ' (private rooms included)' : ''}.`
+        : `Area: ${placeLabel(env, sched.address)}, highest of ${sched.area.of} rooms in ${sched.area.name}${any ? ' (private rooms included)' : ''}.`) : '';
+    const tail = [areaWhy, sched.note ?? ''].filter(Boolean).join(' ');
     let head;
     if (e.wandering) {
         let next = null;
@@ -959,7 +963,7 @@ export function mightWhy(npc, sched, env) {
 }
 
 /** Whether any might option of `e` can put someone in `place` (optionRooms, the roll's own resolver). */
-const mightPointsAt = (e, place, env) => (e.options ?? []).some(o => optionHas(o, place, env));
+const mightPointsAt = (e, place, env) => (e.options ?? []).some(o => optionHas(o, place, env, e.anywhere === true));
 
 /**
  * Who's at `place` after message `index`: everyone due there, plus everyone whose schedule points there but who is

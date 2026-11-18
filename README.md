@@ -273,9 +273,9 @@ Adjacent blocks each roll on their own, so their chances add up: three back-to-b
 roughly a 70% chance of meeting them at some point in those three hours (1 − 0.8 × 0.5 × 0.8 = 68%). There is no gradient
 or peak shorthand: to make someone likely across a span, write one block with the odds you want.
 
-An area option never lands in a **private** room. Rooms are public unless `"private": true` is set on the room, its
+An area option never lands in a **private** room, unless that block is set to **Anywhere** (`"anywhere": true` next to `wandering`, or the Anywhere box in the cast editor; there is no model pick for it). Rooms are public unless `"private": true` is set on the room, its
 subregion, its region or `world.json` (the nearest level that sets it wins, like `expandable`); a schedule entry that names
-a private room still puts them there. If an area has no public room, that share is away, with a note in the inspector.
+a private room still puts them there. If an area has no public room, that share is away, with a note in the inspector. With Anywhere, a block holds private rooms as options too, so `[find]` and Who's here list them there; an `anywhere` block with no area option loads with a note.
 Rooms made in play whose name ends in bedroom, bedchamber, quarters, cottage, apartment, bath, privy or cell start private
 ("Guest Bedroom", "Servants' Quarters"; not "Bath Street" or "Old House"). In the map editor, **Private** on a room or
 area (`set_private`: `true`, `false` or `inherit`) sets it.
@@ -287,13 +287,19 @@ missing times block saving; an overlap with another entry, an option not on the 
 (probably a typo) is shown as a note and does not.
 
 **Remember** gives the new person a daily pattern. Once the card is ready, one small question picks it: **day shift**,
-**night shift** or **passing through**, plus a job and a home (a nearby room, or a few words for a place off the map) and
-up to three favorite public spots. The card shows "Working out a schedule…", then the result ("Day shift at Forge
+**night shift** or **passing through**, plus a job (a nearby room or an area, or a few words for a place off the map), a home
+(a room, or a few words for a place off the map) and up to three favorite public spots. The card shows "Working out a schedule…", then the result ("Day shift at Forge
 (08:00–17:00), home off the map; free time around Market Lane"), or "Couldn't decide, so passing through".
 **Check schedule again** asks only that question again. **Edit** adds Pattern, Job, Home and Favorites boxes (a room or
 area by name or address, or `offmap: the tannery`); Approve edited reads them against this chat's map with no model call,
 and a bad name shows on the card. The game expands the pattern; the narrator never sees it:
 
+- **A job may be an area** (a building or district, for someone whose work moves them around it): the work blocks become
+  100% Might be at blocks that wander the area's public rooms, "around Brask's Smithy" on the card. A one-room area is
+  not turned into a room job (it stays an area, and picks that one room). A room and the area holding it with the same name
+  (a one-room smithy) read as the area. An area with no public room is an error for the model's pick (it is asked again),
+  and only a warning on a typed Job, which saves; set **Anywhere** on those blocks in the cast editor to put them in its
+  private rooms. Areas with no public room are not offered to the model.
 - **Day shift:** at the job 08:00–12:00 and 13:00–17:00; home 17:00–18:30 and 20:00–08:00; lunch 12:00–13:00 at the
   favorite spots (30% in all); evening 18:30–20:00 wandering the spots (40% in all).
 - **Night shift:** at the job 18:00–22:00 and 23:00–03:00; home 03:00–14:30 and 16:00–18:00; a break 22:00–23:00 at the

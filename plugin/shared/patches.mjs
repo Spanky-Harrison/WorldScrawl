@@ -22,7 +22,7 @@
 //   {op: "set_expandable", target, value}   target: a room, "region:sub" or "region"; value true, false or null
 //       (null / "inherit": drop the setting so the next level up decides).
 //   {op: "set_private", target, value}   the same targets and values: "private" (people only turn up there when a
-//       schedule names the room; an area pick skips it). Inherited like expandable; default public.
+//       schedule names the room; an area pick skips it unless the block is set to Anywhere). Inherited like expandable; default public.
 //   {op: "set_fields", target, fields: {key: value | null}}   the map's Edit forms: plain settings of a room, subregion
 //       ("region:sub") or region ("region"); null drops the setting (inherit / default). Allowed keys: FIELD_KEYS.
 //   {op: "set_exit", loc, direction, fields: {key: value | null}}   one exit's settings. Per side (only this side changes):

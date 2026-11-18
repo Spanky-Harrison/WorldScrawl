@@ -163,6 +163,7 @@ function validateMight(e, where, places, note, nearIndex = null, warn = note) {
         else for (const o of unknown) warn(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
         for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) warn(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
     }
+    if (!entry.broken && entry.anywhere && nearIndex && !entry.options.some(o => mightOptionKind(o.text, places, nearIndex) === 'area')) warn(`${where}: "anywhere" has no effect: no option is an area`);
     if (entry.broken) note(`${where}: ${entry.problem}`);
     return entry;
 }

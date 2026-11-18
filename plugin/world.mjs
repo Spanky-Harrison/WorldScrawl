@@ -517,7 +517,7 @@ export function build_world(worldJson, rawRegions) {
                     address, region: rid, subregion: sid, id: lid, name: requireStr(loc, 'name', where), description: requireStr(loc, 'description', where), lore: requireStr(loc, 'lore', where, true), exits,
                     inherit_region_lore: optionalBool(loc, 'inherit_region_lore', where), inherit_subregion_lore: optionalBool(loc, 'inherit_subregion_lore', where),
                     expandable: [optionalBool(loc, 'expandable', where), subregions.get(`${rid}:${sid}`).expandable, region.expandable, worldExpandable].find(v => v !== null) ?? true,
-                    // "private": people only turn up here when a schedule names the room (an area pick skips it). Inherited like expandable; default public.
+                    // "private": people only turn up here when a schedule names the room (an area pick skips it unless the block is set to Anywhere). Inherited like expandable; default public.
                     private: [optionalBool(loc, 'private', where), subregions.get(`${rid}:${sid}`).private, region.private, worldPrivate].find(v => v !== null) ?? false, views: [], pos: optionalPos(loc, where), place: place(loc, where),
                 });
                 if (locations.get(address).place.exposure) anyExposure = true;

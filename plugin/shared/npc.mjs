@@ -166,8 +166,8 @@ export function pickFromTable(options, roll) {
     return null;
 }
 
-/** A stable string of a might entry (its options, times, wandering and activity): part of every seed, so an edit re-rolls. */
-export const mightKey = e => JSON.stringify([e?.might ?? [], e?.from ?? '', e?.to ?? '', !!e?.wandering, e?.activity ?? '']);
+/** A stable string of a might entry (its options, times, wandering and activity, and `anywhere` only when set): part of every seed, so an edit re-rolls. */
+export const mightKey = e => JSON.stringify([e?.might ?? [], e?.from ?? '', e?.to ?? '', !!e?.wandering, e?.activity ?? '', ...(e?.anywhere === true ? ['anywhere'] : [])]);
 
 /** Minutes in a block from `fromMin` to `toMin` (a block that passes midnight wraps; equal times are a whole day). */
 export function blockSpan(fromMin, toMin, dayMinutes = 1440) {
@@ -218,10 +218,10 @@ export function windowsOverlap(a0, a1, b0, b1, dayMinutes = 1440) {
     return inside(b0, a0, a1, dayMinutes) || inside(a0, b0, b1, dayMinutes);
 }
 
-const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'importance'];
+const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'anywhere', 'importance'];
 /**
  * A might entry as both sides read it (the server's validateEntry and the chat's npc_schedule stamp): the parsed options and
- * percent table, the times, wandering, and `authored` (the entry as written, for export). Place checks are the caller's.
+ * percent table, the times, wandering, anywhere, and `authored` (the entry as written, for export). Place checks are the caller's.
  * {entry, problems (break it), warnings (load notes)}.
  */
 export function readMightEntry(e) {
@@ -244,6 +244,7 @@ export function readMightEntry(e) {
     if (fromMin == null) problems.push('from is required and must look like "10:00"');
     if (toMin == null) problems.push('to is required and must look like "13:00"');
     if (e?.wandering != null && typeof e.wandering !== 'boolean') problems.push('wandering must be true or false');
+    if (e?.anywhere != null && typeof e.anywhere !== 'boolean') problems.push('anywhere must be true or false');
     let importance = null;
     if (e?.importance != null && String(e.importance).trim()) {
         importance = matchEnum(e.importance, ['low', 'normal', 'high']);
@@ -254,7 +255,7 @@ export function readMightEntry(e) {
     const entry = {
         might: list.filter(x => typeof x === 'string').map(x => x.trim()), options: table.options, activity,
         ...(fromMin != null ? { from: String(e.from).trim() } : {}), ...(toMin != null ? { to: String(e.to).trim() } : {}), fromMin, toMin,
-        wandering: e?.wandering === true, importance: importance ?? 'low', authored,
+        wandering: e?.wandering === true, anywhere: e?.anywhere === true, importance: importance ?? 'low', authored,
     };
     if (problems.length) Object.assign(entry, { broken: true, problem: problems.join('; ') });
     return { entry, problems, warnings };
@@ -264,9 +265,10 @@ export const isMight = e => !!e && Array.isArray(e.might);
 const hourText = h => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
 
 // ---- Daily patterns (docs/npc-design.md). Remember gives a new person one of these, expanded by the engine into ordinary
-// is-at entries and might-be-at blocks. A pick is {pattern, job, job_activity, home, favorites}: job and home are a place
-// KEY (a room address, or a stub id from elsewhere.json), "offmap: short text", or null; favorites are up to 3 public room
-// or area keys. Engine-made schedules never overlap.
+// is-at entries and might-be-at blocks. A pick is {pattern, job, job_activity, home, favorites, job_area?}: a job is a place
+// KEY (a room address, an area key, or a stub id from elsewhere.json), "offmap: short text", or null; a home is a room, a
+// stub, "offmap: short text" or null; favorites are up to 3 public room or area keys. `job_area` is true only for an area
+// job (derived on every read, never typed). Engine-made schedules never overlap.
 export const PATTERNS = ['day shift', 'night shift', 'passing through'];
 export const PICK_PATTERNS = [...PATTERNS, 'unsure'];
 export const OFFMAP_MAX = 80;
@@ -295,7 +297,7 @@ function atEntry(v, activity, from, to, { home = false, importance = null } = {}
 function spotsOf(pick, room) {
     if (pick?.favorites?.length) return pick.favorites.slice(0, FAVORITES_MAX);
     const job = pick?.job;
-    const onMap = typeof job === 'string' && offmapText(job) == null && job.includes(':');
+    const onMap = pick?.job_area || (typeof job === 'string' && offmapText(job) == null && job.includes(':'));
     const area = areaOfRoom(onMap ? job : room);
     return area ? [area] : [];
 }
@@ -305,8 +307,8 @@ const FREE_BLOCKS = {
     'night shift': [['14:30', '16:00', 40, true], ['22:00', '23:00', 30, false]],
 };
 const hhmm = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-/** Whether `spots` cover `room`: the room itself, or an area (any address above it) holding it. */
-export const spotsCover = (spots, room) => spots.some(a => a === room || String(room).startsWith(`${a}/`));
+/** Whether `spots` cover `room`: the room itself, a subregion holding it, or its region. */
+export const spotsCover = (spots, room) => spots.some(a => a === room || String(room).startsWith(`${a}/`) || String(room).startsWith(`${a}:`));
 /**
  * The met-place guard: when they were met (`room`, `minutes`) inside one of the shift's free-time blocks and the spots
  * do not already cover that room, it joins that block's options; the block's [from, to] or null. Passing through: null.
@@ -331,7 +333,9 @@ export function expandPattern(pick, { room = '', minutes = 0 } = {}) {
     const pattern = pick?.pattern;
     if ((pattern === 'day shift' || pattern === 'night shift') && pick.job) {
         const work = pick.job_activity || 'working', spots = spotsOf(pick, room), met = metSpotBlock(pick, { room, minutes });
-        const job = (from, to) => atEntry(pick.job, work, from, to, { importance: 'high' });
+        const job = (from, to) => (pick.job_area
+            ? { might: spotShares([pick.job], 100), activity: work, from, to, wandering: true, importance: 'high' }
+            : atEntry(pick.job, work, from, to, { importance: 'high' }));
         const home = (from, to) => atEntry(pick.home ?? null, 'at home', from, to, { home: true });
         const free = (total, from, to, wandering) => ({ might: spotShares(met?.[0] === from ? [...spots, room] : spots, total), activity: 'out and about', from, to, ...(wandering ? { wandering: true } : {}) });
         const [a, b] = FREE_BLOCKS[pattern];
@@ -368,11 +372,12 @@ export function passingThrough(room, minutes, pick = null) {
 /**
  * Read a pattern pick (the model's JSON answer, or the Remember card's typed fields) against `places`:
  * {rooms: Map(address -> {name, private}), areas: Map(address -> name), stubs: Map(id -> name)}. A key or an exact name
- * (any case) is accepted; job and home are a room or a stub, "offmap: short text" (at most 80 characters), or empty;
- * favorites are rooms or areas. {pick, warnings} or {error}. Lenient (the model): unknown or private favorites and any past
+ * (any case) is accepted; a job is a room, an area, a stub, "offmap: short text" (at most 80 characters), or empty; a home is
+ * a room, a stub, off-map text, or empty; favorites are rooms or areas. {pick, warnings} or {error}. Lenient (the model): unknown or private favorites and any past
  * three are dropped with a warning, a home that is not a room, a stub or off-map text becomes null (off the map) with a
- * warning, a shift with no job becomes passing through, unsure is passing through; a bad job is still an error. Strict (the
- * player's typed edit): each of those is an error instead, so a bad name shows on the card.
+ * warning, a shift with no job becomes passing through, unsure is passing through; a bad job is still an error, and so is an area job with no public room among the rooms listed. Strict (the
+ * player's typed edit): each of those is an error instead, so a bad name shows on the card; an area job with no public room
+ * is only a warning there (the editor can set Anywhere on its blocks).
  */
 export function readSchedulePick(raw, places = {}, { strict = false } = {}) {
     if (!isObj(raw)) return { error: 'the answer is not a JSON object' };
@@ -390,9 +395,14 @@ export function readSchedulePick(raw, places = {}, { strict = false } = {}) {
         if (kinds.includes('room')) for (const [a, r] of rooms) if (normName(r?.name) === n) hits.push(a);
         if (kinds.includes('area')) for (const [a, name] of areas) if (normName(name) === n) hits.push(a);
         if (kinds.includes('stub')) for (const [a, name] of stubs) if (normName(name) === n) hits.push(a);
+        // A room and the area that holds it with one name (a one-room building) is the same place: the area wins.
+        if (hits.length === 2) {
+            const [room, area] = [hits.find(a => rooms.has(a)), hits.find(a => areas.has(a) && !rooms.has(a))];
+            if (room && area && areaOfRoom(room) === area) return area;
+        }
         return hits.length === 1 ? hits[0] : hits.length > 1 ? { ambiguous: hits } : null;
     };
-    const place = (label, v) => {
+    const place = (label, v, { withAreas = false } = {}) => {
         if (v == null) return { value: null };
         if (typeof v !== 'string') return { error: `${label} must be a place key, "offmap: a few words", or null` };
         const t = v.trim();
@@ -403,14 +413,22 @@ export function readSchedulePick(raw, places = {}, { strict = false } = {}) {
             if (off.length > OFFMAP_MAX) return { error: `${label}: off-map text is at most ${OFFMAP_MAX} characters` };
             return { value: `offmap: ${off}` };
         }
-        const hit = byName(t, ['room', 'stub']);
-        if (typeof hit === 'string') return { value: hit };
+        const hit = byName(t, withAreas ? ['room', 'area', 'stub'] : ['room', 'stub']);
+        if (typeof hit === 'string') return { value: hit, ...(withAreas && areas.has(hit) && !rooms.has(hit) ? { area: true } : {}) };
         if (hit?.ambiguous) return { error: `${label} "${t}" matches ${hit.ambiguous.join(', ')}; use the key` };
-        if (byName(t, ['area'])) return { error: `${label} "${t}" is an area; name one room in it` };
+        if (!withAreas && byName(t, ['area'])) return { error: `${label} "${t}" is an area; name one room in it` };
         return { error: `${label} "${t}" is not in the list (use a key, or "offmap: a few words" for a place off the map)` };
     };
-    const job = place('job', raw.job);
+    const job = place('job', raw.job, { withAreas: true });
     if (job.error) return { error: job.error };
+    if (job.area) { // an area job needs a public room inside it: the model's pick is an error (it asks again), a typed edit a warning (the editor can set Anywhere)
+        const open = [...rooms].some(([a, r]) => !r?.private && spotsCover([job.value], a));
+        if (!open) {
+            const label = `job "${job.value}" has no public room`;
+            if (!strict) return { error: `${label}; name a room in it, or offmap: a few words` };
+            warnings.push(`${label}, so they are away at work until one is public or the block is set to Anywhere`);
+        }
+    }
     let home = place('home', raw.home);
     if (home.error) {
         if (strict) return { error: home.error };
@@ -436,7 +454,7 @@ export function readSchedulePick(raw, places = {}, { strict = false } = {}) {
         pattern = 'passing through';
     }
     const act = str(raw.job_activity, OFFMAP_MAX);
-    return { pick: { pattern, job: job.value, job_activity: act && !/^null$/i.test(act) ? act : null, home: home.value, favorites }, warnings };
+    return { pick: { pattern, job: job.value, job_activity: act && !/^null$/i.test(act) ? act : null, home: home.value, favorites, ...(job.area && job.value ? { job_area: true } : {}) }, warnings };
 }
 
 /** A place value as the player reads it: a room or area by name, a stub by name, off-map text, or `none`. */
@@ -454,7 +472,7 @@ export function pickSummary(pick, { nameOf = a => a, room = '', minutes = null }
         const met = metSpotBlock(pick, { room, minutes });
         const spots = [...spotsOf(pick, room), ...(met ? [room] : [])].map(a => nameOf(a) || a).join(', ');
         const hours = pick.pattern === 'day shift' ? '08:00–17:00' : '18:00–03:00';
-        return `${capWord(pick.pattern)} at ${placeWords(pick.job, nameOf, 'work')} (${hours}${pick.job_activity ? `, ${pick.job_activity}` : ''}), ${home}; free time around ${spots || 'nowhere in particular'}`;
+        return `${capWord(pick.pattern)} ${pick.job_area ? 'around' : 'at'} ${placeWords(pick.job, nameOf, 'work')} (${hours}${pick.job_activity ? `, ${pick.job_activity}` : ''}), ${home}; free time around ${spots || 'nowhere in particular'}`;
     }
     return `Passing through: maybe around ${room ? nameOf(room) || room : 'where they were met'} for an hour either side of the time they were met, ${home}`;
 }
@@ -462,7 +480,7 @@ const capWord = s => s.charAt(0).toUpperCase() + s.slice(1);
 /** The Remember card's schedule boxes for a pick: [key, label, value, placeholder]. Names show where one place has that name. */
 export const SCHEDULE_FIELDS = [
     ['sched_pattern', 'Pattern', 'day shift, night shift or passing through'],
-    ['sched_job', 'Job', 'a room, or offmap: a few words (empty for none)'],
+    ['sched_job', 'Job', 'a room or an area, or offmap: a few words (empty for none)'],
     ['sched_home', 'Home', 'a room, or offmap: a few words (empty: off the map)'],
     ['sched_favorites', 'Favorites', 'up to 3 public rooms or areas, comma separated'],
 ];
@@ -514,7 +532,7 @@ export function exportRecord(npc) {
     if (npc.deep?.relationships && Object.keys(npc.deep.relationships).length) deep.relationships = { ...npc.deep.relationships };
     if (Object.keys(deep).length) out.deep = deep;
     const schedule = (npc.schedule ?? []).filter(e => e && !e.broken).map(e => {
-        if (isMight(e)) return JSON.parse(JSON.stringify(e.authored ?? { might: e.might, activity: e.activity, from: e.from, to: e.to, ...(e.wandering ? { wandering: true } : {}) })); // as authored
+        if (isMight(e)) return JSON.parse(JSON.stringify(e.authored ?? { might: e.might, activity: e.activity, from: e.from, to: e.to, ...(e.wandering ? { wandering: true } : {}), ...(e.anywhere ? { anywhere: true } : {}) })); // as authored
         const row = { activity: e.activity };
         if (e.place) row.place = e.place;
         else {
