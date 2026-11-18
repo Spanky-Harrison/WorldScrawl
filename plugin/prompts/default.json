@@ -1693,7 +1693,7 @@
       "group": "npc",
       "locked": "Both the tracker and the Remember card include this text; the game reads the memories they write.",
       "placeholders": [],
-      "text": "A memory is something this person would still remember tomorrow: a promise, agreement, revelation, threat, favor, conflict, shared experience, or other important interaction. Only what they witnessed, did, or were told; write a claim as a claim. Call people by the names they have in the story (never \"the stranger\", never a bracketed handle) and name the specific thing, in one short line. Skip greetings, small talk and speculation."
+      "text": "A memory is something this person would still remember tomorrow: a promise, agreement, revelation, threat, favor, conflict, shared experience, or other important interaction. Only what they witnessed, did, or were told; write a claim as a claim. Call people by their names (as listed above, or as the story names them), never \"the stranger\" and never a bracketed handle, and name the specific thing, in one short line. Skip greetings, small talk and speculation."
     },
     {
       "id": "npc.looks_summary_system",
