@@ -213,7 +213,7 @@
     // Approve while the prefetch is still running: Preparing…, then Saving…, then exactly one model call (plus the one
     // pattern question, which Approve waits for).
     const reqsBeforeSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
-    await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }, { content: '{"pattern":"passing through","job":null,"home":null,"favorites":[]}' }]);
+    await queue([{ content: '{"name":"Corwin","personality":{"summary":"A ferry hand."}}', delay: 3000 }, { content: '{"pattern":"day shift","job":"riverton:drowned_rat","job_activity":"hauling the ferry rope","home":null,"favorites":[]}' }]); // an area job: the building, not a room
     await page.evaluate(() => SillyTavern.getContext().executeSlashCommandsWithOptions('/ws-npc Corwin'));
     const lastCardText = () => page.evaluate(() => [...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '');
     await page.waitForFunction(() => /Remember Corwin\?/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? '') && /Preparing…/.test([...document.querySelectorAll('.worldscrawl_remembercard')].pop()?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
@@ -226,6 +226,8 @@
     const slow = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_create' && s.name === 'Corwin').map(s => s.line));
     const reqsAfterSlow = (await (await fetch(`${FAKE}/__requests`)).json()).length;
     check('remember prefetch: Approve during the prefetch shows Preparing… then Saving…, waits, and makes exactly one call', preparing && savingSlow && slow.length === 1 && slow[0] === 'A ferry hand.' && reqsAfterSlow === reqsBeforeSlow + 2, JSON.stringify({ preparing, savingSlow, slow, calls: reqsAfterSlow - reqsBeforeSlow }));
+    const corwinSched = await page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_schedule' && x.id === 'corwin') ?? null);
+    check('remember: an area job (the building) is kept as an area job: pick.job_area, work blocks are wandering might blocks over the area, high importance', corwinSched?.pick?.job === 'riverton:drowned_rat' && corwinSched.pick.job_area === true && corwinSched.schedule?.filter(e => Array.isArray(e.might) && e.importance === 'high' && e.wandering === true && e.might.join() === 'riverton:drowned_rat(100)').length === 2 && /^Day shift around /.test(corwinSched.about ?? ''), JSON.stringify(corwinSched));
     const actPre = await page.evaluate(async () => { const { callNotes } = await import('/scripts/extensions/third-party/WorldScrawl/calllog.mjs'); return SillyTavern.getContext().chat.flatMap(m => callNotes(m)).map(n => n.kind).filter(k => /prefetch/.test(k)); });
     check('remember prefetch: logged in the model-calls activity log', actPre.length >= 2, JSON.stringify(actPre));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
