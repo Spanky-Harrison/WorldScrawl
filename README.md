@@ -280,11 +280,16 @@ Rooms made in play whose name ends in bedroom, bedchamber, quarters, cottage, ap
 ("Guest Bedroom", "Servants' Quarters"; not "Bath Street" or "Old House"). In the map editor, **Private** on a room or
 area (`set_private`: `true`, `false` or `inherit`) sets it.
 
-In the Cast editor each schedule row is **Is at** or **Might be at**. A Might be at row has one options line ("Market Lane,
-General Store, nowhere(80)"; names are matched to places, or type the address), From/To, importance and a **Wandering**
-checkbox. A row you did not change is saved exactly as written. Over 100%, a name two places share, a bad option or
-missing times block saving; an overlap with another entry, an option not on the map yet or a single-word off-map option
-(probably a typo) is shown as a note and does not.
+In the Cast editor each schedule row is **Is at** or **Might be at**, and has one "where" slot. On the map it holds the
+place chooser, shown as `Display Name - engine:id` (click the id to select it for copying). With **Off the map** ticked it
+holds an **Off-map place name** and a **Near area** instead. A Might be at row holds a list of picked places: **Add place…**
+opens the map so you can pick rooms, areas and regions (several per trip; press Done), **Add off the map…** adds a stub
+place or plain words, **Add Nowhere** adds nowhere, and each one has a percent box (blank: it shares what is left of 100).
+"Type it instead" shows the same list as text ("Market Lane, General Store, nowhere(80)"; names are matched to places, or
+type the address). Each row also has From/To, importance and the **Wandering** and **Anywhere** checkboxes. A row you did not
+change is saved exactly as written. Over 100%, a name two places share, a bad option or missing times block saving; an
+overlap with another entry, a place listed twice (the shares add up), an option not on the map yet, a room that only exists
+in this chat (in the cast file editor) or a single-word off-map option (probably a typo) is shown as a note and does not.
 
 **Remember** gives the new person a daily pattern. Once the card is ready, one small question picks it: **day shift**,
 **night shift** or **passing through**, plus a job (a nearby room or an area, or a few words for a place off the map), a home

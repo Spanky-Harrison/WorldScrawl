@@ -1,8 +1,9 @@
 // NPC record checks and the near-index: server only (cast files). The rest of the NPC code is in shared/npc.mjs
 // (both sides) and extension/npc.mjs (play).
-import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isMight, isNowhere, isObj, matchEnum, parseHm, readMightEntry, resolveNear, str, windowsOverlap } from './shared/npc.mjs';
+import { APPEARANCE_MAX, DISPOSITIONS, HISTORY_MAX, MEMORY_CAP, NPC_ID, isMight, isNowhere, isObj, matchEnum, normName, parseHm, readMightEntry, resolveNear, str, windowsOverlap } from './shared/npc.mjs';
 
 export { parseHm };
+const NOWHERE_KEY = '\u0000nowhere';
 
 export const DISPOSITION_ALL = ['unknown', ...DISPOSITIONS];
 
@@ -162,6 +163,11 @@ function validateMight(e, where, places, note, nearIndex = null, warn = note) {
         if (unknown.length && unknown.length === entry.options.length) warn(`${where}: no might option is on the map yet (${unknown.map(o => o.text).join(', ')}); the whole block is away until one exists`);
         else for (const o of unknown) warn(`${where}: might option "${o.text}" is not on the map yet; that share is away until it exists`);
         for (const o of entry.options) if (mightOptionKind(o.text, places, nearIndex) === 'text' && !/\s/.test(o.text)) warn(`${where}: might option "${o.text}" matches no place and no stub region (a single word; probably a typo), so it is read as off the map`);
+    }
+    if (!entry.broken) {
+        const seen = new Set(), twice = new Set();
+        for (const o of entry.options) { const k = isNowhere(o.text) ? NOWHERE_KEY : normName(o.text); if (seen.has(k)) twice.add(o.text); seen.add(k); }
+        for (const x of twice) warn(`${where}: "${x}" is listed twice; their shares add up. Remove one`);
     }
     if (!entry.broken && entry.anywhere && nearIndex && !entry.options.some(o => mightOptionKind(o.text, places, nearIndex) === 'area')) warn(`${where}: "anywhere" has no effect: no option is an area`);
     if (entry.broken) note(`${where}: ${entry.problem}`);
