@@ -36,9 +36,10 @@ const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));
 const TARGET_FILLER = new Set(['to', 'the', 'a', 'an', 'at', 'through', 'into', 'in', 'toward', 'towards', 'out', 'of', 'my', 'way']);
 /** The first bracket whose word is a known verb: {verb, target, raw}, or null. "out" stays when it is all there is ("[move] out").
  *  A colon or dot between digits is part of the target ("[wait] until 17:15"), not the end of the sentence.
- *  A [remember] anywhere in the message wins over any other verb in it: the whole message is that command. */
+ *  A [remember] anywhere in the message wins over any other verb in it, then a [help]: the whole message is that command.
+ *  Otherwise two or more verbs are marked `multi` (bracketIntent fails the message: one verb per message for now). */
 export function parseBracket(text) {
-    let first = null;
+    let first = null, help = null, count = 0;
     for (const m of String(text ?? '').matchAll(/\[([^\[\]]{1,40})\]((?:[^\[\n.!?,;:]|(?<=\d)[:.](?=\d))*)/g)) {
         const v = VERB_OF.get(m[1].trim().toLowerCase().replace(/\s+/g, ' '));
         if (!v) continue;
@@ -48,10 +49,15 @@ export function parseBracket(text) {
         if (words.length === 1 && TARGET_FILLER.has(words[0].toLowerCase()) && !['out', 'in'].includes(words[0].toLowerCase())) i = 1;
         const b = { verb: v.id, word: m[1].trim(), target: words.slice(i).join(' '), raw: m[0] };
         if (b.verb === 'remember') return b;
+        if (b.verb === 'help') help ??= b;
+        count++;
         first ??= b;
     }
-    return first;
+    if (help) return help;
+    return first && count > 1 ? { ...first, multi: count } : first;
 }
+/** The notice for a message with two or more action verbs (an outright failure: no reply, the message hidden). */
+export const ONE_VERB = 'One verb per message for now.';
 /** Bracketed verbs read as plain words for the narrator ("I [move] north" -> "I move north"). */
 export const unbracket = text => String(text ?? '').replace(/\[([^\[\]]{1,40})\]/g, (all, w) => (VERB_OF.has(w.trim().toLowerCase().replace(/\s+/g, ' ')) ? w.trim() : all));
 /** Slash commands with no bracket verb (listed by /ws-help after the verbs). */
@@ -64,7 +70,7 @@ export const SLASH_ONLY = [
     ['/ws-know <name> | unmet|met|named', 'set how well you and a saved person know each other (the only way back)'],
     ['/ws-save-world <name>', "save this chat's world as a new world"], ['/ws-on, /ws-off', 'turn WorldScrawl on or off in this chat'],
 ];
-export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message, or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}\nSlash commands only:\n${SLASH_ONLY.map(([c, h]) => `- ${c}: ${h}`).join('\n')}`;
+export const helpText = () => `WorldScrawl commands. Write a verb in brackets in your message (one per message; [remember] and [help] win over the rest), or use the slash command:\n${VERBS.map(v => `- [${v.words[0]}]${v.slash ? ` (${v.slash})` : ''}: ${v.help}`).join('\n')}\nSlash commands only:\n${SLASH_ONLY.map(([c, h]) => `- ${c}: ${h}`).join('\n')}`;
 export const bracketTargetPrompt = (loc, b, opts) => P('intent.bracket_target', { party: partyText(), place: displayName(loc), verb: b.word, target: b.target, options: optionLines(opts) });
 /** Exact match first (an exit name, then a place), else one small target-only question; null when nothing fits. */
 async function bracketTarget(loc, b, opts) {
@@ -86,6 +92,7 @@ export async function bracketIntent(msg, b) {
     const exitsSeen = loc.exits.filter(e => !e.hidden || revealsDestination(e));
     if (b.verb === 'help') return { kind: 'help', loc, command: true }; // a pure system command: the verb list, no reply
     if (b.verb === 'remember') { const r = await offerRemember(msg, b.target); return r.ok ? { kind: 'remember', loc, command: true } : failed(loc, r.reason); }
+    if (b.multi) return failed(loc, ONE_VERB); // two or more action verbs: nothing is done
     if (b.verb === 'name') { const r = await learnNameOn(msg, b.target); if (!r.ok) return failed(loc, r.reason); return { kind: 'name', loc }; }
     if (b.verb === 'find') {
         // Empty or unknown: an outright failure. Right here: a command (the "right here" card, no reply). Found, or a known
