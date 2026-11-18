@@ -39,19 +39,27 @@
         });
         check('[find] Hesk mid-errand from a listed room: she comes here for the rest of the block (whole-block stamp, the store)',
             got.d?.ok === true && got.d?.moved === true && got.s.length === 1 && got.s[0].whole === true && got.s[0].place === STORE, JSON.stringify({ clock, ...got }));
-        check('[find]: the player sees the found notice with the block end', got.note.some(t => /comes here, until 13:00\./.test(t)), JSON.stringify(got.note));
+        check('[find]: the player sees the found notice (no block end time)', got.note.some(t => /comes here\./.test(t)) && !got.note.some(t => /until \d/.test(t)), JSON.stringify(got.note));
         const reqs = await storyReqs(from);
         const told = reqs.map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
         const line = told.split('\n').filter(l => /has just come in/.test(l));
         check('[find]: one narrator call, told she has just come in, in-world words only (her shown name, no engine words)', reqs.length === 1 && line.length === 1 && line[0] === 'The landlady has just come in.',
             JSON.stringify({ n: reqs.length, line }));
-        await reply('She is still sorting through the sacks.', typed('[find] Hesk'));
+        // Right here is a command: no reply (nothing queued), the message is flagged and hidden with ST's /hide.
+        const from2 = (await reqsOf()).length;
+        const len2 = await page.evaluate(() => SillyTavern.getContext().chat.length);
+        await typed('[find] Hesk')();
+        await page.waitForFunction(n => { const ch = SillyTavern.getContext().chat; const u = ch.at(-1); return ch.length > n && u?.is_user && u.is_system === true && !!u.extra?.worldscrawl_cmd && !jQuery('#mes_stop').is(':visible'); }, len2, { timeout: 30000 });
+        await settle(3000);
         const again = await page.evaluate(() => {
-            const u = SillyTavern.getContext().chat.findLast(m => m.is_user);
+            const ch = SillyTavern.getContext().chat, u = ch.findLast(m => m.is_user), at = ch.lastIndexOf(u);
             return { d: (u.extra?.worldscrawl_found ?? []).find(x => x.source === 'bracket') ?? null, s: (u.extra?.worldscrawl_npc ?? []).filter(x => x.type === 'npc_appear' && x.source === 'bracket').length,
+                cmd: u.extra?.worldscrawl_cmd ?? null, hidden: u.is_system === true, attr: document.querySelector(`#chat .mes[mesid="${at}"]`)?.getAttribute('is_system') ?? null, last: at === ch.length - 1,
                 note: [...document.querySelectorAll('#chat .worldscrawl_found_here')].map(e => e.textContent) };
         });
         check('[find] again: a "right here" notice, nothing stamped', again.d?.here === true && again.s === 0 && again.note.some(t => /is right here\./.test(t)), JSON.stringify(again));
+        check('[find] again (right here): a command, flagged and hidden with /hide, no reply and no narrator call',
+            again.cmd?.verb === 'find' && !again.cmd.failed && again.hidden && again.attr === 'true' && again.last && (await storyReqs(from2)).length === 0, JSON.stringify(again));
         await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
         await settle(2000);
     }

@@ -26,9 +26,12 @@
     await send('[help]', 0);
     let bm = await lastChatMsg();
     check('bracket [help]: verb list answered directly, no model call', (await reqsNow()).length === rL && bm.kind === 'text' && /\[move\]/.test(bm.mes) && /\/ws-help/.test(bm.mes), JSON.stringify(bm));
+    const helpRow = await page.evaluate(() => { const ch = SillyTavern.getContext().chat, at = ch.length - 2, m = ch[at]; return { mes: m.mes, sys: m.is_system === true, cmd: m.extra?.worldscrawl_cmd ?? null, attr: document.querySelector(`#chat .mes[mesid="${at}"]`)?.getAttribute('is_system') ?? null }; });
+    check('bracket [help]: the command is flagged and hidden with ST\'s /hide (is_system, the ghost attribute), no failure stamp', helpRow.mes === '[help]' && helpRow.sys && helpRow.attr === 'true' && helpRow.cmd?.verb === 'help' && !helpRow.cmd.failed, JSON.stringify(helpRow));
     await queue([{ content: 'You take in the room again.' }]);
     await send('I [look] around.', 1);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
+    check('a hidden command stays out of the next prompt (ST drops is_system rows)', lq.length === 1 && !lq[0].messages.some(m => String(m.content).includes('[help]') || /(^|: )help$/.test(String(m.content).trim())), JSON.stringify(lq.map(q => q.messages.map(m => String(m.content).slice(0, 60)))));
     check('bracket [look] around: no intent question, look-around narration, brackets gone for the narrator', lq.length === 1 && lk.extra.worldscrawl_look?.kind === 'around' && promptOf(lq[0]).includes('looks around') && promptOf(lq[0]).includes('I look around.') && !promptOf(lq[0]).includes('[look]'), lq.length + JSON.stringify(lk.extra));
     rL = (await reqsNow()).length;
     await queue([{ content: 'none' }]);
