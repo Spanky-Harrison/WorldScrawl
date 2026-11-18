@@ -343,7 +343,7 @@ test('[find]: right here is a notice with no stamp; from a listed room on the sq
     const r = n.extra[FOUND_KEY].find(x => x.id === 'tam');
     assert.equal(r.ok, true, r.reason);
     assert.equal(r.moved, true);
-    assert.equal(r.reason, 'Found: Tam comes here, until 12:00.');
+    assert.equal(r.reason, 'Found: Tam comes here.');
     assert.match(r.detail, /Village Square|square/i);
     assert.ok(appears(n).some(s => s.id === 'tam' && s.place === BAR && s.whole === true && s.source === 'bracket'));
     assert.ok(presentIds(b.c).includes('tam'));

@@ -57,14 +57,13 @@ class El {
     getAttribute(k) { if (k === 'id') return this.id || null; if (k === 'class') return this.className || null; return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
     addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
     dispatchEvent(ev) { for (const fn of this.listeners[ev?.type] ?? []) fn({ ...ev, target: this, stopPropagation() {}, preventDefault() {} }); }
-    append(...xs) {
-        for (const x of xs.flat()) {
-            if (x == null || x === false) continue;
-            if (typeof x !== 'object') { const t = this.ownerDocument.createElement('span'); t.textContent = String(x); t.parent = this; this.children.push(t); }
-            else { x.parent = this; this.children.push(x); }
-        }
+    /** Like a browser: anything that is not an element (null, undefined, false, a number, an array) becomes text, "null" included. */
+    node(x) {
+        if (x instanceof El) { x.remove(); x.parent = this; return x; }
+        const t = this.ownerDocument.createElement('span'); t.textContent = String(x); t.parent = this; return t;
     }
-    prepend(x) { if (!x) return; x.parent = this; this.children.unshift(x); }
+    append(...xs) { for (const x of xs) this.children.push(this.node(x)); }
+    prepend(...xs) { this.children.unshift(...xs.map(x => this.node(x))); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
     replaceChildren(...xs) { this.children = []; this._text = ''; this.append(...xs); }
     get isConnected() { let p = this; while (p) { if (p === this.ownerDocument) return true; p = p.parent; } return false; }

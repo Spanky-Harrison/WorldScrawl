@@ -202,7 +202,7 @@ test('[name] records a per-actor name stamp, and the activity log shows the brac
     assert.match(bracket.text, /Hesk/);
     assert.equal(bracket.status, 'ok');
     const rejected = messageActivity({ extra: { worldscrawl_found: [{ name: 'Hesk', ok: false, reason: 'this room is not within it', source: 'bracket', swipe: 0 }] } }, 0);
-    const flag = rejected.find(e => e.kind === 'flag' && e.label === '[found]');
+    const flag = rejected.find(e => e.kind === 'flag' && e.label === '[find]');
     assert.equal(flag.status, 'rejected');
     assert.match(flag.text, /not within/);
 });

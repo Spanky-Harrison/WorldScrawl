@@ -97,7 +97,11 @@ const waitFor = async (c, text) => { const m = say(c, text); const r = await bra
 async function find(c, name, extra = {}) {
     const m = say(c, `[find] ${name}`, extra);
     const r = await bracketIntent(m, parseBracket(m.mes));
-    assert.equal(r.kind, 'found');
+    const d0 = (m.extra[FOUND_KEY] ?? []).find(x => x.source === 'bracket');
+    // No saved person: an outright failure (short-circuit). Right here: a command (its card, no reply). Found, or a known
+    // person not around: narrated.
+    assert.equal(r.kind, !d0?.id ? 'bracket_failed' : d0.here ? 'find' : 'found');
+    assert.equal(!!r.command, !d0?.id || !!d0.here);
     const d = (m.extra[FOUND_KEY] ?? []).find(x => x.source === 'bracket');
     return { d, m, appear: (m.extra[NPC_KEY] ?? []).filter(s => s.type === 'npc_appear' && s.source === 'bracket') };
 }
@@ -166,7 +170,7 @@ test('a room the block lists directly: she comes here, guaranteed, until the blo
     const { d, appear, m } = await find(c, 'Vera');
     assert.equal(d.ok, true, d.reason);
     assert.equal(d.moved, true);
-    assert.equal(d.reason, 'Found: Vera comes here, until 12:00.');
+    assert.equal(d.reason, 'Found: Vera comes here.');
     assert.equal(appear.length, 1);
     assert.deepEqual({ place: appear[0].place, whole: appear[0].whole, blockStart: appear[0].blockStart }, { place: BAR, whole: true, blockStart: day0(c) * 1440 + H(9) });
     assert.equal(m.extra.worldscrawl_bracket.status, 'ok');
@@ -235,7 +239,7 @@ test('a wandering block (Hesk buying for the inn): a nowhere stretch can\'t be f
     assert.equal(sched(c, 'hesk', H(12, 10)).pick, NOWHERE, 'precondition: the next stretch is nowhere by itself');
     const { d, appear, m } = await find(c, 'Hesk');
     assert.equal(d.ok, true, d.reason);
-    assert.match(d.reason, /^Found: .* comes here, until 13:00\.$/);
+    assert.match(d.reason, /^Found: .* comes here\.$/);
     assert.equal(appear[0].whole, true);
     assert.equal(appear[0].segStart, undefined, 'the whole block, not one stretch');
     await scene.prepareNpcs(m);
@@ -287,8 +291,8 @@ test('unknown name and the tracker path: no saved person is a plain rejection; t
     assert.ok((m.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_found' && s.where === 'her own room' && s.place === UP));
 });
 
-test('a turned-down [find] puts one in-world "not around" line in the narrator\'s facts (nowhere, not an option, is-at elsewhere, off the map), no reason or mechanics', async () => {
-    const line = name => `${name} isn't around here right now; the characters don't find them.`;
+test('a turned-down [find] puts one firm in-world not-found line after the player\'s message (nowhere, not an option, is-at elsewhere, off the map), no reason or mechanics', async () => {
+    const line = name => `You looks for ${name} but does not find them. ${name} is not here and does not appear in this reply in any form: no arrival, no voice, no glimpse, no sign of them. Nobody else stands in for ${name} or answers as them.`;
     const bad = /%|\broll|might be at|nowhere|wander|\bblock\b|segment|\[find\]|schedule|option/i;
     const cases = [['10:00', BAR, 'Nell', 'Nell'], ['10:00', BAR, 'Sol', 'Sol'], ['15:30', BAR, 'Hesk', 'The landlady'], ['10:00', BAR, 'Odo', 'Odo'], ['08:00', UP, 'Hesk', 'The landlady']];
     for (const [time, here, who, shown] of cases) {
@@ -297,12 +301,14 @@ test('a turned-down [find] puts one in-world "not around" line in the narrator\'
         assert.equal(d.ok, false, `${who}: ${d.reason}`);
         await scene.prepareNpcs(m);
         const text = await factsText(blocks);
-        const hits = text.split('\n').filter(l => /isn't around here right now; the characters/.test(l));
+        const hits = text.split('\n').filter(l => /but does not find them\./.test(l));
         assert.deepEqual(hits, [line(shown)], `${who} at ${time}`);
+        assert.ok(blocks[ext.REMINDER_KEY].split('\n').includes(line(shown)), `${who}: in the after-message slot`);
+        assert.ok(!blocks[ext.FACTS_KEY].includes('does not find them'), `${who}: not in the facts block`);
         assert.doesNotMatch(hits[0], bad);
         assert.ok(!text.includes(d.reason), 'the reason stays on the player\'s notice');
         reply(c, 'Nobody comes.');
         say(c, 'I order a drink.');
-        assert.doesNotMatch(await factsText(blocks), /the characters don't find them/, `${who}: only on the turn of the [find]`);
+        assert.doesNotMatch(await factsText(blocks), /does not find them/, `${who}: only on the turn of the [find]`);
     }
 });

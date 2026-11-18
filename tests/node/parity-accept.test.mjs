@@ -1170,7 +1170,8 @@ test('the tracker is told who is not known by name; its name item for someone no
     const tp = promptText('npc.tracker');
     assert.match(tp, /listed above as \(name not yet known\) has their name said in this exchange[^\n]*"action": "name"/);
     assert.match(tp, /with id set to the handle in \[brackets\] after their name/);
-    assert.match(tp, /Call people by the names they have above and in the exchange \(never "the stranger", never a bracketed handle\)/);
+    assert.match(tp, /\{\{memory_rules\}\}/);
+    assert.match(promptText('npc.memory_rules'), /Call people by the names they have in the story \(never "the stranger", never a bracketed handle\)/);
     assert.doesNotMatch(tp, /real name/i);
     c.chat = [msg([])];
     assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
@@ -1184,13 +1185,14 @@ test('the tracker is told who is not known by name; its name item for someone no
     assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
 });
 
-test('[find] and [found] reach Hesk by "the landlady"; an ambiguous alias matches nobody', async () => {
+test('[find] reaches Hesk by "the landlady" ([found] is no longer a verb); an ambiguous alias matches nobody', async () => {
     const { c } = boot();
     rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [LANDLADY] }] });
     roomFetch();
-    for (const text of ['I [find] the landlady', 'I [found] landlady']) {
+    assert.equal(parseBracket('I [found] landlady'), null, '[found] is gone');
+    for (const text of ['I [find] the landlady', 'I [find] landlady']) {
         const b = parseBracket(text);
-        assert.equal(b.verb, 'found');
+        assert.equal(b.verb, 'find');
         const user = { mes: text, is_user: true, swipe_id: 0, extra: {} };
         c.chat = [msg([]), user];
         const r = await bracketIntent(user, b);
@@ -1221,7 +1223,7 @@ test('[find] the landlady behind the bar reaches Hesk; "the guard captain" never
     roomFetch();
     const find = async text => {
         const b = parseBracket(text);
-        assert.equal(b.verb, 'found', text);
+        assert.equal(b.verb, 'find', text);
         const user = { mes: text, is_user: true, swipe_id: 0, extra: {} };
         c.chat = [msg([]), user];
         const r = await bracketIntent(user, b);

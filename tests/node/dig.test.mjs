@@ -39,11 +39,16 @@ test('a return name the courtyard already uses ("in") is swapped for a free one,
 test('a named existing place never becomes a new one', () => {
     assert.match(ext.readDigAnswer({ new: { name: 'Back Courtyard', description: 'A muddy little yard.' }, direction: 'window' }, { loc: up, opts, canNew: false }).error, /no new place/);
 });
-test('a failed break-through is told plainly to the narrator, outranking other notes', () => {
-    const t = ext.factsText(up, null, false, { digFailed: true, look: { kind: 'window', what: 'x' }, newDoor: true });
-    assert.match(t, /FAILED: nothing gave way\. No new opening or passage exists/);
-    assert.match(t, /Narrate the attempt failing \(the wall, floor or window holds\)\.$/m);
-    assert.doesNotMatch(t, /flag/, 'no engine bookkeeping in the narrator line');
+test('a failed break-through is told plainly to the narrator after the player\'s message, outranking other notes', () => {
+    const extra = { digFailed: true, look: { kind: 'window', what: 'x' }, newDoor: true };
+    const t = ext.factsText(up, null, false, extra);
+    assert.doesNotMatch(t, /FAILED|gave way/, 'the facts block no longer carries the attempt');
+    assert.equal(t, ext.factsText(up, null, false, { digFailed: true }), 'the look and new-door notes stay outranked');
+    const after = ext.attemptLines(up, null, extra);
+    assert.equal(after.length, 1);
+    assert.match(after[0], /^What just happened: .* tried to break through, but it FAILED: nothing gave way\. No new opening or passage exists/);
+    assert.match(after[0], /Describe the attempt failing\. Do not create a gap, a crack that opens or a way through\.$/);
+    assert.doesNotMatch(after[0], /flag/, 'no engine bookkeeping in the narrator line');
 });
 test('after a failed break-through the reply cannot add a room or passage', () => {
     const chat = [{ is_user: true, mes: SAID, extra: { worldscrawl_dig_failed: true } }, { is_user: false, mes: 'The window gives way...' }];
