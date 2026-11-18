@@ -138,7 +138,8 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 
 /* Map pick mode (picker.mjs + app.js): a big banner, highlighted targets, a Yes/No confirm. */
 .wspick { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.wspick-value { padding: 2px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; min-width: 8em; }
+.wspick-value { padding: 2px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; min-width: 8em; overflow-wrap: anywhere; }
+.wspick-id { user-select: all; font-family: monospace; font-size: .85em; }
 .wspick-banner { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--SmartThemeQuoteColor); color: #000; font-size: 1.25em; font-weight: bold; z-index: 5; }
 .wspick-title { flex: 0 0 auto; }
 .wspick-find { position: relative; flex: 1 1 auto; font-size: .75em; font-weight: normal; }

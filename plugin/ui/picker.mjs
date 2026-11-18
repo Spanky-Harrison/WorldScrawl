@@ -4,11 +4,15 @@
 // chosen id, or null on Cancel. Pure DOM, no server calls: names and paths come from the outline passed in.
 //   spec = { kind: 'room'|'subregion'|'region', title: 'exit destination', value, exclude: [ids], allowed: [ids] | null,
 //            outline: {regions:[{id,name,subregions:[{id,area,name,rooms:[{address,name}]}]}]}, empty: 'label for no value',
-//            clearable: bool }
+//            clearable: bool, label: 'nameId' (opt-in: show "Display Name - engine:id" on one line, the path in the tooltip),
+//            nameOf: (id) => display name when the outline has none (the first paint, a test) }
+// `kind` may also be an array of kinds (multi-pick: the map's pick mode with `multi: true` resolves with an array of ids;
+// every spec without `multi` resolves with one id string, or null on Cancel).
 // The returned element behaves like a <select> for its callers: .value (get/set) and a bubbling 'change' event.
 
 /** Every entity of a kind in an outline, with its display path: [{id, name, path, kind}]. */
 export function pickEntries(outline, kind) {
+    if (Array.isArray(kind)) return kind.flatMap(k => pickEntries(outline, k));
     const out = [];
     for (const r of outline?.regions ?? []) {
         if (kind === 'region') { out.push({ id: r.id, name: r.name, path: r.name, kind }); continue; }
@@ -37,6 +41,22 @@ export function pickSearch(spec, q, limit = 30) {
         .sort((a, b) => a.rank - b.rank || a.path.localeCompare(b.path)).slice(0, limit);
 }
 export const pathOf = (outline, kind, id) => pickEntries(outline, kind).find(e => e.id === id)?.path ?? null;
+/**
+ * One place for display: {name, id, path}. The name comes from the outline, else `fallbackName` (a string or (id) => string:
+ * the cast panel's own place labels, for the first paint and tests with no outline), else '' (then the line is just the id).
+ */
+export function placeLine(outline, kind, id, fallbackName = '') {
+    const hit = id ? pickEntries(outline, kind).find(e => e.id === id) : null;
+    const fb = typeof fallbackName === 'function' ? fallbackName(id) : fallbackName;
+    return { name: hit?.name ?? (fb && fb !== id ? String(fb) : ''), id: id ?? '', path: hit?.path ?? '' };
+}
+/** The one-line "Display Name - engine:id" label as DOM nodes (the id is its own selectable element). */
+export function nameIdNodes(doc, line) {
+    const out = [];
+    if (line.name) { const n = doc.createElement('span'); n.className = 'wspick-name'; n.textContent = line.name; out.push(n, doc.createTextNode(' - ')); }
+    const c = doc.createElement('code'); c.className = 'wspick-id'; c.textContent = line.id; out.push(c);
+    return out;
+}
 
 export function pickField(doc, spec) {
     const mk = (tag, attrs = {}, ...kids) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v); } e.append(...kids.filter(x => x !== null && x !== undefined && x !== false)); return e; };
@@ -44,11 +64,18 @@ export function pickField(doc, spec) {
     const shown = mk('span', { class: 'wspick-value' });
     const choose = mk('button', { type: 'button', class: 'crumb wspick-choose', title: `Pick the ${spec.title ?? spec.kind} on the map` }, 'Choose…');
     const clear = mk('button', { type: 'button', class: 'crumb wspick-clear', title: 'Clear' }, '✕');
-    const root = mk('span', { class: 'wspick', 'data-kind': spec.kind }, shown, choose, ...(spec.clearable ? [clear] : []));
+    const root = mk('span', { class: 'wspick', 'data-kind': Array.isArray(spec.kind) ? spec.kind.join(' ') : spec.kind }, shown, choose, ...(spec.clearable ? [clear] : []));
     const draw = () => {
-        const p = value ? pathOf(spec.outline, spec.kind, value) ?? value : '';
-        shown.textContent = p || (spec.empty ?? `(no ${spec.kind === 'room' ? 'place' : spec.kind} chosen)`);
-        shown.classList.toggle('muted', !value); root.dataset.value = value; shown.title = value || '';
+        if (spec.label === 'nameId' && value) {
+            const line = placeLine(spec.outline, spec.kind, value, spec.nameOf);
+            shown.replaceChildren(...nameIdNodes(doc, line));
+            shown.title = line.path ? `${line.path}\n${value}` : value;
+        } else {
+            const p = value ? pathOf(spec.outline, spec.kind, value) ?? value : '';
+            shown.textContent = p || (spec.empty ?? `(no ${spec.kind === 'room' ? 'place' : spec.kind} chosen)`);
+            shown.title = value || '';
+        }
+        shown.classList.toggle('muted', !value); root.dataset.value = value;
         clear.hidden = !value;
     };
     const set = (v, fire = true) => { value = v ?? ''; draw(); if (fire) { root.dispatchEvent(new Event('input', { bubbles: true })); root.dispatchEvent(new Event('change', { bubbles: true })); } };

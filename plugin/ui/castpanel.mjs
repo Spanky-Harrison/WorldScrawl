@@ -421,7 +421,7 @@ export function castPanel(doc, io) {
                     const nr = $('input', { type: 'text', class: 'pf-input cf-near', placeholder: 'Near area', title: 'Where that is: a map place or area id, a place from the world\'s off-map list, or plain words. Free text.' }); nr.value = e.near; nr.addEventListener('input', () => { e.near = nr.value; check(); });
                     slot = [$('div', { class: 'cf-offgrid' }, capped('Off-map place name', wh), capped('Near area', nr))];
                 } else {
-                    const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.place });
+                    const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.place, label: 'nameId', nameOf: a => data?.place_labels?.[a] });
                     pk.addEventListener('change', () => { e.place = pk.value; drawSched(); check(); });
                     slot = [$('div', { class: 'cf-field' }, $('span', { class: 'cf-cap' }, 'Place'), pk)];
                 }
