@@ -299,7 +299,9 @@ test('person updates come from the tracker: its prompt guides memory, dispositio
     assert.match(tracker, /Do not set looks/);
     assert.match(tracker, /the player does not have to say that it is temporary/);
     assert.match(tracker, /action": "memory"/);
-    assert.match(tracker, /promise, agreement, revelation, threat, favor, conflict, shared experience/);
+    assert.match(tracker, /\{\{memory_rules\}\}/, 'the shared memory rules come from npc.memory_rules');
+    assert.match(P('npc.memory_rules').text, /promise, agreement, revelation, threat, favor, conflict, shared experience/);
+    assert.ok(P('npc.memory_rules').locked);
     assert.match(tracker, /Nobody has to ask you to remember/);
     assert.match(tracker, /nobody gained a memory they would keep/);
     assert.match(tracker, /Fog, rain, or cold outside does not rewrite the room/);

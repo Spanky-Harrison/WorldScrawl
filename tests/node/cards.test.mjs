@@ -767,17 +767,20 @@ test('committed notes: fact, memory and disposition Edit → Approve edited → 
     }
 });
 
-test('a remembered person: the new-person panel replaces the Looks/Body block; Edit opens every field and clears only the changed field\'s ⚠', async () => {
+test('a remembered person: the kept card is title and buttons only; Edit opens the new-person panel and every field and clears only the changed field\'s ⚠', async () => {
     const { st } = notes([{ type: 'npc_create', id: 'maren', name: 'Maren', line: 'A knife-grinder.', looks: 'wiry woman', body: 'Wiry, with grey eyes.', outfit: 'A patched smock.', history: 'A scar on the chin.', facts: [], invented: ['grey eyes', 'scar on the chin'] }]);
     const s = st('npc_create');
     let doc = draw([0]);
     let el = noteEl(doc, /Maren remembered/);
     assert.equal(doc.querySelector('.worldscrawl_npccreate_more'), null, 'no old block');
-    assert.match(el.querySelector('.worldscrawl_diff').textContent, /new person/);
-    assert.match(el.querySelector('.worldscrawl_invented').textContent, /grey eyes; scar on the chin/);
+    assert.equal(el.querySelector('.worldscrawl_diff'), null, 'kept: no panel rows until Edit');
+    assert.equal(el.querySelector('.worldscrawl_invented'), null, 'kept: no made-up note until Edit');
     byText(el, 'Edit').click();
     await flush(10);
     el = noteEl(doc, /Maren remembered/);
+    assert.match(el.querySelector('.worldscrawl_diff').textContent, /new person/);
+    assert.match(el.querySelector('.worldscrawl_invented').textContent, /grey eyes; scar on the chin/);
+    assert.equal(el.querySelector('.worldscrawl_remember_memory'), null, 'kept: memory is edited as its own npc_memory rows');
     const box = k => noteEl(doc, /Maren remembered/).querySelector(`.worldscrawl_remember_${k}`);
     assert.deepEqual(['name', 'line', 'looks', 'body', 'outfit', 'history'].map(k => box(k)?.value), ['Maren', 'A knife-grinder.', 'wiry woman', 'Wiry, with grey eyes.', 'A patched smock.', 'A scar on the chin.']);
     box('body').value = 'Wiry and stooped.'; box('body').dispatchEvent({ type: 'input' });

@@ -259,7 +259,7 @@ test('slices, suggestions, read-back and tags', () => {
     assert.equal(tags.text, 'She smiles.');
     assert.equal(parseNpcTag('disposition | hesk | very friendly | paid the tab').value, 'friendly');
     assert.equal(parseNpcTag('disposition | hesk | devoted'), null);
-    assert.deepEqual(readRememberAnswer({ name: 'Maren', personality: { summary: 'A knife-grinder.', manner: '', speech: 'Squeak.' } }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], invented: [] });
+    assert.deepEqual(readRememberAnswer({ name: 'Maren', personality: { summary: 'A knife-grinder.', manner: '', speech: 'Squeak.' } }), { name: 'Maren', line: 'A knife-grinder.', manner: '', voice: 'Squeak.', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], memory: [], invented: [] });
     assert.equal(readRememberAnswer({ name: 'Maren' }), null);
 });
 
@@ -474,7 +474,7 @@ test('remember: every field parses, invented details stay on the card and out of
     const got = readRememberAnswer(answer);
     assert.deepEqual(got, { name: 'Maren', line: 'cheerful, shrewd', manner: 'Watches hands.', voice: 'Squeaky, quick.', looks: 'wiry woman with a grinding cart',
         body: 'Small and wiry, grey eyes, a scar on the chin.', outfit: 'A patched leather smock.', history: 'Came up the river as a girl.', unknownAs: 'the knife-grinder',
-        facts: ['Sharpens knives in the square'], invented: ['grey eyes', 'scar on the chin'], disposition: { value: 'friendly', reason: 'You paid without haggling.' } });
+        facts: ['Sharpens knives in the square'], memory: [], invented: ['grey eyes', 'scar on the chin'], disposition: { value: 'friendly', reason: 'You paid without haggling.' } });
     assert.equal(readRememberAnswer({ name: 'M', line: 'old shape' }), null);
     assert.equal(readRememberAnswer({ name: 'M', personality: { summary: 'L' }, disposition: 'Warm and kind' }).disposition, undefined);
     const { name, line, manner, voice, looks, body, outfit, history, unknownAs, invented } = got;

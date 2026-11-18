@@ -189,7 +189,7 @@ const registered = () => {
 
 test('no reporter-tools checkbox or setting: the after-reply tracker reports changes', () => {
     assert.doesNotMatch(src, /worldscrawl_reporter_tools|reporterTools/);
-    assert.match(src, /id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes/);
+    assert.match(src, /id="worldscrawl_flag_npcs" type="checkbox"> Let the after-reply check propose NPC changes/);
     assert.match(src, /flagNpcs: true/);
     assert.doesNotMatch(src, /name="worldscrawl_mode" value="reporter/);
     ctx().extensionSettings.worldscrawl = { moveMode: 'tools', flagTags: true };
