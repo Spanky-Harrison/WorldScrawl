@@ -239,7 +239,7 @@ test('readSchedulePick (the model): matchEnum leniency, unsure is passing throug
     assert.equal(ok({ pattern: 'night shift', job: BAR, home: 'null', favorites: null }).pick.home, null);
     assert.match(readSchedulePick({ pattern: 'day shift', job: 'riverton:nope/room' }, PLACES).error, /job "riverton:nope\/room" is not in the list/);
     assert.match(readSchedulePick({ pattern: 'day shift', job: 'Common Room' }, PLACES).error, /matches .*; use the key/, 'two rooms share the name');
-    assert.match(readSchedulePick({ pattern: 'day shift', job: RAT }, PLACES).error, /is an area; name one room/);
+    assert.equal(ok({ pattern: 'day shift', job: RAT }).pick.job_area, true, 'an area is a legal job now');
     assert.match(readSchedulePick({ pattern: 'day shift', job: `offmap: ${'x'.repeat(81)}` }, PLACES).error, /at most 80 characters/);
     const r = ok({ pattern: 'day shift', job: BAR, favorites: [UP, 'riverton:nope', SQ, RAT, LANE, STORE] });
     assert.deepEqual(r.pick.favorites, [SQ, RAT, LANE], 'private and unknown dropped, then at most 3');
@@ -252,7 +252,7 @@ test('readSchedulePick (the model): matchEnum leniency, unsure is passing throug
         assert.match(h.warnings.join(' '), /^home dropped \(off the map instead\): home[ :]/, String(home));
         assert.match(readSchedulePick({ pattern: 'day shift', job: BAR, home }, PLACES, { strict: true }).error, /^home/, `typed ${home} stays an error`);
     }
-    assert.match(readSchedulePick({ pattern: 'day shift', job: RAT, home: RAT }, PLACES).error, /job "riverton:drowned_rat" is an area/);
+    assert.match(ok({ pattern: 'day shift', job: RAT, home: RAT }).warnings.join(' '), /home "riverton:drowned_rat" is an area; name one room in it/, 'an area job with an area home: the home is dropped');
     const nojob = ok({ pattern: 'night shift', job: null, favorites: [SQ] });
     assert.equal(nojob.pick.pattern, 'passing through');
     assert.match(nojob.warnings.join(' '), /night shift with no job, so passing through/);
@@ -328,14 +328,15 @@ test('Remember asks the pattern once the card is ready: shown on the card while 
     assert.deepEqual(btns(note), ['Edit', 'Turn off', 'Undo']);
 });
 
+const PLACES_HEAD = 'Places (KEY: name). A job may be a room KEY or an area KEY; a home must be a room KEY:\n';
 test('the question: the met room first, nearest rooms (at most 40, private marked), their areas and places off the map; the card\'s line and looks; masked (no unknown name)', async () => {
     const { calls } = await rememberCard({ cards: [] });
     const p = calls.pick[0];
     assert.match(p, /^Choose a daily pattern for Maren, met in Common Room at 10:00\.\nA knife-grinder who works for the landlady\. Looks: wiry woman with a whetstone\n/);
     assert.doesNotMatch(p, /Hesk/, 'the name portal masks the unknown landlady');
     assert.match(p, /The story since they showed up:\nMaren, the knife-grinder, works the wheel by the fire\./);
-    assert.match(p, /\n\nThey were met here, in Common Room, at 10:00: pick a pattern that fits them being here then \(at work if this is their job, otherwise in their free time; the game keeps this place among their free-time spots at that hour\)\.\n\nReply with JSON only\.$/);
-    const list = p.slice(p.indexOf('Places (KEY: name):\n') + 20, p.indexOf('\n\nThey were met here')).split('\n');
+    assert.match(p, /\n\nThey were met here, in Common Room, at 10:00: pick a pattern that fits them being here then \(at work if this is their job, otherwise in their free time; the game keeps this place among their free-time spots at that hour\)\. If this is where they work, make it their job: this room's KEY, or its area's KEY when their work takes them around more than this room\.\n\nReply with JSON only\.$/);
+    const list = p.slice(p.indexOf(PLACES_HEAD) + PLACES_HEAD.length, p.indexOf('\n\nThey were met here')).split('\n');
     assert.equal(list[0], `- ${BAR}: Common Room (The Drowned Rat)`);
     const rooms = list.slice(0, list.indexOf('Areas (anywhere public inside):'));
     assert.ok(rooms.length > 5 && rooms.length <= SP.PICK_ROOMS, String(rooms.length));
@@ -351,7 +352,7 @@ test('a bad answer is asked once more with the error, then fits; two bad answers
     // Retry, then ok.
     let r = await rememberCard({ pick: n => (n === 1 ? { ...PICK, job: 'riverton:nope/room' } : PICK) });
     assert.equal(r.calls.pick.length, 2);
-    assert.match(r.calls.pick[1], /\n\nYour last answer did not fit: job "riverton:nope\/room" is not in the list .*\. Fix it\.$/);
+    assert.match(r.calls.pick[1], /\n\nYour last answer did not fit: job "riverton:nope\/room" is not in the list .*\. Fix it\. A job is a room KEY or an area KEY from the list \(or offmap: and a few words\); a home is a room KEY\.$/);
     assert.equal(r.card().schedule.status, 'ok');
     assert.deepEqual(scheduleNotes(r.c.chat[1]).map(n => [n.status, n.tries ?? 1]), [['ok', 2]]);
     // Two unusable answers: passing through, shown and noted.

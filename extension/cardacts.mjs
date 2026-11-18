@@ -19,7 +19,7 @@ import { getStoredLocation } from './doors.mjs';
 import { REMEMBER_KEY, appearJobs, applyFacts, castPack, npcClock, npcEnv, refreshLivePlaces, discardRemember, editExpiryRevert, editKeptAppearance, keepRemember, rememberWith, retryAppearance, retryRemember, settleNpc } from './scene.mjs';
 import { NPC_EXPIRED_KIND } from './npcexpiry.mjs';
 import { npc as Npc } from './shared.mjs';
-import { retrySchedule, scheduleErrors, scheduleWith } from './schedulepick.mjs';
+import { retrySchedule, scheduleErrors, scheduleWarnings, scheduleWith } from './schedulepick.mjs';
 
 /** Actions that ask the model or write a decision: each must carry its card's ticket. */
 export const ASYNC_ACTIONS = new Set(['again', 'scope', 'rewrite', 'approve', 'save']);
@@ -230,6 +230,8 @@ const remember = {
         const sched = boxes.length ? scheduleWith(t.card.schedule?.pick ?? null, v.fields, boxes) : null;
         if (sched?.error) { scheduleErrors.set(t.key, sched.error); toastr.warning(`WorldScrawl: ${sched.error}`); renderPatchCards(); return { ok: false, error: sched.error }; }
         scheduleErrors.delete(t.key);
+        scheduleWarnings.delete(t.key);
+        if (sched?.warnings?.length) { scheduleWarnings.set(t.key, sched.warnings.join('; ')); toastr.warning(`WorldScrawl: Schedule: ${sched.warnings.join('; ')}`); }
         E().closeCardEditor(t.key);
         return keepRemember(t.id, { card: built.got, ...(sched ? { schedule: sched.pick } : {}) });
     },
@@ -287,6 +289,7 @@ function noteEdit(s, v) {
     if (s.type === 'npc_schedule' && s.pick) { // the daily pattern typed again: read against the live map, expanded at the room and time they were met
         const r = scheduleWith(s.pick, v.fields, v.dirty.filter(isScheduleBox));
         if (r.error) return { error: r.error };
+        if (r.warnings?.length) toastr.warning(`WorldScrawl: Schedule: ${r.warnings.join('; ')}`);
         const met = s.met ?? {};
         return { payload: { pick: r.pick, schedule: Npc.expandPattern(r.pick, { room: met.room ?? '', minutes: met.minutes ?? 0 }), about: Npc.pickSummary(r.pick, { nameOf: a => castPack()?.labels?.[a] || a, room: met.room ?? '', minutes: met.minutes ?? null }) } };
     }

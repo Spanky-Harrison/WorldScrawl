@@ -22,7 +22,7 @@ import { NPC_EXPIRED_KIND, changeLabel } from './npcexpiry.mjs';
 import { reviewFields } from './replay.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
 import { busyLines, onCallChange, onWorkChange, workingOn } from './work.mjs';
-import { prefetchSchedule, scheduleErrors, scheduleFields, scheduleView } from './schedulepick.mjs';
+import { prefetchSchedule, scheduleErrors, scheduleFields, scheduleView, scheduleWarnings } from './schedulepick.mjs';
 
 // ---- Waiting and sleeping: time passes without moving. The seconds are stamped on a message (WAIT_KEY) exactly like
 // a move's travel time, so the clock counts them, deleting the message undoes them and swipes keep them. Triggers:
@@ -300,7 +300,7 @@ function rememberEl(msg, id, remember) {
     const editing = phase === 'review' && !saving && !!editLib()?.editorOpen(key);
     const schedule = scheduleView(remember);
     const desc = C.rememberReview({ key, name: remember.name, suggested: !!remember.suggested, phase, saving, got: prop?.got ?? null, editing,
-        schedule, scheduleError: scheduleErrors.get(key) ?? '', scheduleFields: editing && schedule ? scheduleFields(remember.schedule?.pick ?? null) : [] });
+        schedule, scheduleError: scheduleErrors.get(key) ?? '', scheduleWarning: scheduleWarnings.get(key) ?? '', scheduleFields: editing && schedule ? scheduleFields(remember.schedule?.pick ?? null) : [] });
     return drawCard(desc, 'remember', ticketFor('remember', { id, msg, card: remember }));
 }
 /** A kept person (appearance or base text) change: the shared card; Edit opens the same Body/Outfit editor as its review. */

@@ -214,7 +214,7 @@ export function inventedAfter(got = {}, changed = []) {
 
 /**
  * The Remember card. v: {key, name, suggested, phase ('working'|'review'|'failed'), saving, got, editing, values, intent,
- * schedule: {phase ('working'|'ok'|'failed'), text, reason} | null, scheduleFields: [editor boxes], scheduleError}.
+ * schedule: {phase ('working'|'ok'|'failed'), text, reason} | null, scheduleFields: [editor boxes], scheduleError, scheduleWarning}.
  * The panel is a new person (empty befores); made-up details are marked ⚠ on their fields. The schedule line is the
  * daily pattern question: working, the pick, or passing through; Edit adds its Pattern / Job / Home / Favorites boxes.
  */
@@ -236,6 +236,7 @@ export function rememberReview(v) {
         : sch.phase === 'failed' ? { text: `Schedule: ${sch.text}${sch.reason ? ` (${sch.reason})` : ''}`, tone: 'warn', cls: 'worldscrawl_schedule_failed' }
         : { text: `Schedule: ${sch.text}`, tone: 'info', cls: 'worldscrawl_schedule' });
     if (v.scheduleError) notes.push({ text: `⚠ ${v.scheduleError}`, tone: 'error', cls: 'worldscrawl_schedule_error' });
+    else if (v.scheduleWarning) notes.push({ text: `Schedule: ${v.scheduleWarning}`, tone: 'warn', cls: 'worldscrawl_schedule_warning' });
     const actions = [];
     if (phase === 'review' || phase === 'failed') actions.push(act('again', 'Ask the model again', true));
     if (phase === 'review') actions.push(v.editing ? act('close', 'Forget the edits') : act('edit', 'Change any part of this card before saving it'));
