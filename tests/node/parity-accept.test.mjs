@@ -1171,7 +1171,7 @@ test('the tracker is told who is not known by name; its name item for someone no
     assert.match(tp, /listed above as \(name not yet known\) has their name said in this exchange[^\n]*"action": "name"/);
     assert.match(tp, /with id set to the handle in \[brackets\] after their name/);
     assert.match(tp, /\{\{memory_rules\}\}/);
-    assert.match(promptText('npc.memory_rules'), /Call people by the names they have in the story \(never "the stranger", never a bracketed handle\)/);
+    assert.match(promptText('npc.memory_rules'), /Call people by their names \(as listed above, or as the story names them\), never "the stranger" and never a bracketed handle/);
     assert.doesNotMatch(tp, /real name/i);
     c.chat = [msg([])];
     assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
