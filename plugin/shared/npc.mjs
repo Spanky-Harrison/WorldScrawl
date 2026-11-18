@@ -305,8 +305,8 @@ const FREE_BLOCKS = {
     'night shift': [['14:30', '16:00', 40, true], ['22:00', '23:00', 30, false]],
 };
 const hhmm = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-/** Whether `spots` cover `room`: the room itself, or an area (any address above it) holding it. */
-export const spotsCover = (spots, room) => spots.some(a => a === room || String(room).startsWith(`${a}/`));
+/** Whether `spots` cover `room`: the room itself, a subregion holding it, or its region. */
+export const spotsCover = (spots, room) => spots.some(a => a === room || String(room).startsWith(`${a}/`) || String(room).startsWith(`${a}:`));
 /**
  * The met-place guard: when they were met (`room`, `minutes`) inside one of the shift's free-time blocks and the spots
  * do not already cover that room, it joins that block's options; the block's [from, to] or null. Passing through: null.
