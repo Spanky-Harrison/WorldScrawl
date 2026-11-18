@@ -8,7 +8,7 @@
 //       decideNpc({identity, decisionRev, action, card, ref, seen, values, to}) -> {ok, error, stale} (a Changes card click, run by the chat's card handler) }
 import { permanentProblem, liveSchedule, mightText, placeResolver, mightOptionsShown, toggleRowKind, formWarnings, MIGHT_HELP, IMPORTANCE_HELP, OFFMAP_HELP } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
-import { pickField, pathOf } from './picker.mjs';
+import { pickField, pickList, pathOf } from './picker.mjs';
 import { stampCard } from './castdata.mjs';
 import { renderCard } from './card.mjs';
 import { openCardEditor, closeCardEditor, editorOpen, editorValues } from './cardedit.mjs';
@@ -361,7 +361,9 @@ export function castPanel(doc, io) {
         dsel.value = f.disposition; dsel.addEventListener('change', () => { f.disposition = dsel.value; check(); });
         form.append(fieldRow('disposition', 'Starts toward the player', dsel), fieldRow('reason', 'Because', text('reason')));
         const schedBox = $('div', { class: 'cf-schedule' });
-        const rctx = { resolve: placeResolver(data) };
+        // The resolver knows the world files (data) and this chat's changes (outline); rebuilt whenever either is reloaded.
+        let rcMade = null, rcFn = null;
+        const rctx = { get resolve() { if (!rcFn || rcMade.d !== data || rcMade.o !== outline) { rcFn = placeResolver(data, outline); rcMade = { d: data, o: outline }; } return rcFn; } };
         const kindSel = (e, i) => {
             const k = $('select', { class: 'pf-input cf-kind', title: 'Is at: one place for the hours. Might be at: places with odds.' }, $('option', { value: 'at' }, 'Is at'), $('option', { value: 'might' }, 'Might be at'));
             k.value = e.kind === 'might' ? 'might' : 'at';
@@ -404,10 +406,9 @@ export function castPanel(doc, io) {
                 if (e.kind === 'might') {
                     // Shown by name where the name is unique; typed names are matched back to addresses on save.
                     if (!e.shown) { e.options = mightOptionsShown(e.options, rctx.resolve); e.shown = true; }
-                    const opts = $('input', { type: 'text', class: 'pf-input cf-options', placeholder: 'Market Lane, General Store, nowhere(80)', title: 'The same list as text. A (number) is a percent.' }); opts.value = e.options;
-                    opts.addEventListener('input', () => { e.options = opts.value; check(); });
+                    const pl = pickList(doc, { get resolve() { return rctx.resolve; }, get outline() { return outline; }, get elsewhere() { return data?.elsewhere ?? []; }, value: e.options, title: `places for ${e.activity || 'this entry'}`, onChange: v => { e.options = v; check(); } });
                     return entryShell(e, i, {
-                        slot: [capped('Places and odds', opts)], errKey: `schedule.${i}.options`,
+                        slot: [$('div', { class: 'cf-field' }, $('span', { class: 'cf-cap' }, 'Places and odds'), pl)], errKey: `schedule.${i}.options`,
                         flags: [flagBox('cf-wandering', 'Wandering', 'Moves among the places every 15 to 60 minutes', e.wandering, v => { e.wandering = v; }),
                             flagBox('cf-anywhere', 'Anywhere', 'Area options include private rooms too', e.anywhere, v => { e.anywhere = v; })],
                     });
@@ -472,7 +473,7 @@ export function castPanel(doc, io) {
             const p = formProblems(f, { places, ids, resolve: rctx.resolve });
             for (const [k, e] of errs) e.textContent = p[k] ?? '';
             // Warnings (overlap, not on the map yet, a probable typo) are shown but never block saving.
-            const w = formWarnings(f, { resolve: rctx.resolve });
+            const w = formWarnings(f, { resolve: rctx.resolve, baseMode: !chatMode });
             for (const [k, e] of warns) e.textContent = w[k] ?? '';
             form.querySelectorAll('.cf-row, .cf-sched').forEach(x => x.classList.remove('bad'));
             for (const k of Object.keys(p)) errs.get(k)?.parentElement?.classList.add('bad');

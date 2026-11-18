@@ -153,6 +153,10 @@ body.editor .edge:hover line { stroke: var(--SmartThemeQuoteColor); }
 svg.picking .node.pickable rect { stroke: #ffd84a; stroke-width: 4px; }
 svg.picking .node.pickable { cursor: pointer; }
 svg.picking .node.pickdim { opacity: .3; }
+svg.picking .node.pickdone { opacity: .45; }
+svg.picking .node.pickdone rect { stroke: #8a8; stroke-width: 3px; stroke-dasharray: 4 3; }
+.wspick-count { font-size: .75em; font-weight: normal; white-space: nowrap; }
+.wspick-done { font-size: .8em; background: #fff; color: #000; }
 .wspick-confirm { position: fixed; top: 30%; left: 50%; transform: translateX(-50%); padding: 16px 20px; background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #ddd); border: 2px solid var(--SmartThemeQuoteColor); border-radius: 10px; box-shadow: 0 4px 24px #000a; z-index: 10; display: flex; gap: 10px; align-items: center; }
 .wspick-q { font-weight: bold; margin-right: 8px; }
 /* Text boxes grow only downwards; "Expand with AI" sits on its own line under its text box. */
@@ -253,6 +257,20 @@ body.casting .side { width: 380px; }
 .castform .cf-cap { font-size: .8em; opacity: .7; }
 .castform .cf-offgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10em, 1fr)); gap: 4px; }
 .castform .cf-line4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5em, 1fr)); gap: 4px; }
+.castform .cf-picklist { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.castform .cf-chips { display: flex; flex-direction: column; gap: 3px; }
+.castform .cf-chip { display: grid; grid-template-columns: auto minmax(0, 1fr) 4.5em auto auto; gap: 4px; align-items: center; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; padding: 2px 4px; }
+.castform .cf-chiptag { font-size: .7em; text-transform: uppercase; opacity: .75; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+.castform .cf-chiplabel { min-width: 0; overflow-wrap: anywhere; }
+.castform .cf-pct { width: 4.5em; }
+.castform .cf-chip.bad, .castform .cf-chip.dup, .castform .cf-picklist.over .cf-chip { outline: 1px solid #d05050; }
+.castform .cf-chip.dup:not(.bad) { outline-color: #e9a23b; }
+.castform .cf-addrow { display: flex; flex-wrap: wrap; gap: 4px; }
+.castform .cf-adder { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.castform .cf-adder[hidden] { display: none; }
+.castform .cf-adder .pf-input { flex: 1 1 10em; }
+.castform .cf-total:empty { display: none; }
+.castform .cf-typed summary { cursor: pointer; font-size: .85em; opacity: .8; }
 .castform .cf-flags { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .castform .cf-wandlabel { white-space: nowrap; }
 .castform .cf-rel { display: grid; grid-template-columns: 7em 1fr auto; gap: 4px; margin-bottom: 4px; }

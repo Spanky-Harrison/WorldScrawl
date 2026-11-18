@@ -576,6 +576,17 @@ function createMapWindow(win) {
     const kindOf = n => (n.layer ? n.layer.level : n.kind === 'stub' ? null : 'room');
     const PICK_LEVEL = { room: 'subregion', subregion: 'region', region: 'world' };
     const NOUN = { room: 'place', subregion: 'subregion', region: 'region' };
+    const NOUN_MULTI = 'place or area';
+    /** The spec pick mode checks against: in multi mode the ids already chosen this session are excluded too (no duplicates). */
+    const pickSpec = p => (p.spec.multi ? { ...p.spec, exclude: [...(p.spec.exclude ?? []), ...p.chosen] } : p.spec);
+    const pickKinds = p => [].concat(p.spec.kind);
+    /** How a node shows in pick mode: pickable, pickdone (multi: already listed), pickdim, or not at all. */
+    function pickClass(n) {
+        if (!pick || !pickKinds(pick).includes(kindOf(n))) return null;
+        const ent = entityOf(n);
+        if (pick.spec.multi && (pick.chosen.includes(ent) || (pick.spec.exclude ?? []).includes(ent))) return 'pickdone';
+        return pickValid(pickSpec(pick), ent) ? 'pickable' : 'pickdim';
+    }
     /** The layer showing an entity of a kind (a place's subregion, a subregion's region, the world for a region). */
     const layerFor = (kind, id) => {
         if (!id) return null;
@@ -594,8 +605,16 @@ function createMapWindow(win) {
         p.resolve(v ?? null);
         update(state);
     }
+    /** Multi mode: add one id to this session's picks (a no-op for one already listed or not allowed). */
+    function addPick(id) {
+        const p = pick; if (!p || !p.spec.multi || !pickValid(pickSpec(p), id)) return;
+        p.chosen.push(id);
+        p.count.textContent = `${p.chosen.length} chosen`;
+        world.querySelectorAll('.node').forEach(g => { if (g._pick) { for (const c of ['pickable', 'pickdim', 'pickdone']) g.classList.remove(c); const c = pickClass(g._pick); if (c) g.classList.add(c); } });
+        if (p.selectedNode) pickSide(p.selectedNode);
+    }
     function confirmPick(id) {
-        const p = pick; if (!p || !pickValid(p.spec, id)) return;
+        const p = pick; if (!p || p.spec.multi || !pickValid(p.spec, id)) return;
         win.querySelector('.wspick-confirm')?.remove();
         const name = pathOf(p.spec.outline, p.spec.kind, id) ?? id;
         const box = $('div', { class: 'wspick-confirm', role: 'dialog' }, $('div', { class: 'wspick-q' }, `Choose ${name}?`),
@@ -608,10 +627,24 @@ function createMapWindow(win) {
         layer = l; selected = null; render(current.full, current.here, current.world);
         const n = current.graph.nodes.find(x => entityOf(x) === id && kindOf(x) === kind);
         if (n) { centreOn(n.id); world.querySelectorAll('.node').forEach(g => g.classList.toggle('selected', g.dataset.id === n.id)); pickSide(n); }
+        else if (pick?.spec.multi) addPick(id); // not on the map (an empty subregion): add it right away
         else if (pick && pickValid(pick.spec, id)) confirmPick(id); // not on the map (an empty subregion): ask right away
+    }
+    function pickSideMulti(n) {
+        const p = pick; p.selectedNode = n ?? null;
+        side.replaceChildren($('h3', {}, `Add ${p.spec.title ?? 'places'}`),
+            $('p', { class: 'muted' }, 'Click a place, area or region, then Add. Double-click a place to add it, or an area to open it. Press Done when you have them all.'));
+        if (!n) return;
+        const id = entityOf(n), kind = kindOf(n), noun = NOUN[kind] ?? 'place';
+        const c = pickClass(n);
+        side.append($('b', {}, pathOf(p.spec.outline, kind, id) ?? n.name));
+        if (c === 'pickable') side.append($('div', {}, $('button', { class: 'crumb wspick-this', onclick: () => addPick(id) }, `Add this ${noun}`)));
+        else if (c === 'pickdone') side.append($('div', {}, $('button', { class: 'crumb wspick-this', disabled: true }, 'Already in the list')));
+        else side.append($('p', { class: 'muted' }, c ? "Can't be chosen here." : `Not something to add${n.layer ? ': double-click to open it' : ''}.`));
     }
     function pickSide(n) {
         const p = pick; if (!p) return;
+        if (p.spec.multi) return pickSideMulti(n);
         const noun = NOUN[p.spec.kind];
         side.replaceChildren($('h3', {}, `Pick the ${p.spec.title ?? noun}`),
             $('p', { class: 'muted' }, `Double-click a highlighted ${noun} to choose it. Double-click an area to open it.`));
@@ -623,24 +656,30 @@ function createMapWindow(win) {
     }
     globalThis.wsPick = spec => new Promise(resolve => {
         if (pick) finishPick(null);
-        const noun = NOUN[spec.kind] ?? spec.kind;
+        const multi = spec.multi === true;
+        const noun = multi ? NOUN_MULTI : NOUN[spec.kind] ?? spec.kind;
         const q = $('input', { type: 'search', class: 'wspick-search', placeholder: `Search ${noun}s…`, autocomplete: 'off' });
         const results = $('ul', { class: 'wspick-results' });
-        q.addEventListener('input', () => results.replaceChildren(...pickSearch(spec, q.value, 12).map(r => $('li', { class: r.valid ? 'ok' : 'dim', 'data-id': r.id, onclick: () => { results.replaceChildren(); jumpTo(spec.kind, r.id); } }, r.path))));
+        const chosen = [];
+        const count = $('span', { class: 'wspick-count' }, '0 chosen');
+        const live = () => (pick?.spec === spec ? pickSpec(pick) : spec);
+        q.addEventListener('input', () => results.replaceChildren(...pickSearch(live(), q.value, 12).map(r => $('li', { class: r.valid ? 'ok' : 'dim', 'data-id': r.id, onclick: () => { results.replaceChildren(); jumpTo(multi ? r.kind : spec.kind, r.id); } }, r.path))));
         const banner = $('div', { class: 'wspick-banner' }, $('span', { class: 'wspick-title' }, `Picking ${spec.title ?? noun}…`),
-            $('span', { class: 'wspick-find' }, q, results), $('button', { class: 'crumb wspick-cancel', onclick: () => finishPick(null) }, 'Cancel'));
+            $('span', { class: 'wspick-find' }, q, results), ...(multi ? [count, $('button', { class: 'crumb wspick-done', onclick: () => finishPick(pick?.chosen.slice() ?? []) }, 'Done')] : []),
+            $('button', { class: 'crumb wspick-cancel', onclick: () => finishPick(null) }, 'Cancel'));
         const onKey = ev => { if (ev.key === 'Escape') { if (win.querySelector('.wspick-confirm')) win.querySelector('.wspick-confirm').remove(); else finishPick(null); } };
-        pick = { spec, resolve, saved: [...side.childNodes], layer, lastKey, banner, onKey };
+        pick = { spec, resolve, saved: [...side.childNodes], layer, lastKey, banner, onKey, chosen, count, selectedNode: null };
         document.addEventListener('keydown', onKey);
         win.insertBefore(banner, body);
         side.replaceChildren();
         // Open at the field's value, else where the party is; the full map (no fog) loads in update().
         const here = current?.here ?? partyHere(state);
-        const at = spec.value ? layerFor(spec.kind, spec.value) : here ? layerFor(spec.kind, spec.kind === 'region' ? here.split(':')[0] : spec.kind === 'subregion' ? here.split('/')[0] : here) : null;
+        const k0 = multi ? 'room' : spec.kind; // a multi pick opens on the party's own place
+        const at = spec.value ? layerFor(k0, spec.value) : here ? layerFor(k0, k0 === 'region' ? here.split(':')[0] : k0 === 'subregion' ? here.split('/')[0] : here) : null;
         pick.open = { layer: at ?? { level: 'world' }, focus: spec.value || null };
         update(state);
     });
-    globalThis.wsPicking = () => (pick ? { kind: pick.spec.kind, title: pick.spec.title, layer: layerKey(layer) } : null); // for the e2e tests
+    globalThis.wsPicking = () => (pick ? { kind: pick.spec.kind, title: pick.spec.title, layer: layerKey(layer), ...(pick.spec.multi ? { multi: true, chosen: pick.chosen.slice() } : {}) } : null); // for the e2e tests
 
     // ---- The cast panel: kept across renders while cast mode is on (a pick suspends and restores it like any form).
     const worldQ = () => { const w = current?.st?.world ?? state?.world ?? ''; return w ? `?world=${encodeURIComponent(w)}` : ''; };
@@ -794,8 +833,9 @@ function createMapWindow(win) {
                 g.append(S('circle', { class: 'patchdot', cx: w / 2 - 7, cy: -h / 2 + 7, r: 4, fill: '#f0a030', stroke: '#222' }));
                 title.textContent += ' · changed in this chat';
             }
-            const ent = entityOf(n), pk = pick && kindOf(n) === pick.spec.kind ? (pickValid(pick.spec, ent) ? 'pickable' : 'pickdim') : null;
+            const ent = entityOf(n), pk = pick?.spec.multi ? pickClass(n) : pick && kindOf(n) === pick.spec.kind ? (pickValid(pick.spec, ent) ? 'pickable' : 'pickdim') : null;
             if (pk) g.classList.add(pk);
+            if (pick?.spec.multi) g._pick = n;
             g.addEventListener('click', () => {
                 if (moved) return;
                 if (pick) { world.querySelectorAll('.node').forEach(x => x.classList.toggle('selected', x === g)); return pickSide(n); }
@@ -805,6 +845,7 @@ function createMapWindow(win) {
             g.addEventListener('dblclick', ev => {
                 ev.stopPropagation();
                 // In pick mode, at the field's level: a highlighted target asks "Choose …?"; above it, areas open as usual.
+                if (pick?.spec.multi) { if (n.layer) return setLayer(n.layer); return pk === 'pickable' ? addPick(ent) : undefined; } // multi: a place is added at once, an area opens
                 if (pick && pk === 'pickable' && layer?.level === PICK_LEVEL[pick.spec.kind]) return confirmPick(ent);
                 if (n.layer) setLayer(n.layer);
             });

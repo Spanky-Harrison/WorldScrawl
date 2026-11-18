@@ -191,8 +191,8 @@ This applies to every schedule entry, is at and might be at.
 
 A schedule entry may omit `place`. It then needs `activity`, and may have:
 
-- `where`: a short label, such as "her own room" or "at home".
-- `near`: where that is, in this order: a real map address (`riverton:drowned_rat`, a room, or a region id); an id from the world's stub list; or plain text ("a fishing camp up the river"), passed to the narrator as written.
+- `where`: a short label, such as "her own room" or "at home" (the Cast editor calls it **Off-map place name**).
+- `near`: (the editor's **Near area**) where that is, in this order: a real map address (`riverton:drowned_rat`, a room, or a region id); an id from the world's stub list; or plain text ("a fishing camp up the river"), passed to the narrator as written.
 - `from`, `to`, and `importance`, as on a placed entry.
 
 While that entry is in force the person is off the map: never present in any scene. The narrator gets an absent line built from it, for example `Hesk: asleep, elsewhere (her own room, in The Drowned Rat)`. A single word in `near` that matches neither a map address nor a stub id is a load warning (probably a typo). Multi-word text is not a warning; the inspector only notes that it is not in the list.

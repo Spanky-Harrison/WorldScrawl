@@ -135,24 +135,38 @@ export function splitOptions(line) {
  * region or stub whose name matches (case and punctuation ignored); a name two places share is ambiguous; anything else
  * is plain off-map words. -> (text) => {address, kind: 'room'|'area'|'stub'|'text'|'unknown'|'ambiguous', matches?}
  */
-export function placeResolver(data) {
+export function placeResolver(data, outline = null) {
     const rooms = new Set(data?.places ?? []), areas = new Set([...(data?.subs ?? []), ...(data?.regions ?? [])]);
     const stubs = new Set((data?.elsewhere ?? []).map(x => x.id));
+    const regionIds = new Set(data?.regions ?? []);
+    const inWorld = new Set([...rooms, ...areas, ...stubs]); // what the world files hold (a room made in play is not here)
+    // The editor's outline carries this chat's changes: rooms and areas made in play resolve too, with their names.
+    const labels = { ...(data?.place_labels ?? {}) };
+    for (const r of outline?.regions ?? []) {
+        areas.add(r.id); regionIds.add(r.id); if (r.name) labels[r.id] = r.name;
+        for (const sr of r.subregions ?? []) {
+            const area = sr.area ?? `${r.id}:${sr.id}`;
+            areas.add(area); if (sr.name) labels[area] = sr.name;
+            for (const x of sr.rooms ?? []) { rooms.add(x.address); if (x.name) labels[x.address] = x.name; }
+        }
+    }
     const byName = new Map();
     const add = (name, address) => { const k = normName(name); if (!k) return; const l = byName.get(k) ?? []; if (!l.includes(address)) l.push(address); byName.set(k, l); };
-    for (const [a, n] of Object.entries(data?.place_labels ?? {})) add(n, a);
+    for (const [a, n] of Object.entries(labels)) add(n, a);
     for (const x of data?.elsewhere ?? []) { add(x.name, x.id); add(x.id, x.id); }
     const kindOf = a => (rooms.has(a) ? 'room' : areas.has(a) ? 'area' : stubs.has(a) ? 'stub' : null);
     const fn = text => {
         const t = String(text ?? '').trim();
-        if (kindOf(t)) return { address: t, kind: kindOf(t) };
+        if (kindOf(t)) return { address: t, kind: kindOf(t), ...(kindOf(t) === 'area' ? { level: regionIds.has(t) ? 'region' : 'subregion' } : {}) };
         const hit = byName.get(normName(t)) ?? [];
-        if (hit.length === 1) return { address: hit[0], kind: kindOf(hit[0]) ?? 'room' };
+        if (hit.length === 1) { const k = kindOf(hit[0]) ?? 'room'; return { address: hit[0], kind: k, ...(k === 'area' ? { level: regionIds.has(hit[0]) ? 'region' : 'subregion' } : {}) }; }
         if (hit.length > 1) return { address: t, kind: 'ambiguous', matches: hit };
         return { address: t, kind: t.includes(':') ? 'unknown' : 'text' };
     };
-    fn.label = a => data?.place_labels?.[a] ?? (data?.elsewhere ?? []).find(x => x.id === a)?.name ?? a;
+    fn.label = a => labels[a] ?? (data?.elsewhere ?? []).find(x => x.id === a)?.name ?? a;
     fn.nameUnique = a => { const n = fn.label(a); return n !== a && (byName.get(normName(n)) ?? []).length === 1; };
+    /** True only when the world files hold the address (false: made in play, so it exists in this chat only). */
+    fn.inWorld = a => inWorld.has(a);
     return fn;
 }
 /** A might row's options line with addresses shown by name where the name is unique (for the editor box). */
@@ -276,7 +290,7 @@ export function formProblems(f, { places = null, ids = new Set(), resolve = null
  * Inline warnings that do not block saving (the load notes the server gives too): a might block overlapping another timed
  * row, a might option not on the map yet, a single-word off-map option (probably a typo). {field: message}, keys 'schedule.N.warn'.
  */
-export function formWarnings(f, { resolve = null } = {}) {
+export function formWarnings(f, { resolve = null, baseMode = false } = {}) {
     const w = {};
     const rows = f.schedule ?? [];
     const add = (i, m) => { const k = `schedule.${i}.warn`; w[k] = w[k] ? `${w[k]} ${m}` : m; };
@@ -288,7 +302,14 @@ export function formWarnings(f, { resolve = null } = {}) {
             if (unknown.length && unknown.length === opts.length) add(i, `None of these is on the map yet (${unknown.map(o => o.text).join(', ')}): the whole block is away until one exists.`);
             else for (const o of unknown) add(i, `${o.text} is not on the map yet: that share is away until it exists.`);
             for (const o of opts) if (resolve(o.text).kind === 'text' && !/\s/.test(o.text)) add(i, `"${o.text}" matches no place (a single word; probably a typo), so it reads as off the map.`);
+            // A room or area made in play, picked in the cast file editor: the file is read in every chat, where it does not exist.
+            if (baseMode && resolve.inWorld) for (const o of opts) { const r = resolve(o.text); if ((r.kind === 'room' || r.kind === 'area') && !resolve.inWorld(r.address)) add(i, `${resolve.label(r.address)} only exists in this chat: save it to the world first, or that share is away in other chats.`); }
         }
+        // The same place twice (or a name and its own address, or two nowhere): their shares add up. Warned, never blocked.
+        const key = o => (isNowhere(o.text) ? '\u0000nowhere' : resolve ? resolve(o.text).address : normName(o.text));
+        const seen = new Set(), twice = new Map();
+        for (const o of splitOptions(e.options).filter(x => x.text)) { const k = key(o); if (seen.has(k)) twice.set(k, isNowhere(o.text) ? 'Nowhere' : resolve?.label ? resolve.label(resolve(o.text).address) : o.text); seen.add(k); }
+        for (const name of twice.values()) add(i, `${name} is listed twice; their shares add up. Remove one.`);
     });
     const timed = rows.map((e, i) => ({ e, i, a: parseHm(e.from), b: parseHm(e.to) })).filter(x => x.a != null && x.b != null && (x.e.kind === 'might' || s(x.e.activity)));
     for (const x of timed) for (const y of timed) {
