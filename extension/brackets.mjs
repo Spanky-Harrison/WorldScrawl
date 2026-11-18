@@ -6,10 +6,10 @@ import { askValid, narrativeDig } from './dig.mjs';
 import { barHere, barrierOf, changesOf, currentLocation, doorCandidates, doorChange, ensurePrompts, isBarredNow, isOpenNow, sightOf, soundOf } from './doors.mjs';
 import { exitsText } from './footer.mjs';
 import { CHANGE_KEY, ctx, toolsOn } from './index.js';
-import { doorOptions, exitTargetLabel, lookOptions, narrativeDoor, narrativeLook } from './looking.mjs';
-import { ELSEWHERE, STAY, alreadyText, displayName, engineMove, engineTravel, keyFor, namedInText, optionLines, partyText, pickKey, sameName, sameWord, stamp, travelCandidates, words } from './movement.mjs';
+import { doorOptions, exitTargetLabel, lookOptions, narrativeDoor, narrativeLook, whichDoorText } from './looking.mjs';
+import { ELSEWHERE, STAY, alreadyText, displayName, engineMove, engineTravel, keyFor, namedInText, optionLines, partyText, pickKey, sameName, sameWord, stamp, stuckAttempt, travelCandidates, words } from './movement.mjs';
 import { revealsDestination } from './shared.mjs';
-import { applyFound, castPack, learnNameOn, loreChain, offerRemember, renderTokens, requestLore } from './scene.mjs';
+import { castPack, learnNameOn, loreChain, offerRemember, renderTokens, requestLore, runFind } from './scene.mjs';
 import { planWait, stampWait } from './waits.mjs';
 
 // ---- Bracket commands: "I [move] north", "I [look] out the window". One verb table for bracket verbs and slash
@@ -29,14 +29,16 @@ export const VERBS = [
     { id: 'lore', words: ['lore'], slash: null, help: 'bring up what locals know about this place (its lore) for the rest of the scene, e.g. [lore] or [lore] The Drowned Rat' },
     { id: 'help', words: ['help'], slash: '/ws-help', help: 'list these commands' },
     { id: 'remember', words: ['remember'], slash: '/ws-npc <name>', help: 'remember a person from the story, e.g. I [remember] Maren' },
-    { id: 'found', words: ['found', 'find'], slash: '/ws-found <name>', help: 'look for someone who might be around: if this room is one of the places they could be right now, they come here until their current stretch ends, e.g. [find] Hesk or [found] the landlady' },
+    { id: 'find', words: ['find'], slash: '/ws-find <name>', help: 'look for someone who might be around: if this room is one of the places they could be right now, they come here until their current stretch ends, e.g. [find] Hesk' },
     { id: 'name', words: ['name'], slash: '/ws-name <name>', help: 'you know this person\'s name from now on, e.g. [name] Hesk' },
 ];
 const VERB_OF = new Map(VERBS.flatMap(v => v.words.map(w => [w, v])));
 const TARGET_FILLER = new Set(['to', 'the', 'a', 'an', 'at', 'through', 'into', 'in', 'toward', 'towards', 'out', 'of', 'my', 'way']);
 /** The first bracket whose word is a known verb: {verb, target, raw}, or null. "out" stays when it is all there is ("[move] out").
- *  A colon or dot between digits is part of the target ("[wait] until 17:15"), not the end of the sentence. */
+ *  A colon or dot between digits is part of the target ("[wait] until 17:15"), not the end of the sentence.
+ *  A [remember] anywhere in the message wins over any other verb in it: the whole message is that command. */
 export function parseBracket(text) {
+    let first = null;
     for (const m of String(text ?? '').matchAll(/\[([^\[\]]{1,40})\]((?:[^\[\n.!?,;:]|(?<=\d)[:.](?=\d))*)/g)) {
         const v = VERB_OF.get(m[1].trim().toLowerCase().replace(/\s+/g, ' '));
         if (!v) continue;
@@ -44,9 +46,11 @@ export function parseBracket(text) {
         let i = 0;
         while (i < words.length - 1 && TARGET_FILLER.has(words[i].toLowerCase())) i++;
         if (words.length === 1 && TARGET_FILLER.has(words[0].toLowerCase()) && !['out', 'in'].includes(words[0].toLowerCase())) i = 1;
-        return { verb: v.id, word: m[1].trim(), target: words.slice(i).join(' '), raw: m[0] };
+        const b = { verb: v.id, word: m[1].trim(), target: words.slice(i).join(' '), raw: m[0] };
+        if (b.verb === 'remember') return b;
+        first ??= b;
     }
-    return null;
+    return first;
 }
 /** Bracketed verbs read as plain words for the narrator ("I [move] north" -> "I move north"). */
 export const unbracket = text => String(text ?? '').replace(/\[([^\[\]]{1,40})\]/g, (all, w) => (VERB_OF.has(w.trim().toLowerCase().replace(/\s+/g, ' ')) ? w.trim() : all));
@@ -70,7 +74,8 @@ async function bracketTarget(loc, b, opts) {
     const pick = pickKey(opts);
     return (await askValid('bracket target', bracketTargetPrompt(loc, b, opts), a => (/^none\b/i.test(String(a).trim()) ? false : pick(a)))) || null; // 'none': no retries
 }
-const failed = (loc, note) => ({ kind: 'bracket_failed', loc, note });
+/** An outright failure: always a command (the message is stamped with the error and hidden, no reply). */
+const failed = (loc, note) => ({ kind: 'bracket_failed', loc, note, command: true });
 /** Handle one bracket verb on the player's message. Returns a parseIntent-style result. */
 export async function bracketIntent(msg, b) {
     await ensurePrompts();
@@ -79,10 +84,17 @@ export async function bracketIntent(msg, b) {
     msg.extra.worldscrawl_bracket = { verb: b.verb, target: b.target };
     const loc = await currentLocation();
     const exitsSeen = loc.exits.filter(e => !e.hidden || revealsDestination(e));
-    if (b.verb === 'help') return { kind: 'help', loc };
-    if (b.verb === 'remember') { await offerRemember(msg, b.target); return { kind: 'remember', loc }; }
+    if (b.verb === 'help') return { kind: 'help', loc, command: true }; // a pure system command: the verb list, no reply
+    if (b.verb === 'remember') { const r = await offerRemember(msg, b.target); return r.ok ? { kind: 'remember', loc, command: true } : failed(loc, r.reason); }
     if (b.verb === 'name') { const r = await learnNameOn(msg, b.target); if (!r.ok) return failed(loc, r.reason); return { kind: 'name', loc }; }
-    if (b.verb === 'found') { if (!String(b.target ?? '').trim()) return failed(loc, '[found] needs a name.'); await applyFound(msg, [b.target], 'bracket'); return { kind: 'found', loc }; }
+    if (b.verb === 'find') {
+        // Empty or unknown: an outright failure. Right here: a command (the "right here" card, no reply). Found, or a known
+        // person who is not around: narrated (the not-found line goes after the player's message).
+        const f = await runFind(msg, b.target);
+        if (f.outcome === 'empty' || f.outcome === 'unknown') return failed(loc, f.reason);
+        if (f.outcome === 'here') return { kind: 'find', loc, command: true };
+        return { kind: 'found', loc };
+    }
     if (b.verb === 'lore') {
         const hits = requestLore(msg, loc, b.target ?? '', 'bracket');
         if (!hits.length) {
@@ -100,6 +112,7 @@ export async function bracketIntent(msg, b) {
         const hit = await bracketTarget(loc, b, opts);
         if (!hit) return failed(loc, `[${b.word}] ${b.target}: there is no exit or known place called "${b.target}" here.`);
         const res = hit.exit ? await engineMove(hit.exit.direction) : await engineTravel(hit.place.address, hit.place.prefix ?? null);
+        if (!res.ok && res.stuck) { stuckAttempt(msg, res.stuck); return { kind: 'door', loc }; } // a stuck door: the attempt is narrated
         if (!res.ok) return failed(loc, `[${b.word}] ${b.target}: ${res.error ?? 'there is no way there from here.'}`);
         stamp(msg, res.to, res.move);
         return { kind: 'move', loc: res.to };
@@ -117,7 +130,7 @@ export async function bracketIntent(msg, b) {
         const d = doorCandidates(loc), list = b.verb === 'open' ? [...d.toOpen, ...d.stuck] : d.toClose;
         const opts = doorOptions(list).map(o => ({ ...o, match: o.exit.direction }));
         const hit = list.length === 1 && !b.target ? opts[0] : await bracketTarget(loc, b, opts);
-        if (!hit) return failed(loc, list.length ? `[${b.word}] ${b.target}: doors you can ${b.verb} here: ${list.map(x => x.direction).join(', ')}.` : `[${b.word}]: no door to ${b.verb} here.`);
+        if (!hit) return failed(loc, !list.length ? `[${b.word}]: no door to ${b.verb} here.` : !b.target ? whichDoorText(b.verb, list) : `[${b.word}] ${b.target}: doors you can ${b.verb} here: ${list.map(x => x.direction).join(', ')}.`);
         return await narrativeDoor(msg, loc, [hit.exit], b.verb === 'open' ? 'open_door' : 'close_door');
     }
     if (b.verb === 'bar' || b.verb === 'unbar') {
@@ -183,13 +196,18 @@ export const whichText = (cands, prefix = WHICH_PREFIX) => `${prefix} ${cands.ma
  * kind 'which' lists candidate buttons; otherwise the not-aware / no-route text plus exit buttons.
  * Everything needed to rebuild the buttons is stored on the message, so they survive reloads.
  */
+const noticeCands = candidates => candidates.map(x => ({ label: x.label, name: x.name, ...(x.direction ? { direction: x.direction } : {}), ...(x.prefix ? { prefix: x.prefix } : {}), address: x.address }));
+/** The text addNotice shows for these options (also the error a failed typed move stamps on the player's message). */
+export function noticeMes({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '', prefix = WHICH_PREFIX, text = '' }) {
+    return kind === 'text' ? text : kind === 'which' ? whichText(noticeCands(candidates), prefix) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute);
+}
 async function addNotice({ loc, noRoute = null, kind = 'unreachable', candidates = [], name = '', prefix = WHICH_PREFIX, text = '' }) {
     const c = ctx();
     const which = kind === 'which';
-    const cands = candidates.map(x => ({ label: x.label, name: x.name, ...(x.direction ? { direction: x.direction } : {}), ...(x.prefix ? { prefix: x.prefix } : {}), address: x.address }));
+    const cands = noticeCands(candidates);
     const msg = {
         name: 'WorldScrawl', is_user: false, is_system: true, send_date: Date.now(),
-        mes: kind === 'text' ? text : which ? whichText(cands, prefix) : kind === 'already' ? alreadyText(loc, name) : unreachableText(loc, noRoute),
+        mes: noticeMes({ loc, noRoute, kind, candidates, name, prefix, text }),
         extra: { worldscrawl_notice: true, worldscrawl_notice_kind: kind, worldscrawl_notice_loc: loc?.address ?? null,
             worldscrawl_notice_prefix: kind === 'text' ? '' : which ? prefix : kind === 'already' ? `You're already in ${name}.` : noticePrefix(noRoute), ...(which ? { worldscrawl_notice_candidates: cands } : {}) },
     };
@@ -259,6 +277,25 @@ export function lookText(who, here, look) {
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
 /** The narration line for a door that is not on the map yet: open it only if it fits the room. The story does not say how to flag it. */
 export const newDoorLine = (who, place) => P('narration.new_door', { party: who, place });
+/** Which failed attempt this turn carries (dig, stuck look, stuck door), in that precedence, or ''. */
+function attemptKind(extra = {}) {
+    if (extra.digFailed && !extra.dig) return 'dig';
+    if (extra.look && extra.look.kind === 'closed' && extra.look.stuck) return 'look';
+    if (extra.door?.type === 'stuck') return 'door';
+    return '';
+}
+/**
+ * The engine's result for a failed attempt, as fact, for the after-message slot (right after the player's message, with the
+ * arrival reminder): one line for the first case that applies, none on a move turn. Same inputs as factsText's `extra`.
+ */
+export function attemptLines(loc, move, extra = {}) {
+    if (move) return [];
+    const who = partyText(), place = displayName(loc), kind = attemptKind(extra);
+    if (kind === 'dig') return [P('narration.dig_failed', { party: who, place })];
+    if (kind === 'look') return [P('narration.door_stuck', { party: who, door: doorWord(extra.look.via), why: extra.look.stuck, place })];
+    if (kind === 'door') return [P(extra.door.attempt === 'move' ? 'narration.door_stuck_move' : 'narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place })];
+    return [];
+}
 export function factsText(loc, move, toolsOn, extra = {}) {
     // The third argument still means "movement tools" for older callers. The story prompt does not tell the narrator how to report changes.
     const moveTools = extra.moveTools != null ? !!extra.moveTools : !!toolsOn;
@@ -280,9 +317,10 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     if (extra.dig && move && move.to === loc.address) lines.push(P('narration.dig_through', { party: who, direction: extra.dig.direction, from: move.from_name, arrival: arrivalText, where }));
     else if (move?.path?.length > 2) lines.push(P('narration.travel', { party: who, from: move.path[0], via: move.path.slice(1, -1).join(', '), to: move.to_name, cut_short: move.stopped ? P('narration.travel_cut_short') : '', arrival: arrivalText, where }));
     else if (move) lines.push(P('narration.move', { party: who, direction: move.direction, from: move.from_name, to: move.to_name, arrival: arrivalText, where }));
-    else if (extra.digFailed && !extra.dig) lines.push(P('narration.dig_failed', { party: who, place })); // a failure outranks any other note on the turn
+    // A failed attempt (a failed dig, a stuck door looked at, opened or walked into) outranks any other note on the turn. Its
+    // line goes after the player's message (attemptLines, the after-message slot); the facts block keeps only the stay-put line.
+    else if (attemptKind(extra)) { /* attemptLines */ }
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
-    else if (extra.door?.type === 'stuck') lines.push(P('narration.door_stuck', { party: who, door: doorWord(extra.door.direction), why: extra.door.why, place }));
     else if (extra.newDoor) lines.push(newDoorLine(who, place));
     else if (extra.door) lines.push(P('narration.door', { party: who, verb: ({ open_door: 'opens', close_door: 'closes', bar_door: 'bars', unbar_door: 'unbars' })[extra.door.type] ?? 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));

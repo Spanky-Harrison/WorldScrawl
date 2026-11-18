@@ -16,7 +16,7 @@ import { render as P, setPrompts, hasPrompts, offReason, slug } from './shared.m
 import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp, actorHistory } from './actors.mjs';
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
-import { WHICH_PREFIX, addNotice, bracketIntent, helpText, parseBracket, unbracket } from './brackets.mjs';
+import { WHICH_PREFIX, addNotice, bracketIntent, helpText, noticeMes, parseBracket, unbracket } from './brackets.mjs';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';
 import { calendarLib, chatElapsed, chatWorld, defaultWorldId, effectiveWorld, listedWorlds, loadCalendar, rememberWorlds, worldLiving, worldMissing, worldName, worldNames, worldTimes } from './clock.mjs';
@@ -31,7 +31,7 @@ import { ELSEWHERE, chatAddresses, discoveredPlaces, displayName, doorFetched, d
 import { revealsDestination } from './shared.mjs';
 import { mapCtx } from './patches.mjs';
 import { placeExpiryTurn } from './placerevert.mjs';
-import { applyFacts, applyFound, learnNameOn, offerRemember, personExpiryTurn, prepareNpcs, setRelOn } from './scene.mjs';
+import { applyFacts, applyFound, learnNameOn, offerRemember, personExpiryTurn, prepareNpcs, runFind, setRelOn } from './scene.mjs';
 import { addSettingsPanel } from './settings.mjs';
 import { planWait, renderPatchCards, stampWait, waitNote } from './waits.mjs';
 export { loadCalendar, placeWeatherNow, clockAt, chatElapsed, gameDate, effectiveWorld, worldName, chatWorld, worldSeed, chatChanges, firstSentence } from './clock.mjs';
@@ -336,6 +336,39 @@ export function stripStartMarker(arr) {
     arr.forEach((m, i) => { if (typeof m?.mes === 'string' && m.mes.includes(START_MARKER)) arr[i] = { ...m, mes: m.mes.split(START_MARKER).join('').replace(/[ \t]+\n/g, '\n').trim() }; });
 }
 
+/** The flag on a player message that was a command (stamped, hidden with /hide, no reply). */
+export const CMD_KEY = 'worldscrawl_cmd';
+export const CMD_REDO_TOAST = 'That was a command, so there is no reply to redo. Delete it to undo it, or send a new message.';
+/**
+ * Is the last real chat line a command that is still hidden? Walks back from the end: a flagged command that is still
+ * is_system answers yes (checked first: a hidden command is is_system too); notices and other system rows are skipped;
+ * anything else (a story reply, a player line, a command the player unhid) answers no.
+ */
+export function hiddenCommandLast(chat) {
+    for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (m?.extra?.[CMD_KEY] && m.is_system) return true;
+        if (m?.is_system || m?.extra?.worldscrawl_notice) continue;
+        return false;
+    }
+    return false;
+}
+/**
+ * Hide a command message the way /hide does (ST's own is_system flag: ghosted in the chat, out of every prompt, the eye
+ * button unhides it), through the slash command. If that did not hide it, set the flag and the element attribute directly
+ * and save the chat (the direct path skips /hide's own save), and note it in the call log. Never throws.
+ */
+export async function hideCommand(at) {
+    const c = ctx(), msg = c.chat?.[at];
+    if (!msg) return;
+    try { await c.executeSlashCommandsWithOptions(`/hide ${at}`); } catch (e) { console.warn('[WorldScrawl] /hide failed', e?.message || e); }
+    if (msg.is_system === true) return;
+    msg.is_system = true;
+    try { document.querySelector?.(`#chat .mes[mesid="${at}"]`)?.setAttribute('is_system', 'true'); } catch { /* no chat element */ }
+    try { noteCall(at, { kind: 'hide', status: 'failed', reason: '/hide did not hide the command, so WorldScrawl hid it directly' }); } catch { /* call log unavailable */ }
+    try { await c.saveChat(); } catch (e) { console.warn('[WorldScrawl] save after hide failed', e?.message || e); }
+}
+
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
     if (offReason) return; // off (version check): the chat goes to the narrator untouched
@@ -346,6 +379,13 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
         const c = ctx();
         const chat = c.chat ?? [];
         const s = settings();
+        // A command still hidden as the last real line: there is no reply to redo (ST would answer the exchange before it).
+        // Before the tracker wait, so a refused regenerate never waits. An unhidden command is a normal line again.
+        if ((type === 'regenerate' || type === 'swipe' || type === 'continue') && hiddenCommandLast(chat)) {
+            abort(true);
+            toastr.info(`WorldScrawl: ${CMD_REDO_TOAST}`);
+            return;
+        }
         // The turn waits (capped, on the busy line) for the last reply's tracker, so it is built on that reply's results.
         // Only replies before the turn's player line: a regenerated or swiped reply is not waited for. Stop ends the wait.
         if (!type || type === 'normal' || type === 'regenerate' || type === 'swipe') {
@@ -361,20 +401,29 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
         if (bracket || (turn && s.moveMode === 'typed' && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked)) {
             const r = (bracket && await bracketIntent(turn, bracket)) || await parseIntent(turn);
             await c.saveChat();
-            if (r.kind === 'help' || r.kind === 'bracket_failed') {
+            // A command ([remember], [help], an already-here [find]) or an outright failure (any failed bracket verb, a typed
+            // move that cannot happen): no reply. The player's message is stamped (the error on a failure) and hidden with
+            // /hide, then the notice (the verb list, the error) goes below it. The model would only narrate what didn't happen.
+            const typed = r.kind === ELSEWHERE || r.kind === 'which' || r.kind === 'already';
+            if (r.command || r.kind === 'help' || r.kind === 'bracket_failed' || typed) {
                 abort(true); // answered here: the narrator is not called
-                await addNotice({ loc: r.loc, kind: 'text', text: r.kind === 'help' ? helpText() : r.note });
+                const notice = r.kind === 'help' ? { loc: r.loc, kind: 'text', text: helpText() }
+                    : r.kind === 'bracket_failed' ? { loc: r.loc, kind: 'text', text: r.note }
+                    : r.kind === 'which' ? { loc: r.loc, kind: 'which', candidates: r.candidates, prefix: r.prefix ?? WHICH_PREFIX }
+                    : r.kind === 'already' ? { loc: r.loc, kind: 'already', name: r.name }
+                    : r.kind === ELSEWHERE ? { loc: r.loc, noRoute: r.noRoute } : null;
+                const failure = r.kind === 'bracket_failed' || typed;
+                turn.extra = turn.extra ?? {};
+                turn.extra[CMD_KEY] = { verb: bracket?.verb ?? r.verb ?? 'move', ...(failure ? { failed: true, error: noticeMes(notice) } : {}) };
+                await c.saveChat();
+                await hideCommand(turnAt);
+                if (notice) await addNotice(notice);
+                try { await c.saveChat(); } catch (e) { console.warn('[WorldScrawl] save', e?.message || e); }
+                renderPatchCards();
                 renderAllExits();
                 return;
             }
             await c.saveChat();
-            if (r.kind === ELSEWHERE || r.kind === 'which' || r.kind === 'already') {
-                abort(true); // no model call: the model would only narrate a trip that didn't happen
-                await addNotice(r.kind === 'which' ? { loc: r.loc, kind: 'which', candidates: r.candidates, prefix: r.prefix ?? WHICH_PREFIX }
-                    : r.kind === 'already' ? { loc: r.loc, kind: 'already', name: r.name } : { loc: r.loc, noRoute: r.noRoute });
-                renderAllExits();
-                return;
-            }
             if (r.kind === 'dig_failed') toastr.warning(`WorldScrawl: ${DIG_FAILED_NOTICE}`);
             if (r.kind === 'found' || r.kind === 'name') renderPatchCards();
             renderAllExits();
@@ -597,6 +646,22 @@ export async function setEnabled(on) {
 }
 const whenOn = fn => async (...a) => { if (!isOn()) { toastr.info(OFF_NOTICE); return OFF_NOTICE; } return fn(...a); };
 
+/**
+ * /ws-find <name>: the same code as [find] (runFind), on the last player line that is not hidden. A slash command has no
+ * reply of its own, so it only reports: a failure or a person who is not around is a text notice (the decision is stamped
+ * slash, so no narrator turn gets its not-found line); right here is the "right here" card; found is the appearance stamp.
+ */
+export async function findCommand(name) {
+    const chat = ctx().chat ?? [];
+    let id = chat.length - 1;
+    while (id >= 0 && !(chat[id]?.is_user && !chat[id]?.is_system)) id--;
+    const msg = chat[id];
+    if (!msg) { toastr.info('WorldScrawl: say it in a message, e.g. [find] Hesk'); return ''; }
+    const f = await runFind(msg, name, { via: 'slash' });
+    if (f.outcome === 'empty' || f.outcome === 'unknown' || f.outcome === 'absent') await addNotice({ kind: 'text', text: f.outcome === 'absent' ? `Couldn't find ${f.decision?.name || name}: ${f.reason}` : f.reason });
+    renderPatchCards();
+    return '';
+}
 function registerSlashCommands() {
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, SlashCommandNamedArgument, ARGUMENT_TYPE } = ctx();
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -674,19 +739,10 @@ function registerSlashCommands() {
         helpString: 'WorldScrawl: you know this person\'s name from now on (the same stamp as [ws_flag: name | Name]). Delete the message to undo.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ws-found',
-        callback: whenOn(async (_a, name) => {
-            const chat = ctx().chat ?? [];
-            let id = chat.length - 1;
-            while (id > 0 && !chat[id]?.is_user) id--;
-            const msg = chat[id];
-            if (!msg?.is_user) { toastr.info('WorldScrawl: say it in a message, e.g. [found] Hesk'); return ''; }
-            await applyFound(msg, [String(name ?? '')], 'bracket');
-            renderPatchCards();
-            return '';
-        }),
+        name: 'ws-find',
+        callback: whenOn(async (_a, name) => findCommand(String(name ?? ''))),
         unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'the person to look for, e.g. Hesk', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-        helpString: 'WorldScrawl: look for someone (the same as [find]): when their current "might be at" stretch puts them somewhere and this room is one of its places, they come here until it ends. Already here: a notice. Nowhere, off the map or a fixed entry elsewhere: they can\'t be found. Delete the message to undo.',
+        helpString: 'WorldScrawl: look for someone (the same as [find]): when their current "might be at" stretch puts them somewhere and this room is one of its places, they come here until it ends. Already here: a notice. Nowhere, off the map or a fixed entry elsewhere: a notice says they can\'t be found. No reply. Delete the message to undo.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-map', callback: async () => { openMapWindow(); return ''; }, helpString: 'WorldScrawl: open the map window (a new tab that follows this chat live).' }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'ws-on', callback: async () => { const t = await setEnabled(true); toastr.info(t); return t; }, helpString: 'WorldScrawl: turn WorldScrawl on in this chat.' }));

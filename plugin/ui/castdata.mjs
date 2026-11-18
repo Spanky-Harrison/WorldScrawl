@@ -661,7 +661,7 @@ export function stampCard(x, { who = '', editing = false, play = null } = {}) {
     let fields = [], rows = [];
     if (x.type === 'npc_create' && editing) {
         const v = C.rememberValues(play ?? {});
-        fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` }));
+        fields = C.REMEMBER_FIELDS.filter(([k]) => k !== 'starts' && k !== 'memory').map(([k, label, kind]) => ({ key: k, label, value: v[k] ?? '', kind, cls: `worldscrawl_remember_${k}` }));
     } else if (NOTE_FIELD[x.type] && editing) { const [k, label] = NOTE_FIELD[x.type]; fields = [{ key: k, label, value: x[k] ?? '', kind: 'text', cls: 'worldscrawl_note_text' }]; }
     if (pending) rows = [{ field: 'text', label: 'Fact', before: '', after: x.text ?? '' }];
     const title = pending ? `Lasting change for ${who}: ${x.text}` : x.off ? `Character change turned off: ${text}` : `Character changed here: ${text}`;

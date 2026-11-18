@@ -35,9 +35,9 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_show_exits" type="checkbox"> Show exits footer</label>
       <div>Map changes</div>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep" type="checkbox"> Approve map changes without asking (skip the Approve / Discard card)</label>
-      <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the narrator flag map changes</label>
+      <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the after-reply check propose map changes</label>
       <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
-      <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the narrator flag NPC changes</label>
+      <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the after-reply check propose NPC changes</label>
       <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_weather_numbers" type="checkbox"> Weather numbers to the narrator (off: the narrator gets words like &quot;a warm, humid evening&quot;; on: the temperature and humidity numbers too)</label>

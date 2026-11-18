@@ -13,7 +13,7 @@ Lore is not sent by default. Each turn the narrator gets one index line naming t
 
 Lore is fed in only two ways:
 
-1. **The narrator asks** with `[ws_flag: lore | The Drowned Rat]` at the end of a reply. The tag is removed from the reply. The lore stays fed while the player stays inside the place it is about: room lore in that room, building (subregion) lore anywhere in the building, region lore anywhere in the region. Once they leave it, it drops.
+1. **A pasted tag** `[ws_flag: lore | The Drowned Rat]` in a reply (the narrator is not told how to ask; it only sees the index line). The tag is removed from the reply. The lore stays fed while the player stays inside the place it is about: room lore in that room, building (subregion) lore anywhere in the building, region lore anywhere in the region. Once they leave it, it drops.
 2. **The player forces it** with `[lore]` (all lore here) or `[lore] The Drowned Rat`. It is fed on that turn and from then on, by the same rule. `[lore]` is listed in `/ws-help`.
 
 Fed lore is labelled as background knowledge, not what the senses show.

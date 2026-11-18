@@ -24,7 +24,7 @@ How things look and behave on screen, plus naming and code style. Engine rules a
 - Anything lasting or reviewable goes in a notice or the inspector, not in a toast.
 
 ## Commands and brackets
-- Slash commands are `/ws-<verb>` in lowercase with hyphens (`/ws-found`, `/ws-wait`). Each has a bracket or menu equivalent where it makes sense, and `/ws-help` lists them all.
+- Slash commands are `/ws-<verb>` in lowercase with hyphens (`/ws-wait`, `/ws-npc`). Each has a bracket or menu equivalent where it makes sense, and `/ws-help` lists them all.
 
 ## Naming and ids
 - Ids are lowercase with no apostrophes, made by the one `slug` rule in `plugin/shared/ids.mjs`.

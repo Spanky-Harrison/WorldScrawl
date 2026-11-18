@@ -188,12 +188,12 @@ export function placeExpiry(v) {
 
 /** The Remember card's fields, in order: [key, label, kind]. `starts` is the disposition ("friendly — why"). */
 export const REMEMBER_FIELDS = [['name', 'Name', 'text'], ['line', 'Line', 'text'], ['looks', 'Looks', 'textarea'], ['manner', 'Manner', 'textarea'], ['voice', 'Speech', 'textarea'],
-    ['body', 'Body', 'textarea'], ['outfit', 'Wearing', 'textarea'], ['history', 'History', 'textarea'], ['starts', 'Starts', 'text'], ['facts', 'Facts', 'list']];
-/** A parsed remember answer as editor text: {name, line, …, starts, facts (one per line)}. */
+    ['body', 'Body', 'textarea'], ['outfit', 'Wearing', 'textarea'], ['history', 'History', 'textarea'], ['starts', 'Starts', 'text'], ['facts', 'Facts', 'list'], ['memory', 'Memory', 'list']];
+/** A parsed remember answer as editor text: {name, line, …, starts, facts and memory (one per line)}. */
 export function rememberValues(got = {}) {
     const d = got.disposition;
     return { name: got.name ?? '', line: got.line ?? '', looks: got.looks ?? '', manner: got.manner ?? '', voice: got.voice ?? '', body: got.body ?? '', outfit: got.outfit ?? '',
-        history: got.history ?? '', starts: d?.value ? `${d.value}${d.reason ? ` — ${d.reason}` : ''}` : '', facts: (got.facts ?? []).join('\n') };
+        history: got.history ?? '', starts: d?.value ? `${d.value}${d.reason ? ` — ${d.reason}` : ''}` : '', facts: (got.facts ?? []).join('\n'), memory: (got.memory ?? []).join('\n') };
 }
 const lc = t => String(t ?? '').toLowerCase();
 /** Which fields hold each made-up detail (by its words appearing there): {fields: {key: [details]}, loose: [details in no field]}. */
