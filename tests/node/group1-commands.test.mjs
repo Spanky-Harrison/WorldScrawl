@@ -219,11 +219,48 @@ for (const text of ['[find] Bryn', '[find] Bryn.', '[find] Bryn and ask about th
         assert.equal(c.chat.length, len, 'no notice row');
     });
 }
-test('deviation pin: "[move] north [find] Bryn" reads the first verb (only [remember] wins over others), so it is the move', async () => {
-    assert.equal(parseBracket('[move] north [find] Bryn').verb, 'move');
+for (const text of ['[move] north [find] Bryn', '[move] out [find] Bryn', '[open] back then [move] out']) {
+    test(`"${text}": two action verbs are an outright failure ("One verb per message for now."), nothing is done`, async () => {
+        const { c, rec } = boot({ time: '10:00' });
+        const at = say(c, text);
+        const before = chatElapsed(c.chat);
+        assert.equal((await intercept(c, rec)).aborted, 1);
+        assert.equal(rec.calls.length, 0, 'no model call');
+        const m = c.chat[at];
+        assert.equal(m.extra[CMD_KEY].failed, true);
+        assert.equal(m.extra[CMD_KEY].error, 'One verb per message for now.');
+        assert.equal(m.is_system, true);
+        const notes = noticesAfter(c, at);
+        assert.equal(notes.length, 1);
+        assert.equal(notes[0].mes, 'One verb per message for now.');
+        assert.equal(m.extra[MOVE_KEY], undefined, 'no move');
+        assert.equal(m.extra[FOUND_KEY], undefined, 'no [find] decision');
+        assert.equal(m.extra.worldscrawl_door, undefined, 'no door touched');
+        assert.equal(chatElapsed(c.chat), before);
+    });
+}
+test('parse: [remember] and then [help] anywhere make the message that command; two action verbs are marked multi', () => {
+    assert.equal(parseBracket('[move] north [find] Bryn').multi, 2);
     assert.equal(parseBracket('[find] Bryn [remember] Maren').verb, 'remember');
     assert.equal(parseBracket('[move] north [remember] Maren').verb, 'remember');
+    assert.equal(parseBracket('[help] [remember] Maren').verb, 'remember');
+    assert.equal(parseBracket('[move] out [help]').verb, 'help');
+    assert.equal(parseBracket('[move] out').multi, undefined);
+    assert.equal(parseBracket('[OOC: hi] then I [move] east').multi, undefined, 'unknown brackets do not count');
 });
+for (const [text, verb] of [['[move] out and [remember] Maren', 'remember'], ['[move] out [help]', 'help']]) {
+    test(`"${text}": the system command wins (${verb}), the move is not made`, async () => {
+        const { c, rec } = boot({ time: '10:00' });
+        const at = say(c, text);
+        assert.equal((await intercept(c, rec)).aborted, 1);
+        const m = c.chat[at];
+        assert.deepEqual(m.extra[CMD_KEY], { verb });
+        assert.equal(m.is_system, true);
+        assert.equal(m.extra[MOVE_KEY], undefined, 'no move');
+        if (verb === 'remember') assert.equal(m.extra[REMEMBER_KEY]?.name, 'Maren');
+        else assert.equal(noticesAfter(c, at)[0].mes, helpText());
+    });
+}
 test('[find] someone who comes: not aborted, not hidden, the appearance stamp, Found line without a block end', async () => {
     const { c, rec } = boot({ time: '10:00' });
     const at = say(c, '[find] Vera');
