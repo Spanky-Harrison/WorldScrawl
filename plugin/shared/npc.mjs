@@ -166,8 +166,8 @@ export function pickFromTable(options, roll) {
     return null;
 }
 
-/** A stable string of a might entry (its options, times, wandering and activity): part of every seed, so an edit re-rolls. */
-export const mightKey = e => JSON.stringify([e?.might ?? [], e?.from ?? '', e?.to ?? '', !!e?.wandering, e?.activity ?? '']);
+/** A stable string of a might entry (its options, times, wandering and activity, and `anywhere` only when set): part of every seed, so an edit re-rolls. */
+export const mightKey = e => JSON.stringify([e?.might ?? [], e?.from ?? '', e?.to ?? '', !!e?.wandering, e?.activity ?? '', ...(e?.anywhere === true ? ['anywhere'] : [])]);
 
 /** Minutes in a block from `fromMin` to `toMin` (a block that passes midnight wraps; equal times are a whole day). */
 export function blockSpan(fromMin, toMin, dayMinutes = 1440) {
@@ -218,10 +218,10 @@ export function windowsOverlap(a0, a1, b0, b1, dayMinutes = 1440) {
     return inside(b0, a0, a1, dayMinutes) || inside(a0, b0, b1, dayMinutes);
 }
 
-const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'importance'];
+const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'anywhere', 'importance'];
 /**
  * A might entry as both sides read it (the server's validateEntry and the chat's npc_schedule stamp): the parsed options and
- * percent table, the times, wandering, and `authored` (the entry as written, for export). Place checks are the caller's.
+ * percent table, the times, wandering, anywhere, and `authored` (the entry as written, for export). Place checks are the caller's.
  * {entry, problems (break it), warnings (load notes)}.
  */
 export function readMightEntry(e) {
@@ -244,6 +244,7 @@ export function readMightEntry(e) {
     if (fromMin == null) problems.push('from is required and must look like "10:00"');
     if (toMin == null) problems.push('to is required and must look like "13:00"');
     if (e?.wandering != null && typeof e.wandering !== 'boolean') problems.push('wandering must be true or false');
+    if (e?.anywhere != null && typeof e.anywhere !== 'boolean') problems.push('anywhere must be true or false');
     let importance = null;
     if (e?.importance != null && String(e.importance).trim()) {
         importance = matchEnum(e.importance, ['low', 'normal', 'high']);
@@ -254,7 +255,7 @@ export function readMightEntry(e) {
     const entry = {
         might: list.filter(x => typeof x === 'string').map(x => x.trim()), options: table.options, activity,
         ...(fromMin != null ? { from: String(e.from).trim() } : {}), ...(toMin != null ? { to: String(e.to).trim() } : {}), fromMin, toMin,
-        wandering: e?.wandering === true, importance: importance ?? 'low', authored,
+        wandering: e?.wandering === true, anywhere: e?.anywhere === true, importance: importance ?? 'low', authored,
     };
     if (problems.length) Object.assign(entry, { broken: true, problem: problems.join('; ') });
     return { entry, problems, warnings };
@@ -514,7 +515,7 @@ export function exportRecord(npc) {
     if (npc.deep?.relationships && Object.keys(npc.deep.relationships).length) deep.relationships = { ...npc.deep.relationships };
     if (Object.keys(deep).length) out.deep = deep;
     const schedule = (npc.schedule ?? []).filter(e => e && !e.broken).map(e => {
-        if (isMight(e)) return JSON.parse(JSON.stringify(e.authored ?? { might: e.might, activity: e.activity, from: e.from, to: e.to, ...(e.wandering ? { wandering: true } : {}) })); // as authored
+        if (isMight(e)) return JSON.parse(JSON.stringify(e.authored ?? { might: e.might, activity: e.activity, from: e.from, to: e.to, ...(e.wandering ? { wandering: true } : {}), ...(e.anywhere ? { anywhere: true } : {}) })); // as authored
         const row = { activity: e.activity };
         if (e.place) row.place = e.place;
         else {

@@ -273,9 +273,9 @@ Adjacent blocks each roll on their own, so their chances add up: three back-to-b
 roughly a 70% chance of meeting them at some point in those three hours (1 − 0.8 × 0.5 × 0.8 = 68%). There is no gradient
 or peak shorthand: to make someone likely across a span, write one block with the odds you want.
 
-An area option never lands in a **private** room. Rooms are public unless `"private": true` is set on the room, its
+An area option never lands in a **private** room, unless that block is set to **Anywhere** (`"anywhere": true` next to `wandering`, or the Anywhere box in the cast editor; there is no model pick for it). Rooms are public unless `"private": true` is set on the room, its
 subregion, its region or `world.json` (the nearest level that sets it wins, like `expandable`); a schedule entry that names
-a private room still puts them there. If an area has no public room, that share is away, with a note in the inspector.
+a private room still puts them there. If an area has no public room, that share is away, with a note in the inspector. With Anywhere, a block holds private rooms as options too, so `[find]` and Who's here list them there; an `anywhere` block with no area option loads with a note.
 Rooms made in play whose name ends in bedroom, bedchamber, quarters, cottage, apartment, bath, privy or cell start private
 ("Guest Bedroom", "Servants' Quarters"; not "Bath Street" or "Old House"). In the map editor, **Private** on a room or
 area (`set_private`: `true`, `false` or `inherit`) sets it.

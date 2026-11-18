@@ -26,9 +26,9 @@ export function mightShares(e) {
 /** "might be at Market Lane 20%, the store 20% (wandering), 10:00–13:00": a might entry for the cast panel (away is left out). */
 export function mightText(e, placeName = a => a) {
     const opts = mightShares(e).filter(o => !isNowhere(o.text)).map(o => `${o.text.includes(':') ? placeName(o.text) : o.text} ${o.share}%`);
-    return `might be at ${opts.join(', ') || 'nowhere in particular'}${e?.wandering ? ' (wandering)' : ''}, ${e?.from ?? ''}–${e?.to ?? ''}`;
+    return `might be at ${opts.join(', ') || 'nowhere in particular'}${e?.wandering || e?.anywhere ? ` (${[e?.wandering ? 'wandering' : '', e?.anywhere ? 'anywhere' : ''].filter(Boolean).join(', ')})` : ''}, ${e?.from ?? ''}–${e?.to ?? ''}`;
 }
-const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'importance'];
+const MIGHT_KEYS = ['might', 'activity', 'from', 'to', 'wandering', 'anywhere', 'importance'];
 /** A might entry as written (a loaded entry keeps it as `authored`), for the editor to carry through unchanged. */
 const writtenMight = e => {
     const src = e?.authored && typeof e.authored === 'object' ? e.authored : e;
@@ -114,13 +114,13 @@ export function formFromRecord(rec = null) {
 /** A might-be-at form row from an entry as written: options as one comma-separated line ("Market Lane, nowhere(80)"). */
 export function mightFormRow(m) {
     const list = Array.isArray(m?.might) ? m.might.map(String) : [];
-    return { kind: 'might', options: list.join(', '), activity: s(m?.activity), from: s(m?.from), to: s(m?.to), wandering: m?.wandering === true,
+    return { kind: 'might', options: list.join(', '), activity: s(m?.activity), from: s(m?.from), to: s(m?.to), wandering: m?.wandering === true, anywhere: m?.anywhere === true,
         importance: s(m?.importance), authored: JSON.parse(JSON.stringify(m ?? {})) };
 }
 /** Turn a row to the other kind, keeping what carries over (activity, times, importance; the place becomes the one option). */
 export function toggleRowKind(e, kind, resolve = null) {
     if ((e.kind ?? 'at') === kind) return e;
-    if (kind === 'might') return { kind: 'might', options: e.offmap ? s(e.where) : s(e.place), activity: s(e.activity), from: s(e.from), to: s(e.to), wandering: false, importance: s(e.importance) };
+    if (kind === 'might') return { kind: 'might', options: e.offmap ? s(e.where) : s(e.place), activity: s(e.activity), from: s(e.from), to: s(e.to), wandering: false, anywhere: false, importance: s(e.importance) };
     const first = splitOptions(e.options)[0];
     const hit = first?.text && !isNowhere(first.text) ? (resolve ? resolve(first.text) : { address: first.text, kind: first.text.includes(':') ? 'room' : 'text' }) : null;
     const place = hit && hit.kind === 'room' ? hit.address : '';
@@ -169,10 +169,11 @@ function mightFromRow(e, resolve) {
     });
     const x = { might: opts, activity: s(e.activity), from: s(e.from), to: s(e.to) };
     if (e.wandering) x.wandering = true;
+    if (e.anywhere) x.anywhere = true;
     if (s(e.importance)) x.importance = s(e.importance);
     const a = e.authored;
     if (a && JSON.stringify(a.might ?? []) === JSON.stringify(opts) && s(a.activity) === x.activity && s(a.from) === x.from && s(a.to) === x.to
-        && (a.wandering === true) === !!e.wandering && s(a.importance) === s(e.importance)) return JSON.parse(JSON.stringify(a));
+        && (a.wandering === true) === !!e.wandering && (a.anywhere === true) === !!e.anywhere && s(a.importance) === s(e.importance)) return JSON.parse(JSON.stringify(a));
     return x;
 }
 /** `ctx.resolve`: placeResolver(...) for typed might options (names -> addresses). */
@@ -297,7 +298,7 @@ export function formWarnings(f, { resolve = null } = {}) {
     return w;
 }
 /** The editor help for might-be-at rows (the authoring note). */
-export const MIGHT_HELP = 'Might be at: a time block with places and odds, like "Market Lane, General Store, nowhere(80)". A (number) is a percent; places without one split what is left of 100, and anything under 100 is nowhere. A normal block rolls once when it starts; Wandering moves them every 15 to 60 minutes. Adjacent rows each roll on their own, so their chances add up: three hourly rows at 20%, 50% and 20% give about a 70% chance of meeting them at some point in those three hours. To make someone likely across a span, write one block with the odds you want.';
+export const MIGHT_HELP = 'Might be at: a time block with places and odds, like "Market Lane, General Store, nowhere(80)". A (number) is a percent; places without one split what is left of 100, and anything under 100 is nowhere. A normal block rolls once when it starts; Wandering moves them every 15 to 60 minutes. Anywhere lets an area option include private rooms too, like Hesk anywhere in the inn. Adjacent rows each roll on their own, so their chances add up: three hourly rows at 20%, 50% and 20% give about a 70% chance of meeting them at some point in those three hours. To make someone likely across a span, write one block with the odds you want.';
 
 const KIND = { follow: 'following', stay: 'staying', might: 'turned up', schedule: 'on schedule', scene: 'here' };
 /**
@@ -594,7 +595,7 @@ export function permanentProblem(place, basePlaces) {
  * near, from, to, src: 'card'|'chat', notes: [], current}. `rec` is the card record; null play = the card as is.
  */
 export function liveSchedule(rec, play) {
-    const key = e => [e?.place ?? '', e?.activity ?? '', e?.where ?? '', e?.near ?? '', e?.from ?? '', e?.to ?? '', JSON.stringify(e?.might ?? null), e?.wandering ? 'w' : ''].join('|');
+    const key = e => [e?.place ?? '', e?.activity ?? '', e?.where ?? '', e?.near ?? '', e?.from ?? '', e?.to ?? '', JSON.stringify(e?.might ?? null), e?.wandering ? 'w' : '', e?.anywhere ? 'a' : ''].join('|');
     const card = (rec?.schedule ?? []).filter(e => e && !e.broken);
     const cardKeys = new Set(card.map(key));
     const eff = play?.record?.schedule ?? card;

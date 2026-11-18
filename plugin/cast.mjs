@@ -187,7 +187,7 @@ export function tidyRecord(raw) {
                 for (const k of Object.keys(e)) { // in the order written
                     if (k === 'might') x.might = e.might.filter(o => typeof o === 'string').map(o => o.trim()).filter(Boolean);
                     else if (['activity', 'from', 'to', 'importance'].includes(k) && s(e[k])) x[k] = s(e[k]);
-                    else if (k === 'wandering' && typeof e.wandering === 'boolean') x.wandering = e.wandering;
+                    else if ((k === 'wandering' || k === 'anywhere') && typeof e[k] === 'boolean') x[k] = e[k];
                 }
                 return x;
             }
