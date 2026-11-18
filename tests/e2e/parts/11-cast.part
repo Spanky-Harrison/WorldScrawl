@@ -113,6 +113,7 @@
     const g3Off = await cw.evaluate(() => { const r = document.querySelector('.cf-sched[data-i="1"]'); const w = r.querySelector('.cf-where')?.getBoundingClientRect().width ?? 0, n = r.querySelector('.cf-near')?.getBoundingClientRect().width ?? 0; return { pick: r.querySelectorAll('.wspick').length, w, n, wph: r.querySelector('.cf-where')?.placeholder, nph: r.querySelector('.cf-near')?.placeholder }; });
     await cw.locator('.cf-sched[data-i="1"] .cf-offmap').uncheck();
     const g3On = await cw.evaluate(() => ({ pick: document.querySelectorAll('.cf-sched[data-i="1"] .wspick').length, where: document.querySelectorAll('.cf-sched[data-i="1"] .cf-where').length }));
+    await cw.locator('.cf-sched[data-i="1"] .cf-offmap').check(); // back off the map: an at-row with no place would (rightly) block the save below
     check('Off the map swaps the one where slot: the chooser is absent, Off-map place name and Near area are visible and wide; unticking brings the chooser back',
         g3Off.pick === 0 && g3Off.w >= 80 && g3Off.n >= 80 && g3Off.wph === 'Off-map place name' && g3Off.nph === 'Near area' && g3On.pick === 1 && g3On.where === 0, JSON.stringify([g3Off, g3On]));
     // A single-kind pick on the real map still behaves as before: one id, the "Choose X?" box, a string.
