@@ -78,6 +78,106 @@
     const cast3 = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
     const hsEarly = cast3.npcs?.find(n => n.id === 'hesk');
     check('map Update writes the lasting fact and the schedule, not a second file', hsEarly?.facts?.includes('hates rats') && hsEarly?.schedule?.[1]?.place === 'riverton:drowned_rat/courtyard' && hsEarly?.schedule?.[1]?.activity === 'feeding the hens' && !cast3.npcs?.some(n => n.id === 'hesk-2'), JSON.stringify(cast3.npcs?.map(n => [n.id, n.facts, n.schedule])));
+    // ---- Group 3: the schedule editor polish (layout, one where slot, Name - id label, the might-be-at list on the real map).
+    await cw.evaluate(() => wsCast.selectId('hesk', 'resolved')); await cw.waitForTimeout(200);
+    await cw.locator('.cast-saveas').click();
+    await cw.waitForTimeout(400);
+    const g3Measure = (w, offIdx) => cw.evaluate(([w, offIdx]) => {
+        document.querySelector('.side').style.width = `${w}px`;
+        const form = document.querySelector('.castform'), fr = form.getBoundingClientRect();
+        const out = { overflow: form.scrollWidth > form.clientWidth + 1, narrow: [], actMin: 1e9, flagsOut: [], rows: 0 };
+        for (const row of form.querySelectorAll('.cf-sched')) {
+            out.rows++;
+            for (const el of row.querySelectorAll('input:not([type=checkbox]):not(.cf-pct), select, .wspick-value, button.crumb')) {
+                if (!el.offsetParent) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 60) out.narrow.push(`${el.className || el.tagName}:${Math.round(r.width)}`);
+                if (r.right > fr.right + 1) out.flagsOut.push(`${el.className || el.tagName} past the panel`);
+            }
+            for (const el of row.querySelectorAll('.cf-flags label')) if (el.getBoundingClientRect().right > fr.right + 1) out.flagsOut.push('flags past the panel');
+            const act = row.querySelector('.cf-activity'); if (act) out.actMin = Math.min(out.actMin, act.getBoundingClientRect().width);
+        }
+        return out;
+    }, [w, offIdx]);
+    // An off-map row to measure too (the second entry, now ticked off the map).
+    await cw.locator('.cf-sched[data-i="1"] .cf-offmap').check();
+    await cw.waitForTimeout(200);
+    const g3w380 = await g3Measure(380), g3w300 = await g3Measure(300);
+    check('editor layout at the 380px cast panel: no control under 60px, Activity at least 200px, no horizontal overflow, flags inside the panel',
+        g3w380.rows >= 5 && g3w380.narrow.length === 0 && g3w380.actMin >= 200 && !g3w380.overflow && g3w380.flagsOut.length === 0, JSON.stringify(g3w380));
+    check('editor layout at the plain 300px side: no control under 60px, Activity at least 140px, no horizontal overflow, flags inside the panel',
+        g3w300.narrow.length === 0 && g3w300.actMin >= 140 && !g3w300.overflow && g3w300.flagsOut.length === 0, JSON.stringify(g3w300));
+    await cw.evaluate(() => { document.querySelector('.side').style.width = ''; });
+    const g3Label = await cw.evaluate(() => ({ t: document.querySelector('.cf-sched[data-i="0"] .wspick-value')?.innerText ?? '', sel: getComputedStyle(document.querySelector('.cf-sched[data-i="0"] .wspick-id')).userSelect }));
+    check('the Is-at chooser reads "Name - engine:id" on one line (no path arrows) and the id is click-to-select', / - riverton:drowned_rat\/common_room$/.test(g3Label.t) && !/›/.test(g3Label.t) && g3Label.sel === 'all', JSON.stringify(g3Label));
+    const g3Off = await cw.evaluate(() => { const r = document.querySelector('.cf-sched[data-i="1"]'); const w = r.querySelector('.cf-where')?.getBoundingClientRect().width ?? 0, n = r.querySelector('.cf-near')?.getBoundingClientRect().width ?? 0; return { pick: r.querySelectorAll('.wspick').length, w, n, wph: r.querySelector('.cf-where')?.placeholder, nph: r.querySelector('.cf-near')?.placeholder }; });
+    await cw.locator('.cf-sched[data-i="1"] .cf-offmap').uncheck();
+    const g3On = await cw.evaluate(() => ({ pick: document.querySelectorAll('.cf-sched[data-i="1"] .wspick').length, where: document.querySelectorAll('.cf-sched[data-i="1"] .cf-where').length }));
+    check('Off the map swaps the one where slot: the chooser is absent, Off-map place name and Near area are visible and wide; unticking brings the chooser back',
+        g3Off.pick === 0 && g3Off.w >= 80 && g3Off.n >= 80 && g3Off.wph === 'Off-map place name' && g3Off.nph === 'Near area' && g3On.pick === 1 && g3On.where === 0, JSON.stringify([g3Off, g3On]));
+    // A single-kind pick on the real map still behaves as before: one id, the "Choose X?" box, a string.
+    await cw.locator('.cf-sched[data-i="0"] .wspick-choose').click();
+    await cw.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    const g3One = await cw.evaluate(() => ({ p: globalThis.wsPicking(), done: !!document.querySelector('.wspick-done'), count: !!document.querySelector('.wspick-count') }));
+    await cw.waitForTimeout(600);
+    await cw.dispatchEvent('.node[data-id="riverton:drowned_rat/courtyard"]', 'dblclick');
+    const g3Q = await cw.evaluate(() => document.querySelector('.wspick-confirm')?.innerText ?? '');
+    await cw.locator('.wspick-yes').click();
+    const g3V = await cw.evaluate(() => ({ v: document.querySelector('.cf-sched[data-i="0"] .wspick')?.value, banner: !!document.querySelector('.wspick-banner') }));
+    check('single pick (the Is-at chooser) is unchanged: kind "room", no Done or count, a Choose box, one string back',
+        g3One.p?.kind === 'room' && !g3One.p?.multi && !g3One.done && !g3One.count && /Choose .*Courtyard/i.test(g3Q) && g3V.v === 'riverton:drowned_rat/courtyard' && !g3V.banner, JSON.stringify([g3One, g3Q, g3V]));
+    // Multi-pick: Hesk's area-only block, add a room, an area (open it, add its room) and a region, one percent, Nowhere, save.
+    const g3Row = '.cf-sched[data-i="3"]';
+    await cw.locator(`${g3Row} .cf-addplace`).click();
+    await cw.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    await cw.waitForTimeout(600);
+    const g3Multi = await cw.evaluate(() => ({ p: globalThis.wsPicking(), done: !!document.querySelector('.wspick-done'), count: document.querySelector('.wspick-count')?.innerText }));
+    check('Add place… opens pick mode in multi mode: kinds room, subregion and region, a Done button and a count', Array.isArray(g3Multi.p?.kind) && g3Multi.p.kind.join() === 'room,subregion,region' && g3Multi.p.multi === true && g3Multi.done && g3Multi.count === '0 chosen', JSON.stringify(g3Multi));
+    await cw.dispatchEvent('.node[data-id="riverton:drowned_rat/cellar"]', 'click');
+    await cw.locator('.wspick-this').click();
+    const g3Dim = await cw.evaluate(() => ({ done: !!document.querySelector('.node.pickdone[data-id="riverton:drowned_rat/cellar"]'), btn: document.querySelector('.wspick-this')?.disabled, txt: document.querySelector('.wspick-this')?.innerText, count: document.querySelector('.wspick-count')?.innerText }));
+    check('an added place is greyed (pickdone) and its button reads "Already in the list"; the count follows', g3Dim.done && g3Dim.btn === true && /Already in the list/.test(g3Dim.txt) && g3Dim.count === '1 chosen', JSON.stringify(g3Dim));
+    await cw.locator('.wspick-search').fill('smithy');
+    await cw.locator('.wspick-results li[data-id="riverton:smithy"]').click();
+    await cw.locator('.wspick-this:not([disabled])').click();
+    await cw.dispatchEvent('.node[data-id="sub:riverton:smithy"]', 'dblclick');
+    await cw.waitForTimeout(500);
+    await cw.dispatchEvent('.node[data-id="riverton:smithy/forge"]', 'dblclick');
+    await cw.locator('.wspick-search').fill('riverton');
+    await cw.locator('.wspick-results li[data-id="riverton"]').click();
+    if (await cw.locator('.wspick-this:not([disabled])').count()) await cw.locator('.wspick-this:not([disabled])').click();
+    const g3Count = await cw.evaluate(() => ({ count: document.querySelector('.wspick-count')?.innerText, p: globalThis.wsPicking() }));
+    await cw.locator('.wspick-done').click();
+    await cw.waitForTimeout(300);
+    const g3Chips = await cw.evaluate(row => ({ banner: !!document.querySelector('.wspick-banner'), chips: [...document.querySelectorAll(`${row} .cf-chip`)].map(c => c.dataset.kind || c.getAttribute('data-kind')), labels: [...document.querySelectorAll(`${row} .cf-chiplabel`)].map(l => l.innerText) }), g3Row);
+    check('Done adds the room, the area, the area\'s own room and the region as chips in the order picked (a place, an area, a place, a region), the form intact',
+        g3Count.count === '4 chosen' && !g3Chips.banner && g3Chips.chips.join() === 'area,room,area,room,region' && /Cellar - riverton:drowned_rat\/cellar/.test(g3Chips.labels[1]) && / - riverton:smithy\/forge$/.test(g3Chips.labels[3]), JSON.stringify([g3Count, g3Chips]));
+    await cw.locator(`${g3Row} .cf-chip:nth-child(2) .cf-pct`).fill('20');
+    await cw.locator(`${g3Row} .cf-addnowhere`).click();
+    await cw.locator('.castform .cast-save').click();
+    await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1200);
+    const g3Cast = await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json();
+    const g3Copy = g3Cast.npcs?.find(n => n.id === 'hesk-2');
+    const g3Might = g3Copy?.schedule?.[3]?.might;
+    check('saving writes the picked list: the area, the room with its percent, the smithy, its forge, the region and nowhere',
+        JSON.stringify(g3Might) === JSON.stringify(['riverton:drowned_rat', 'riverton:drowned_rat/cellar(20)', 'riverton:smithy', 'riverton:smithy/forge', 'riverton', 'nowhere']), JSON.stringify(g3Might));
+    await cw.locator('.cast-del').click();
+    await cw.locator('.cast-delyes').click();
+    await cw.waitForTimeout(600);
+    check('the test copy is removed again', !(await (await stFetch(`/cast?world=${encodeURIComponent(exportWorld || '')}`)).json()).npcs?.some(n => n.id === 'hesk-2'));
+    // Cancel in a multi pick adds nothing.
+    await cw.evaluate(() => wsCast.selectId('hesk', 'resolved')); await cw.waitForTimeout(200);
+    await cw.locator('.cast-saveas').click(); await cw.waitForTimeout(300);
+    await cw.locator(`${g3Row} .cf-addplace`).click();
+    await cw.locator('.wspick-banner').waitFor({ timeout: 10000 });
+    await cw.waitForTimeout(600);
+    await cw.dispatchEvent('.node[data-id="riverton:drowned_rat/cellar"]', 'click');
+    await cw.locator('.wspick-this').click();
+    await cw.locator('.wspick-cancel').click();
+    await cw.waitForTimeout(300);
+    check('Cancel in a multi pick adds nothing', await cw.locator(`${g3Row} .cf-chip`).count() === 1);
+    await cw.locator('.castform .cast-cancel').click(); await cw.waitForTimeout(300);
     // Who's here, what the narrator was told, and the unsaved list.
     await cw.evaluate(() => wsCast.selectPlace('riverton:drowned_rat/common_room'));
     await cw.waitForTimeout(200);
