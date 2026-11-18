@@ -297,6 +297,9 @@ export function formWarnings(f, { resolve = null } = {}) {
     }
     return w;
 }
+/** The importance tooltip. Importance is saved with the entry; today it only picks someone's main workplace for the "who is this" line. */
+export const IMPORTANCE_HELP = 'How firmly this entry pulls them away. High: insistent, like work. Normal. Low: easygoing, like free time. Blank on Is at: judged from the activity. Blank on Might be at: low. At the moment this is saved with the entry and used to pick the main workplace in the "who is this" line; it does not change where they turn up.';
+export const OFFMAP_HELP = 'No place on the map: they are somewhere else, and nobody can meet them here during these hours.';
 /** The editor help for might-be-at rows (the authoring note). */
 export const MIGHT_HELP = 'Might be at: a time block with places and odds, like "Market Lane, General Store, nowhere(80)". A (number) is a percent; places without one split what is left of 100, and anything under 100 is nowhere. A normal block rolls once when it starts; Wandering moves them every 15 to 60 minutes. Anywhere lets an area option include private rooms too, like Hesk anywhere in the inn. Adjacent rows each roll on their own, so their chances add up: three hourly rows at 20%, 50% and 20% give about a 70% chance of meeting them at some point in those three hours. To make someone likely across a span, write one block with the odds you want.';
 

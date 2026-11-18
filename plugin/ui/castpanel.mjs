@@ -6,7 +6,7 @@
 //       play() -> this chat's npcs (map state) or null, placeName(a), showPlace(a), showMessage(i), exportNpc(id, update), changed(),
 //       inspect() -> map state's npc_inspect {who, narrator, unsaved, threshold}, chatAt() -> {msg, swipe} of the latest message, chatEdit(id, stamps, at) -> {ok, error}, highlight(addresses),
 //       decideNpc({identity, decisionRev, action, card, ref, seen, values, to}) -> {ok, error, stale} (a Changes card click, run by the chat's card handler) }
-import { permanentProblem, liveSchedule, mightText, placeResolver, mightOptionsShown, toggleRowKind, formWarnings, MIGHT_HELP } from './castdata.mjs';
+import { permanentProblem, liveSchedule, mightText, placeResolver, mightOptionsShown, toggleRowKind, formWarnings, MIGHT_HELP, IMPORTANCE_HELP, OFFMAP_HELP } from './castdata.mjs';
 import { castRows, filterRows, formFromRecord, recordFromForm, formProblems, slugFor, playSummary, stampRows, DISPOSITIONS, IMPORTANCE, recordChanges, chatStamps, chatStampLines, whyRows, activeFounds, permanentSchedule, cardAppearance, resolvedCard, editSeed, authoringChanges } from './castdata.mjs';
 import { pickField, pathOf } from './picker.mjs';
 import { stampCard } from './castdata.mjs';
@@ -368,44 +368,70 @@ export function castPanel(doc, io) {
             k.addEventListener('change', () => { f.schedule[i] = toggleRowKind(e, k.value, rctx.resolve); drawSched(); check(); });
             return k;
         };
-        const tm = (e, k) => { const t = $('input', { type: 'time', class: `pf-input cf-${k}` }); t.value = e[k]; t.addEventListener('input', () => { e[k] = t.value; check(); }); t.addEventListener('change', () => { e[k] = t.value; check(); }); return t; };
-        const impSel = e => { const imp = $('select', { class: 'pf-input cf-importance' }, $('option', { value: '' }, 'importance'), ...IMPORTANCE.map(x => $('option', { value: x }, x))); imp.value = e.importance; imp.addEventListener('change', () => { e.importance = imp.value; check(); }); return imp; };
+        const capped = (text, ctl, cls = '') => $('label', { class: `cf-capped ${cls}`.trim() }, $('span', { class: 'cf-cap' }, text), ctl);
+        const tm = (e, k) => {
+            const might = e.kind === 'might';
+            const title = k === 'from'
+                ? `Start of the block (24-hour, like 08:00). ${might ? 'Required.' : 'Empty: from the end of the one before.'}`
+                : `End of the block (24-hour, like 17:00). ${might ? 'Required.' : 'Empty: until the end of the day.'}`;
+            const t = $('input', { type: 'time', class: `pf-input cf-${k}`, title }); t.value = e[k]; t.addEventListener('input', () => { e[k] = t.value; check(); }); t.addEventListener('change', () => { e[k] = t.value; check(); }); return t;
+        };
+        const impSel = e => {
+            const blank = e.kind === 'might' ? '(low)' : '(judge from activity)';
+            const imp = $('select', { class: 'pf-input cf-importance', title: IMPORTANCE_HELP }, $('option', { value: '' }, blank), ...IMPORTANCE.map(x => $('option', { value: x }, x)));
+            imp.value = e.importance; imp.addEventListener('change', () => { e.importance = imp.value; check(); }); return imp;
+        };
         const xBtn = i => $('button', { type: 'button', class: 'pf-x cf-schedx', title: 'Remove this entry', onclick: () => { f.schedule.splice(i, 1); drawSched(); check(); } }, '✕');
+        const flagBox = (cls, label, title, on, set) => {
+            const c = $('input', { type: 'checkbox', class: cls, title }); c.checked = !!on; c.addEventListener('change', () => { set(c.checked); check(); });
+            return $('label', { class: 'cf-wandlabel', title }, c, ` ${label}`);
+        };
+        /** The one entry layout both kinds share: kind line, the where slot, activity, times and importance, flags (might), errors. */
+        const entryShell = (e, i, { mid = null, slot, errKey, flags = null }) => {
+            const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'What they are doing', title: 'What they are doing during these hours.' });
+            act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
+            return $('div', { class: `cf-sched${e.kind === 'might' ? ' cf-might' : ''}`, 'data-i': i },
+                $('div', { class: 'cf-line1' }, kindSel(e, i), mid ?? $('span', { class: 'cf-line1gap' }), xBtn(i)),
+                $('div', { class: 'cf-slot' }, ...slot), err(errKey),
+                $('div', { class: 'cf-line3' }, act), err(`schedule.${i}.activity`),
+                $('div', { class: 'cf-line4' }, capped('From', tm(e, 'from')), capped('To', tm(e, 'to')), capped('Importance', impSel(e))),
+                err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
+                flags ? $('div', { class: 'cf-flags' }, ...flags) : null,
+                warnEl(`schedule.${i}.warn`));
+        };
         const drawSched = () => {
             schedBox.replaceChildren(...(f.schedule ?? []).map((e, i) => {
                 if (e.kind === 'might') {
                     // Shown by name where the name is unique; typed names are matched back to addresses on save.
                     if (!e.shown) { e.options = mightOptionsShown(e.options, rctx.resolve); e.shown = true; }
-                    const opts = $('input', { type: 'text', class: 'pf-input cf-options', placeholder: 'Market Lane, General Store, nowhere(80)' }); opts.value = e.options;
+                    const opts = $('input', { type: 'text', class: 'pf-input cf-options', placeholder: 'Market Lane, General Store, nowhere(80)', title: 'The same list as text. A (number) is a percent.' }); opts.value = e.options;
                     opts.addEventListener('input', () => { e.options = opts.value; check(); });
-                    const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
-                    const wand = $('input', { type: 'checkbox', class: 'cf-wandering' }); wand.checked = !!e.wandering; wand.addEventListener('change', () => { e.wandering = wand.checked; check(); });
-                    const any = $('input', { type: 'checkbox', class: 'cf-anywhere' }); any.checked = !!e.anywhere; any.addEventListener('change', () => { e.anywhere = any.checked; check(); });
-                    return $('div', { class: 'cf-sched cf-might', 'data-i': i }, $('div', { class: 'cf-schedtop' }, kindSel(e, i), opts, xBtn(i)),
-                        err(`schedule.${i}.options`),
-                        $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e), $('label', { class: 'cf-wandlabel', title: 'Moves among the places every 15 to 60 minutes' }, wand, ' Wandering'), $('label', { class: 'cf-wandlabel', title: 'Area options include private rooms too' }, any, ' Anywhere')),
-                        err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
-                        warnEl(`schedule.${i}.warn`));
+                    return entryShell(e, i, {
+                        slot: [capped('Places and odds', opts)], errKey: `schedule.${i}.options`,
+                        flags: [flagBox('cf-wandering', 'Wandering', 'Moves among the places every 15 to 60 minutes', e.wandering, v => { e.wandering = v; }),
+                            flagBox('cf-anywhere', 'Anywhere', 'Area options include private rooms too', e.anywhere, v => { e.anywhere = v; })],
+                    });
                 }
-                const off = $('input', { type: 'checkbox', class: 'cf-offmap' }); off.checked = !!e.offmap;
+                // One where slot: the chooser on the map; off the map the chooser is not drawn at all, and the name and near boxes take its place.
+                const off = $('input', { type: 'checkbox', class: 'cf-offmap', title: OFFMAP_HELP }); off.checked = !!e.offmap;
                 off.addEventListener('change', () => { e.offmap = off.checked; if (off.checked) e.place = ''; drawSched(); check(); });
-                const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.offmap ? '' : e.place });
-                pk.addEventListener('change', () => { e.place = pk.value; if (pk.value) e.offmap = false; drawSched(); check(); });
-                const act = $('input', { type: 'text', class: 'pf-input cf-activity', placeholder: 'doing what' }); act.value = e.activity; act.addEventListener('input', () => { e.activity = act.value; check(); });
-                const wh = $('input', { type: 'text', class: 'pf-input cf-where', placeholder: 'where (her own room)' }); wh.value = e.where; wh.addEventListener('input', () => { e.where = wh.value; check(); });
-                const nr = $('input', { type: 'text', class: 'pf-input cf-near', placeholder: 'near (a place, a stub, or words)' }); nr.value = e.near; nr.addEventListener('input', () => { e.near = nr.value; check(); });
-                return $('div', { class: 'cf-sched', 'data-i': i }, $('div', { class: 'cf-schedtop' }, kindSel(e, i), $('label', { class: 'cf-offlabel' }, off, ' Off the map'), pk, xBtn(i)),
-                    err(`schedule.${i}.place`),
-                    e.offmap ? $('div', { class: 'cf-schedrow' }, wh, nr) : null,
-                    $('div', { class: 'cf-schedrow' }, act, tm(e, 'from'), '–', tm(e, 'to'), impSel(e)),
-                    err(`schedule.${i}.activity`), err(`schedule.${i}.from`), err(`schedule.${i}.to`), err(`schedule.${i}.importance`),
-                    warnEl(`schedule.${i}.warn`));
-            }), $('button', { type: 'button', class: 'crumb cf-addsched', onclick: () => { f.schedule.push({ kind: 'at', place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
+                let slot;
+                if (e.offmap) {
+                    const wh = $('input', { type: 'text', class: 'pf-input cf-where', placeholder: 'Off-map place name', title: 'A short name for where they are, like "her own room" or "at the fishing camp". Shown to the narrator.' }); wh.value = e.where; wh.addEventListener('input', () => { e.where = wh.value; check(); });
+                    const nr = $('input', { type: 'text', class: 'pf-input cf-near', placeholder: 'Near area', title: 'Where that is: a map place or area id, a place from the world\'s off-map list, or plain words. Free text.' }); nr.value = e.near; nr.addEventListener('input', () => { e.near = nr.value; check(); });
+                    slot = [$('div', { class: 'cf-offgrid' }, capped('Off-map place name', wh), capped('Near area', nr))];
+                } else {
+                    const pk = pickField(doc, { kind: 'room', title: `place for ${e.activity || 'this entry'}`, outline, value: e.place });
+                    pk.addEventListener('change', () => { e.place = pk.value; drawSched(); check(); });
+                    slot = [$('div', { class: 'cf-field' }, $('span', { class: 'cf-cap' }, 'Place'), pk)];
+                }
+                return entryShell(e, i, { mid: $('label', { class: 'cf-offlabel', title: OFFMAP_HELP }, off, ' Off the map'), slot, errKey: `schedule.${i}.place` });
+            }), $('button', { type: 'button', class: 'crumb cf-addsched', title: 'Add another schedule entry', onclick: () => { f.schedule.push({ kind: 'at', place: '', offmap: false, activity: '', where: '', near: '', from: '', to: '', importance: '' }); drawSched(); check(); } }, 'Add schedule entry'));
         };
         drawSched();
         form.append($('b', {}, 'Schedule'), $('div', { class: 'muted' }, chatMode
             ? 'A change here is stamped on the latest message and applies only in this chat. It is not written to the cast file.'
-            : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place, an activity, and optionally where they are and what that is near.'),
+            : 'Entries are checked in order; one with no times fills the rest of the day. Off the map: no place on the map, an activity, and optionally an off-map place name and the area it is near.'),
             $('details', { class: 'cf-mighthelp' }, $('summary', {}, 'About Might be at'), $('p', { class: 'muted' }, MIGHT_HELP)), schedBox);
         const relBox = $('div', { class: 'cf-rels' });
         const drawRels = () => relBox.replaceChildren(...(f.relationships ?? []).map((x, i) => {

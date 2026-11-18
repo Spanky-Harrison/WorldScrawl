@@ -65,6 +65,7 @@
     check('a message link flashes that message in SillyTavern', await page.evaluate(n => !!document.querySelector(`#chat .mes[mesid="${n}"]`)?.style.outline, ratMsg), String(ratMsg));
     await cw.locator('.cast-update').click();
     await cw.waitForTimeout(300);
+    await cw.locator('.cf-sched[data-i="1"] .cf-offmap').uncheck(); // the asleep entry is off the map: untick it to get the chooser (one where slot)
     await pickSet(cw.locator('.cf-sched[data-i="1"] .wspick'), 'riverton:drowned_rat/courtyard');
     await cw.locator('.cf-sched[data-i="1"] .cf-activity').fill('feeding the hens');
     await cw.locator('.cf-sched[data-i="1"] .cf-from').fill('07:00');
