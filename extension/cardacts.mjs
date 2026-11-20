@@ -12,7 +12,8 @@ import { currentLocation } from './doors.mjs';
 import { FLAG_KEY, PATCH_KEY, WAITCARD_KEY, broadcastMapState, ctx, hooks } from './index.js';
 import { analyzeFlag, isCarrier, removeFromCard, swapRewrite } from './carriers.mjs';
 import { discardWait, keepWait, renderPatchCards } from './waits.mjs';
-import { discardFlag, keepFlag, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
+import { discardFlag, keepFlag, runTracker, syncSwipeExtra, undoFlag, unmergeFlag } from './discovery.mjs';
+import { TRACKED_KEY, trackFailure } from './tracker.mjs';
 import { retryPlaceRebuild } from './placerevert.mjs';
 import { isPlaceExpiryNotice, keepExpiryEdit, keptForGood, openEditor, openForms, saveKeptEdit, toggleFromCard } from './patches.mjs';
 import { getStoredLocation } from './doors.mjs';
@@ -71,6 +72,11 @@ const TICKETS = {
     job({ id, msg, job }) {
         const swipe = swipeOf(msg), same = j => j.id === job.id && j.key === job.key && j.status === job.status && (j.token ?? null) === (job.token ?? null);
         return { type: 'job', id, msg, job, key: `${id}|job|${job.id}|${job.key}`, still: () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe && appearJobs(msg).some(same) };
+    },
+    /** The failed after-reply check (its answer could not be read): current while that failed read is still the one shown. */
+    track({ id, msg }) {
+        const swipe = swipeOf(msg), mark = msg?.extra?.[TRACKED_KEY] ?? null;
+        return { type: 'track', id, msg, mark, key: `${id}|track`, still: () => ctx().chat?.[id] === msg && swipeOf(msg) === swipe && !!mark && trackFailure(msg) === mark };
     },
     /** An expiry notice: current while that notice is still at its place in the chat, on the same swipe. */
     expiry({ id, msg, key, kind, person = null, got = null, host = null, job = null, jobs = null }) {
@@ -386,8 +392,13 @@ const job = {
     again: t => againJob(t.id, t.job),
 };
 
+// ---- the failed after-reply check: Retry reads the reply once more (one call, shown on the marker as the next try)
+const track = {
+    again: t => runTracker(t.id, { attempt: (t.mark?.tries ?? 1) + 1 }),
+};
+
 /** The handlers: the only per-type card code that acts. */
-export const HANDLERS = { place, person, expiry, remember, placeKept, personNote, found, wait, job };
+export const HANDLERS = { place, person, expiry, remember, placeKept, personNote, found, wait, job, track };
 
 /**
  * Run a card action. Refuses an action the type does not have, an async action without a ticket, and any action whose

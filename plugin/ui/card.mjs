@@ -13,8 +13,9 @@ const baseOf = id => (String(id).startsWith('extra:') ? 'extra' : String(id));
 
 /** The label the card gives an action. Approve reads "Approve edited" while the editor is open; Discard reads
  *  "Dismiss" on an info notice; the scope switch names where it goes. */
-export function actionLabel(a, { editing = false, state = '' } = {}) {
+export function actionLabel(a, { editing = false, state = '', type = '' } = {}) {
     const id = String(a.id);
+    if (id === 'again' && type === 'track') return 'Retry';
     if (id === 'approve' && editing) return 'Approve edited';
     if (id === 'discard' && state === 'info') return 'Dismiss';
     if (id === 'scope') return a.to === 'light' ? 'Make it a light touch' : 'Make it a full rewrite';
@@ -129,7 +130,7 @@ export function renderCard(doc, desc, onAction = () => {}, hooks = {}) {
     }
     for (const x of desc.extras ?? []) if (x) el.append(x);
     const editing = !!desc.editor;
-    const buttons = orderActions(desc.actions).map(a => cardButton(doc, actionLabel(a, { editing, state: desc.state }), () => onAction(a.id, a), a.title ?? '', !!a.decides, hooks));
+    const buttons = orderActions(desc.actions).map(a => cardButton(doc, actionLabel(a, { editing, state: desc.state, type: desc.type }), () => onAction(a.id, a), a.title ?? '', !!a.decides, hooks));
     if (buttons.length) el.append(noticeRow(doc, buttons));
     if (desc.locked) lockRow(el.querySelector('.worldscrawl_notice_row'));
     return el;

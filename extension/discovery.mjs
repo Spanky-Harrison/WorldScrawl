@@ -4,7 +4,7 @@ import { DECIDED_KEY, noticeIdOf, markDecided } from './notices.mjs';
 import { narratorNote } from './calllog.mjs';
 import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, factHasEnd, presentAt, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
 import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
@@ -15,14 +15,14 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, listedPeople, maybeSuggest, npcClock, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
-import { findPerson, maskForModel } from './names.mjs';
+import { findPerson, handleOf, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
 import { withWait } from './work.mjs';
-import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
+import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, ownerCheck, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { narratorWaitAction, planWait, proposeWait, renderPatchCards, stampWait } from './waits.mjs';
 
 /** The narrator's only tools are the movement ones (ws_look, ws_move), when moveMode is 'tools'. The after-reply tracker reports changes. */
@@ -264,6 +264,17 @@ async function applyProposedWait(id, w, source = '') {
         await c.saveChat?.(); renderPatchCards();
     }
 }
+/** A warning line on the message's cards (NPC_WARN_KEY), once per text, swipe and source, with its call note. */
+function noteNpcWarning(id, text, source = '') {
+    const msg = ctx().chat?.[id];
+    if (!msg) return;
+    msg.extra = msg.extra ?? {};
+    const swipe = swipeOf(msg);
+    const list = Array.isArray(msg.extra[NPC_WARN_KEY]) ? msg.extra[NPC_WARN_KEY] : [];
+    if (list.some(w => w?.text === text && (w?.swipe ?? 0) === swipe && (w?.source ?? '') === source)) return;
+    msg.extra[NPC_WARN_KEY] = [...list, { swipe, text, ...(source ? { source } : {}) }];
+    noteCall(id, { kind: 'warning', status: 'failed', reason: text });
+}
 /** Today's person apply: no-op appearance (empty, "looks", "appeared") warns and does not stamp or rebuild. */
 async function applyPersonStamps(id, stamped) {
     const c = ctx(), msg = c.chat?.[id];
@@ -272,18 +283,11 @@ async function applyPersonStamps(id, stamped) {
     const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     const applied = [];
     const toFill = [];
-    const noteNpcWarning = (text, source = '') => {
-        msg.extra = msg.extra ?? {};
-        const swipe = swipeOf(msg);
-        const list = Array.isArray(msg.extra[NPC_WARN_KEY]) ? msg.extra[NPC_WARN_KEY] : [];
-        if (list.some(w => w?.text === text && (w?.swipe ?? 0) === swipe && (w?.source ?? '') === source)) return;
-        msg.extra[NPC_WARN_KEY] = [...list, { swipe, text, ...(source ? { source } : {}) }];
-        noteCall(id, { kind: 'warning', status: 'failed', reason: text });
-    };
+    const warn = (text, source = '') => noteNpcWarning(id, text, source);
     for (const s0 of stamped) {
         const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
         const t = findPerson(s0.id, folded)?.id ?? null;
-        if (!t) { noteNpcWarning(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }
+        if (!t) { warn(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }
         let s = t === s0.id ? s0 : { ...s0, id: t };
         const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
         if (s.type === 'npc_fact' && alreadyShown(cur, s.text)) { noteCall(id, { kind: 'npc_fact', status: 'skipped', reason: 'already known' }); continue; }
@@ -291,7 +295,7 @@ async function applyPersonStamps(id, stamped) {
             const decision = judgeAppearance(cur, s);
             if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
             if (decision === 'reject') {
-                noteNpcWarning(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom);
+                warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom);
                 continue;
             }
             const intent = appearanceIntent(s);
@@ -335,7 +339,7 @@ async function applyPersonStamps(id, stamped) {
         if (s.pending === true || seen.has(s.id)) continue;
         seen.add(s.id);
         const live = npcAt(c.chat, id, castPack()?.npcs ?? [], s.id);
-        for (const w of claimWarnings(live, applied.filter(x => x.id === s.id && x.pending !== true))) noteNpcWarning(w, s.source === TRACKER_SOURCE ? TRACKER_SOURCE : '');
+        for (const w of claimWarnings(live, applied.filter(x => x.id === s.id && x.pending !== true))) warn(w, s.source === TRACKER_SOURCE ? TRACKER_SOURCE : '');
     }
     syncSwipeExtra(msg);
     await c.saveChat?.();
@@ -388,11 +392,37 @@ async function applyLearnedNames(id, learned, source) {
     }
     await c.saveChat?.();
 }
+/**
+ * T2b, the ownership guard: an appearance or fact item about someone the exchange never names is checked against the
+ * other people in it (ownerCheck, no model call). Drop: noted in the Activity log, nothing stamped. Warn: kept, with a
+ * warning line on its card. Other actions (memory, disposition, name, found, leave…) are not about the person's own
+ * body or record and pass as they are. `present`: the people here (presentAt), else worked out from the chat.
+ */
+function guardOwners(id, people, present = null) {
+    const c = ctx(), chat = c.chat ?? [], msg = chat[id];
+    const items = (people ?? []).filter(p => (p.action === 'appearance' || p.action === 'fact') && !(p.action === 'fact' && factHasEnd(p.lasts)));
+    if (!items.length) return people;
+    let here = present;
+    if (!here) { try { here = presentAt(chat, id, castPack()?.npcs ?? [], npcEnv(chat, null)); } catch { here = []; } }
+    const shape = p => ({ name: p.name, aliases: p.aliases, unknownAs: p.unknownAs, nameKnown: shownName(p) === (p.name || 'someone'), label: shownName(p) }); // name-ok: inbound (matching the story text); the card text uses shownName
+    const text = `${playerLineBefore(chat, id)}\n${msg?.mes ?? ''}`;
+    const out = [];
+    for (const item of people) {
+        const person = items.includes(item) ? findPerson(item.id || item.name, here) : null; // name-ok: inbound (tracker answer)
+        if (!person) { out.push(item); continue; }
+        const r = ownerCheck(item, shape(person), text, here.filter(p => p !== person).map(shape));
+        if (r.verdict === 'drop') { noteCall(id, { kind: 'tracker owner', status: 'skipped', reason: r.reason }); continue; }
+        if (r.verdict === 'warn') noteNpcWarning(id, r.reason, TRACKER_SOURCE);
+        out.push(item);
+    }
+    return out;
+}
 /** Feed a tracker answer into the place rewrite and the person apply. No third apply path. */
-export async function applyTrackerResult(id, parsed) {
+export async function applyTrackerResult(id, parsed, { present = null } = {}) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg) return;
     const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
+    gated.people = guardOwners(id, gated.people, present);
     const { stamps, found, names, dropped: noEnd } = trackerPayloads(gated.people);
     noteDroppedFacts(id, 'tracker fact', noEnd);
     if (stamps.length) await applyPersonStamps(id, stamps);
@@ -442,46 +472,64 @@ export async function trackerSettled(before, cap = TRACKER_WAIT.cap) {
     if (r === 'cap') for (const [m] of runs) if (trackerRuns.has(m)) noteCall(chat.indexOf(m), { kind: 'tracker', status: 'skipped', reason: 'tracker still running; the reply went ahead without it' });
     return r;
 }
-/** Hit 3. A small question, not the narrator, and not the narrator's chat. Story is already on screen. */
-async function runTracker(id) {
+/** When the tracker's answer can't be read at all: 'off' (the read fails), 'ask' (the failed marker offers Retry) or
+ *  'auto' (up to trackerRetryCount more tries, each shown on the marker, then Retry as in ask). */
+export const trackerRetryMode = () => (['off', 'ask', 'auto'].includes(settings().trackerRetry) ? settings().trackerRetry : 'ask');
+/** How many more tries auto makes: 1-3. */
+export const trackerRetryCount = () => Math.min(3, Math.max(1, Math.round(Number(settings().trackerRetryCount)) || 1));
+/** Hit 3. A small question, not the narrator, and not the narrator's chat. Story is already on screen.
+ *  attempt: which try this read starts on (a Retry click on a failed read is the next one). */
+export async function runTracker(id, { attempt = 1 } = {}) {
     const msg = ctx().chat?.[id];
-    const p = trackReply(id);
+    const p = trackReply(id, { attempt });
     if (msg) { trackerRuns.set(msg, p); p.finally(() => { if (trackerRuns.get(msg) === p) trackerRuns.delete(msg); }).catch(() => {}); }
     return p;
 }
-async function trackReply(id) {
+async function trackReply(id, { attempt: first = 1 } = {}) {
     if (!isOn()) return;
     const c = ctx(), chat = c.chat ?? [], msg = chat[id];
     if (!shouldTrackReply(msg, chat, id)) return;
     const genNo = bumpTracker(msg);
     const swipe = swipeOf(msg), story = msg.mes ?? '';
     let status = null; // what the marker ends on (null: skipped or stale, nothing shown for this read)
-    let personChanged = false;
+    let personChanged = false, tries = first, unreadable = false;
     try {
         await ensurePrompts();
         let loc = null;
         try { loc = await currentLocation(); } catch { loc = null; }
         // Without the place and the cards, a look or an entrance is too easy to mistake for a change.
         if (!loc?.name && !loc?.address) { noteCall(id, { kind: 'tracker', status: 'skipped', reason: 'place unavailable' }); return; }
-        markTracking(msg, genNo);
+        // auto: up to trackerRetryCount more tries on an unreadable answer only. A Retry click (first > 1) is one try.
+        const last = first === 1 && trackerRetryMode() === 'auto' ? 1 + trackerRetryCount() : first;
+        const of = first === 1 ? last : 0; // a Retry click has no fixed number of tries: "try 2"
+        markTracking(msg, genNo, { attempt: first, of });
         renderPatchCards();
         const weather = placeWeatherNow(loc)?.line ?? '';
         const date = gameDateAt(id, chat); // the reply's own clock: a later [wait] has not happened yet for this exchange
         const people = listedPeople(chat, id, loc);
+        let present = null;
+        try { present = presentAt(chat, id, castPack()?.npcs ?? [], npcEnv(chat, loc)); } catch { present = null; }
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
         const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
-        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 700 }, { at: id, shown: 'marker' }); // "tracking…"
-        // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
-        if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg || (msg.mes ?? '') !== story || newSwipePending(msg)) return;
-        const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
-        // Empty, prose, or cut off mid-object: the read failed. It is never "nothing changed", and nothing is applied.
-        if (parsed.unreadable) { noteCall(id, { kind: 'tracker', status: 'failed', reason: 'the answer was not JSON' }); status = 'failed'; return; }
+        let parsed = null;
+        for (let attempt = first; attempt <= last; attempt++) {
+            tries = attempt;
+            if (attempt > first) { markTracking(msg, genNo, { attempt, of }); renderPatchCards(); } // "tracking… (try 2 of 3)"
+            const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 700 }, { at: id, shown: 'marker' }); // "tracking…"
+            // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
+            if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg || (msg.mes ?? '') !== story || newSwipePending(msg)) return;
+            parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
+            if (!parsed.unreadable) break;
+            // Empty, prose, or cut off mid-object: this try failed. It is never "nothing changed", and nothing is applied.
+            noteCall(id, { kind: 'tracker', status: 'failed', reason: `the answer was not JSON${last > 1 || first > 1 ? ` (try ${attempt}${of ? ` of ${of}` : ''})` : ''}` });
+        }
+        if (parsed.unreadable) { status = 'failed'; unreadable = true; return; }
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
         const before = (msg.extra?.[NPC_KEY] ?? []).length;
-        await applyTrackerResult(id, parsed);
+        await applyTrackerResult(id, parsed, { present });
         personChanged = (msg.extra?.[NPC_KEY] ?? []).length !== before; // a person stamp landed: the Cast pane needs the new state
         if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = hasTrackerCard(msg) ? 'carded' : 'tracked';
     } catch (e) {
@@ -489,7 +537,7 @@ async function trackReply(id) {
         noteCall(id, { kind: 'tracker', status: 'failed', reason: e?.message || String(e) });
         if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = 'failed';
     } finally {
-        markTracked(msg, genNo, status);
+        markTracked(msg, genNo, status, { tries, unreadable });
         if (status) { syncSwipeExtra(msg); try { await ctx().saveChat?.(); } catch (e) { console.warn('[WorldScrawl] save', e?.message || e); } }
         renderPatchCards();
         if (personChanged) try { broadcastMapState(); } catch { /* map window may not be open */ } // debounced: one post per tick

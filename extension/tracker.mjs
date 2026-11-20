@@ -1,6 +1,6 @@
 // After-reply bookkeeper. Hit 1 (the verb check) and hit 2 (the narrator) do not report state.
 // This pass is one question. It reads the latest exchange plus the live fields it may change, not earlier chat.
-import { render as P } from './shared.mjs';
+import { render as P, nameIn, normName, text as Text } from './shared.mjs';
 import { FOUND_KEY, NPC_KEY, NPC_WARN_KEY } from './npc.mjs';
 import { judgeRewrite } from './arearewrite.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
@@ -124,6 +124,60 @@ export function placeDropReason(chat, at, place) {
     if (place.kind !== 'discover' && transientOnly(place.note)) return `tracker place dropped: only passing scene state (${place.note})`;
     return '';
 }
+// ---- T2b, the ownership guard (no model call): is a tracker appearance or fact item really about the person it names?
+/** Person nouns that make an unlisted rival owner ("a stranger", "the old sailor"). Tune from playtests. */
+export const RIVAL_NOUNS = ['man', 'men', 'woman', 'women', 'girl', 'boy', 'lad', 'lass', 'youth', 'child', 'stranger', 'traveller', 'traveler',
+    'guard', 'soldier', 'patron', 'customer', 'drinker', 'drunk', 'sailor', 'bargeman', 'fisherman', 'merchant', 'peddler', 'figure', 'newcomer',
+    'servant', 'maid', 'farmer', 'hunter', 'priest', 'monk', 'beggar', 'thief', 'knight', 'rider', 'messenger', 'fellow', 'urchin'];
+const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'from', 'with', 'into', 'onto', 'over', 'under',
+    'through', 'up', 'down', 'out', 'off', 'is', 'are', 'was', 'were', 'be', 'been', 'has', 'have', 'had', 'it', 'its', 'her', 'his', 'their',
+    'she', 'he', 'they', 'them', 'him', 'now', 'new', 'very', 'all', 'some', 'who', 'that', 'this', 'as', 'than', 'so', 'not', 'no']);
+const RIVAL_RE = new RegExp(`\\b(?:one of the|another|some|the|an|a) (?:[a-z'-]+ ){0,2}?(${[...RIVAL_NOUNS].sort((x, y) => y.length - x.length).join('|')})s?\\b`, 'g');
+const PRONOUN_START = /^\W*(?:she|he|they|her|his|their)\b/i;
+const stem = w => w.replace(/(?:ing|ed|es|s)$/, '');
+const sameWord = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && stem(a) === stem(b));
+const bareTerm = t => normName(t).replace(/^(?:the|a|an) /, '');
+/** What a person can be called in the story: the name once the player knows it, aliases, and unknownAs with or without its article. */
+const termsOf = p => [...(p?.nameKnown === false ? [] : [p?.name]), ...(Array.isArray(p?.aliases) ? p.aliases : []), p?.unknownAs, p?.unknownAs ? bareTerm(p.unknownAs) : '']
+    .filter(t => typeof t === 'string' && normName(t));
+const namedIn = (text, p) => termsOf(p).some(t => nameIn(text, t));
+/** The content words of the change: "her cloak is soaked through" gives cloak, soaked. */
+export function intentWords(item) {
+    return [...new Set(normName(item?.intent || item?.text || '').split(' ').filter(w => w.length > 2 && !STOP.has(w)))];
+}
+/**
+ * The T2b guard for one tracker item (appearance or fact) on `person` ({name, aliases, unknownAs, nameKnown, label}).
+ * `text` is the player's line and the narrator reply; `listed` is everyone else listed here. Returns {verdict, reason}:
+ * keep when the person is named; drop when they are not and a rival (another listed person named, or "a stranger"-style
+ * phrase that is nobody listed) shares a sentence with the change's words, or the sentence before a "she/he/they" one;
+ * otherwise warn (pronouns only: no gender guessing).
+ */
+export function ownerCheck(item, person, text, listed = []) {
+    const who = person?.label || person?.unknownAs || person?.name || 'this person';
+    if (namedIn(text, person)) return { verdict: 'keep', reason: '' };
+    const words = intentWords(item);
+    const everyone = [person, ...listed].filter(Boolean);
+    const known = everyone.flatMap(termsOf).map(bareTerm).filter(Boolean);
+    const sentences = Text.splitSentences(text);
+    const rivalIn = sentence => {
+        const n = normName(sentence);
+        const other = listed.find(p => namedIn(n, p));
+        if (other) return other.label || other.unknownAs || other.name;
+        for (const m of n.matchAll(RIVAL_RE)) {
+            if (known.some(k => nameIn(m[0], k))) continue; // "the landlady" is never a rival while she is listed
+            return `the ${m[1].replace(/^men$/, 'man').replace(/^women$/, 'woman')}`;
+        }
+        return '';
+    };
+    for (let i = 0; i < sentences.length; i++) {
+        const has = normName(sentences[i]).split(' ').some(w => words.some(x => sameWord(w, x)));
+        if (!has) continue;
+        const rival = rivalIn(sentences[i]) || (i > 0 && PRONOUN_START.test(sentences[i]) ? rivalIn(sentences[i - 1]) : '');
+        if (rival) return { verdict: 'drop', reason: `tracker item dropped: the change reads as ${possessive(rival)}, not ${possessive(who)}`, rival };
+    }
+    return { verdict: 'warn', reason: `This reply never names ${who}; check this change is really ${possessive(who)}.` };
+}
+const possessive = w => (/s$/i.test(w) ? `${w}'` : `${w}'s`);
 export function readPlace(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (p.changed === false) return null;
@@ -242,16 +296,27 @@ export const trackerGen = msg => gens.get(msg) ?? 0;
 export const TRACKED_KEY = 'worldscrawl_tracked';
 const running = new WeakMap(); // msg -> {swipe, gen}
 const swipeAt = m => m?.swipe_id ?? 0;
-/** The read started on this swipe (gen: bumpTracker's number for it). */
-export function markTracking(msg, gen) { running.set(msg, { swipe: swipeAt(msg), gen }); }
+/** The read started on this swipe (gen: bumpTracker's number for it). attempt / of: which try this is, for the marker
+ *  ("tracking… (try 2 of 3)"; of 0 when the number of tries is open, a Retry click: "tracking… (try 2)"). */
+export function markTracking(msg, gen, { attempt = 1, of = 1 } = {}) { running.set(msg, { swipe: swipeAt(msg), gen, attempt, of }); }
+/** The try the live read is on: {attempt, of}, or null when none is running on the swipe shown. */
+export function trackTry(msg) {
+    const r = running.get(msg);
+    return r && r.swipe === swipeAt(msg) ? { attempt: r.attempt ?? 1, of: r.of ?? 1 } : null;
+}
 /** The read ended: 'tracked' (nothing to add), 'carded' (it put up a card, which stands in for the marker), 'failed',
  *  or null (stale or skipped: nothing stored). Only the read that is still current may end the live state. */
-export function markTracked(msg, gen, status) {
+export function markTracked(msg, gen, status, { tries = 1, unreadable = false } = {}) {
     const r = running.get(msg);
     if (r && r.gen === gen) running.delete(msg);
     if (!status || !msg) return;
     msg.extra = msg.extra ?? {};
-    msg.extra[TRACKED_KEY] = { swipe: swipeAt(msg), status };
+    msg.extra[TRACKED_KEY] = { swipe: swipeAt(msg), status, ...(tries > 1 ? { tries } : {}), ...(status === 'failed' && unreadable ? { unreadable: true } : {}) };
+}
+/** The stored failed read on the swipe shown ({status: 'failed', tries?, unreadable?}), or null. */
+export function trackFailure(msg) {
+    const t = msg?.extra?.[TRACKED_KEY];
+    return trackMark(msg) === 'failed' && t ? t : null;
 }
 /** Did this read leave anything on the message (a card or a stamp the player sees)? */
 export function hasTrackerCard(msg) {
