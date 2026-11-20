@@ -1,5 +1,5 @@
 import './ststub.mjs';
-import { extSource, client, RIVERTON, TAVERN, SQUARE } from './helpers.mjs';
+import { extSource, client, RIVERTON, TAVERN, SQUARE, TRACKER_SYSTEM_MARK } from './helpers.mjs';
 import { DEFAULT_PROMPTS } from './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -350,4 +350,12 @@ test('P2: the dead narrator tool and tag-hint prompts are gone from the prompt m
   const ext = await import('../../extension/index.js');
   assert.deepEqual(ext.TOOL_NAMES, ['ws_look', 'ws_move']);
   for (const fn of ['flagHint', 'flagToolText', 'flagActionText', 'waitHint']) assert.equal(ext[fn], undefined, fn);
+});
+
+// The tracker's fake model is routed on its system prompt (isTrackerCall in helpers.mjs). Guard the mark in the real default text,
+// as the extension gets it: the default.json prompts handed to setPrompts, then trackerSys() renders npc.tracker_system.
+test('the default tracker system prompt contains the routing mark the test fakes route on', async () => {
+  const ext = await import('../../extension/index.js');
+  ext.setPrompts(DEFAULT_PROMPTS);
+  assert.ok(ext.trackerSys().includes(TRACKER_SYSTEM_MARK), 'tracker system prompt no longer contains the routing mark; update TRACKER_SYSTEM_MARK in tests/node/helpers.mjs');
 });
