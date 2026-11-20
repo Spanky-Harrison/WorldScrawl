@@ -696,9 +696,9 @@ test("level '' requests keep the exact-room rule", () => {
     assert.deepEqual(activeLore(chat, 2, ratChain, playerAt), []);
 });
 test('a claimed person field that is not on the card is a warning', () => {
-    const npc = { id: 'hesk', name: 'Hesk', line: 'stern', facts: ['hates rats'], temps: [{ text: 'soaked' }], memory: ['owes a favor'], disposition: { player: { value: 'indifferent', reason: '' } }, effects: [], deep: { history: 'She runs the inn.' } };
+    const npc = { id: 'hesk', name: 'Hesk', line: 'stern', facts: ['hates rats'], memory: ['owes a favor'], disposition: { player: { value: 'indifferent', reason: '' } }, effects: [], deep: { history: 'She runs the inn.' } };
     assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'hates rats' }), 'landed');
-    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'soaked' }), 'landed');
+    assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'soaked' }), 'missed', 'facts are the only fact list (no temporary facts)');
     assert.equal(claimResult(npc, { type: 'npc_fact', field: 'personality.summary', text: 'kinder' }), 'missed');
     assert.equal(claimResult(npc, { type: 'npc_fact', field: 'fact', text: 'a new scar', pending: true }), 'waiting');
     assert.equal(claimResult(npc, { type: 'npc_appearance', intent: 'magically young' }), 'missed');

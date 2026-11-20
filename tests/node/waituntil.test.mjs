@@ -121,3 +121,16 @@ test('the wait card\'s Approve edited with "until 17:15" lands on 17:15', async 
     await W.keepWait(id, 'until 17:15');
     assert.equal(clock(c), '17:15');
 });
+
+// 4-R1a (W1): the tracker is asked for HH:MM to the minute. Its "17:15" lands on 17:15 exactly; "5:15 PM" (the form
+// the prompt no longer asks for) still reads as 17:15 today (pinned).
+for (const until of ['17:15', '5:15 PM']) {
+    test(`a tracker wait "until ${until}" with no time on the player's line`, async () => {
+        const { c, calls } = boot({ tracker: { place: null, people: [], wait: { duration: '', until, sleep: false, reason: 'waiting for the coach' } } });
+        say(c, 'I wait at the window for the coach.', { worldscrawl_intent_checked: true });
+        const id = reply(c, 'At a quarter past five the coach rattles into the square.');
+        await D.onReplyForFlags(id);
+        assert.equal(clock(c), '17:15');
+        assert.equal(asked(calls), 0, 'no "how long" model call');
+    });
+}

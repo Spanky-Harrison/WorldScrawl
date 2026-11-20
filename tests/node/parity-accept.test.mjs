@@ -1068,8 +1068,10 @@ test('a tracker answer with no scope is a light touch that says it was not judge
 
 test('prompts: the tracker judges scope by the result, and a full rewrite rebuilds the field instead of keeping sentences', () => {
     const tracker = promptText('npc.tracker');
-    assert.match(tracker, /Always set scope/);
-    assert.match(tracker, /not by how many words the change takes: "turned into a gnoll" is short but heavy/);
+    assert.match(tracker, /"scope": "light"/);
+    assert.match(tracker, /not by how many words the change takes: "turned into a gnoll" is short but full/);
+    assert.match(tracker, /scope is "light" when the change touches one detail .* and "full" when it remakes them/, 'light or full, the same words as a place rewrite');
+    assert.doesNotMatch(tracker, /heavy/);
     const sys = promptText('npc.appearance_rebuild_system');
     assert.doesNotMatch(sys, /keep details the change does not contradict/);
     assert.match(sys, /For a full rewrite, write that field again from scratch for what they are now/);
@@ -1169,8 +1171,8 @@ test('the tracker is told who is not known by name; its name item for someone no
     assert.doesNotMatch(lines, /they know this person only as/, 'the shown name is the line\'s own name: no second "known only as" line');
     assert.doesNotMatch(lines.split('\n')[1], /not yet known/);
     const tp = promptText('npc.tracker');
-    assert.match(tp, /listed above as \(name not yet known\) has their name said in this exchange[^\n]*"action": "name"/);
-    assert.match(tp, /with id set to the handle in \[brackets\] after their name/);
+    assert.match(tp, /"action": "name"[^\n]*listed as \(name not yet known\) has their name said in this exchange/);
+    assert.match(tp, /id is the handle in \[brackets\] after their name/);
     assert.match(tp, /\{\{memory_rules\}\}/);
     assert.match(promptText('npc.memory_rules'), /Call people by their names \(as listed above, or as the story names them\), never "the stranger" and never a bracketed handle/);
     assert.doesNotMatch(tp, /real name/i);
@@ -1366,7 +1368,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     assert.match(trackerPrompt, /Already done by the game \(not new changes; do not report them\):\nThe landlady \[p[0-9a-z]+\]: The temporary change "turned into a gnoll" on the landlady ran out; the game already changed them back\. The Body and Outfit listed above are the result\./);
     assert.doesNotMatch(trackerPrompt.split('\n\nPlayer:')[0], /Hesk|\[hesk\]/, 'the engine part; the story is the story');
     assert.ok(prompts.some(p => /turned back into a woman \[body\]/.test(p)), 'the proposal really went through the fill');
-    assert.match(trackerPrompt, /Do not report an appearance change, or a fact, that only describes something under "Already done by the game"/);
+    assert.match(trackerPrompt, /anything under "Already done by the game" has already been applied \(the Body and Outfit above are the result\)/);
     assert.equal((reply.extra[NPC_KEY] ?? []).some(s => s.type === 'npc_appearance'), false, 'the no-op proposal is not left Waiting on you');
     assert.ok(callNotes(reply).some(n => n.kind === 'npc_appearance' && n.status === 'skipped' && /no change: the result matches how Hesk looks now/.test(n.reason)), JSON.stringify(callNotes(reply)));
     const doc = makeDoc();
@@ -1542,17 +1544,19 @@ test('a kept temporary change: Edit → Approve edited saves the typed for-now t
     assert.equal(o.off, true);
 });
 
-test('re-timing a kept wait rechecks person expiries too, and a temporary fact that runs out is named in the wait line', async () => {
+test('re-timing a kept wait rechecks person expiries too; a tracker fact with a duration is dropped, so nothing about it runs out', async () => {
     const { c, prompts } = bootAt('16:20');
     await gnollFor1h(c, prompts);
     await applyTrackerResult(0, readTrackerAnswer('{"people": [{"id": "hesk", "action": "fact", "text": "has a split lip", "lasts": "90 minutes"}]}'));
+    assert.equal((c.chat[0].extra[NPC_KEY] ?? []).some(x => x.type === 'npc_fact'), false, 'no fact stamp');
+    assert.ok(Object.values(c.chat[0].extra.worldscrawl_calls ?? {}).flat().some(n => n.kind === 'tracker fact' && n.status === 'skipped' && n.reason === 'a fact has no end: dropped (has a split lip, 90 minutes)'));
     model(c, prompts);
     await applyTrackerResult(0, readTrackerAnswer('{"place": null, "people": [], "wait": {"duration": "30m", "until": "", "sleep": false, "reason": "a short rest"}}'));
     assert.equal(await keepWait(0), '');
     assert.equal(c.chat.some(m => m.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND), false, 'nothing ran out in 30 minutes');
     const longer = await editKeptWait(0, '2h');
     assert.ok(longer.crossed.some(g => /"turned into a gnoll" on Hesk/.test(g.note)), JSON.stringify(longer.crossed));
-    assert.ok(longer.crossed.some(g => /temporary detail "has a split lip" on Hesk/.test(g.note)));
+    assert.equal(longer.crossed.some(g => /split lip/.test(g.note)), false);
     assert.ok(c.chat.some(m => m.extra?.worldscrawl_notice_kind === NPC_EXPIRED_KIND), 'the re-timed wait posts the notice');
     c.chat.splice(1);
     const shorter = await editKeptWait(0, '30m');
@@ -1561,7 +1565,8 @@ test('re-timing a kept wait rechecks person expiries too, and a temporary fact t
     c.chat.push(userMsg('[wait] 2h'));
     await bracketIntent(c.chat[1], parseBracket(c.chat[1].mes));
     const wf = await waitFacts(c.chat, ROOM);
-    assert.match(wf, /wore off and no longer hold: [^\n]*The landlady: "turned into a gnoll"[^\n]*; The landlady: "has a split lip"/);
+    assert.match(wf, /wore off and no longer hold: [^\n]*The landlady: "turned into a gnoll"/);
+    assert.doesNotMatch(wf, /split lip/);
 });
 
 // ---- S6: the cast Changes tab shows the chat's cards; a click runs the chat card's handler over the map channel

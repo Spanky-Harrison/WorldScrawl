@@ -305,7 +305,7 @@ test('the tracker reads one exchange into place, people, and wait, and skips wha
     assert.equal(ext.newSwipePending({ mes: 'x', swipes: ['x', 'y'], swipe_id: 1 }), false);
     const prompt = ext.trackerPrompt({ scrap: 'This place: Hall\nWeather (known; not a reason to rewrite this place): Fog.\nPeople here:\nHesk [hesk]. Looks: copper braids.', player: 'I look around.', story: 'You look around.' });
     assert.match(prompt, /Fog/);
-    assert.match(prompt, /does not rewrite the room/);
+    assert.match(prompt, /The game already keeps them \(see Time of day and Weather above\), so for them place stays null/);
     assert.doesNotMatch(prompt, /yesterday|the whole chat/);
 });
 
@@ -483,13 +483,18 @@ test('the tracker scrap is one pass over the live place and every field a person
     assert.match(people, /Stance toward the player: indifferent \(Strangers are customers\)/);
     assert.match(ext.trackerScrap({ placeName: 'Hall' }), /This place: Hall\nDescription: \(none\)/);
     assert.match(ext.trackerScrap({ placeName: 'Taproom', displayName: 'The Uncommon Room' }), /This place: Taproom \(The Uncommon Room\)/);
+    assert.doesNotMatch(scrap, /Time of day/, 'no clock given: no time line');
+    const timed = ext.trackerScrap({ placeName: 'Hall', exits: 'out (Square)', time: { part: 'morning', time: '08:10' }, weather: 'Fog.' }).split('\n');
+    assert.equal(timed[2], 'Exits: out (Square)');
+    assert.equal(timed[3], 'Time of day: morning (08:10). The game keeps the light and the hour; they are never a change to the place.', 'the time line comes right after Exits');
+    assert.match(timed[4], /^Weather /, 'and right before the Weather line');
     const prompt = ext.trackerPrompt({ scrap, player: 'I look around.', story: 'You look around.' });
-    assert.match(prompt, /does not rewrite the room/);
-    assert.match(prompt, /memory already listed/);
+    assert.match(prompt, /see Time of day and Weather above/);
+    assert.match(prompt, /facts and memories listed above are already known/);
     assert.match(prompt, /stance and reason listed above/);
     assert.match(prompt, /walk in soaked/);
     assert.match(prompt, /time actually passed/);
-    assert.match(prompt, /"looks" or "appeared"/);
+    assert.match(prompt, /being looked at or described is not a change/);
     assert.doesNotMatch(prompt, /yesterday|the whole chat|end your reply with|\[ws_npc/);
     const discovery = fs.readFileSync(new URL('../../extension/discovery.mjs', import.meta.url), 'utf8');
     assert.equal(discovery.split("gen('tracker'").length - 1, 1);

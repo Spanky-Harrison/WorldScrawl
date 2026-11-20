@@ -21,26 +21,24 @@ test('lasts: reads numbers and game-time text, lasting otherwise', () => {
     assert.equal(lastsText(1500), '1d1h');
 });
 
-test('lasts: the fact tag takes an optional trailing duration', () => {
-    assert.deepEqual(parseNpcTag('fact | maren | bandaged hand | 2 hours'), { type: 'npc_fact', id: 'maren', field: 'fact', text: 'bandaged hand', lasts: 120 });
+test('a fact tag with a trailing duration is dropped (a fact has no end); other trailing text is part of the fact', () => {
+    assert.deepEqual(parseNpcTag('fact | maren | bandaged hand | 2 hours'), { dropped: 'a fact has no end', type: 'npc_fact', id: 'maren', text: 'bandaged hand', lasts: '2 hours' });
     assert.deepEqual(parseNpcTag('fact | maren | likes rain | hates snow'), { type: 'npc_fact', id: 'maren', field: 'fact', text: 'likes rain | hates snow' });
     assert.deepEqual(parseNpcTag('fact | maren | 2 hours'), { type: 'npc_fact', id: 'maren', field: 'fact', text: '2 hours' });
 });
 
-test('lasts: a temporary fact applies at once and expires in game time; a pending lasting one waits', () => {
-    const chat = [bot([MAREN, { type: 'npc_fact', id: 'maren', field: 'fact', text: 'bruised lip', lasts: 120 }, { type: 'npc_fact', id: 'maren', field: 'fact', text: 'owes Hesk', pending: true }]), bot(), bot(), bot()];
+test('a pending fact waits for the card; once approved it holds with no end', () => {
+    const chat = [bot([MAREN, { type: 'npc_fact', id: 'maren', field: 'fact', text: 'owes Hesk', pending: true }]), bot(), bot(), bot()];
     const f = framesOf(chat, 3, [], clock);
-    assert.deepEqual(f[0].get('maren').temps.map(t => t.text), ['bruised lip']);
     assert.ok(!f[0].get('maren').facts.includes('owes Hesk'));
-    assert.equal(f[1].get('maren').temps.length, 1);
-    assert.equal(f[2].get('maren').temps.length, 0, 'over after two game hours');
-    assert.equal(framesOf(chat, 3, []).at(-1).get('maren').temps.length, 1, 'no clock: nothing expires');
-    delete chat[0].extra[NPC_KEY][2].pending;
+    assert.equal(f[0].get('maren').temps, undefined, 'there are no temporary facts');
+    delete chat[0].extra[NPC_KEY][1].pending;
+    assert.ok(framesOf(chat, 3, [], clock).every(fr => fr.get('maren').facts.includes('owes Hesk')), 'holds on every later frame');
     assert.ok(framesOf(chat, 3, [], clock).at(-1).get('maren').facts.includes('owes Hesk'), 'approved');
 });
 
 test('lasts: the inspector shows when each field change ends', () => {
-    const s = { type: 'npc_fact', id: 'maren', text: 'bruised lip', lasts: 120 };
+    const s = { type: 'npc_appearance', id: 'maren', intent: 'bruised lip', lasts: 120 }; // facts have no end: only appearance changes expire
     assert.deepEqual(expiryOf({ ...s, lasts: undefined }, 0, 3, env), { lasting: true });
     assert.deepEqual(expiryOf(s, 0, 1, env), { lasts: 120, until: { day: 1, hour: 10, minute: 0 }, over: false });
     assert.equal(expiryOf(s, 0, 3, env).over, true);
@@ -53,12 +51,12 @@ test('lasts: the inspector shows when each field change ends', () => {
     assert.equal(rows[0].text, 'Maren: owes Hesk (⏳ waiting on you) (lasting)');
 });
 
-test('lasts: npcPlayState carries pending and expiry on fact stamps', () => {
-    const chat = [bot([MAREN, { type: 'npc_fact', id: 'maren', field: 'fact', text: 'bruised lip', lasts: 60 }]), bot(), bot()];
+test('npcPlayState: a fact stamp carries pending and no expiry, and its summary has no "(for …)"', () => {
+    const chat = [bot([MAREN, { type: 'npc_fact', id: 'maren', field: 'fact', text: 'owes Hesk' }]), bot(), bot()];
     const fact = npcPlayState(chat, [], env).find(p => p.id === 'maren').stamps.find(x => x.type === 'npc_fact');
-    assert.equal(fact.expiry.over, true);
+    assert.equal(fact.expiry, undefined);
     assert.equal(fact.pending, false);
-    assert.match(fact.summary, /\(for 1h\)$/);
+    assert.equal(fact.summary, 'Maren: owes Hesk');
 });
 
 test('flag target: an id or a saved name; unknown is null', () => {

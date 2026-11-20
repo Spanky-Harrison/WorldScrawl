@@ -218,6 +218,29 @@
     await cw.waitForTimeout(1200);
     const chatMem = await page.evaluate(() => { const ch = SillyTavern.getContext().chat; return (ch[ch.length - 1].extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_memory' && s.note === 'pointed at the rat' && s.id === 'hesk'); });
     check('Edit saves a Character changed here stamp on the latest message', chatMem);
+    // 4-R1a (4d): facts are permanent. The fact row has no duration control; a save that carries one (forced onto the
+    // editor's own SillyTavern bridge) is refused with the reason in the editor and stamps nothing; a plain fact saves
+    // with no lasts.
+    await cw.evaluate(() => wsCast.selectId('hesk', 'resolved'));
+    await cw.locator('.cast-edit:not([disabled])').click();
+    await cw.waitForTimeout(200);
+    const factCtl = await cw.locator('.cf-row[data-field="facts"]').evaluate(r => [...r.querySelectorAll('input, select, textarea')].map(e => `${e.tagName}|${e.type || ''}|${e.className}|${e.name || ''}|${e.placeholder || ''}`));
+    check('the Cast editor fact row has no duration control', factCtl.length === 1 && /^TEXTAREA/.test(factCtl[0]) && !/lasts|duration|hour|minute/i.test(factCtl.join(' ')), JSON.stringify(factCtl));
+    const factBox = cw.locator('.cf-row[data-field="facts"] textarea');
+    await factBox.fill(((await factBox.inputValue()) + '\nkeeps a cudgel under the bar').trim());
+    await cw.evaluate(() => { const post = BroadcastChannel.prototype.postMessage; window.__wsPost = post; BroadcastChannel.prototype.postMessage = function (d) { return post.call(this, d?.type === 'npc_chat_edit' ? { ...d, stamps: (d.stamps ?? []).map(s => (s.type === 'npc_fact' ? { ...s, lasts: 180 } : s)) } : d); }; });
+    await cw.locator('.cast-save').click();
+    await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1200);
+    const refusedTxt = await cw.locator('.castpanel .cast-msg').first().innerText().catch(() => '');
+    const cudgel = () => page.evaluate(() => SillyTavern.getContext().chat.flatMap(m => m.extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_fact' && s.text === 'keeps a cudgel under the bar'));
+    check('a fact saved with a duration is refused in the editor, and nothing is stamped', /Not saved: Facts are permanent; they can't have a duration\./.test(refusedTxt) && (await cudgel()).length === 0, refusedTxt);
+    await cw.evaluate(() => { BroadcastChannel.prototype.postMessage = window.__wsPost; });
+    await cw.locator('.cast-save').click();
+    if (await cw.locator('.cast-review .cast-confirm').count()) await cw.locator('.cast-review .cast-confirm').click();
+    await cw.waitForTimeout(1200);
+    const keptFact = await cudgel();
+    check('a fact saved in the Cast editor is stamped with no duration', keptFact.length === 1 && !('lasts' in keptFact[0]) && !keptFact[0].pending, JSON.stringify(keptFact));
     // New person: inline validation, then create and delete with a confirm.
     await cw.locator('.cast-new').click();
     await cw.locator('.cf-row[data-field="name"] input').fill('Pip');

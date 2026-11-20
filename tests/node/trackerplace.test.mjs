@@ -135,15 +135,16 @@ test('answeredPlayerIndex finds the player line after the reply is in (turnPlaye
 });
 
 // ---- The tracker sees the exits; the prompt says what place is for.
-test('the tracker prompt lists the exits and the never-for list', async () => {
+test('the tracker prompt lists the exits and gives the place definition instead of a ban list', async () => {
     const { c, calls } = boot(null);
     say(c, 'I look around.');
     await onReplyForFlags(reply(c, 'The common room is quiet.'));
     const p = trackerPromptOf(calls);
     assert.match(p, /^Exits: out \(Village Square\), up \(Upstairs Rooms\), back \(Courtyard\)$/m);
-    assert.match(p, /place is only for a lasting physical change to the place itself/);
-    assert.match(p, /Never set place for the light or time of day, the weather, a fire being lit, banked or burning down, smells, sounds, mood, people coming and going, or a door being opened, closed or left ajar/);
-    assert.match(p, /Arriving, entering or leaving by a listed exit is never a discovery\./);
+    assert.match(p, /PLACE\. Report a place change only when the place itself is different in a way someone walking in tomorrow would still find/);
+    assert.match(p, /The game already keeps them \(see Time of day and Weather above\), so for them place stays null\./);
+    assert.match(p, /A door or way that is not under Exits and actually opens is kind "discover"; coming or going by a listed exit never is\./);
+    assert.doesNotMatch(p, /Never set place|Do not set place/, 'no ban list');
     const style = id => PROMPTS.prompts.find(e => e.id === id).text;
     assert.match(style('change.style'), /Descriptions and notes are timeless/);
     assert.match(style('discover.style'), /Descriptions are timeless/);
