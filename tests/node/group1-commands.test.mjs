@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir, isTrackerCall } from './helpers.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 class Chan {
@@ -100,7 +100,7 @@ function boot({ time = '10:00', here = BAR, mode = 'buttons', hide = 'slash', do
         const prompt = String(args?.prompt ?? ''), sys = String(args?.systemPrompt ?? '');
         rec.calls.push({ prompt, sys });
         if (intent && /The player wrote: "/.test(prompt)) return intent; // the typed-move intent question
-        if (/Reply with JSON only:\n\{"place"/.test(prompt)) return '{"place": null, "people": [], "wait": null}';
+        if (isTrackerCall(args)) return '{"place": null, "people": [], "wait": null}';
         if (sys.includes(PROMPTS.prompts.find(e => e.id === 'npc.memory_rules').text) && /"memory"/.test(sys)) return JSON.stringify(REMEMBER_ANSWER);
         return '{}';
     };
@@ -318,7 +318,7 @@ for (const [text, verb, why] of SC) {
         const at = say(c, text);
         const before = chatElapsed(c.chat);
         assert.equal((await intercept(c, rec)).aborted, 1);
-        assert.ok(!rec.calls.some(x => /Reply with JSON only:\n\{"place"/.test(x.prompt)), 'no tracker');
+        assert.ok(!rec.calls.some(x => isTrackerCall(x)), 'no tracker');
         if (verb !== 'move') assert.equal(rec.calls.length, 0, rec.calls.map(x => x.prompt.slice(0, 80)).join(' | '));
         const m = c.chat[at];
         assert.equal(m.extra[CMD_KEY].verb, verb);

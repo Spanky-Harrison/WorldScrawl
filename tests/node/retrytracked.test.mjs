@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { clientDir, RIVERTON, TAVERN } from './helpers.mjs';
+import { clientDir, RIVERTON, TAVERN, isTrackerCall } from './helpers.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 const ext = await import('../../extension/index.js');
@@ -49,7 +49,6 @@ function boot() {
     ext.settings().flagTags = true; ext.settings().flagNpcs = true; ext.settings().autoKeepWaits = false;
     return { c, blocks };
 }
-const isTracker = p => /Reply with JSON only:\n\{"place"/.test(p);
 const user = (mes, extra = {}) => ({ is_user: true, mes, swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_intent_checked: true, ...extra } });
 const reply = mes => ({ is_user: false, mes, swipe_id: 0, swipes: [mes], swipe_info: [{ extra: {} }], extra: {} });
 function draw(c) { const doc = makeDoc(c.chat.map((_, i) => i)); globalThis.document = doc; renderPatchCards(); return doc; }
@@ -80,7 +79,7 @@ test('a failed rebuild after an expiry: the notice shows the failure and Check a
     c.generateRaw = async args => {
         const p = String(args?.prompt ?? '');
         if (/Looks line/.test(p)) return '{"looks":"a scarred landlady"}';
-        if (isTracker(p)) return '{"place": null, "people": [], "wait": null}';
+        if (isTrackerCall(args)) return '{"place": null, "people": [], "wait": null}';
         calls++;
         if (fail) throw new Error('backend down');
         return '{"body":"sturdy, a scar across her cheek","outfit":"wool"}';
@@ -133,7 +132,7 @@ function trackerModel(c, answer) {
     const reads = [];
     c.generateRaw = async args => {
         const p = String(args?.prompt ?? '');
-        if (isTracker(p)) { reads.push(p); return typeof answer === 'function' ? answer(p) : answer; }
+        if (isTrackerCall(args)) { reads.push(p); return typeof answer === 'function' ? answer(p) : answer; }
         return '{}';
     };
     return reads;

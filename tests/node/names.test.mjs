@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir, isTrackerCall } from './helpers.mjs';
 
 const ext = await import('../../extension/index.js');
 const N = await import('../../extension/names.mjs');
@@ -69,7 +69,7 @@ function boot({ tracker = () => '{"place": null, "people": [], "wait": null}', c
     c.generateRaw = async args => {
         const prompt = String(args?.prompt ?? ''), sys = String(args?.systemPrompt ?? '');
         calls.push({ prompt, sys });
-        if (/Reply with JSON only:\n\{"place"/.test(prompt)) return tracker(prompt);
+        if (isTrackerCall(args)) return tracker(prompt);
         return '';
     };
     Object.assign(ext.settings(), { flagNpcs: true, flagTags: true, autoKeep: false });
@@ -343,7 +343,7 @@ test('canary inbound P1: present, the player says the name the narrator wrote: l
     assert.deepEqual([s?.id, s?.source, s?.override, more.length], ['hesk', 'player line', undefined, 0], JSON.stringify(callNotes(c.chat[id])));
     assert.equal(known(c), true);
     assert.equal(npcAt(c.chat, id, scene.castPack().npcs, 'hesk').rel.player.by, 'said by the player');
-    assert.ok(calls.some(x => /Reply with JSON only:\n\{"place"/.test(x.prompt)), 'the tracker still ran (and named no one)');
+    assert.ok(calls.some(x => isTrackerCall(x)), 'the tracker still ran (and named no one)');
     say(c, 'I order an ale.');
     assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
     // The same reply read again (a re-run on that swipe): still one stamp.
@@ -477,7 +477,7 @@ test('canary side calls: the tracker lists her as "the landlady [handle]"; after
     say(c, 'I nod to the woman at the bar.');
     let id = reply(c, 'The landlady wipes a mug and says nothing.');
     await onReplyForFlags(id);
-    let t = calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt));
+    let t = calls.find(x => isTrackerCall(x));
     assert.ok(t, 'the tracker ran');
     assert.match(t.prompt, new RegExp(`the landlady \\[${handle()}\\]`));
     assert.deepEqual(leaks(t.prompt), [], 'not her name, alias, or cast id; her memory and demeanor are masked');
@@ -486,7 +486,7 @@ test('canary side calls: the tracker lists her as "the landlady [handle]"; after
     calls.length = 0;
     id = reply(c, 'She nods.');
     await onReplyForFlags(id);
-    t = calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt));
+    t = calls.find(x => isTrackerCall(x));
     assert.match(t.prompt, new RegExp(`${CANARY} \\[${handle()}\\]`));
 });
 
@@ -502,7 +502,7 @@ test('canary side calls: first-meeting disposition and the appearance rebuild ne
     calls.length = 0;
     const id = reply(c, `Her braids turn white. [ws_npc: appearance | ${handle()} | hair turned white | looks,body | 1 hour]`);
     await onReplyForFlags(id);
-    const rebuild = calls.filter(x => /body/i.test(x.prompt) && !/Reply with JSON only:\n\{"place"/.test(x.prompt));
+    const rebuild = calls.filter(x => /body/i.test(x.prompt) && !isTrackerCall(x));
     assert.ok(rebuild.length, 'the appearance rebuild ran');
     for (const r of rebuild) assert.deepEqual(leaks(engineOnly(r)), [], r.prompt);
     assert.ok(rebuild.some(r => /the landlady/i.test(r.prompt)));
@@ -565,7 +565,7 @@ test('Reveal names: the narrator and the tracker see her real name, with no gate
     assert.doesNotMatch(f, GATE);
     const id = reply(c, 'She wipes the bar.');
     await onReplyForFlags(id);
-    assert.match(calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt)).prompt, new RegExp(`${CANARY} \\[${handle()}\\]`));
+    assert.match(calls.find(x => isTrackerCall(x)).prompt, new RegExp(`${CANARY} \\[${handle()}\\]`));
     assert.equal(nameStamps(c.chat[id]).length, 0, 'nothing is stamped');
     assert.match(await ext.revealPlaces('names off'), /Reveal names is off/);
     assert.equal('worldscrawl_reveal_names' in c.chatMetadata, false);

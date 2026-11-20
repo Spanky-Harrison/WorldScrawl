@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, clientDir, isTrackerCall } from './helpers.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 class Chan {
@@ -73,7 +73,7 @@ function boot({ time = '17:00', tracker = { place: null, people: [], wait: null 
     c.generateRaw = async args => {
         const prompt = String(args?.prompt ?? ''), sys = String(args?.systemPrompt ?? '');
         rec.calls.push({ prompt, sys });
-        if (/Reply with JSON only:\n\{"place"/.test(prompt)) return typeof tracker === 'function' ? tracker(prompt) : JSON.stringify(tracker);
+        if (isTrackerCall(args)) return typeof tracker === 'function' ? tracker(prompt) : JSON.stringify(tracker);
         if (sys.includes(MEMORY_RULES) && /"memory"/.test(sys)) return JSON.stringify(remember ?? { name: 'Maren', personality: { summary: 'A knife-grinder.' }, facts: [], memory: [], invented: [] });
         if (/Looks line/.test(prompt)) return '{"looks":"a big woman with copper braids"}';
         if (rewrite) return JSON.stringify(rewrite);
@@ -122,7 +122,7 @@ test('tracker: the prompt sent after a reply has the fact paragraph, the appeara
     say(c, 'I ask the landlady about the river.');
     const at = reply(c, 'She shrugs and keeps pouring.');
     await onReplyForFlags(at);
-    const p = rec.calls.find(x => /Reply with JSON only:\n\{"place"/.test(x.prompt))?.prompt ?? '';
+    const p = rec.calls.find(x => isTrackerCall(x))?.prompt ?? '';
     assert.ok(p.includes(TRACKER_FACT), 'fact paragraph');
     assert.match(p, /Most exchanges add no fact\./);
     assert.ok(p.includes(TRACKER_LOOKS), 'appearance paragraph');

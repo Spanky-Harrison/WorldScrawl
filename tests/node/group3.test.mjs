@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir, isTrackerCall } from './helpers.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
 import { mightTable } from '../../plugin/shared/npc.mjs';
 import { formWarnings, formProblems, formFromRecord, formFromPlay, recordFromForm, placeResolver, MIGHT_HELP, IMPORTANCE_HELP, splitOptions } from '../../plugin/ui/castdata.mjs';
@@ -66,7 +66,7 @@ function boot({ time = '10:00', cards = [], here = BAR } = {}) {
     const blocks = {};
     c.setExtensionPrompt = (key, text) => { blocks[key] = String(text ?? ''); };
     c.registerFunctionTool = () => {}; c.unregisterFunctionTool = () => {};
-    c.generateRaw = async args => (/Reply with JSON only:\n\{"place"/.test(String(args?.prompt ?? '')) ? '{"place": null, "people": [], "wait": null}' : '');
+    c.generateRaw = async args => (isTrackerCall(args) ? '{"place": null, "people": [], "wait": null}' : '');
     Object.assign(ext.settings(), { flagNpcs: true, flagTags: true, autoKeep: false });
     c.chat = [{ is_user: false, mes: 'A quiet morning.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_world: { id: 'riverton', name: 'Riverton' }, worldscrawl_location: here } }];
     return { c, blocks, server, dir };

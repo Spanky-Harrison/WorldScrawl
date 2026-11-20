@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, SQUARE, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, SQUARE, clientDir, isTrackerCall } from './helpers.mjs';
 
 const ext = await import('../../extension/index.js');
 const { onReplyForFlags } = await import('../../extension/discovery.mjs');
@@ -35,11 +35,12 @@ function boot(place) {
     c.saveChat = async () => {}; c.saveSettingsDebounced = () => {}; c.updateMessageBlock = () => {};
     c.setExtensionPrompt = () => {};
     c.registerFunctionTool = () => {}; c.unregisterFunctionTool = () => {};
-    const calls = [];
+    const calls = []; calls.tracker = []; calls.other = []; // every prompt, then the tracker's and everyone else's
     c.generateRaw = async args => {
         const prompt = String(args?.prompt ?? '');
         calls.push(prompt);
-        if (/Reply with JSON only:\n\{"place"/.test(prompt)) return JSON.stringify({ place, people: [], wait: null });
+        (isTrackerCall(args) ? calls.tracker : calls.other).push(prompt);
+        if (isTrackerCall(args)) return JSON.stringify({ place, people: [], wait: null });
         return '';
     };
     Object.assign(ext.settings(), { flagNpcs: true, flagTags: true, autoKeep: false });
@@ -51,8 +52,8 @@ const reply = (c, text, extra = {}) => { c.chat.push({ is_user: false, mes: text
 /** Let a kept card's map-change call finish before the next test boots (it would otherwise answer into the next chat). */
 const settle = async c => { for (let i = 0; i < 100 && c.chat.some(m => m.extra?.[FLAG]?.status === 'working'); i++) await new Promise(r => setTimeout(r, 20)); await new Promise(r => setTimeout(r, 50)); };
 const notes = m => Object.values(m.extra?.worldscrawl_calls ?? {}).flat();
-const trackerPromptOf = calls => calls.find(p => /Reply with JSON only:\n\{"place"/.test(p)) ?? '';
-const analyzeCalls = calls => calls.filter(p => !/Reply with JSON only:\n\{"place"/.test(p));
+const trackerPromptOf = calls => calls.tracker[0] ?? '';
+const analyzeCalls = calls => calls.other;
 
 // ---- Passing scene state is not a place change.
 const MORNING = { changed: true, kind: 'change', note: 'morning light fills the room; the fire has burned down to embers; the back door stands ajar', rewrite: 'light', why: 'door status updated' };

@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { clientDir, RIVERTON, TAVERN } from './helpers.mjs';
+import { clientDir, RIVERTON, TAVERN, isTrackerCall } from './helpers.mjs';
 import { makeDoc } from './fakedom.mjs';
 
 const ext = await import('../../extension/index.js');
@@ -55,12 +55,12 @@ function boot() {
     globalThis.document = makeDoc([]);
     return { c, blocks };
 }
-const kindOf = p => (/Looks line/.test(p) ? 'looks' : /Before the temporary change it read:/.test(p) ? 'revert' : /Reply with JSON only:\n\{"place"/.test(p) ? 'tracker' : /body/i.test(p) ? 'fields' : 'other');
+const kindOf = args => { const p = String(args?.prompt ?? ''); return isTrackerCall(args) ? 'tracker' : /Looks line/.test(p) ? 'looks' : /Before the temporary change it read:/.test(p) ? 'revert' : /body/i.test(p) ? 'fields' : 'other'; };
 /** Stubbed model. answers[kind]: a string, a function, or 'gate' (held until release(kind)). */
 function model(c, answers) {
     const calls = [], gates = {};
     c.generateRaw = async args => {
-        const p = String(args?.prompt ?? ''), k = kindOf(p);
+        const p = String(args?.prompt ?? ''), k = kindOf(args);
         calls.push(k);
         const a = answers[k];
         if (a === undefined) return k === 'tracker' ? '{"place": null, "people": [], "wait": null}' : '{}';

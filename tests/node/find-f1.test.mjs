@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, copytree, tmpPath, write, clientDir, isTrackerCall } from './helpers.mjs';
 import { NOWHERE } from '../../plugin/shared/npc.mjs';
 
 const ext = await import('../../extension/index.js');
@@ -76,7 +76,7 @@ function boot({ time = '10:00', here = BAR } = {}) {
     const blocks = {}, calls = [];
     c.setExtensionPrompt = (key, text) => { blocks[key] = String(text ?? ''); };
     c.registerFunctionTool = () => {}; c.unregisterFunctionTool = () => {};
-    c.generateRaw = async args => { calls.push(String(args?.prompt ?? '')); return /Reply with JSON only:\n\{"place"/.test(String(args?.prompt ?? '')) ? '{"place": null, "people": [], "wait": null}' : ''; };
+    c.generateRaw = async args => { calls.push(String(args?.prompt ?? '')); return isTrackerCall(args) ? '{"place": null, "people": [], "wait": null}' : ''; };
     Object.assign(ext.settings(), { flagNpcs: true, flagTags: true, autoKeep: false });
     c.chat = [{ is_user: false, mes: 'A quiet morning.', swipe_id: 0, swipe_info: [{ extra: {} }], extra: { worldscrawl_world: { id: 'riverton', name: 'Riverton' }, worldscrawl_location: here } }];
     return { c, blocks, calls };

@@ -59,3 +59,9 @@ export function caplog(fn) {
 /** All extension source text (index.js and its modules), for tests that check the source for a pattern. */
 export const extSource = () => fs.readdirSync(path.join(REPO, 'extension')).filter(f => /\.(m?js)$/.test(f)).sort()
     .map(f => fs.readFileSync(path.join(REPO, 'extension', f), 'utf8')).join('\n');
+
+/** The tracker's fake-model routing key: its system prompt opens "You are the bookkeeper for a text adventure" (npc.tracker_system).
+ *  Route on this, never on wording inside the tracker's user prompt, so that prompt can be reordered or reworded freely.
+ *  Takes the args the extension passes to generateRaw ({ prompt, systemPrompt }) or a recorded call ({ prompt, sys }). */
+export const TRACKER_SYSTEM_MARK = 'You are the bookkeeper for a text adventure';
+export const isTrackerCall = a => String(a?.systemPrompt ?? a?.sys ?? a?.system ?? '').includes(TRACKER_SYSTEM_MARK);
