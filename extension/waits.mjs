@@ -1,5 +1,5 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
-import { trackMark } from './tracker.mjs';
+import { trackFailure, trackMark, trackTry } from './tracker.mjs';
 import { waitReason } from './words.mjs';
 import { capFirst } from './names.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
@@ -11,7 +11,7 @@ import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAn
 import { targetLabel, textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, narratorWeather, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
 import { baseReply, gen, noteCall } from './dig.mjs';
-import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra } from './discovery.mjs';
+import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra, trackerRetryMode } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
 import { FLAG_KEY, WAITCARD_KEY, WAIT_KEY, activeWorld, broadcastMapState, ctx, hooks, isOn, openCarriers, settings } from './index.js';
@@ -490,13 +490,27 @@ export function drawBusy() {
     (el.querySelector('.mes_block') ?? el).appendChild(d);
 }
 onCallChange(drawBusy);
-/** The small tracked marker under the latest reply. A card the read put up stands in for it (trackMark gives ''). */
-function drawTrackMark(el, msg) {
+/** "tracking…", or "tracking… (try 2 of 3)" while auto retries, "tracking… (try 2)" after a Retry click. */
+function trackText(msg, mark) {
+    const t = mark === 'tracking' ? trackTry(msg) : null;
+    if (!t || t.attempt <= 1) return TRACK_TEXT[mark];
+    return `${TRACK_TEXT.tracking} (try ${t.attempt}${t.of ? ` of ${t.of}` : ''})`;
+}
+/** The small tracked marker under the latest reply. A card the read put up stands in for it (trackMark gives ''). An answer
+ *  that could not be read at all, with the retry setting on ask or auto, is the shared failed card with Retry instead. */
+function drawTrackMark(el, msg, id) {
     const mark = trackMark(msg);
     if (!mark) return;
+    const failed = mark === 'failed' ? trackFailure(msg) : null;
+    if (failed?.unreadable && trackerRetryMode() !== 'off') {
+        const card = drawCard(C.trackFailed({ key: `${id}|track`, tries: failed.tries ?? 1 }), 'track', ticketFor('track', { id, msg }));
+        card.classList.add('worldscrawl_trackmark', 'worldscrawl_trackmark_failed');
+        (el.querySelector('.mes_block') ?? el).appendChild(card);
+        return;
+    }
     const d = document.createElement('div');
     d.className = `worldscrawl_trackmark worldscrawl_trackmark_${mark}`;
-    d.textContent = TRACK_TEXT[mark];
+    d.textContent = trackText(msg, mark);
     d.title = TRACK_TITLE[mark];
     d.style.cssText = 'margin-top:2px;font-size:0.75em;opacity:0.55;text-align:right;font-style:italic;user-select:none;';
     (el.querySelector('.mes_block') ?? el).appendChild(d);
@@ -512,7 +526,7 @@ export function renderPatchCards() {
         el.querySelector('.worldscrawl_patchcard')?.remove();
         el.querySelector('.worldscrawl_trackmark')?.remove();
         if (!msg) continue;
-        if (id === latest && isOn()) drawTrackMark(el, msg);
+        if (id === latest && isOn()) drawTrackMark(el, msg, id);
         if (abandonStuckAppearance(msg)) { syncSwipeExtra(msg); ctx().saveChat?.(); }
         const bar = el.querySelector('.extraMesButtons') ?? el.querySelector('.mes_buttons');
         if (bar && !bar.querySelector('.worldscrawl_flag_btn') && !msg.is_system && isOn()) {

@@ -16,6 +16,8 @@ export const ACTIONS = {
     found: { kept: ['edit', 'close', 'save', 'off', 'undo'], off: ['on', 'undo'] },
     wait: { review: ['edit', 'close', 'approve', 'discard'] },
     job: { working: [], failed: ['again'] },
+    // The after-reply check that could not read its answer: Retry (labelled so on the card) reads the reply once more.
+    track: { failed: ['again'] },
 };
 /** The actions a type may offer in a state. */
 export const allowedActions = (type, state) => ACTIONS[type]?.[state] ?? [];
@@ -375,6 +377,16 @@ export function appearJob(v) {
     };
 }
 
+/** The after-reply check failed: its answer could not be read. v: {key, tries}. Retry reads the reply once more. */
+export function trackFailed(v) {
+    const tries = Number(v.tries) > 1 ? ` (${v.tries} tries)` : '';
+    return {
+        key: v.key, type: 'track', state: 'failed', pending: false, cls: 'worldscrawl_trackfailed',
+        title: `tracking failed: the answer could not be read${tries}. Nothing was added.`, titleCls: 'worldscrawl_remember_failed',
+        summary: [], notes: [], panel: null, editor: null,
+        actions: within('track', 'failed', [act('again', 'Read this reply again for changes', true)]),
+    };
+}
 /** The line a decided card leaves ("✓ Approved: …"). d: the stored decision {action, text}. */
 export function resolvedText(d) {
     const verb = { approve: 'Approved', adjust: 'Approved (edited)', discard: 'Discarded' }[d?.action] ?? 'Done';

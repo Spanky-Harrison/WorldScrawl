@@ -5,6 +5,7 @@ import { exitsCache, renderAllExits } from './footer.mjs';
 import { DEFAULTS, DEFAULT_NUDGE, applyChatState, ctx, isOn, refreshSaveName, saveWorld, setEnabled, settings } from './index.js';
 import { fillWorlds, openMapWindow, openWorldFolder, testConnection } from './mapwindow.mjs';
 import { applyFacts } from './scene.mjs';
+import { renderPatchCards } from './waits.mjs';
 import { sharedLoadedFrom, sharedUrl } from './shared.mjs';
 
 function addSettingsPanel() {
@@ -39,6 +40,10 @@ function addSettingsPanel() {
       <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the after-reply check propose NPC changes</label>
       <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
+      <label for="worldscrawl_tracker_retry">When the after-reply check can't read its answer</label>
+      <div class="flex-container"><select id="worldscrawl_tracker_retry" class="text_pole flex1"><option value="off">Off</option><option value="ask">Ask (Retry button)</option><option value="auto">Retry automatically</option></select>
+        <label for="worldscrawl_tracker_retry_count" style="white-space:nowrap;align-self:center;">Retries: 1-3</label>
+        <input id="worldscrawl_tracker_retry_count" class="text_pole" type="number" min="1" max="3" step="1" style="width:4em;"></div>
       <label class="checkbox_label"><input id="worldscrawl_narrate_expiries" type="checkbox"> Narrate expiries (when a temporary place runs out with the party inside, pick where they end up, then the narrator tells it)</label>
       <label class="checkbox_label"><input id="worldscrawl_weather_numbers" type="checkbox"> Weather numbers to the narrator (off: the narrator gets words like &quot;a warm, humid evening&quot;; on: the temperature and humidity numbers too)</label>
       <label class="checkbox_label"><input id="worldscrawl_auto_keep_waits" type="checkbox"> Approve the narrator&apos;s waits without asking (skip the wait card)</label>
@@ -89,6 +94,15 @@ function addSettingsPanel() {
     const flagTags = document.getElementById('worldscrawl_flag_tags');
     flagTags.checked = !!settings().flagTags;
     flagTags.addEventListener('change', () => { settings().flagTags = flagTags.checked; applyNudge(); ctx().saveSettingsDebounced(); });
+    const retry = document.getElementById('worldscrawl_tracker_retry');
+    retry.value = ['off', 'ask', 'auto'].includes(settings().trackerRetry) ? settings().trackerRetry : 'ask';
+    retry.addEventListener('change', () => { settings().trackerRetry = retry.value; ctx().saveSettingsDebounced(); renderPatchCards(); });
+    const retries = document.getElementById('worldscrawl_tracker_retry_count');
+    retries.value = String(Math.min(3, Math.max(1, Math.round(Number(settings().trackerRetryCount)) || 1)));
+    retries.addEventListener('change', () => {
+        const n = Math.min(3, Math.max(1, Math.round(Number(retries.value)) || 1));
+        settings().trackerRetryCount = n; retries.value = String(n); ctx().saveSettingsDebounced();
+    });
     const flagNpcs = document.getElementById('worldscrawl_flag_npcs');
     flagNpcs.checked = settings().flagNpcs !== false;
     flagNpcs.addEventListener('change', () => { settings().flagNpcs = flagNpcs.checked; applyTools(); applyFacts(); ctx().saveSettingsDebounced(); });
