@@ -109,7 +109,7 @@ test('the prompt order (T8) and wording: PLACE, PEOPLE, WAIT, each rule before t
     say(c, 'I ask the landlady about the river.');
     await onReplyForFlags(reply(c, 'She shrugs and keeps pouring.'));
     const p = String(trackerCalls()[0].prompt);
-    const order = ['\nPlayer: ', '\nNarrator: ', 'Report only what this exchange changed. Most exchanges change nothing.', '\nPLACE. ', '\nPEOPLE. ', '\nAppearance: ', '\nFact: ', '\nMemory: ', '\nDisposition: ', '\nName: ', '\nFound: ', '"action": "leave"}: they leave the scene.', '"action": "staying"}: they agree to stay', '"action": "follow"}: they come along', '"action": "stay"}: they stay behind', '\nWAIT. ', SKELETON];
+    const order = ['\nPlayer: ', '\nNarrator: ', "Report only what this exchange changed. Most exchanges change nothing about the place or people's looks.", '\nPLACE. ', '\nPEOPLE. ', '\nAppearance: ', '\nFact: ', '\nMemory: ', '\nDisposition: ', '\nName: ', '\nFound: ', '"action": "leave"}: they leave the scene.', '"action": "staying"}: they agree to stay', '"action": "follow"}: they come along', '"action": "stay"}: they stay behind', '\nWAIT. ', SKELETON];
     const pos = order.map(s => p.indexOf(s));
     assert.ok(pos.every(i => i >= 0), JSON.stringify(order.filter((s, i) => pos[i] < 0)));
     assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'in this order');
@@ -119,6 +119,8 @@ test('the prompt order (T8) and wording: PLACE, PEOPLE, WAIT, each rule before t
     assert.match(p, /scope is "light" when .* and "full" when it remakes them/, 'T6: light or full');
     assert.match(p, /a time of day as HH:MM on a 24-hour clock, to the minute the story gives \("17:15" for a quarter past five in the afternoon; never rounded\), or one of dawn, morning, noon, dusk, evening, night, midnight/, 'W1');
     assert.doesNotMatch(p, /Never set place|Do not set place|heavy|fact with lasts|A fact that will wear off/);
+    assert.match(p, /set lasts to a duration such as "2h"/, 'the short form map ops accept');
+    assert.doesNotMatch(p, /\b\d+ (?:hours?|minutes?)\b/, 'no long-form duration examples');
     assert.doesNotMatch(p, /\{\{\w+\}\}/, 'every placeholder filled');
     for (const id of ['npc.tracker_time', 'npc.fact_rules']) assert.ok(entry(id)?.locked && entry(id).group === 'npc', `${id}: its own prompt-manager entry`);
     assert.deepEqual(entry('npc.tracker_time').placeholders.map(x => x.name), ['part', 'time']);

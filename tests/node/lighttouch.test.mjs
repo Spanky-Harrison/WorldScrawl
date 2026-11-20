@@ -146,7 +146,7 @@ test('prompts: light edit copies the base; both rewrite prompts describe the loo
         assert.match(promptText(id), /Describe how they look, not what they are doing, where they are, or the moment/, id);
     const tracker = promptText('npc.tracker');
     assert.match(tracker, /intent names only the change to their body or clothes \("braids tied back", "hem soaked from the river"\), not how they arrived or what they did\./);
-    assert.match(tracker, /If the change will pass on its own \(soaked, muddy, bruised\), set lasts to a duration such as "2 hours"/);
+    assert.match(tracker, /If the change will pass on its own \(soaked, muddy, bruised\), set lasts to a duration such as "2h"/);
 });
 
 // ---- B8: a light touch that keeps less than half of the base is asked once more, then fails visibly.

@@ -125,7 +125,7 @@ test('tracker: the prompt sent after a reply has the fact paragraph, the appeara
     await onReplyForFlags(at);
     const p = rec.calls.find(x => isTrackerCall(x))?.prompt ?? '';
     assert.ok(p.includes(TRACKER_FACT), 'fact line, with the shared npc.fact_rules text');
-    assert.match(p, /Most exchanges change nothing\./);
+    assert.match(p, /Most exchanges change nothing about the place or people's looks\./);
     assert.ok(p.includes(TRACKER_LOOKS), 'appearance paragraph');
     assert.match(p, /\(holding, gesturing, a blush, a frown\) is part of the moment, and the narrator already has it, so it gets no item/);
     assert.doesNotMatch(p, /fact with lasts|A fact that will wear off/, 'no route sends a passing state into a timed fact');
