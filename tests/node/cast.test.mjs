@@ -271,16 +271,14 @@ test('person pane: pending is not narrator text, and a temporary transformation 
     const againstLive = chatStamps(play, edited);
     assert.ok(againstLive.cannot.some(s => /Looks/.test(s)), 'Looks is derived and is not stamped from the form');
 
-    const withFact = [{ mes: 'x', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'hates rats' }, { swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'soaked to the skin', lasts: 30 }, { swipe: 0, ...tag }] } }];
+    const withFact = [{ mes: 'x', is_user: false, extra: { [NPC_KEY]: [{ swipe: 0, type: 'npc_fact', id: 'hesk', field: 'fact', text: 'hates rats' }, { swipe: 0, ...tag }] } }];
     const both = npcPlayState(withFact, cast, env).find(n => n.id === 'hesk');
     const wrote = authoringChanges(hesk, both);
     assert.deepEqual(wrote.map(x => x.field), ['facts']);
     assert.match(wrote[0].to, /hates rats/);
-    assert.doesNotMatch(wrote[0].to, /soaked to the skin/);
     assert.doesNotMatch(JSON.stringify(wrote), /bright dress|Years younger|young woman/);
     const factRow = resolvedCard(hesk, both).find(r => r.key === 'Facts');
     assert.match(factRow.value, /hates rats/);
-    assert.match(factRow.value, /soaked to the skin/);
     assert.match(factRow.source, /message #0/);
 
     const two = resolvedCard({ ...hesk, line: 'old' }, { line: 'new', stamps: [{ type: 'npc_fact', field: 'personality.summary', msg: 2 }, { type: 'npc_fact', field: 'personality.summary', msg: 5 }] });

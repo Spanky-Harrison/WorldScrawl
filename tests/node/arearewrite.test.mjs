@@ -418,14 +418,15 @@ test('button order on the area card in each state', async () => {
 test('prompts: the tracker judges rewrite by the result; the patch and rewrite prompts carry the pick; nothing changes without one', async () => {
     const text = id => PROMPTS.prompts.find(e => e.id === id).text;
     assert.match(text('npc.tracker'), /"rewrite": "light", "why": "a few words"/);
-    assert.match(text('npc.tracker'), /Always set rewrite for a place change, and judge it by how much of the place's description the result changes/);
+    assert.match(text('npc.tracker'), /Judge it by how much of the description the result changes, not by how many words the change takes/);
     assert.match(text('npc.tracker'), /an inn turned into a palace/);
     assert.match(text('change.patch'), /\{\{what\}\}\n\{\{rewrite\}\}\{\{retry\}\}/);
     const pl = await import('../../plugin/shared/patches.mjs');
     assert.equal(pl.rewritePiece(''), '');
     assert.equal(pl.patchPrompt({ outline: [] }, {}), pl.patchPrompt({ outline: [] }, { rewrite: '' }));
     assert.match(pl.patchPrompt({ outline: [] }, { rewrite: 'full' }), /How much to rewrite: full rewrite/);
-    assert.match(text('npc.tracker'), /rewrite is exactly "light" or "full", nothing else, and why gives only the reason, without repeating the word/);
+    assert.match(text('npc.tracker'), /rewrite is "light" when one part of the place changes .* and "full" when the place is remade/);
+    assert.match(text('npc.tracker'), /why names the physical change in a few story words/);
     assert.equal(rr.areaRewrite('heavy'), 'full'); assert.equal(rr.areaRewrite('Light'), 'light');
     assert.equal(rr.areaRewrite('medium'), '', 'an unclear word is not judged'); assert.equal(rr.areaRewrite(undefined), '');
 });

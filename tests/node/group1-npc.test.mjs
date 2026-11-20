@@ -39,9 +39,10 @@ const REMEMBER_KEY = scene.REMEMBER_KEY, WAIT = 'worldscrawl_wait';
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
 const entry = id => PROMPTS.prompts.find(e => e.id === id);
 const MEMORY_RULES = entry('npc.memory_rules').text;
-const FACTS_PARA = 'facts are only what is lastingly true of who they are: their role, their ties to people and places, their situation and their habits';
-const TRACKER_FACT = 'A fact is something lasting about who they are that this exchange shows for the first time';
-const TRACKER_LOOKS = 'Appearance is for lasting changes to the body or clothes';
+const FACT_RULES = entry('npc.fact_rules').text;
+const FACTS_PARA = `facts: ${FACT_RULES} Clothes and scent go in appearance`;
+const TRACKER_FACT = `Fact: {"id": "their-id", "action": "fact", "text": "..."}. ${FACT_RULES} Report a fact only when this exchange shows it for the first time.`;
+const TRACKER_LOOKS = 'Appearance is something a newcomer would still see if they walked in an hour from now';
 const MOMENT_GUARD = 'If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base.';
 const HESK = JSON.parse(fs.readFileSync(path.join(RIVERTON, 'cast', 'hesk.json'), 'utf8'));
 const server = clientDir(path.dirname(RIVERTON));
@@ -108,14 +109,14 @@ test('Remember: the system prompt sent to the model has the facts paragraph, the
     await rememberAndApprove(c);
     const sys = rec.calls.find(x => x.sys.includes(MEMORY_RULES) && /"memory"/.test(x.sys))?.sys;
     assert.ok(sys, 'the Remember call was made');
-    assert.match(sys, /"facts": \["short lasting facts about who they are"\]/);
+    assert.match(sys, /"facts": \["short facts about who they are, with no end date"\]/);
     assert.match(sys, /"memory": \["one short line for each memory this person already has from the story so far, at most 8"\]/);
-    assert.ok(sys.includes(FACTS_PARA));
-    assert.match(sys, /if it is worth keeping, it goes in memory/);
+    assert.ok(sys.includes(FACTS_PARA), 'the facts paragraph, with the shared npc.fact_rules text');
+    assert.match(sys, /What happened in a scene goes in memory/);
     assert.match(sys, /\(memory is never filled in\)/);
     assert.match(sys, /A memory is never made up: it is not part of filling the gaps, and nothing in memory goes in invented\./);
     assert.ok(sys.includes(MEMORY_RULES), 'the shared npc.memory_rules text');
-    assert.doesNotMatch(sys, /short facts the story established|\{\{memory_rules\}\}/);
+    assert.doesNotMatch(sys, /short facts the story established|\{\{memory_rules\}\}|\{\{fact_rules\}\}/);
 });
 test('tracker: the prompt sent after a reply has the fact paragraph, the appearance paragraph and the same shared memory rules', async () => {
     const { c, rec } = boot();
@@ -123,14 +124,14 @@ test('tracker: the prompt sent after a reply has the fact paragraph, the appeara
     const at = reply(c, 'She shrugs and keeps pouring.');
     await onReplyForFlags(at);
     const p = rec.calls.find(x => isTrackerCall(x))?.prompt ?? '';
-    assert.ok(p.includes(TRACKER_FACT), 'fact paragraph');
-    assert.match(p, /Most exchanges add no fact\./);
+    assert.ok(p.includes(TRACKER_FACT), 'fact line, with the shared npc.fact_rules text');
+    assert.match(p, /Most exchanges change nothing about the place or people's looks\./);
     assert.ok(p.includes(TRACKER_LOOKS), 'appearance paragraph');
-    assert.match(p, /a person holding a list for a moment has not changed how they look/);
-    assert.match(p, /report it as a fact with lasts, not as appearance/);
+    assert.match(p, /\(holding, gesturing, a blush, a frown\) is part of the moment, and the narrator already has it, so it gets no item/);
+    assert.doesNotMatch(p, /fact with lasts|A fact that will wear off/, 'no route sends a passing state into a timed fact');
     assert.ok(p.includes(MEMORY_RULES), 'the shared npc.memory_rules text');
-    assert.match(p, /Skip any memory already listed above\. Nobody has to ask you to remember\./);
-    assert.doesNotMatch(p, /\{\{memory_rules\}\}/);
+    assert.match(p, /nobody has to ask you to remember\./);
+    assert.doesNotMatch(p, /\{\{memory_rules\}\}|\{\{fact_rules\}\}/);
 });
 test('appearance rebuild and light-touch system prompts carry the passing-moment guard; entries exist with the right placeholders', () => {
     for (const id of ['npc.appearance_rebuild_system', 'npc.appearance_edit_light_system']) {
@@ -142,7 +143,12 @@ test('appearance rebuild and light-touch system prompts carry the passing-moment
     assert.deepEqual(mr.placeholders, []);
     assert.equal(mr.group, 'npc');
     assert.ok(mr.locked);
-    for (const id of ['npc.tracker', 'npc.remember_system']) assert.ok(entry(id).placeholders.some(p => p.name === 'memory_rules'), id);
+    for (const id of ['npc.tracker', 'npc.remember_system']) assert.ok(entry(id).placeholders.some(p => p.name === 'memory_rules') && entry(id).placeholders.some(p => p.name === 'fact_rules'), id);
+    const fr = entry('npc.fact_rules');
+    assert.deepEqual(fr.placeholders, []);
+    assert.equal(fr.group, 'npc');
+    assert.ok(fr.locked);
+    assert.ok(PROMPTS.placeholders.fact_rules);
     assert.ok(PROMPTS.placeholders.memory_rules && PROMPTS.placeholders.role);
     const want = { 'narration.door_stuck': ['door', 'party', 'place', 'why'], 'narration.door_stuck_move': ['door', 'party', 'place', 'why'], 'narration.dig_failed': ['party', 'place'], 'narration.npc_not_found': ['not_found', 'party'], 'narration.npc_identity': ['role', 'shown'] };
     for (const [id, names] of Object.entries(want)) assert.deepEqual(entry(id).placeholders.map(p => p.name).sort(), names, id);

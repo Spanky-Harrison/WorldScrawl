@@ -70,6 +70,8 @@ export const cases = ({ ext, patches, placeform }) => ({
         scrap: ext.trackerScrap({
             placeName: 'Uncommon Room', displayName: 'Uncommon Room (The Uncommon Room)',
             placeDescription: 'A long hall with a copper bar.',
+            exits: 'out (Village Square)',
+            time: { part: 'morning', time: '08:10' },
             weather: 'Fog outside.',
             peopleLines: ext.trackerPeopleLines([{ id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'Tall, raw-boned.', outfit: "Widow's black.", facts: ['keeps the keys'], memory: ['Joe lied about the coin.'], stance: 'indifferent', stanceReason: 'Strangers are customers until they make trouble.' }]),
         }),

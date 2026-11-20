@@ -109,16 +109,14 @@ test('rebuildInputs: base fields + still-active intents in start order; never pr
     ]);
 });
 
-test('alreadyShown / alreadyEffect: Known, Looks, active intent, temps', () => {
+test('alreadyShown / alreadyEffect: Known, Looks, active intent', () => {
     const npc = {
         facts: ['owes Hesk'], looks: 'blonde braids', body: '', outfit: '',
         effects: [{ intent: 'blonde hair', fields: ['looks'] }],
-        temps: [{ text: 'wet sleeves' }],
     };
     assert.equal(alreadyShown(npc, 'owes Hesk'), true);
     assert.equal(alreadyShown(npc, 'blonde braids'), true);
     assert.equal(alreadyShown(npc, 'blonde hair'), true);
-    assert.equal(alreadyShown(npc, 'wet sleeves'), true);
     assert.equal(alreadyShown(npc, 'something new'), false);
     assert.equal(alreadyEffect(npc, 'blonde hair', 'looks'), true);
     assert.equal(alreadyEffect(npc, 'blonde hair', 'body'), false);
