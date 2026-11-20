@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, clientDir, isTrackerCall } from './helpers.mjs';
 
 const ext = await import('../../extension/index.js');
 const D = await import('../../extension/discovery.mjs');
@@ -45,7 +45,7 @@ function boot({ tracker = { place: null, people: [], wait: null }, autoKeepWaits
     c.generateRaw = async args => {
         const prompt = String(args?.prompt ?? '');
         calls.push(prompt);
-        if (/Reply with JSON only:\n\{"place"/.test(prompt)) return JSON.stringify(tracker);
+        if (isTrackerCall(args)) return JSON.stringify(tracker);
         if (/How long is this wait\?/.test(prompt)) return '{"until": "17:00"}'; // a model that rounds
         return '{}';
     };

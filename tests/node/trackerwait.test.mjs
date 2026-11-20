@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RIVERTON, TAVERN, clientDir } from './helpers.mjs';
+import { RIVERTON, TAVERN, clientDir, isTrackerCall } from './helpers.mjs';
 
 const ext = await import('../../extension/index.js');
 const D = await import('../../extension/discovery.mjs');
@@ -19,7 +19,6 @@ const server = clientDir(path.dirname(RIVERTON));
 const LOC = 'worldscrawl_location', WAIT = 'worldscrawl_wait', TRACKED = 'worldscrawl_tracked';
 const flush = (ms = 20) => new Promise(r => setTimeout(r, ms));
 function gate() { let release; const p = new Promise(r => { release = r; }); return { p, release }; }
-const TRACKER_Q = /Reply with JSON only:\n\{"place"/;
 
 let n = 0;
 /** A chat with one reply whose tracker is held at a gate; `answer` is what it says when released (or a function that throws). */
@@ -42,7 +41,7 @@ function boot({ answer = { place: null, people: [], wait: { duration: '2 hours',
     c.registerFunctionTool = () => {}; c.unregisterFunctionTool = () => {};
     const g = gate();
     c.generateRaw = async args => {
-        if (!TRACKER_Q.test(String(args?.prompt ?? ''))) return '{}';
+        if (!isTrackerCall(args)) return '{}';
         await g.p;
         if (typeof answer === 'function') return answer();
         return JSON.stringify(answer);

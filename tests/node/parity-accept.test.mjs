@@ -4,6 +4,7 @@ import './ststub.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { isTrackerCall } from './helpers.mjs';
 
 await import('../../extension/index.js');
 const scene = await import('../../extension/scene.mjs');
@@ -1273,7 +1274,7 @@ function model(c, prompts, { tracker = '{"place": null, "people": [], "wait": nu
         const p = String(args?.prompt ?? '');
         prompts.push(p);
         if (/Looks line/.test(p)) return typeof looks === 'function' ? looks(p) : looks;
-        if (/Reply with JSON only:\n\{"place"/.test(p)) return typeof tracker === 'function' ? tracker(p) : tracker;
+        if (isTrackerCall(args)) { (prompts.tracker ??= []).push(p); return typeof tracker === 'function' ? tracker(p) : tracker; }
         return typeof fields === 'function' ? fields(p) : fields;
     };
 }
@@ -1361,7 +1362,7 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
         fields: '{"body":"sturdy","outfit":"wool"}',
     });
     await onStorySwipe(at);
-    const trackerPrompt = prompts.find(p => /Reply with JSON only:\n\{"place"/.test(p));
+    const trackerPrompt = prompts.tracker?.[0];
     assert.match(trackerPrompt, /Already done by the game \(not new changes; do not report them\):\nThe landlady \[p[0-9a-z]+\]: The temporary change "turned into a gnoll" on the landlady ran out; the game already changed them back\. The Body and Outfit listed above are the result\./);
     assert.doesNotMatch(trackerPrompt.split('\n\nPlayer:')[0], /Hesk|\[hesk\]/, 'the engine part; the story is the story');
     assert.ok(prompts.some(p => /turned back into a woman \[body\]/.test(p)), 'the proposal really went through the fill');
@@ -1688,7 +1689,7 @@ test('GUI payload: kept rows carry the summary only (no panel rows), with a shor
 
 // ---- fix/e2e-gate: the tracker reads only an exchange, and never a story that has left the screen.
 const { onReplyForFlags } = await import('../../extension/discovery.mjs');
-const trackerReads = prompts => prompts.filter(p => /Reply with JSON only:\n\{"place"/.test(p));
+const trackerReads = prompts => prompts.tracker ?? []; // the prompts model() routed to the tracker, by its system prompt
 const reply = mes => ({ mes, is_user: false, swipe_id: 0, swipes: [mes], swipe_info: [{ extra: {} }], extra: {} });
 
 test('the tracker skips a greeting (no player line before it), [ws-start] marker included, and reads the first exchange', async () => {
