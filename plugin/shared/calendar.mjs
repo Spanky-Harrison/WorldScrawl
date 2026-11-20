@@ -202,7 +202,7 @@ export function clockAt(chat, index, after = -1) {
     return end < 0 ? 0 : sum;
 }
 // ---- Waiting and sleeping. "/ws-wait 2h", "/ws-wait 1h30m", "/ws-wait 2d", "/ws-wait until dawn", "/ws-wait until 14:30".
-export const WAIT_TARGETS = ['dawn', 'morning', 'noon', 'dusk', 'evening', 'night', 'midnight'];
+export const WAIT_TARGETS = ['dawn', 'morning', 'noon', 'afternoon', 'dusk', 'evening', 'night', 'midnight'];
 export const SLEEP_DEFAULT = 8 * 3600;
 /** Parse wait arguments: {seconds} for a duration (days allowed: "2d", "1d6h"), {until} for a time of day; throws. */
 const UNIT = { s: 1, sec: 1, secs: 1, second: 1, seconds: 1, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, d: 'day', day: 'day', days: 'day', w: 'week', wk: 'week', week: 'week', weeks: 'week' };
@@ -244,34 +244,80 @@ export function parse12Hour(text, cal = GREGORIAN) {
     if (h >= cal.hours_per_day) throw new Error(`time ${JSON.stringify(text)} is outside the day`);
     return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 }
-/** A clock time or day-part word at the start of a wait target ("17:15", "5:15 pm", "dawn"), ignoring words after it. */
-const UNTIL_TOKEN = /^(\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\b\.?)?|\d{1,2}\s*[ap]\.?\s*m\b\.?|sunrise|sunset|dawn|morning|noon|dusk|evening|night|midnight)(?![\w:])/;
-/** One wait target ("17:15", "5 pm", "dawn") -> its WAIT_TARGETS word or "HH:MM"; throws when it is none. */
+// ---- Wait targets: "until 17:15", "5.15 pm", "17h15", "1715", "a quarter past five", "half past 5", "five o'clock",
+// "5", "dawn", "sundown", "tomorrow morning". An hour of 1-12 with no am/pm, no leading zero and no part-of-day word has
+// two readings (05:15 and 17:15): `alt` carries the second, and the caller takes the next one to come (pickReading).
+const DAY_WORDS = { sunrise: 'dawn', sunup: 'dawn', 'first light': 'dawn', daybreak: 'dawn', dawn: 'dawn', morning: 'morning', noon: 'noon',
+    midday: 'noon', afternoon: 'afternoon', sunset: 'dusk', sundown: 'dusk', nightfall: 'dusk', dusk: 'dusk', evening: 'evening', tonight: 'night',
+    night: 'night', midnight: 'midnight' };
+const DAY_WORD_RE = new RegExp(`^(${Object.keys(DAY_WORDS).sort((a, b) => b.length - a.length).join('|')})(?![\\w:])`);
+const HOUR_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+const H = `(\\d{1,2}|${Object.keys(HOUR_WORDS).join('|')})`;
+const hourOf = w => (HOUR_WORDS[w] ?? +w);
+const AM_RE = /^\s*(?:in the morning|a\.?\s*m\b\.?)/, PM_RE = /^\s*(?:in the afternoon|in the evening|at night|tonight|p\.?\s*m\b\.?)/;
+const UNIT_AFTER = /^\s*(?:h|hr|hrs|hours?|m|mins?|minutes?|s|secs?|seconds?|d|days?|w|weeks?)\b/;
+const hm = (h, mi) => `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+export const UNTIL_HELP = 'say the time like "17:15", "5:15 pm" or "a quarter past five", or a part of the day like "dawn" or "evening"';
+/**
+ * Read a wait target at the start of `t` (lower case, after until/till/to): {until, alt?, tomorrow?, rest} or null.
+ * until is a WAIT_TARGETS word or "HH:MM" (the literal reading); rest is whatever follows ("and eat").
+ */
+export function readUntil(t, cal = GREGORIAN) {
+    let s = String(t ?? '').trim().toLowerCase().replace(/^(?:(?:the|about|around|roughly|approximately|at)\s+)+/, '');
+    let tomorrow = false;
+    const tm = /^tomorrow(?:\s+(?:at|in the|by)\b)?\s*/.exec(s);
+    if (tm) { tomorrow = true; s = s.slice(tm[0].length).replace(/^the\s+/, ''); if (!s) return null; }
+    const out = (until, rest, alt = null) => ({ until, ...(alt && !tomorrow ? { alt } : {}), ...(tomorrow ? { tomorrow: true } : {}), rest: rest.trim() });
+    const dw = DAY_WORD_RE.exec(s);
+    if (dw) return out(DAY_WORDS[dw[1]], s.slice(dw[0].length));
+    const day24 = cal.hours_per_day === 24;
+    // A 12-hour reading of hour h, minute mi: am/pm from a suffix, else literal plus the other half of the day.
+    const twelve = (h, mi, rest, explicit = '') => {
+        if (h < 1 || h > 12 || mi > 59) return null;
+        const am = explicit === 'a' || (!explicit && AM_RE.test(rest)), pm = explicit === 'p' || (!explicit && PM_RE.test(rest));
+        if (!explicit) rest = rest.replace(am ? AM_RE : pm ? PM_RE : /^/, '');
+        if (am) return out(hm(h === 12 ? 0 : h, mi), rest);
+        if (pm) return day24 ? out(hm(h === 12 ? 12 : h + 12, mi), rest) : null;
+        if (!day24) return out(hm(h, mi), rest);
+        return out(hm(h, mi), rest, hm(h === 12 ? 0 : h + 12, mi));
+    };
+    let m;
+    if ((m = /^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return day24 ? twelve(+m[1], +m[2], s.slice(m[0].length), m[3]) : null;
+    if ((m = /^(\d{1,2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return day24 ? twelve(+m[1], 0, s.slice(m[0].length), m[2]) : null;
+    if ((m = /^(\d{1,2})h(\d{2})(?![\w:])/.exec(s))) return out(hm(+m[1], +m[2]), s.slice(m[0].length));
+    if ((m = /^(\d{1,2})[:.](\d{2})(?![\w:]|\.\d)/.exec(s))) {
+        const h = +m[1], mi = +m[2];
+        if (m[1].startsWith('0') || h >= 13 || h === 0) return out(hm(h, mi), s.slice(m[0].length)); // literal
+        return twelve(h, mi, s.slice(m[0].length));
+    }
+    if ((m = /^(\d{4})(?![\w:])/.exec(s))) { const h = +m[1].slice(0, 2), mi = +m[1].slice(2); return h <= 23 && mi <= 59 ? out(hm(h, mi), s.slice(m[0].length)) : null; }
+    if ((m = new RegExp(`^(?:a\\s+)?(quarter|half)\\s+past\\s+${H}(?![\\w:])`).exec(s))) return twelve(hourOf(m[2]), m[1] === 'half' ? 30 : 15, s.slice(m[0].length));
+    if ((m = new RegExp(`^(?:a\\s+)?quarter\\s+(?:to|till|til|before)\\s+${H}(?![\\w:])`).exec(s))) { const h = hourOf(m[1]); return twelve(h === 1 ? 12 : h - 1, 45, s.slice(m[0].length)); }
+    if ((m = new RegExp(`^${H}\\s*o'?\\s?clock\\b`).exec(s))) return twelve(hourOf(m[1]), 0, s.slice(m[0].length));
+    if ((m = new RegExp(`^${H}(?![\\w:]|\\.\\d)`).exec(s)) && !UNIT_AFTER.test(s.slice(m[0].length))) return twelve(hourOf(m[1]), 0, s.slice(m[0].length));
+    return null;
+}
+/** Of a target's readings ({until, alt}), the next one to come after second-of-day `sod`; the literal one without a clock. */
+export function pickReading(r, sod = null, cal = GREGORIAN) {
+    if (!r?.alt || !Number.isFinite(sod)) return r?.until ?? null;
+    const spd = secondsPerDay(cal), ahead = x => { const d = ((parseClock(x, cal) - sod) % spd + spd) % spd; return d === 0 ? spd : d; };
+    return ahead(r.alt) < ahead(r.until) ? r.alt : r.until;
+}
+/** One wait target -> {until, alt?, tomorrow?}; throws when it is none. Words after the time are left out ("until 17:15 and eat"). */
 function untilTarget(t, cal) {
-    t = t.replace(/^(\d{1,2})\.(\d{2})$/, '$1:$2'); // "17.15" is 17:15
-    if (t === 'sunrise') return 'dawn';
-    if (t === 'sunset') return 'dusk';
-    if (WAIT_TARGETS.includes(t)) return t;
-    const ampm = parse12Hour(t, cal);
-    if (ampm) return ampm;
-    parseClock(t, cal);
-    return t;
+    const r = readUntil(t, cal);
+    if (!r) throw new Error(`${UNTIL_HELP}; got ${JSON.stringify(String(t ?? '').trim())}`);
+    if (/^\d{2}:\d{2}$/.test(r.until)) parseClock(r.until, cal);
+    const { rest, ...target } = r;
+    return target;
 }
 export function parseWait(text, cal = GREGORIAN) {
     const s = String(text ?? '').trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^(?:for|about|around|roughly)\s+/, '');
     if (!s) throw new Error('say how long, e.g. "2h", "1h30m", or "until morning"');
     const u = /^(?:until|till|til|to|unti)\s+(.+)$/.exec(s);
     // A bare clock time ("[wait] 17:15", or "[wait] to 17:15" once the bracket drops "to") is a wait until it.
-    const clock = !u && /^\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\.?)?$/.test(s) ? s : null;
-    if (u || clock) {
-        const t = clock ?? u[1].trim().replace(/^(?:the|about|around|roughly|approximately)\s+/, '');
-        try { return { until: untilTarget(t, cal) }; } catch (e) {
-            // Words after the time ("until 17:15 and eat", "until dawn, then go"): the time alone, not a model guess.
-            const lead = UNTIL_TOKEN.exec(t);
-            if (lead && lead[1].trim() !== t) return { until: untilTarget(lead[1].trim(), cal) };
-            throw e;
-        }
-    }
+    const bare = !u && /^\d{1,2}[:.h]\d{2}(?:\s*[ap]\.?\s*m\.?)?$/.test(s) ? s : null;
+    if (u || bare) return untilTarget(bare ?? u[1].trim(), cal);
     if (/^\d+$/.test(s)) { if (+s <= 0) throw new Error('the wait must be longer than zero'); return { seconds: +s * 3600 }; } // a bare number: hours
     const secs = waitWords(s, secondsPerDay(cal));
     if (secs == null) throw new Error(`wait must look like "2h", "1h30m", "an hour and a half", "90 min" or "until dawn", got ${JSON.stringify(String(text ?? '').trim())}`);
@@ -279,13 +325,25 @@ export function parseWait(text, cal = GREGORIAN) {
     return { seconds: secs };
 }
 /**
- * The clock time a player's line waits until ("I wait until 17:15", "sit till 5:15 pm and eat"): "HH:MM", or null when
- * the line names no clock time after until/till. Day-part words are left to whoever reads the line.
+ * Every clock time a line waits until ("I wait until 17:15", "sit till a quarter past five and eat"), as "HH:MM", in
+ * order, without repeats. `now` (second of the day) picks the next one to come of an hour with two readings; without
+ * it the literal reading. Day-part words and "tomorrow …" are left to whoever reads the line.
  */
-export function untilClockIn(text, cal = GREGORIAN) {
-    const m = /\b(?:until|till|til)\s+(?:about\s+|around\s+|roughly\s+)?(\d{1,2}[:.]\d{2}(?:\s*[ap]\.?\s*m\b\.?)?|\d{1,2}\s*[ap]\.?\s*m\b\.?)/i.exec(String(text ?? ''));
-    if (!m) return null;
-    try { return untilTarget(m[1].trim().toLowerCase(), cal); } catch { return null; }
+export function untilClocksIn(text, cal = GREGORIAN, { now = null } = {}) {
+    const out = [], src = String(text ?? '');
+    for (const m of src.matchAll(/\b(?:until|till|til)\s+/gi)) {
+        let r = null;
+        try { r = readUntil(src.slice(m.index + m[0].length).slice(0, 60), cal); } catch { r = null; }
+        if (!r || r.tomorrow || !/^\d{2}:\d{2}$/.test(r.until)) continue;
+        try { parseClock(r.until, cal); } catch { continue; }
+        const t = pickReading(r, now, cal);
+        if (!out.includes(t)) out.push(t);
+    }
+    return out;
+}
+/** The first clock time a line waits until, or null (see untilClocksIn). */
+export function untilClockIn(text, cal = GREGORIAN, opts = {}) {
+    return untilClocksIn(text, cal, opts)[0] ?? null;
 }
 /** Second of the day `target` (a WAIT_TARGETS word or "HH:MM") falls on, for the day starting at `day0` (see untilSeconds). */
 function targetOfDay(day0, target, spd, cal, sunAt) {
@@ -293,7 +351,7 @@ function targetOfDay(day0, target, spd, cal, sunAt) {
     let sun = null; try { sun = sunAt?.(Math.max(0, day0 + spd / 2)) ?? null; } catch { sun = null; }
     const okSun = sun && Number.isFinite(sun.sunrise) && Number.isFinite(sun.sunset) && sun.sunset > sun.sunrise;
     const at = { dawn: okSun ? sun.sunrise : frac(6 / 24), morning: okSun ? Math.min(sun.sunrise + 3600, frac(0.5)) : frac(7 / 24),
-        noon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
+        noon: frac(0.5), afternoon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
         ?? parseClock(target, cal);
     return Math.round(at);
 }
@@ -325,6 +383,28 @@ export function untilBehind(elapsed, target, start = null, cal = null, sunAt = n
     const { t } = todayTarget(elapsed, target, start, cal, sunAt);
     const behind = Math.floor(elapsed) - t;
     return behind >= 0 ? behind : null;
+}
+/** Game seconds from `elapsed` until `target` on the next day ("until tomorrow morning", "tomorrow 9:30"). */
+export function untilTomorrowSeconds(elapsed, target, start = null, cal = null, sunAt = null) {
+    const { dayStart, spd, cal: c } = todayTarget(elapsed, target, start, cal, sunAt);
+    const day0 = dayStart + spd;
+    return day0 + targetOfDay(day0, target, spd, c, sunAt) - Math.floor(elapsed);
+}
+/** The parts of the day a wait word spans, in order: each runs until the next starts (night runs on to the next dawn). */
+const PART_SPANS = ['dawn', 'morning', 'noon', 'evening', 'night'];
+/**
+ * Is game time `elapsed` already in the part of the day `target` names ("until morning" during the morning, "until
+ * evening" at 18:30)? dawn, morning, noon/afternoon, evening and night are spans; dusk is a point (within NEAR_NOW).
+ * Clock times and midnight are not parts: false.
+ */
+export function untilPartNow(elapsed, target, start = null, cal = null, sunAt = null) {
+    const word = target === 'afternoon' ? 'noon' : target;
+    if (word !== 'dusk' && !PART_SPANS.includes(word)) return false;
+    const { dayStart, spd, cal: c } = todayTarget(elapsed, word, start, cal, sunAt);
+    const sod = Math.floor(elapsed) - dayStart, at = w => targetOfDay(dayStart, w, spd, c, sunAt);
+    if (word === 'dusk') return Math.abs(sod - at('dusk')) <= NEAR_NOW;
+    if (word === 'night') return sod >= at('night') || sod < at('dawn');
+    return sod >= at(word) && sod < at(PART_SPANS[PART_SPANS.indexOf(word) + 1]);
 }
 /** Is today's `target` in the same minute as game time `elapsed` (a player's "until 17:15" at 17:15 or 17:15:40)? */
 export function untilNow(elapsed, target, start = null, cal = null, sunAt = null) {

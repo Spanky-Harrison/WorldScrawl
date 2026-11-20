@@ -36,7 +36,7 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it: the arrival reminder goes after the latest message on move turns. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
     },
     {
       "id": "npc",
@@ -84,7 +84,7 @@
     "label": "the name of a place the player already knows about",
     "found": "the saved people the player's [find] just brought to this room, as the narrator may call them (comma-separated), e.g. The landlady",
     "not_found": "a saved person the player's [find] looked for and did not find, as the narrator may call them, e.g. The landlady",
-    "lines": "saved people who came or went since the last reply, one per line with the game time, e.g. [14:20] The landlady arrives.",
+    "lines": "the narrator's lines about saved people, one per entry: who came or went since the last reply with the game time (e.g. [14:20] The landlady arrives.), or who is already in the place just reached with what they are doing (e.g. the landlady (buying for the inn))",
     "mentions": "other world text that names a changed place (from the Map changes piece), or empty",
     "name": "the name of the place or person being written about",
     "body": "the person's resolved Body text, the physical description already in force",
@@ -620,7 +620,7 @@
       "description": "Alongside bracket commands and /ws-wait: used only when a wait amount ([wait], [sleep], /ws-wait or the narrator's wait tag) is not in a form the game reads itself. The game reads the JSON answer.",
       "group": "intent",
       "locked": "The game reads the JSON answer.",
-      "text": "You turn a player's description of how long to wait into a number. {{reply}}: {\"seconds\": N} for an amount of time, {\"until\": \"dawn|morning|noon|dusk|evening|night|midnight|HH:MM\"} for a time of day (a clock time exactly as written, never rounded), or {\"unknown\": true} if it says no amount.",
+      "text": "You turn a player's description of how long to wait into a number. {{reply}}: {\"seconds\": N} for an amount of time, {\"until\": \"...\"} for a time of day, or {\"unknown\": true} if it says no amount. until: a time of day as HH:MM on a 24-hour clock, to the minute the text gives (\"17:15\" for a quarter past five in the afternoon; never rounded), or one of dawn, morning, noon, afternoon, dusk, evening, night, midnight.",
       "placeholders": [
         {
           "name": "reply",
@@ -986,6 +986,25 @@
       "locked": "Tells the narrator where the turn ends; the game relies on it to keep the story and map in step.",
       "text": "[At the end of this reply the characters are in {{where}}. Do not narrate entering any other room. If the last message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
       "placeholders": [
+        {
+          "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_on_arrival",
+      "title": "Narration: who is already there on arrival",
+      "description": "Alongside, after the player's message, right after the arrival reminder on move and travel turns: saved people already in the place the party just reached, each with what they are doing.",
+      "group": "narration",
+      "locked": "The game fills the names, the place and the party from the map and the schedules; only people who were not with the party before the move are listed.",
+      "text": "Already in {{where}} when {{party}} got there: {{lines}}. Show them in this reply.",
+      "placeholders": [
+        {
+          "name": "lines"
+        },
+        {
+          "name": "party"
+        },
         {
           "name": "where"
         }
@@ -1567,10 +1586,10 @@
     {
       "id": "narration.npc_comings",
       "title": "Narration: who came and went",
-      "description": "Alongside, inside {{npcs_present}}, when the player stayed put and time passed: saved people who arrived or left since the last reply, with the game time.",
+      "description": "Alongside, after the player's message, when the player stayed put and time passed: saved people who arrived or left since the last reply, with the game time.",
       "group": "narration",
-      "locked": "The game fills the lines from the schedules. People already in the scene never come or go here.",
-      "text": "Since your last reply:\n{{lines}}\nWork these in where the time fits.",
+      "locked": "The game fills the lines (the names and times) from the schedules. People already in the scene never come or go here.",
+      "text": "Since the last reply, at these times:\n{{lines}}\nShow each one in this reply where its time fits: whoever left is gone at the end of it, and whoever arrived is here.",
       "placeholders": [
         {
           "name": "lines"
@@ -1580,10 +1599,10 @@
     {
       "id": "narration.npc_found",
       "title": "Narration: someone the player went looking for",
-      "description": "Alongside, inside {{npcs_present}}, on the turn the player's [find] brought a saved person to this room: who has just come in.",
+      "description": "Alongside, after the player's message, on the turn the player's [find] brought a saved person to this room: who came in, here at the end of the reply.",
       "group": "narration",
-      "locked": "The game fills the names from the [find] it accepted; the person is in the people-here list above.",
-      "text": "{{found}} has just come in.",
+      "locked": "The game fills the names from the [find] it accepted; the person is also in the people-here list.",
+      "text": "{{found}} came in just now and is here at the end of this reply. Show them arriving.",
       "placeholders": [
         {
           "name": "found"
@@ -1595,8 +1614,8 @@
       "title": "Narration: someone the player looked for and did not find",
       "description": "Alongside, after the player's message: someone the party looked for is not here (the turn the player's [find] did not find a saved person).",
       "group": "narration",
-      "locked": "The game fills the name from the [find] it turned down; the narrator must not bring that person in.",
-      "text": "{{party}} looks for {{not_found}} but does not find them. {{not_found}} is not here and does not appear in this reply in any form: no arrival, no voice, no glimpse, no sign of them. Nobody else stands in for {{not_found}} or answers as them.",
+      "locked": "The game fills the names from the [find] it turned down; the narrator must not bring that person in.",
+      "text": "{{party}} looked for {{not_found}} and did not find them: {{not_found}} is somewhere else, and this reply ends without them. Show the search coming up empty. Anyone who answers is one of the people listed here, speaking as themselves.",
       "placeholders": [
         {
           "name": "party"

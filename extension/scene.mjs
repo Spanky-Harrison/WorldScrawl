@@ -10,7 +10,7 @@ import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, 
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
-import { LOOK_AROUND_RE, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
+import { LOOK_AROUND_RE, arrival, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
 import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
@@ -361,7 +361,20 @@ function foundNow(chat, present) {
     const ui = lastUserIndex(chat);
     if (ui < 0) return [];
     const ids = new Set(stampsOn(chat[ui], swipeOf(chat[ui])).filter(s => s.type === 'npc_appear' && s.whole === true).map(s => s.id));
-    return present.filter(p => ids.has(p.id)).map(p => capFirst(shownName(p)));
+    return present.filter(p => ids.has(p.id));
+}
+/**
+ * On a move or travel turn that ended here: the saved people in the scene now who were not with the party before the move
+ * (followers come along, so they are not new), minus anyone the turn's [find] brought in. One "the landlady (buying for the
+ * inn)" line each, for narration.npc_on_arrival. No model call.
+ */
+function onArrivalLines(chat, loc, present, env, cast, found) {
+    const ui = lastUserIndex(chat);
+    const move = ui >= 0 ? chat[ui]?.extra?.[MOVE_KEY] : null;
+    if (!move || move.to !== loc.address || !present.length) return [];
+    const before = new Set(ui >= 1 ? presentAt(chat, ui - 1, cast, env).map(p => p.id) : []);
+    const skip = new Set(found.map(p => p.id));
+    return present.filter(p => !before.has(p.id) && !skip.has(p.id)).map(p => `${shownName(p)}${p.activity ? ` (${p.activity})` : ''}`);
 }
 /**
  * Shown names of saved people the player's latest line looked for with [find] and did not find (any reason; never "right
@@ -429,12 +442,17 @@ function npcPromptBits(loc) {
         const lore = fedLore(loc).map(c => c.text).join('\n'); // absence lines only for {{npc:id}} in lore being fed
         let elsewhere = false;
         const absent = absentAt(chat, chat.length - 1, pack.npcs, env, { lore, present, onOffmap: () => { elsewhere = true; } });
+        // After the player's message (applyFacts' reminder slot), not in the people-here block: who is already there on
+        // arrival, who the [find] brought in, who came and went, who was not found.
         const comings = comingsAndGoings(chat, chat.length - 1, pack.npcs, env);
-        if (comings.length) absent.unshift(P('narration.npc_comings', { lines: comings.join('\n') }));
-        const found = foundNow(chat, present);
-        if (found.length) absent.unshift(P('narration.npc_found', { found: found.join(', ') }));
-        // Not found: after the player's message (applyFacts' after-message slot), not in the people-here block.
-        const after = notFoundLines(chat, pack.npcs, present);
+        const foundPeople = foundNow(chat, present);
+        const arrived = onArrivalLines(chat, loc, present, env, pack.npcs, foundPeople);
+        const after = {
+            onArrival: arrived.length ? [P('narration.npc_on_arrival', { where: arrival(loc, chat[lastUserIndex(chat)]?.extra?.[MOVE_KEY]).where, party: partyText(), lines: arrived.join('; ') })] : [],
+            found: foundPeople.length ? [P('narration.npc_found', { found: foundPeople.map(p => capFirst(shownName(p))).join(', ') })] : [],
+            comings: comings.length ? [P('narration.npc_comings', { lines: comings.join('\n') })] : [],
+            notFound: notFoundLines(chat, pack.npcs, present),
+        };
         if (!present.length && !absent.length) return { after };
         if (elsewhere) absent.push(P('narration.offmap_found'));
         if (!present.length) return { npcs_present: `(none)\n${absent.join('\n')}`, npc_focus: '', after };
@@ -868,8 +886,10 @@ async function applyFacts({ carry = false, type = 'normal' } = {}) {
         const moveTools = toolsOn();
         const facts = { date: d ? calendarLib.describeDate(d) : '', weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
         text = factsText(loc, move, moveTools, facts);
-        // After the player's message, in this order: where the turn ends, a failed attempt's result, then who was not found.
-        reminder = [arrivalReminder(loc, move), ...attemptLines(loc, move, facts), ...(facts.after ?? [])].filter(Boolean).join('\n');
+        // After the player's message, in this order: where the turn ends, who is already there, a failed attempt's result,
+        // who the [find] brought in, who came and went, then who was not found (and who they are).
+        const af = facts.after ?? {};
+        reminder = [arrivalReminder(loc, move), ...(af.onArrival ?? []), ...attemptLines(loc, move, facts), ...(af.found ?? []), ...(af.comings ?? []), ...(af.notFound ?? [])].filter(Boolean).join('\n');
         const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
         if (ep) { if (carry) ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
         // A reply that told an expiry, written again (swipe, regenerate, continue): the line from its host, no new run.
