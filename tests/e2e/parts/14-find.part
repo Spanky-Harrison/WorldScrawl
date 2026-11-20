@@ -42,8 +42,8 @@
         check('[find]: the player sees the found notice (no block end time)', got.note.some(t => /comes here\./.test(t)) && !got.note.some(t => /until \d/.test(t)), JSON.stringify(got.note));
         const reqs = await storyReqs(from);
         const told = reqs.map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
-        const line = told.split('\n').filter(l => /has just come in/.test(l));
-        check('[find]: one narrator call, told she has just come in, in-world words only (her shown name, no engine words)', reqs.length === 1 && line.length === 1 && line[0] === 'The landlady has just come in.',
+        const line = told.split('\n').filter(l => /came in just now/.test(l));
+        check('[find]: one narrator call, told she came in just now, in-world words only (her shown name, no engine words)', reqs.length === 1 && line.length === 1 && line[0] === 'The landlady came in just now and is here at the end of this reply. Show them arriving.',
             JSON.stringify({ n: reqs.length, line }));
         // Right here is a command: no reply (nothing queued), the message is flagged and hidden with ST's /hide.
         const from2 = (await reqsOf()).length;

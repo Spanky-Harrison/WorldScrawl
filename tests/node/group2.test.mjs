@@ -652,7 +652,7 @@ test('[find] through the typed handler: from the cellar, the flagged block bring
         await scene.prepareNpcs(m);
         assert.ok(presentIds(c).includes('wren'));
         const text = await factsText(blocks);
-        assert.match(text, /Wren has just come in\./);
+        assert.match(blocks[ext.REMINDER_KEY] ?? '', /^Wren came in just now and is here at the end of this reply\. Show them arriving\.$/m);
         const people = text.slice(text.indexOf('People here'), text.indexOf('You stays'));
         assert.match(people, /Wren \[\w+\]: .*Now: seeing to the inn/);
         assert.doesNotMatch(people, /anywhere|private|\bmight\b|wander|%|\bblock\b|\bflag\b/i, 'in-world words only: the narrator never sees the flag');

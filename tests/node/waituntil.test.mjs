@@ -123,7 +123,7 @@ test('the wait card\'s Approve edited with "until 17:15" lands on 17:15', async 
 });
 
 // 4-R1a (W1): the tracker is asked for HH:MM to the minute. Its "17:15" lands on 17:15 exactly; "5:15 PM" (the form
-// the prompt no longer asks for) still reads as 17:15 today (pinned).
+// the prompt no longer asks for) still reads as 17:15 today (pinned; 4-WN keeps it: the wait reader reads am/pm forms).
 for (const until of ['17:15', '5:15 PM']) {
     test(`a tracker wait "until ${until}" with no time on the player's line`, async () => {
         const { c, calls } = boot({ tracker: { place: null, people: [], wait: { duration: '', until, sleep: false, reason: 'waiting for the coach' } } });
