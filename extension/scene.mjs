@@ -588,7 +588,7 @@ async function askRemember(id, name, { prefetch = false, hint = '', keep = null 
     const kind = prefetch ? 'remember (prefetch)' : 'remember';
     let got = null;
     for (let t = 0; t < 2 && !got; t++) {
-        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), memory_rules: P('npc.memory_rules') }), responseLength: 900 }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
+        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') }), responseLength: 900 }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
         if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
     }
     if (got && keep) got = rememberWith(got, keep, Object.keys(keep)).got ?? got; // what the player typed stays exactly

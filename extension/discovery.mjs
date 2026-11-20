@@ -6,7 +6,7 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { calendarLib, chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
@@ -462,10 +462,11 @@ async function trackReply(id) {
         markTracking(msg, genNo);
         renderPatchCards();
         const weather = placeWeatherNow(loc)?.line ?? '';
+        const date = gameDateAt(id, chat); // the reply's own clock: a later [wait] has not happened yet for this exchange
         const people = listedPeople(chat, id, loc);
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
-        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), weather, peopleLines: trackerPeopleLines(people), engineLines }));
+        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id, shown: 'marker' }); // "tracking…"
         // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.

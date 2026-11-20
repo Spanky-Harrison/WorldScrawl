@@ -80,21 +80,22 @@ export function trackerPeopleLines(people) {
 }
 /**
  * The scrap for the one after-reply question. The full place name, display name, description and exits (so arriving by one is not a discovery),
- * the known weather, and each person here. No earlier chat. Weather is listed so a foggy sky is not
- * mistaken for a new fact about the room.
+ * the time of day (npc.tracker_time) and the known weather, and each person here. No earlier chat. The time and weather are listed
+ * so morning light or a foggy sky is not mistaken for a new fact about the room. `time`: {part, time} at the reply, or null.
  */
-export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
+export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', time = null, weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
     return [
         `This place: ${placeTitle(placeName, displayName)}`,
         `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
         `Exits: ${String(exits ?? '').trim() || '(none)'}`,
+        ...(time?.part && time?.time ? [P('npc.tracker_time', { part: time.part, time: time.time })] : []),
         `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
         `People here:\n${peopleLines || '(none)'}`,
         ...(engineLines && engineLines !== '(none)' ? [`Already done by the game (not new changes; do not report them):\n${engineLines}`] : []),
     ].join('\n');
 }
 export const trackerSys = () => P('npc.tracker_system');
-export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000), memory_rules: P('npc.memory_rules') });
+export const trackerPrompt = ({ scrap, player, story }) => P('npc.tracker', { scrap, said: clip(player, 1500), story: clip(story, 2000), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') });
 
 /** A why that only restates that something was updated ("door status updated", "changed"). */
 const STATUS_WHY_RE = /^(?:[\w-]+\s+){0,2}(?:status|state)?\s*(?:updated|changed)\.?$/i;
