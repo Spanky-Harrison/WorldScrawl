@@ -6,7 +6,7 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { calendarLib, chatChanges, chatElapsed, placeWeatherNow } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
@@ -321,7 +321,7 @@ async function applyPersonStamps(id, stamped) {
             continue;
         }
         let stamp = s;
-        if (s.type === 'npc_fact' && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
+        if (s.type === 'npc_fact') stamp = { ...s, pending: true }; // every model fact is a review card (facts have no end, so never a lasts to skip it)
         if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
         else if (s.type === 'npc_stay' && !s.place) {
             const place = positionOf(c.chat, id, PLAYER)?.address || '';
@@ -363,15 +363,18 @@ function dropNoopProposal(chat, identity, at, name) {
     return true;
 }
 function trackerPayloads(people) {
-    const stamps = [], found = [], names = [];
+    const stamps = [], found = [], names = [], dropped = [];
     for (const p of people ?? []) {
         if (p.action === 'found') { found.push(p.name || p.id); continue; } // name-ok: inbound (tracker answer)
         if (p.action === 'name') { names.push({ id: p.id, name: p.name || '' }); continue; } // name-ok: inbound (tracker answer)
         const stamp = toolNpcStamp({ ...p, id: p.id || p.name }); // name-ok: inbound (tracker answer)
+        if (stamp?.dropped) { dropped.push(stamp); continue; } // a fact with a duration: nothing stamped, and nothing made in its place
         if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
     }
-    return { stamps, found, names };
+    return { stamps, found, names, dropped };
 }
+/** The Activity note for a model fact that came with a duration: "a fact has no end: dropped (drunk, 3h)". */
+const noteDroppedFacts = (id, kind, dropped) => { for (const d of dropped ?? []) noteCall(id, { kind, status: 'skipped', reason: `${d.dropped}: dropped (${[d.text, d.lasts].filter(Boolean).join(', ')})` }); };
 /** Tracker name items: the item's handle (or id) says who, its name is what was heard. No name-only fallback. */
 async function applyLearnedNames(id, learned, source) {
     const c = ctx(), msg = c.chat?.[id];
@@ -390,7 +393,8 @@ export async function applyTrackerResult(id, parsed) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg) return;
     const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
-    const { stamps, found, names } = trackerPayloads(gated.people);
+    const { stamps, found, names, dropped: noEnd } = trackerPayloads(gated.people);
+    noteDroppedFacts(id, 'tracker fact', noEnd);
     if (stamps.length) await applyPersonStamps(id, stamps);
     if (found.length) await applyFound(msg, found, TRACKER_SOURCE); // found first: someone found here can then learn their name
     if (names.length) await applyLearnedNames(id, names, TRACKER_SOURCE);
@@ -462,15 +466,18 @@ async function trackReply(id) {
         markTracking(msg, genNo);
         renderPatchCards();
         const weather = placeWeatherNow(loc)?.line ?? '';
+        const date = gameDateAt(id, chat); // the reply's own clock: a later [wait] has not happened yet for this exchange
         const people = listedPeople(chat, id, loc);
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
-        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), weather, peopleLines: trackerPeopleLines(people), engineLines }));
+        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
-        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id, shown: 'marker' }); // "tracking…"
+        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 700 }, { at: id, shown: 'marker' }); // "tracking…"
         // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg || (msg.mes ?? '') !== story || newSwipePending(msg)) return;
         const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
+        // Empty, prose, or cut off mid-object: the read failed. It is never "nothing changed", and nothing is applied.
+        if (parsed.unreadable) { noteCall(id, { kind: 'tracker', status: 'failed', reason: 'the answer was not JSON' }); status = 'failed'; return; }
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
         const before = (msg.extra?.[NPC_KEY] ?? []).length;
@@ -593,6 +600,7 @@ export async function onReplyForFlags(id) {
     const stamped = taken.stamps;
     for (const s of taken.stamps) emitted.push(`${s.type} tag`);
     noteCall(id, narratorNote(emitted));
+    noteDroppedFacts(id, 'npc_fact tag', taken.dropped);
     if (taken.text !== (msg.mes ?? '')) {
         msg.mes = taken.text;
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;

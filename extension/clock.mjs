@@ -57,6 +57,12 @@ export function gameDate(chat = ctx().chat ?? []) {
     if (!calendarLib || !t) return null;
     try { return calendarLib.dateAt(chatElapsed(chat), t.start_date, t.calendar); } catch (e) { console.warn('[WorldScrawl] clock:', e.message); return null; }
 }
+/** The game date at message `index` ({part, time, ...} from calendar.mjs dateAt, at clockAt(index)), or null if unknown. */
+export function gameDateAt(index, chat = ctx().chat ?? []) {
+    const t = worldTimes.get(activeWorld || defaultWorldId);
+    if (!calendarLib || !t) return null;
+    try { return calendarLib.dateAt(clockAt(Math.max(0, index), chat), t.start_date, t.calendar); } catch (e) { console.warn('[WorldScrawl] clock:', e.message); return null; }
+}
 /**
  * The world requests actually go to. Normally the chat's stamped world; if that world's folder is gone, the world it
  * was saved from (the switch stamp's "from", if that still exists), else the default. Stamps are never changed.

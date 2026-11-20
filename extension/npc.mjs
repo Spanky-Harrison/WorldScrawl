@@ -49,8 +49,7 @@ export function claimResult(npc, stamp) {
             const who = field.slice('deep.relationships.'.length);
             return String(npc.deep?.relationships?.[who] ?? '').trim() === text ? 'landed' : 'missed';
         }
-        const facts = [...(npc.facts ?? []), ...(npc.temps ?? []).map(t => t?.text ?? t)];
-        return facts.some(f => String(f).trim() === text) ? 'landed' : 'missed';
+        return (npc.facts ?? []).some(f => String(f).trim() === text) ? 'landed' : 'missed';
     }
     if (stamp.type === 'npc_memory') {
         const note = String(stamp.note ?? '').trim();
@@ -362,7 +361,7 @@ function blankFrom(rec) {
         invented: [...(rec.invented ?? [])], deep: clone(rec.deep ?? {}), facts: [...(rec.facts ?? [])], memory: [...(rec.memory ?? [])].slice(-MEMORY_CAP),
         disposition: clone(rec.disposition ?? {}), fromCast: new Set(Object.keys(rec.disposition ?? {})),
         schedule: (rec.schedule ?? []).map(e => ({ ...e })),
-        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], stays: [], found: {}, temps: [],
+        ok: rec.ok !== false, from: rec.from ?? 'cast', following: null, held: null, appearances: [], stays: [], found: {},
     };
 }
 
@@ -370,7 +369,7 @@ function snapshot(state) {
     const out = new Map();
     for (const [id, n] of state) out.set(id, {
         ...n, deep: clone(n.deep), facts: n.facts.slice(), memory: n.memory.slice(), disposition: clone(n.disposition),
-        fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), stays: n.stays.slice(), temps: (n.temps ?? []).map(t => ({ ...t })),
+        fromCast: new Set(n.fromCast), rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), appearances: n.appearances.slice(), stays: n.stays.slice(),
         base: { ...(n.base ?? { looks: n.looks, body: n.body, outfit: n.outfit }) },
         effects: (n.effects ?? []).map(e => ({ ...e, fields: (e.fields ?? []).slice(), text: e.text ? { ...e.text } : undefined })),
         caches: clone(n.caches ?? {}),
@@ -391,6 +390,14 @@ function setDeep(deep, field, text) {
 }
 
 const LASTS_RE = /^(?:for\s+)?(\d+(?:\.\d+)?)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)$/i;
+/** Why a model fact with a duration is dropped (facts are permanent: they last until the story changes them). */
+export const FACT_NO_END = 'a fact has no end';
+/** A fact's `lasts` that asks for an end: any readable duration, or any other words that are not a way of saying "no end". */
+export function factHasEnd(v) {
+    if (v == null || v === '' || v === 0) return false;
+    if (lastsMinutes(v)) return true;
+    return !/^\s*(?:0|none|no|never|null|n\/a|-|permanent(?:ly)?|forever|for good|indefinite(?:ly)?|lasting|no end)?\s*$/i.test(String(v));
+}
 /** A `lasts` value in game minutes: a number, or text like '2 hours', '30 min', '1 day'. null when lasting (or unreadable). */
 export function lastsMinutes(v) {
     if (Number.isFinite(v)) return v > 0 ? Math.round(v) : null;
@@ -400,8 +407,6 @@ export function lastsMinutes(v) {
     const n = Math.round(Number(m[1]) * (k === 'd' ? 1440 : k === 'h' ? 60 : 1));
     return n > 0 ? n : null;
 }
-/** A temporary change is over once `lasts` game minutes have passed since the message that made it. */
-const tempOver = (t, elapsed) => Number.isFinite(t.start) && Number.isFinite(elapsed) && elapsed >= t.start + t.lasts * 60;
 /** '2h', '30m', '1d4h': a lasts value for labels. */
 export function lastsText(min) {
     const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
@@ -462,8 +467,6 @@ function applyStamp(state, s, index, elapsed = null) {
         const field = String(s.field ?? 'fact');
         const text = str(s.text, field === 'history' || field === 'deep.history' ? HISTORY_MAX : /appearance/.test(field) ? APPEARANCE_MAX : 400);
         if (!text) return;
-        const lasts = lastsMinutes(s.lasts);
-        if (lasts) { n.temps.push({ text, at: index, lasts, start: elapsed }); return; }
         if (CARD_FIELDS[field]) {
             const key = CARD_FIELDS[field];
             n[key] = text;
@@ -569,7 +572,6 @@ export function framesOf(chat, index, cast = [], clock = null) {
         const flagged = flagsOn(chat[i]).map(normName);
         if (flagged.length) for (const n of state.values()) if (flagged.includes(normName(n.name)) || flagged.includes(n.id)) relUp(n, PLAYER, 'met', i, 'npc flag'); // name-ok: inbound match
         if (Number.isFinite(el)) for (const n of state.values()) {
-            if (n.temps.length) n.temps = n.temps.filter(t => !tempOver(t, el));
             // Drop expired appearance effects (lasts in game minutes from start; start is elapsed seconds).
             n.effects = (n.effects ?? []).filter(e => !(e.lasts > 0 && Number.isFinite(e.start) && el >= e.start + e.lasts * 60));
         }
@@ -791,7 +793,7 @@ function publicNpc(n) {
         looksHow: n.looksHow ?? 'base', looksKey: n.looksKey ?? '',
         liveOps: (n.liveOps ?? []).map(o => ({ owner: o.owner, lasts: o.lasts ?? null, start: o.start, intent: o.committed?.intent || o.intent || '', fields: o.committed?.fields || '' })),
         unknownAs: n.unknownAs ?? '', aliases: [...(n.aliases ?? [])], rel: clone(n.rel ?? {}), invented: (n.invented ?? []).slice(), deep: clone(n.deep ?? {}),
-        facts: [...n.facts, ...(n.temps ?? []).map(t => t.text)], temps: (n.temps ?? []).map(t => ({ ...t })), memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
+        facts: [...n.facts], memory: n.memory.slice(), disposition, fromCast: [...n.fromCast],
         following: n.following ? { ...n.following } : null, from: n.from,
         schedule: n.schedule.map(e => ({ ...e })),
     };
@@ -868,7 +870,7 @@ export function npcPlayState(chat, cast, env) {
             else if (s.type === 'npc_memory') extra.note = typeof s.note === 'string' ? s.note : '';
             else if (s.type === 'npc_disposition') { extra.value = s.value ?? ''; extra.reason = typeof s.reason === 'string' ? s.reason : ''; }
             else if (s.type === 'npc_schedule') extra.count = Array.isArray(s.schedule) ? s.schedule.length : 0;
-            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_fact' || s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}), index, sig: stampSig(s) }); // name-ok: inspector
+            stamps.get(s.id).push({ msg: i, type: s.type, off: s.off === true, pending: s.pending === true || !!(s.candidate && !s.committed), where: s.where, place: s.place, owner: s.owner || s.identity?.owner || '', identity: s.identity || null, decisionRev: s.decisionRev ?? 1, summary: stampSummary(s, last.get(s.id)?.name ?? s.name ?? s.id), ...extra, ...(s.type === 'npc_appearance' || s.type === 'npc_baseline' ? { expiry: expiryOf(s, i, end, env) } : {}), index, sig: stampSig(s) }); // name-ok: inspector
         });
         const found = msg?.extra?.[FOUND_KEY];
         if (Array.isArray(found)) for (const f of found) {
@@ -1406,9 +1408,11 @@ export function parseNpcTag(body) {
     const id = p[1] ?? '';
     if (!type || !NPC_ID.test(id)) return null;
     if (type === 'npc_fact') {
-        const rest = p.slice(2), lasts = rest.length > 1 ? lastsMinutes(rest.at(-1)) : null;
+        // A fact has no end: a trailing duration ("| 3h") drops the whole tag (the reader notes it), never a timed fact.
+        const rest = p.slice(2), lasts = rest.length > 1 && lastsMinutes(rest.at(-1)) ? rest.at(-1) : '';
         const text = (lasts ? rest.slice(0, -1) : rest).join(' | ').trim();
-        return text ? { type, id, field: 'fact', text, ...(lasts ? { lasts } : {}) } : null;
+        if (!text) return null;
+        return lasts ? { dropped: FACT_NO_END, type, id, text, lasts } : { type, id, field: 'fact', text };
     }
     if (type === 'npc_memory') { const note = p.slice(2).join(' | ').trim(); return note ? { type, id, note } : null; }
     if (type === 'npc_disposition') {
@@ -1435,15 +1439,16 @@ export function parseNpcTag(body) {
 
 export const NPC_TAG = /\[ws_npc:\s*([^\]]{0,400})\]/gi;
 
-/** Pull every NPC tag out of a reply. The story text comes back without the tags. */
+/** Pull every NPC tag out of a reply. The story text comes back without the tags; a fact tag with a duration is in `dropped`. */
 export function takeNpcTags(text) {
-    const stamps = [];
+    const stamps = [], dropped = [];
     const cleaned = String(text ?? '').replace(NPC_TAG, (_all, body) => {
         const s = parseNpcTag(body);
-        if (s) stamps.push(s);
+        if (s?.dropped) dropped.push(s);
+        else if (s) stamps.push(s);
         return '';
     }).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd();
-    return { stamps, text: cleaned };
+    return { stamps, dropped, text: cleaned };
 }
 
 /**
@@ -1475,7 +1480,7 @@ export function readRememberAnswer(ans) {
 export function stampSummary(s, name = '') {
     const who = name || s?.id || 'Someone';
     if (!s) return who;
-    if (s.type === 'npc_fact') return `${who}: ${s.text}${lastsMinutes(s.lasts) ? ` (for ${lastsText(lastsMinutes(s.lasts))})` : ''}`;
+    if (s.type === 'npc_fact') return `${who}: ${s.text}`;
     if (s.type === 'npc_memory') return `${who}: remembered — ${s.note}`;
     if (s.type === 'npc_disposition') return `${who}: ${s.value}${s.reason ? ` (${s.reason})` : ''}`;
     if (s.type === 'npc_follow') return `${who} comes along`;
