@@ -472,10 +472,12 @@ async function trackReply(id) {
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
         const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
-        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 400 }, { at: id, shown: 'marker' }); // "tracking…"
+        const raw = await gen('tracker', { prompt, systemPrompt: trackerSys(), responseLength: 700 }, { at: id, shown: 'marker' }); // "tracking…"
         // Stale: another read started, the swipe changed, or the text it read is no longer the story shown.
         if (trackerGen(msg) !== genNo || swipeOf(msg) !== swipe || ctx().chat?.[id] !== msg || (msg.mes ?? '') !== story || newSwipePending(msg)) return;
         const parsed = readTrackerAnswer(parseJsonAnswer(raw) ?? raw);
+        // Empty, prose, or cut off mid-object: the read failed. It is never "nothing changed", and nothing is applied.
+        if (parsed.unreadable) { noteCall(id, { kind: 'tracker', status: 'failed', reason: 'the answer was not JSON' }); status = 'failed'; return; }
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
         const before = (msg.extra?.[NPC_KEY] ?? []).length;

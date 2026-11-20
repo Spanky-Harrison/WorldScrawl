@@ -181,12 +181,14 @@ function foldChange(list, into) {
 }
 /**
  * The tracker's JSON: a place, any number of person updates, and a wait, together or empty.
- * `changes: []` is accepted as well as the place/people/wait object. Not prose.
+ * `changes: []` is accepted as well as the place/people/wait object. Not prose. Text that is not JSON at all (empty,
+ * prose, or cut off mid-object) comes back `unreadable: true`, so the read is marked failed instead of "nothing changed".
  */
 export function readTrackerAnswer(ans) {
     if (typeof ans === 'string') {
-        try { ans = JSON.parse(ans.replace(/```(?:json)?/gi, '').trim()); } catch { return { ...EMPTY, people: [] }; }
+        try { ans = JSON.parse(ans.replace(/```(?:json)?/gi, '').trim()); } catch { return { ...EMPTY, people: [], unreadable: true }; }
     }
+    if (ans == null) return { ...EMPTY, people: [], unreadable: true };
     if (!ans || typeof ans !== 'object' || Array.isArray(ans)) return { ...EMPTY, people: [] };
     const out = { place: readPlace(ans.place), people: [], wait: readWait(ans.wait) };
     for (const p of Array.isArray(ans.people) ? ans.people : []) {
