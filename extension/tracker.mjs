@@ -145,12 +145,15 @@ const namedIn = (text, p) => termsOf(p).some(t => nameIn(text, t));
 export function intentWords(item) {
     return [...new Set(normName(item?.intent || item?.text || '').split(' ').filter(w => w.length > 2 && !STOP.has(w)))];
 }
+/** Review round 1: an owner found only by the rival-noun list ("a stranger", "one of the patrons") warns instead of
+ *  dropping. Flip to true to promote it to a drop once playtests show the noun list is safe. */
+export const UNLISTED_RIVAL_DROPS = false;
 /**
  * The T2b guard for one tracker item (appearance or fact) on `person` ({name, aliases, unknownAs, nameKnown, label}).
  * `text` is the player's line and the narrator reply; `listed` is everyone else listed here. Returns {verdict, reason}:
- * keep when the person is named; drop when they are not and a rival (another listed person named, or "a stranger"-style
- * phrase that is nobody listed) shares a sentence with the change's words, or the sentence before a "she/he/they" one;
- * otherwise warn (pronouns only: no gender guessing).
+ * keep when the person is named; drop when they are not and another listed person who IS named shares a sentence with
+ * the change's words (or the sentence before a "she/he/they" one); warn, naming the phrase, when the owner in that spot
+ * is only an unlisted "a stranger"-style phrase (UNLISTED_RIVAL_DROPS); otherwise warn (pronouns only: no gender guessing).
  */
 export function ownerCheck(item, person, text, listed = []) {
     const who = person?.label || person?.unknownAs || person?.name || 'this person';
@@ -159,22 +162,25 @@ export function ownerCheck(item, person, text, listed = []) {
     const everyone = [person, ...listed].filter(Boolean);
     const known = everyone.flatMap(termsOf).map(bareTerm).filter(Boolean);
     const sentences = Text.splitSentences(text);
-    const rivalIn = sentence => {
-        const n = normName(sentence);
-        const other = listed.find(p => namedIn(n, p));
-        if (other) return other.label || other.unknownAs || other.name;
-        for (const m of n.matchAll(RIVAL_RE)) {
+    const listedIn = sentence => { const o = listed.find(p => namedIn(normName(sentence), p)); return o ? (o.label || o.unknownAs || o.name) : ''; };
+    const phraseIn = sentence => {
+        for (const m of normName(sentence).matchAll(RIVAL_RE)) {
             if (known.some(k => nameIn(m[0], k))) continue; // "the landlady" is never a rival while she is listed
             return `the ${m[1].replace(/^men$/, 'man').replace(/^women$/, 'woman')}`;
         }
         return '';
     };
+    let phrase = '';
     for (let i = 0; i < sentences.length; i++) {
         const has = normName(sentences[i]).split(' ').some(w => words.some(x => sameWord(w, x)));
         if (!has) continue;
-        const rival = rivalIn(sentences[i]) || (i > 0 && PRONOUN_START.test(sentences[i]) ? rivalIn(sentences[i - 1]) : '');
+        const lead = i > 0 && PRONOUN_START.test(sentences[i]);
+        const rival = listedIn(sentences[i]) || (lead ? listedIn(sentences[i - 1]) : '');
         if (rival) return { verdict: 'drop', reason: `tracker item dropped: the change reads as ${possessive(rival)}, not ${possessive(who)}`, rival };
+        phrase = phrase || phraseIn(sentences[i]) || (lead ? phraseIn(sentences[i - 1]) : '');
     }
+    if (phrase && UNLISTED_RIVAL_DROPS) return { verdict: 'drop', reason: `tracker item dropped: the change reads as ${possessive(phrase)}, not ${possessive(who)}`, rival: phrase };
+    if (phrase) return { verdict: 'warn', reason: `This change may belong to ${phrase}, not ${who}; check it.`, rival: phrase };
     return { verdict: 'warn', reason: `This reply never names ${who}; check this change is really ${possessive(who)}.` };
 }
 const possessive = w => (/s$/i.test(w) ? `${w}'` : `${w}'s`);
