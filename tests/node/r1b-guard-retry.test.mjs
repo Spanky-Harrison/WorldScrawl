@@ -23,7 +23,7 @@ const CLK = await import('../../extension/clock.mjs');
 const { rememberWorlds, loadCalendar } = CLK;
 await loadCalendar();
 const { onReplyForFlags, onStorySwipe, trackerSettled, TRACKER_WAIT } = D;
-const { ownerCheck, RIVAL_NOUNS } = T;
+const { ownerCheck, RIVAL_NOUNS, UNLISTED_RIVAL_DROPS } = T;
 
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
 const server = clientDir(path.dirname(RIVERTON));
@@ -90,22 +90,30 @@ async function exchange(c, player, story) { say(c, player); const id = reply(c, 
 const soaked = (extra = {}) => ({ place: null, people: [{ id: hesk(), action: 'appearance', intent: 'cloak soaked through', fields: 'outfit', lasts: '2h', scope: 'light', why: 'only the cloak', ...extra }], wait: null });
 
 // ================================================================ T2b, the ownership guard (prompt-plan R1 test 3)
-test('3a: "A stranger stumbles in from the rain, her cloak soaked through." on the landlady\'s handle is dropped; the Activity log names the stranger', async () => {
-    const { c } = boot({ tracker: () => soaked() });
-    const id = await exchange(c, 'I watch the door.', 'A stranger stumbles in from the rain, her cloak soaked through.');
-    const m = c.chat[id];
-    assert.deepEqual(stamps(m), [], 'no stamp and no card');
-    assert.equal(m.extra[WARN], undefined);
-    const note = notes(m).find(x => x.kind === 'tracker owner');
-    assert.deepEqual({ status: note?.status, reason: note?.reason }, { status: 'skipped', reason: "tracker item dropped: the change reads as the stranger's, not the landlady's" });
-    assert.ok(messageActivity(m, id).some(e => /tracker item dropped: the change reads as the stranger's, not the landlady's/.test(e.reason ?? '')), 'in the Activity log');
-    assert.equal(T.trackMark(m), 'tracked', 'visible through the tracker status: tracked, with the note');
-});
-test('3a, a fact too: the stranger\'s line about the ferry is not the landlady\'s fact', async () => {
+// Review round 1: an owner found only by the rival-noun list warns (the item stays a card); only a named listed person drops.
+const STRANGER_WARN = 'This change may belong to the stranger, not the landlady; check it.';
+for (const autoKeep of [false, true]) {
+    test(`3a: "A stranger stumbles in from the rain, her cloak soaked through." on the landlady's handle is a warned card, not applied and not dropped${autoKeep ? ' (auto-keep on)' : ''}`, async () => {
+        const { c } = boot({ autoKeep, tracker: () => soaked() });
+        const id = await exchange(c, 'I watch the door.', 'A stranger stumbles in from the rain, her cloak soaked through.');
+        const m = c.chat[id];
+        const o = stamps(m, 'npc_appearance')[0];
+        assert.ok(o, 'not dropped: the item stays');
+        assert.equal(o.committed ?? null, null, 'not applied: a card for the player');
+        assert.deepEqual((m.extra[WARN] ?? []).map(w => [w.text, w.source]), [[STRANGER_WARN, 'tracker']]);
+        assert.equal(notes(m).some(x => x.kind === 'tracker owner'), false, 'no drop note');
+        assert.ok(messageActivity(m, id).some(e => (e.reason ?? '').includes(STRANGER_WARN)), 'the warning is in the Activity log');
+        const el = draw(c).querySelector(`.mes[mesid="${id}"]`);
+        assert.ok(el.querySelector('.worldscrawl_card_person'), 'the review card is drawn');
+        assert.ok(el.textContent.includes(`⚠ ${STRANGER_WARN}`));
+    });
+}
+test('3a, a fact too: the stranger\'s line about the ferry stays a pending fact card with the warning', async () => {
     const { c } = boot({ tracker: () => ({ place: null, people: [{ id: hesk(), action: 'fact', text: 'runs the ferry at night' }], wait: null }) });
     const id = await exchange(c, 'I ask who runs the ferry.', 'A stranger by the hearth says he runs the ferry at night.');
-    assert.deepEqual(stamps(c.chat[id]), []);
-    assert.ok(notes(c.chat[id]).some(x => x.kind === 'tracker owner' && /reads as the stranger's/.test(x.reason)));
+    assert.deepEqual(stamps(c.chat[id], 'npc_fact').map(s => [s.text, s.pending]), [['runs the ferry at night', true]]);
+    assert.deepEqual((c.chat[id].extra[WARN] ?? []).map(w => w.text), [STRANGER_WARN]);
+    assert.equal(notes(c.chat[id]).some(x => x.kind === 'tracker owner'), false);
 });
 for (const autoKeep of [false, true]) {
     test(`3b: "She wrings out her soaked cloak." with nobody named is kept with a warning on its card${autoKeep ? ' (auto-keep on: still a card)' : ''}`, async () => {
@@ -149,29 +157,41 @@ test('3e: a memory item with the landlady unnamed is kept (the guard covers appe
     assert.equal(c.chat[id].extra[WARN], undefined);
     assert.equal(notes(c.chat[id]).some(x => x.kind === 'tracker owner'), false);
 });
-test('3f: ownerCheck over the noun list (pure)', () => {
+test('3f: ownerCheck (pure): only a named listed person drops; the noun list still finds an unlisted owner, which warns', () => {
     const P = { name: 'Hesk', unknownAs: 'the landlady', nameKnown: false, label: 'the landlady' };
+    const COR = { name: 'Corwin', nameKnown: true, label: 'Corwin' };
     const it = { action: 'appearance', intent: 'cloak soaked through' };
-    const v = (text, listed = [], person = P, item = it) => ownerCheck(item, person, text, listed).verdict;
+    const r = (text, listed = [], person = P, item = it) => ownerCheck(item, person, text, listed);
+    const v = (...a) => r(...a).verdict;
+    assert.equal(UNLISTED_RIVAL_DROPS, false, 'review round 1: the noun list warns, it does not drop');
     assert.equal(v('The landlady stands in the rain, her cloak soaked through.'), 'keep', '"the landlady" names her, never a rival while she is listed');
     assert.equal(v('Landlady, your cloak is soaked through!'), 'keep', 'unknownAs without its article');
     assert.equal(v('Hesk wrings out her soaked cloak.'), 'warn', 'her real name does not count before the player knows it');
     assert.equal(v('Hesk wrings out her soaked cloak.', [], { ...P, nameKnown: true, label: 'Hesk' }), 'keep');
     assert.equal(v('Red wrings out her soaked cloak.', [], { ...P, aliases: ['Red'] }), 'keep', 'an alias');
-    for (const noun of RIVAL_NOUNS) assert.equal(v(`The ${noun} comes in, cloak soaked through.`), 'drop', noun);
-    assert.equal(v('One of the patrons shakes out a soaked cloak.'), 'drop', 'one of the …');
-    assert.equal(v('An old, grizzled sailor stamps in; his cloak is soaked.'), 'drop', 'adjectives before the noun');
-    assert.equal(v('A stranger stumbles in. Her cloak is soaked through.'), 'drop', 'the sentence before a pronoun-subject one');
-    assert.equal(v('A stranger stumbles in. The fire crackles. Her cloak is soaked through.'), 'warn', 'not two sentences back');
-    assert.equal(v('A stranger stumbles in. She wrings out her soaked cloak.'), 'drop');
-    assert.equal(v('A stranger nods. The cloak by the fire is soaked.'), 'warn', 'a rival in another sentence without a pronoun lead is not the owner');
+    // The noun list is kept: every noun is still found as the likely owner, and named in the warning.
+    for (const noun of RIVAL_NOUNS) {
+        const got = r(`The ${noun} comes in, cloak soaked through.`);
+        assert.equal(got.verdict, 'warn', noun);
+        assert.equal(got.rival, `the ${noun.replace(/^men$/, 'man').replace(/^women$/, 'woman')}`, noun);
+    }
+    for (const [text, rival] of [['One of the patrons shakes out a soaked cloak.', 'the patron'], ['An old, grizzled sailor stamps in; his cloak is soaked.', 'the sailor'],
+        ['A stranger stumbles in. Her cloak is soaked through.', 'the stranger'], ['The figure by the door wrings out a soaked cloak.', 'the figure'], ['The drunk spills ale; his cloak is soaked.', 'the drunk']]) {
+        assert.deepEqual(r(text), { verdict: 'warn', reason: `This change may belong to ${rival}, not the landlady; check it.`, rival }, text);
+    }
+    assert.equal(r('A stranger stumbles in. The fire crackles. Her cloak is soaked through.').rival, undefined, 'not two sentences back: the plain warning');
+    assert.equal(r('A stranger nods. The cloak by the fire is soaked.').reason, "This reply never names the landlady; check this change is really the landlady's.", 'another sentence without a pronoun lead');
+    assert.equal(v('The man says he runs the ferry at night.', [], P, { action: 'fact', text: 'runs the ferry at night' }), 'warn', 'facts read their text');
+    // Drops: a named listed person only.
+    assert.equal(v("Corwin's cloak is soaked through.", [COR]), 'drop', 'a listed person named in the same sentence');
+    assert.equal(v('Corwin laughs. She shakes her soaked cloak.', [COR]), 'drop', 'a listed person named in the sentence before a pronoun lead');
+    assert.equal(v('A stranger and Corwin come in, cloaks soaked through.', [COR]), 'drop', 'a named listed person wins over a noun-list phrase');
+    assert.equal(v('A stranger stumbles in, cloak soaked. Corwin laughs.', [COR]), 'warn', 'a listed person in another sentence is not the owner');
     assert.equal(v('The old man shakes his soaked cloak.', [], { name: 'Bram', unknownAs: 'the old man', nameKnown: false, label: 'the old man' }), 'keep', 'her own unknownAs is a name, not a rival');
-    assert.equal(v('The old man shakes his soaked cloak.', [{ name: 'Bram', unknownAs: 'the old man', nameKnown: false, label: 'the old man' }]), 'drop', 'a listed person by what the list calls them');
-    assert.equal(v('She shakes her soaked cloak.', [{ name: 'Corwin', nameKnown: true, label: 'Corwin' }]), 'warn', 'no gender guessing between two listed people');
-    assert.equal(v('Corwin laughs. She shakes her soaked cloak.', [{ name: 'Corwin', nameKnown: true, label: 'Corwin' }]), 'drop', 'a listed rival named in the sentence before a pronoun lead');
-    assert.equal(ownerCheck({ action: 'fact', text: 'runs the ferry at night' }, P, 'The man says he runs the ferry at night.', []).verdict, 'drop', 'facts read their text');
-    assert.match(ownerCheck(it, P, 'A stranger enters, cloak soaked through.', []).reason, /^tracker item dropped: the change reads as the stranger's, not the landlady's$/);
-    assert.match(ownerCheck(it, { ...P, label: 'Wells' }, 'Her cloak is soaked.', []).reason, /check this change is really Wells'\.$/);
+    assert.equal(v('The old man shakes his soaked cloak.', [{ name: 'Bram', unknownAs: 'the old man', nameKnown: false, label: 'the old man' }]), 'drop', 'a listed person named by what the list calls them');
+    assert.equal(v('She shakes her soaked cloak.', [COR]), 'warn', 'no gender guessing between two listed people');
+    assert.equal(r("Corwin's cloak is soaked through.", [COR]).reason, "tracker item dropped: the change reads as Corwin's, not the landlady's");
+    assert.match(r('Her cloak is soaked.', [], { ...P, label: 'Wells' }).reason, /check this change is really Wells'\.$/);
 });
 
 // ================================================================ T7 retry: off / ask / auto
