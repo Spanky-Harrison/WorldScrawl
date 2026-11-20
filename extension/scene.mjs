@@ -5,7 +5,7 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { messageKey } from './replay.mjs';
@@ -781,6 +781,8 @@ function mapInspect(chat, here) {
     } catch (e) { console.warn('[WorldScrawl] npc inspector failed', e); return null; }
 }
 /** "In this chat" edits from the map: stamps on the latest message, only if the chat, message and swipe are still the ones the map saw. */
+/** The Cast editor's refusal for a fact sent with a duration (nothing is stamped). */
+const FACT_LASTS_REFUSED = "Facts are permanent; they can't have a duration.";
 const CHAT_EDIT_TYPES = new Set(['npc_fact', 'npc_memory', 'npc_disposition', 'npc_appearance', 'npc_baseline', 'npc_schedule']);
 async function npcChatEdit(d) {
     const c = ctx(), chat = c.chat ?? [];
@@ -792,6 +794,7 @@ async function npcChatEdit(d) {
     if (!npcAt(chat, i, castPack()?.npcs ?? [], id)) return { ok: false, error: 'That person is not in this chat.' };
     const stamps = (Array.isArray(d.stamps) ? d.stamps : []).filter(s => s && CHAT_EDIT_TYPES.has(s.type)).map(s => ({ ...s, id, by: 'map' }));
     if (!stamps.length) return { ok: false, error: 'Nothing changed.' };
+    if (stamps.some(s => s.type === 'npc_fact' && s.lasts != null && s.lasts !== '')) return { ok: false, error: FACT_LASTS_REFUSED };
     const person = npcAt(chat, i, castPack()?.npcs ?? [], id);
     for (const s of stamps) {
         if (s.type !== 'npc_baseline') { addNpcStamp(msg, s); continue; }
@@ -819,7 +822,12 @@ function toolNpcStamp(args = {}) {
     const action = String(args.action ?? '').toLowerCase();
     const id = String(args.id ?? '').trim();
     if (!id) return null;
-    if (action === 'fact') { const lasts = lastsMinutes(args.lasts); return args.text ? { type: 'npc_fact', id, field: 'fact', text: String(args.text), ...(lasts ? { lasts } : {}) } : null; }
+    if (action === 'fact') {
+        if (!args.text) return null;
+        // A fact has no end. One that comes with a duration is dropped (the caller notes it), and nothing is made in its place.
+        if (factHasEnd(args.lasts)) return { dropped: FACT_NO_END, id, text: String(args.text), lasts: String(args.lasts) };
+        return { type: 'npc_fact', id, field: 'fact', text: String(args.text) };
+    }
     if (action === 'memory') return args.text ? { type: 'npc_memory', id, note: String(args.text) } : null;
     if (action === 'disposition') return { type: 'npc_disposition', id, who: PLAYER, value: args.value, reason: String(args.reason ?? args.text ?? '') };
     if (action === 'leave') return { type: 'npc_leave', id };

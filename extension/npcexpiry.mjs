@@ -1,8 +1,8 @@
 // Temporary person changes that ran out. Place expiries come from the map's patches (expiredBetween);
-// people keep theirs as stamps on messages (appearance owners with start/lasts, and temporary facts).
+// people keep theirs as stamps on messages (appearance owners with start/lasts; facts have no end).
 // The engine drops an elapsed one from the replay by itself; this module names it, so the narrator,
 // the tracker, the chat notice and a wait's summary all hear about it once.
-import { NPC_KEY, lastsMinutes } from './npc.mjs';
+import { NPC_KEY } from './npc.mjs';
 import { capFirst, handleOf, knows, shownName } from './names.mjs';
 import { isOwnerStamp } from './replay.mjs';
 
@@ -16,27 +16,16 @@ const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g, ' ').trim(); return
 
 /**
  * Temporary person changes that run out after game time `before` and by `after` (seconds), in the order they end:
- * [{key, id, kind: 'appearance'|'fact', what, ends, msg}]. `clock(i)` is the elapsed game time after message i
- * (a temporary fact starts at its message's time; an appearance owner carries its own start).
+ * [{key, id, kind: 'appearance', what, ends, msg}]. An appearance owner carries its own start. `clock` is unused (kept for the callers' shape).
  */
 export function personExpiriesBetween(chat, before, after, clock) {
     const out = [];
     if (!Number.isFinite(after)) return out;
     (chat ?? []).forEach((m, i) => {
         for (const s of stampsOf(m)) {
-            if (isOwnerStamp(s)) {
-                if (!s.committed || !(s.lasts > 0) || !Number.isFinite(s.start)) continue;
-                const ends = s.start + s.lasts * 60;
-                if (ends > before && ends <= after) out.push({ key: `own:${s.owner || s.identity?.owner}`, id: s.id, kind: 'appearance', what: clip(s.committed.intent || s.committed.text || s.intent || 'a change to how they look', 160), ends, msg: i });
-            } else if (s.type === 'npc_fact' && s.pending !== true) {
-                const lasts = lastsMinutes(s.lasts);
-                if (!lasts) continue;
-                let start = null;
-                try { start = clock?.(i); } catch { start = null; }
-                if (!Number.isFinite(start)) continue;
-                const ends = start + lasts * 60;
-                if (ends > before && ends <= after) out.push({ key: `fact:${m.extra?.worldscrawl_mid || i}:${s.text}`, id: s.id, kind: 'fact', what: clip(s.text, 160), ends, msg: i });
-            }
+            if (!isOwnerStamp(s) || !s.committed || !(s.lasts > 0) || !Number.isFinite(s.start)) continue;
+            const ends = s.start + s.lasts * 60;
+            if (ends > before && ends <= after) out.push({ key: `own:${s.owner || s.identity?.owner}`, id: s.id, kind: 'appearance', what: clip(s.committed.intent || s.committed.text || s.intent || 'a change to how they look', 160), ends, msg: i });
         }
     });
     return out.sort((a, b) => a.ends - b.ends);
@@ -73,7 +62,7 @@ export function describeExpiries(items, person, party) {
 }
 
 /** "the temporary change "turned into a gnoll" on Hesk": one item, for lists (a wait's summary, the tracker). */
-export const changeLabel = it => `the temporary ${it.kind === 'fact' ? 'detail' : 'change'} "${it.what}" on ${it.who || it.name || it.id}`;
+export const changeLabel = it => `the temporary change "${it.what}" on ${it.who || it.name || it.id}`;
 /** changeLabel as the model may see it: the shown name ("the landlady"), never the real one before it is learned. */
 export const modelChangeLabel = it => changeLabel({ ...it, who: it.shown || it.who });
 
@@ -88,7 +77,6 @@ export function expiryNarratorNote(items, party = 'the player') {
     if (!items?.length) return '';
     const lines = items.map(it => {
         const who = capFirst(it.shown || it.who);
-        if (it.kind === 'fact') return `- ${who}: "${it.what}" no longer holds.`;
         const now = [it.looks && `Looks: ${it.looks}`, it.body && `Body: ${it.body}`, it.outfit && `Outfit: ${it.outfit}`].filter(Boolean).join(' ');
         return `- ${who}: "${it.what}" has worn off; they look as they did before it.${now ? ` What they look like now: ${now}` : ''}`;
     });

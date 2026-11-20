@@ -118,7 +118,6 @@ export function alreadyShown(npc, text) {
         if (v && v === t) return true;
     }
     if ((npc.effects ?? []).some(e => String(e.intent ?? '').trim().toLowerCase() === t)) return true;
-    if ((npc.temps ?? []).some(x => String(x.text ?? '').trim().toLowerCase() === t)) return true;
     return false;
 }
 

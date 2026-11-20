@@ -264,7 +264,7 @@ const placeKept = {
     }),
 };
 
-// ---- person notes (fact, memory, disposition, a remembered person, automatic rows) and a pending lasting fact
+// ---- person notes (fact, memory, disposition, a remembered person, automatic rows) and a pending fact
 async function noteDone(msg) { syncSwipeExtra(msg); await ctx().saveChat?.(); await applyFacts(); renderPatchCards(); broadcastMapState(); }
 const NOTE_KEYS = { npc_fact: 'text', npc_memory: 'note', npc_disposition: 'reason' };
 /** off / on / undo through settleNpc (a stamp from before owners has no identity: changed in place). */
@@ -306,14 +306,16 @@ const personNote = {
         if (!v.dirty.length) { E()?.closeCardEditor(t.key); renderPatchCards(); return { ok: true, same: true }; }
         const ed = noteEdit(t.s, v);
         if (ed.error) { toastr.warning(`WorldScrawl: ${ed.error}`); return { ok: false, error: ed.error }; }
+        if (t.s.type === 'npc_fact') delete t.s.lasts; // a fact has no end: an edit never keeps a duration
         const res = t.s.identity ? decideNpc(chat(), t.s.identity, t.rev, 'edit', ed.payload) : applyNote(t.s, ed.payload);
         if (res?.ok) E()?.closeCardEditor(t.key);
         await noteDone(t.msg);
         return res;
     }),
-    // A pending lasting fact: Approve (edited) adds it for good with the words in the box; Discard drops it.
+    // A pending fact: Approve (edited) adds it for good with the words in the box; Discard drops it. Facts have no end.
     approve: t => once(`npc-ok:${t.key}`, async () => {
         const s = t.s;
+        if (s.type === 'npc_fact') delete s.lasts;
         if (isOpen(t)) {
             const v = vals(t), k = NOTE_KEYS[s.type] ?? 'text', text = String(v.fields[k] ?? '').trim();
             if (text) s[k] = text;

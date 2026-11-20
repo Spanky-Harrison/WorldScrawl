@@ -321,7 +321,7 @@ async function applyPersonStamps(id, stamped) {
             continue;
         }
         let stamp = s;
-        if (s.type === 'npc_fact' && !lastsMinutes(s.lasts)) stamp = { ...s, pending: true };
+        if (s.type === 'npc_fact') stamp = { ...s, pending: true }; // every model fact is a review card (facts have no end, so never a lasts to skip it)
         if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
         else if (s.type === 'npc_stay' && !s.place) {
             const place = positionOf(c.chat, id, PLAYER)?.address || '';
@@ -363,15 +363,18 @@ function dropNoopProposal(chat, identity, at, name) {
     return true;
 }
 function trackerPayloads(people) {
-    const stamps = [], found = [], names = [];
+    const stamps = [], found = [], names = [], dropped = [];
     for (const p of people ?? []) {
         if (p.action === 'found') { found.push(p.name || p.id); continue; } // name-ok: inbound (tracker answer)
         if (p.action === 'name') { names.push({ id: p.id, name: p.name || '' }); continue; } // name-ok: inbound (tracker answer)
         const stamp = toolNpcStamp({ ...p, id: p.id || p.name }); // name-ok: inbound (tracker answer)
+        if (stamp?.dropped) { dropped.push(stamp); continue; } // a fact with a duration: nothing stamped, and nothing made in its place
         if (stamp) stamps.push({ ...stamp, source: TRACKER_SOURCE });
     }
-    return { stamps, found, names };
+    return { stamps, found, names, dropped };
 }
+/** The Activity note for a model fact that came with a duration: "a fact has no end: dropped (drunk, 3h)". */
+const noteDroppedFacts = (id, kind, dropped) => { for (const d of dropped ?? []) noteCall(id, { kind, status: 'skipped', reason: `${d.dropped}: dropped (${[d.text, d.lasts].filter(Boolean).join(', ')})` }); };
 /** Tracker name items: the item's handle (or id) says who, its name is what was heard. No name-only fallback. */
 async function applyLearnedNames(id, learned, source) {
     const c = ctx(), msg = c.chat?.[id];
@@ -390,7 +393,8 @@ export async function applyTrackerResult(id, parsed) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg) return;
     const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
-    const { stamps, found, names } = trackerPayloads(gated.people);
+    const { stamps, found, names, dropped: noEnd } = trackerPayloads(gated.people);
+    noteDroppedFacts(id, 'tracker fact', noEnd);
     if (stamps.length) await applyPersonStamps(id, stamps);
     if (found.length) await applyFound(msg, found, TRACKER_SOURCE); // found first: someone found here can then learn their name
     if (names.length) await applyLearnedNames(id, names, TRACKER_SOURCE);
@@ -594,6 +598,7 @@ export async function onReplyForFlags(id) {
     const stamped = taken.stamps;
     for (const s of taken.stamps) emitted.push(`${s.type} tag`);
     noteCall(id, narratorNote(emitted));
+    noteDroppedFacts(id, 'npc_fact tag', taken.dropped);
     if (taken.text !== (msg.mes ?? '')) {
         msg.mes = taken.text;
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;

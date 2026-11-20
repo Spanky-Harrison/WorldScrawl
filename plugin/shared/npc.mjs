@@ -551,20 +551,13 @@ export function exportRecord(npc) {
 }
 
 /**
- * What may be written to a cast file: the base appearance (file plus lasting facts and lasting effects)
- * and lasting facts only. Temporary appearance, temporary facts, and runtime (following, holds, rolls) stay out.
+ * What may be written to a cast file: the base appearance (file plus lasting effects) and the facts (facts have
+ * no end, so every one is lasting). Temporary appearance and runtime (following, holds, rolls) stay out.
  */
 export function authorRecord(npc) {
     if (!npc?.id) return null;
     const base = isObj(npc.base) ? npc.base : null;
     const facts = Array.isArray(npc.facts) ? npc.facts.slice() : npc.facts;
-    if (Array.isArray(facts)) {
-        for (const t of Array.isArray(npc.temps) ? npc.temps : []) {
-            const text = typeof t === 'string' ? t : (t?.text ?? '');
-            const i = facts.lastIndexOf(text);
-            if (text && i >= 0) facts.splice(i, 1);
-        }
-    }
     const looks = base ? (base.looks ?? '') : (npc.looks ?? '');
     const body = base ? (base.body ?? '') : (npc.body ?? '');
     const outfit = base ? (base.outfit ?? '') : (npc.outfit ?? '');
