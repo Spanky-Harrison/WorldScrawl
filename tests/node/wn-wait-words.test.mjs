@@ -177,13 +177,16 @@ test('an amount the parser can\'t read that names minutes: a model answer on the
     assert.equal(asked(calls), 1, 'one model call, with its own status');
     assert.ok(hidden(m), JSON.stringify(m.extra));
     assert.equal(clock(c), '14:00');
-    assert.ok(notes(m).some(x => x.kind === 'wait amount' && x.answer === '{"until": "17:00"}'), 'the model call shows on the Activity log');
+    const n = notes(m).filter(x => x.kind === 'wait amount');
+    assert.equal(n.length, 1, 'one call note');
+    assert.deepEqual([n[0].status, n[0].answer, n[0].reason], ['failed', '{"until": "17:00"}', 'the answer 17:00 is on the hour, but the amount names minutes'], 'the rejected answer shows as failed, not ok');
     assert.match(m.extra.worldscrawl_cmd.error, /wait must look like .*got "quarter-ish past five"/, 'the parser\'s own error stands');
 });
 test('the same amount with a model answer to the minute is kept', async () => {
     const { c } = boot({ time: '14:00', model: '{"until": "17:15"}' });
-    await typed(c, 'I [wait] a quarter-ish past five');
+    const m = await typed(c, 'I [wait] a quarter-ish past five');
     assert.equal(clock(c), '17:15');
+    assert.equal(notes(m).find(x => x.kind === 'wait amount')?.status, 'ok');
 });
 
 // ---------------------------------------------------------------- parts of the day
@@ -212,7 +215,7 @@ test('"until evening" at 18:30 is the same error; at 16:00 it waits one hour', a
         assert.equal(clock(c), '18:30');
     }
     { const { c } = boot({ time: '16:00' }); const m = await typed(c, 'I [wait] until evening'); assert.equal(m.extra[WAIT]?.seconds, 3600); assert.equal(clock(c), '17:00'); }
-    { const { c } = boot({ time: '13:00' }); assert.match(await ext.waitCommand('until noon'), /it is already afternoon/); }
+    { const { c } = boot({ time: '13:00' }); assert.match(await ext.waitCommand('until afternoon'), /it is already afternoon/); assert.equal(clock(c), '13:00'); }
 });
 test('a tracker wait "until evening" at 17:20: already evening, no time passes, no card', async () => {
     const { c, id } = await trackerTurn({ line: 'I wait a bit.', story: 'The lamps are lit.', time: '17:20', tracker: { ...coach, wait: { ...coach.wait, until: 'evening' } } });
@@ -220,6 +223,41 @@ test('a tracker wait "until evening" at 17:20: already evening, no time passes, 
     assert.equal(c.chat[id].extra[WAIT], undefined);
     assert.equal(c.chat[id].extra.worldscrawl_waitcard, undefined);
     assert.ok(notes(c.chat[id]).some(x => /no time \(already evening\)/.test(x.kind) && x.status === 'skipped'), JSON.stringify(notes(c.chat[id])));
+});
+
+// ---------------------------------------------------------------- noon and midnight are clock points (review round 1)
+test('"until midnight" at exactly 00:00: the same-minute error for the player (hidden, clock unchanged), no time for the narrator; never a 24-hour wait', async () => {
+    {
+        const { c } = boot({ time: '00:00' });
+        const m = await typed(c, 'I [wait] until midnight');
+        assert.ok(hidden(m), JSON.stringify(m.extra));
+        assert.match(m.extra.worldscrawl_cmd.error, /it is already 00:00; say how long or a later time/);
+        assert.equal(clock(c), '00:00');
+        assert.equal(await ext.waitCommand('until midnight'), 'it is already 00:00; say how long or a later time');
+        const w = await W.planWait('until midnight', false, 'the bells', { narrator: true });
+        assert.deepEqual([w.seconds, w.passed, w.label], [0, true, 'no time (already 00:00)']);
+    }
+    {
+        const { c, id } = await trackerTurn({ line: 'I keep watch.', story: 'The bells ring out.', time: '00:00', tracker: { ...coach, wait: { ...coach.wait, until: 'midnight' } } });
+        assert.equal(clock(c), '00:00');
+        assert.equal(c.chat[id].extra[WAIT], undefined);
+        assert.equal(c.chat[id].extra.worldscrawl_waitcard, undefined, 'no card');
+    }
+    { const { c } = boot({ time: '00:01' }); const d0 = day(c); await typed(c, 'I [wait] until midnight'); assert.equal(clock(c), '00:00'); assert.equal(day(c), d0 + 1, 'a minute past: the next midnight'); }
+    { const { c } = boot({ time: '23:00' }); const d0 = day(c); const m = await typed(c, 'I [wait] until midnight'); assert.equal(m.extra[WAIT]?.seconds, 3600); assert.equal(day(c), d0 + 1); }
+});
+test('"until noon" is a clock point: during the afternoon it waits for the next noon; at exactly 12:00 it is the same-minute error; in the morning it waits for today\'s', async () => {
+    { const { c } = boot({ time: '13:00' }); const d0 = day(c); const m = await typed(c, 'I [wait] until noon'); assert.equal(m.extra[WAIT]?.seconds, 23 * 3600); assert.equal(clock(c), '12:00'); assert.equal(day(c), d0 + 1); }
+    { const { c } = boot({ time: '12:00' }); const m = await typed(c, 'I [wait] until noon'); assert.match(m.extra.worldscrawl_cmd?.error ?? '', /it is already 12:00/); assert.equal(clock(c), '12:00'); }
+    { const { c } = boot({ time: '11:00' }); await typed(c, 'I [wait] until noon'); assert.equal(clock(c), '12:00'); }
+    { const w = (boot({ time: '13:00' }), await W.planWait('until noon', false, '', { narrator: true })); assert.equal(w.seconds, 23 * 3600, 'the narrator too: an hour past noon is not "no time"'); }
+});
+test('only morning, afternoon, evening and night are parts of the day', () => {
+    boot({ time: '00:00' });
+    const w = worldTimes.get('riverton'), now = (t, h) => calendarLib.untilPartNow(h * 3600, t, w.start_date, w.calendar);
+    assert.deepEqual(['morning', 'afternoon', 'evening', 'night'].map(t => [now(t, 10), now(t, 13), now(t, 18), now(t, 23), now(t, 3)]),
+        [[true, false, false, false, false], [false, true, false, false, false], [false, false, true, false, false], [false, false, false, true, true]]);
+    for (const t of ['noon', 'midnight', 'dawn', 'dusk', '09:30']) for (const h of [0, 6, 12, 19]) assert.equal(now(t, h), false, `${t} at ${h}`);
 });
 
 // ---------------------------------------------------------------- the prompt
