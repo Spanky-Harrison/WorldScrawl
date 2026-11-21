@@ -8,7 +8,7 @@ import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
-import { messageKey } from './replay.mjs';
+import { isOwnerStamp, messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrival, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
@@ -1162,7 +1162,12 @@ async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
         return filled;
     }
     const res = decideNpc(chat, identity, decisionRev, action, { ...payload, elapsed });
-    const touch = action === 'undo' || action === 'off' || action === 'on' || action === 'approve';
+    // 4-G (Q5): a person's Looks is rebuilt once, after the last of their pending cards on this message is decided
+    // (approved or discarded); deciding one card while another for them is still pending waits for it.
+    const decided = action === 'approve' || (action === 'discard' && (identity?.domain === 'appearance' || identity?.domain === 'baseline'));
+    const siblingPending = decided && !!host && (host.extra?.worldscrawl_npc ?? []).some(s => s && s.id === identity?.npc && isOwnerStamp(s) && s.candidate && s.off !== true
+        && (s.owner || s.identity?.owner) !== identity?.owner && (s.swipe ?? 0) === (host.swipe_id ?? 0));
+    const touch = (action === 'undo' || action === 'off' || action === 'on' || decided) && !siblingPending;
     const appearance = identity?.domain === 'appearance' || identity?.domain === 'baseline' || identity?.npc;
     if (res?.refill && identity?.owner && Number.isFinite(elapsed)) {
         const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));

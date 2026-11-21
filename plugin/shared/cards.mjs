@@ -69,16 +69,19 @@ export function personReview(v) {
     // Its rewrite failed: the reason here, not on a second (job) card.
     if (phase === 'failed' && v.failReason) notes.push({ text: `⚠ ${v.failReason}`, tone: 'error', cls: 'worldscrawl_remember_failed' });
     if (v.scoped) notes.push({ text: `${v.heavy ? 'Full rewrite' : 'Light touch'}${v.why ? `: ${v.why}` : ''}`, tone: 'scope', cls: 'worldscrawl_scope' });
-    const summary = phase === 'review' ? (v.summary?.length ? v.summary : [`${v.who}: no change to body or outfit`]) : [];
-    const actions = [act('again', 'Ask again for this body and outfit', true)];
+    // 4-G: a one-field card (v.field 'body' or 'outfit') says which field it changes.
+    const what = v.field === 'body' || v.field === 'outfit' ? v.field : 'body and outfit';
+    const head = v.field === 'body' ? 'Body: ' : v.field === 'outfit' ? 'Outfit: ' : '';
+    const summary = phase === 'review' ? (v.summary?.length ? v.summary : [`${v.who}: no change to ${v.field ? what : 'body or outfit'}`]) : [];
+    const actions = [act('again', `Ask again for this ${what}`, true)];
     if (phase !== 'working') actions.push(v.editing ? act('close', 'Forget the edits and keep the suggestion as it was') : act('edit', 'Change what this does before approving it'));
     if (v.scoped && phase !== 'working') actions.push(act('scope', v.heavy ? 'Rewrite again, changing only what this names' : 'Rewrite again, reworking anything this change affects', true, { to: v.heavy ? 'light' : 'heavy' }));
-    if (v.editing) actions.push(act('rewrite', 'Rewrite the body and outfit for the edited change', true));
-    if (phase === 'review') actions.push(act('approve', v.editing ? 'Apply the body and outfit exactly as typed in the boxes' : 'Apply the reviewed body and outfit', true));
+    if (v.editing) actions.push(act('rewrite', `Rewrite the ${what} for the edited change`, true));
+    if (phase === 'review') actions.push(act('approve', v.editing ? `Apply the ${what} exactly as typed in the boxes` : `Apply the reviewed ${what}`, true));
     actions.push(act('discard', 'Do not change this person', true));
     return {
         key: v.key, type: 'person', state: phase, pending: true, cls: 'worldscrawl_npcpending',
-        title: phase === 'failed' ? `👤 Appearance for ${v.who} did not resolve.` : phase === 'review' ? '👤 Proposed person change:' : `👤 Preparing a change to ${v.who}…`,
+        title: `👤 ${head}${phase === 'failed' ? `Appearance for ${v.who} did not resolve.` : phase === 'review' ? 'Proposed person change:' : `Preparing a change to ${v.who}…`}`,
         summary, notes,
         panel: phase === 'review' ? { type: 'fields', title: v.who, tag: 'person', rows: v.panelRows ?? [] } : null,
         editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_npc_intent' }, fields: phase === 'review' ? (v.fields ?? []) : [] } : null,
