@@ -32,9 +32,9 @@ export function parseWaitTag(body) {
 
 // ---- Lenient tag reading: the model's obvious short forms become the documented tags before any tag is read.
 export const FLAG_ACTIONS = ['change', 'discover', 'wait', 'sleep', 'npc', 'name', 'lore', 'found'];
-export const NPC_ACTIONS = ['fact', 'memory', 'disposition', 'leave', 'staying', 'follow', 'stay', 'appearance'];
+export const NPC_ACTIONS = ['fact', 'memory', 'disposition', 'leave', 'staying', 'follow', 'stay', 'appearance', 'came_along'];
 const ANY_WS_TAG = /\[\s*ws[_ ]([a-z]+)\s*(?:[:|]\s*([^\]]*?))?\s*\]/gi;
-const headAct = (rest, acts) => String(rest ?? '').replace(/^\s*([a-z]+)\s*(?:[:|]\s*|$)/i, (m, k) => (acts.includes(k.toLowerCase()) ? `${k.toLowerCase()}${m.trim().length > k.length || /\S/.test(rest.slice(m.length)) ? ' | ' : ''}` : m));
+const headAct = (rest, acts) => String(rest ?? '').replace(/^\s*([a-z_]+)\s*(?:[:|]\s*|$)/i, (m, k) => (acts.includes(k.toLowerCase()) ? `${k.toLowerCase()}${m.trim().length > k.length || /\S/.test(rest.slice(m.length)) ? ' | ' : ''}` : m));
 /**
  * [ws_found | Hesk], [ws_found: Hesk], [WS_Flag : Found|Hesk], [ws_memory | hesk | ...], [ws_sleep: until morning] ...
  * -> [ws_flag: found | Hesk], [ws_npc: memory | hesk | ...], [ws_wait: sleep until morning]. Unknown [ws_...] tags are left as they are.

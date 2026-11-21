@@ -78,12 +78,20 @@ export function trackerPeopleLines(people) {
     }).filter(Boolean);
     return lines.join('\n') || '(none)';
 }
+/** 4-NF: the people just left behind (scene.mjs leftBehind), one "name [handle]. Looks: …" line each, in the people-here
+ *  form. '' when there are none (the scrap then has no such section). */
+export function trackerLeftBehind(rows) {
+    const list = (rows ?? []).filter(p => p?.id || p?.name);
+    if (!list.length) return '';
+    const lines = list.map(p => `${p.name || p.id} [${p.id || p.name}]${p.nameKnown === false && bare(p.unknownAs) ? ' (name not yet known)' : ''}. Looks: ${textOf(p.looks)}`); // name-ok: leftBehind gives the shown name and handle
+    return P('npc.tracker_left_behind', { from: list[0].from || 'the last place', lines: lines.join('\n') });
+}
 /**
  * The scrap for the one after-reply question. The full place name, display name, description and exits (so arriving by one is not a discovery),
  * the time of day (npc.tracker_time) and the known weather, and each person here. No earlier chat. The time and weather are listed
  * so morning light or a foggy sky is not mistaken for a new fact about the room. `time`: {part, time} at the reply, or null.
  */
-export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', time = null, weather = '', peopleLines = '(none)', engineLines = '' } = {}) {
+export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', time = null, weather = '', peopleLines = '(none)', leftBehind = '', engineLines = '' } = {}) {
     return [
         `This place: ${placeTitle(placeName, displayName)}`,
         `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
@@ -91,6 +99,7 @@ export function trackerScrap({ placeName = '', displayName = '', placeDescriptio
         ...(time?.part && time?.time ? [P('npc.tracker_time', { part: time.part, time: time.time })] : []),
         `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
         `People here:\n${peopleLines || '(none)'}`,
+        ...(leftBehind ? [leftBehind] : []),
         ...(engineLines && engineLines !== '(none)' ? [`Already done by the game (not new changes; do not report them):\n${engineLines}`] : []),
     ].join('\n');
 }
@@ -184,6 +193,28 @@ export function ownerCheck(item, person, text, listed = []) {
     return { verdict: 'warn', reason: `This reply never names ${who}; check this change is really ${possessive(who)}.` };
 }
 const possessive = w => (/s$/i.test(w) ? `${w}'` : `${w}'s`);
+// ---- 4-NF, came_along (no model call): only someone just left behind may come along, and only when the reply names them.
+const handleIs = (p, id) => { const k = String(id ?? '').trim().toLowerCase(); return !!k && [p?.id, p?.npcId].some(x => String(x ?? '').toLowerCase() === k); };
+/**
+ * One person item on a reply to a move. `candidates`: the people just left behind (leftBehind rows: {id handle, npcId,
+ * name, aliases, unknownAs, nameKnown, label}); `listed`: the people here, same shape; `reply`: the narrator reply.
+ * {verdict: 'keep'|'skip'|'drop', reason, person}. came_along: kept for a candidate the reply names (name, alias or
+ * unknownAs, the T2b matcher; no pronoun guessing), skipped for someone already here, dropped otherwise. An appearance
+ * or fact item for a candidate is dropped (they are not here); their memory, disposition and name items are kept.
+ */
+export function alongCheck(item, candidates = [], listed = [], reply = '') {
+    const action = String(item?.action ?? '').toLowerCase();
+    const cand = (candidates ?? []).find(p => handleIs(p, item?.id));
+    const label = p => p?.label || p?.name || p?.unknownAs || item?.id || 'this person';
+    if (action === 'came_along') {
+        if (cand) return namedIn(reply, cand) ? { verdict: 'keep', reason: '', person: cand } : { verdict: 'drop', reason: `came_along dropped: the reply never shows ${label(cand)}` };
+        const here = (listed ?? []).find(p => handleIs(p, item?.id));
+        if (here) return { verdict: 'skip', reason: `came_along skipped: ${label(here)} is already here` };
+        return { verdict: 'drop', reason: `came_along dropped: ${item?.id || 'they'} was not with the player before the move` };
+    }
+    if (cand && (action === 'appearance' || action === 'fact')) return { verdict: 'drop', reason: `tracker ${action} dropped: ${label(cand)} is not here` };
+    return { verdict: 'keep', reason: '' };
+}
 export function readPlace(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (p.changed === false) return null;

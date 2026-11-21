@@ -15,14 +15,15 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, leftBehind, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { findPerson, handleOf, maskForModel, shownName } from './names.mjs';
 import { REWRITE_NOT_JUDGED, judgeRewrite } from './arearewrite.mjs';
 import { withWait } from './work.mjs';
-import { TRACKED_KEY, TRACKER_SOURCE, bumpTracker, ownerCheck, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
+import { placeName } from './schedulepick.mjs';
+import { TRACKED_KEY, TRACKER_SOURCE, alongCheck, bumpTracker, ownerCheck, trackerLeftBehind, hasTrackerCard, markTracked, markTracking, dropTrackerMarks, gateTracker, newSwipePending, placeDropReason, playerLineBefore, readTrackerAnswer, shouldTrackReply, trackerGen, trackerPeopleLines, trackerPrompt, trackerScrap, trackerSys } from './tracker.mjs';
 import { narratorWaitAction, planWait, proposeWait, renderPatchCards, stampWait } from './waits.mjs';
 
 /** The narrator's only tools are the movement ones (ws_look, ws_move), when moveMode is 'tools'. The after-reply tracker reports changes. */
@@ -283,6 +284,7 @@ async function applyPersonStamps(id, stamped) {
     const folded = [...(framesOf(c.chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
     const applied = [];
     const toFill = [];
+    let along = null;
     const warn = (text, source = '') => noteNpcWarning(id, text, source);
     for (const s0 of stamped) {
         const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
@@ -325,6 +327,15 @@ async function applyPersonStamps(id, stamped) {
             continue;
         }
         let stamp = s;
+        if (s.type === 'npc_along') {
+            // 4-NF: only someone just left behind, named in the reply, comes along; held where the player is now.
+            along ??= alongContext(c.chat, id);
+            const r = alongCheck({ action: 'came_along', id: s.id }, along.candidates, along.listed, msg.mes ?? '');
+            if (r.verdict !== 'keep') { noteCall(id, { kind: 'came_along', status: 'skipped', reason: r.reason }); continue; }
+            const place = positionOf(c.chat, id, PLAYER)?.address || '';
+            if (!place) { noteCall(id, { kind: 'came_along', status: 'skipped', reason: 'came_along dropped: the player\'s place is unknown' }); continue; }
+            stamp = { ...s, place, from: r.person.fromAddress || '', where: placeName(place) };
+        }
         if (s.type === 'npc_fact') stamp = { ...s, pending: true }; // every model fact is a review card (facts have no end, so never a lasts to skip it)
         if (s.type === 'npc_staying') stamp = { ...s, elapsed: s.elapsed ?? clock.elapsed };
         else if (s.type === 'npc_stay' && !s.place) {
@@ -417,6 +428,33 @@ function guardOwners(id, people, present = null) {
     }
     return out;
 }
+/** The people just left behind and the people here, in alongCheck's shape, for the reply at `id`. */
+function alongContext(chat, id, loc = null) {
+    const shape = p => ({ id: handleOf(p.id), npcId: p.id, name: shownName(p), label: shownName(p), aliases: [...(p.aliases ?? [])], unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false });
+    let listed = [];
+    try { listed = presentAt(chat, id, castPack()?.npcs ?? [], npcEnv(chat, loc)).map(shape); } catch { listed = []; }
+    return { candidates: leftBehind(chat, id, loc), listed };
+}
+/**
+ * 4-NF: tracker items about someone just left behind, and the tracker's old follow. An appearance or fact item for them is dropped (they are not here),
+ * noted in the Activity log; memory, disposition and name items are kept (a goodbye is a real memory). came_along items
+ * go on to applyPersonStamps, which checks them for every source (tracker and tag).
+ */
+function guardLeftBehind(id, people, candidates) {
+    // came_along replaces the tracker's follow (no following state from the tracker); the [ws_npc: follow] tag still stamps it.
+    people = (people ?? []).filter(item => {
+        if (item.action !== 'follow') return true;
+        noteCall(id, { kind: 'tracker follow', status: 'skipped', reason: 'follow is not a tracker action (came_along replaces it): dropped' });
+        return false;
+    });
+    if (!candidates?.length) return people;
+    return people.filter(item => {
+        if (item.action === 'came_along') return true;
+        const r = alongCheck(item, candidates, [], '');
+        if (r.verdict === 'drop') noteCall(id, { kind: 'tracker owner', status: 'skipped', reason: r.reason });
+        return r.verdict !== 'drop';
+    });
+}
 /** How far apart two "HH:MM" times are in minutes, the short way round midnight. */
 function clockGap(a, b) {
     const m = x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; };
@@ -443,10 +481,11 @@ function waitClockOverride(chat, id, msg, wait) {
     return { said: null, from: '' };
 }
 /** Feed a tracker answer into the place rewrite and the person apply. No third apply path. */
-export async function applyTrackerResult(id, parsed, { present = null } = {}) {
+export async function applyTrackerResult(id, parsed, { present = null, behind = null } = {}) {
     const c = ctx(), msg = c.chat?.[id];
     if (!msg) return;
     const gated = gateTracker(parsed, { places: settings().flagTags !== false, people: settings().flagNpcs !== false });
+    gated.people = guardLeftBehind(id, gated.people, behind ?? leftBehind(c.chat, id, null));
     gated.people = guardOwners(id, gated.people, present);
     const { stamps, found, names, dropped: noEnd } = trackerPayloads(gated.people);
     noteDroppedFacts(id, 'tracker fact', noEnd);
@@ -534,8 +573,9 @@ async function trackReply(id, { attempt: first = 1 } = {}) {
         let present = null;
         try { present = presentAt(chat, id, castPack()?.npcs ?? [], npcEnv(chat, loc)); } catch { present = null; }
         const engineLines = trackerExpiryLines(freshPersonExpiries(chat, id));
+        const behind = leftBehind(chat, id, loc); // 4-NF: on a move, who was just left behind (the came_along candidates)
         // Every line of the scrap is engine text (the story and the player's line are not in it): masked as a whole.
-        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), engineLines }));
+        const scrap = maskForModel(trackerScrap({ placeName: loc?.name || '', displayName: loc?.display_name || '', placeDescription: loc?.description || '', exits: exitsText(loc).replace(/^Exits: /, ''), time: date ? { part: date.part, time: date.time } : null, weather, peopleLines: trackerPeopleLines(people), leftBehind: trackerLeftBehind(behind), engineLines }));
         const prompt = trackerPrompt({ scrap, player: playerLineBefore(chat, id), story: msg.mes ?? '' });
         let parsed = null;
         for (let attempt = first; attempt <= last; attempt++) {
@@ -553,7 +593,7 @@ async function trackReply(id, { attempt: first = 1 } = {}) {
         const n = (parsed.place ? 1 : 0) + parsed.people.length + (parsed.wait ? 1 : 0);
         noteCall(id, { kind: 'tracker', status: 'ok', reason: n ? `${n} change${n === 1 ? '' : 's'}` : 'nothing changed' });
         const before = (msg.extra?.[NPC_KEY] ?? []).length;
-        await applyTrackerResult(id, parsed, { present });
+        await applyTrackerResult(id, parsed, { present, behind });
         personChanged = (msg.extra?.[NPC_KEY] ?? []).length !== before; // a person stamp landed: the Cast pane needs the new state
         if (trackerGen(msg) === genNo && swipeOf(msg) === swipe) status = hasTrackerCard(msg) ? 'carded' : 'tracked';
     } catch (e) {
