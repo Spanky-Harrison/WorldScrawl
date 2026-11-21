@@ -119,7 +119,7 @@ test('already here: a "right here" notice, nothing stamped, nothing moves; the n
     await scene.prepareNpcs(m); // the turn's own pass: she turns up as usual (her roll put her here)
     assert.ok(presentIds(c).includes('bryn'));
     const t = await factsText(blocks);
-    assert.doesNotMatch(t, /has just come in/);
+    assert.doesNotMatch(t, /came in just now/);
     assert.doesNotMatch(t, /isn't around here right now/, 'right here: no not-found line');
 });
 
@@ -179,14 +179,15 @@ test('a room the block lists directly: she comes here, guaranteed, until the blo
     assert.equal(placeNow(c, 'vera'), BAR);
     assert.ok(presentIds(c).includes('vera'));
     const text = await factsText(blocks);
-    assert.match(text, /Vera has just come in\./);
+    assert.match(blocks[ext.REMINDER_KEY], /^Vera came in just now and is here at the end of this reply\. Show them arriving\.$/m, 'after the player\'s message');
+    assert.doesNotMatch(blocks[ext.FACTS_KEY], /came in just now/, 'not in the people-here block');
     assert.doesNotMatch(text, /isn't around here right now/, 'found: no not-found line');
     assert.doesNotMatch(text, /%|\broll|might be at|nowhere|wander|\bblock\b|segment|\[find\]/i, 'in-world facts only');
     // Who's here for the common room agrees with the cast panel.
     assert.ok(whoAt(c.chat, c.chat.length - 1, cast(), envOf(c), BAR).some(r => r.id === 'vera' && r.here));
     reply(c, 'Vera comes in with a basket of eggs.');
     say(c, 'I nod to her.');
-    assert.doesNotMatch(await factsText(blocks), /has just come in/, 'only on the turn of the [find]');
+    assert.doesNotMatch(await factsText(blocks), /came in just now/, 'only on the turn of the [find]');
     reply(c, 'She nods back.');
     await waitFor(c, '[wait] 1h'); // 11:00: still the same block
     assert.equal(placeNow(c, 'vera'), BAR);
@@ -292,7 +293,7 @@ test('unknown name and the tracker path: no saved person is a plain rejection; t
 });
 
 test('a turned-down [find] puts one firm in-world not-found line after the player\'s message (nowhere, not an option, is-at elsewhere, off the map), no reason or mechanics', async () => {
-    const line = name => `You looks for ${name} but does not find them. ${name} is not here and does not appear in this reply in any form: no arrival, no voice, no glimpse, no sign of them. Nobody else stands in for ${name} or answers as them.`;
+    const line = name => `You looked for ${name} and did not find them: ${name} is somewhere else, and this reply ends without them. Show the search coming up empty. Anyone who answers is one of the people listed here, speaking as themselves.`;
     const bad = /%|\broll|might be at|nowhere|wander|\bblock\b|segment|\[find\]|schedule|option/i;
     const cases = [['10:00', BAR, 'Nell', 'Nell'], ['10:00', BAR, 'Sol', 'Sol'], ['15:30', BAR, 'Hesk', 'The landlady'], ['10:00', BAR, 'Odo', 'Odo'], ['08:00', UP, 'Hesk', 'The landlady']];
     for (const [time, here, who, shown] of cases) {
@@ -301,14 +302,14 @@ test('a turned-down [find] puts one firm in-world not-found line after the playe
         assert.equal(d.ok, false, `${who}: ${d.reason}`);
         await scene.prepareNpcs(m);
         const text = await factsText(blocks);
-        const hits = text.split('\n').filter(l => /but does not find them\./.test(l));
+        const hits = text.split('\n').filter(l => /and did not find them:/.test(l));
         assert.deepEqual(hits, [line(shown)], `${who} at ${time}`);
         assert.ok(blocks[ext.REMINDER_KEY].split('\n').includes(line(shown)), `${who}: in the after-message slot`);
-        assert.ok(!blocks[ext.FACTS_KEY].includes('does not find them'), `${who}: not in the facts block`);
+        assert.ok(!blocks[ext.FACTS_KEY].includes('did not find them'), `${who}: not in the facts block`);
         assert.doesNotMatch(hits[0], bad);
         assert.ok(!text.includes(d.reason), 'the reason stays on the player\'s notice');
         reply(c, 'Nobody comes.');
         say(c, 'I order a drink.');
-        assert.doesNotMatch(await factsText(blocks), /does not find them/, `${who}: only on the turn of the [find]`);
+        assert.doesNotMatch(await factsText(blocks), /did not find them/, `${who}: only on the turn of the [find]`);
     }
 });

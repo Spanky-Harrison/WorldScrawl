@@ -150,7 +150,7 @@ test('appearance rebuild and light-touch system prompts carry the passing-moment
     assert.ok(fr.locked);
     assert.ok(PROMPTS.placeholders.fact_rules);
     assert.ok(PROMPTS.placeholders.memory_rules && PROMPTS.placeholders.role);
-    const want = { 'narration.door_stuck': ['door', 'party', 'place', 'why'], 'narration.door_stuck_move': ['door', 'party', 'place', 'why'], 'narration.dig_failed': ['party', 'place'], 'narration.npc_not_found': ['not_found', 'party'], 'narration.npc_identity': ['role', 'shown'] };
+    const want = { 'narration.door_stuck': ['door', 'party', 'place', 'why'], 'narration.door_stuck_move': ['door', 'party', 'place', 'why'], 'narration.dig_failed': ['party', 'place'], 'narration.npc_not_found': ['not_found', 'party'], 'narration.npc_identity': ['role', 'shown'], 'narration.npc_on_arrival': ['lines', 'party', 'where'] };
     for (const [id, names] of Object.entries(want)) assert.deepEqual(entry(id).placeholders.map(p => p.name).sort(), names, id);
 });
 test('a moment intent whose rewrite leaves the fields as they are: no card, a skipped "no change" call note', async () => {

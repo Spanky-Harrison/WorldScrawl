@@ -86,12 +86,13 @@
         const b = btn(card, label); if (!b) return false;
         b.click(); await new Promise(r => setTimeout(r, 800)); return true; }, { label, amount });
     // The narrator has no wait tool (the after-reply tracker reports waits); a pasted [ws_wait] tag still waits on a card.
+    // (The chat starts at 08:00, already morning: "until morning" would be no time, so the tag asks for tomorrow's.)
     check('no story tools sent to the model, movement tools are', !/ws_wait|ws_npc|ws_flag/.test(JSON.stringify(reqs[0].tools ?? [])) && JSON.stringify(reqs[0].tools ?? []).includes('ws_move'));
     check('Auto-keep waits is off by default', await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.autoKeepWaits === false && !document.getElementById('worldscrawl_auto_keep_waits').checked));
     let ws;
-    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until morning | sleeping on the bench]' }]);
+    await queue([{ content: 'You bed down on a bench. [ws_wait: sleep until tomorrow morning | sleeping on the bench]' }]);
     await send('I sleep.', 1);
-    check('[ws_wait] tag: a card with the amount, nothing stamped yet', JSON.stringify(await waitCards()).includes('until morning') && (await waits()).length === 0, JSON.stringify(await waitCards()));
+    check('[ws_wait] tag: a card with the amount, nothing stamped yet', JSON.stringify(await waitCards()).includes('until tomorrow morning') && (await waits()).length === 0, JSON.stringify(await waitCards()));
     check('[ws_wait] tag reason shows on the card', /Why: sleeping on the bench/.test(await page.evaluate(() => document.querySelector('.worldscrawl_waitcard')?.textContent ?? '')));
     check('[ws_wait] tag stripped from reply', await page.evaluate(() => { const b = SillyTavern.getContext().chat.filter(m => /bench/.test(m.mes ?? '')); return b.length > 0 && b.every(m => !/ws_wait/.test(m.mes)); }));
     check('Edit → Approve edited stamps the typed amount (6h sleep) with its reason', await cardClick('Approve edited', '6h') && (ws = await waits()).length === 1 && ws[0].sleep && ws[0].seconds === 6 * 3600 && ws[0].reason === 'sleeping on the bench', JSON.stringify(ws));

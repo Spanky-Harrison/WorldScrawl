@@ -281,12 +281,13 @@ test('[find] a known person who is not around: narrated; the firm not-found line
     assert.equal(aborted, 0, 'narrated');
     assert.equal(c.chat[at].is_system, undefined);
     const after = rec.blocks[REMINDER_KEY];
-    assert.match(after, /You looks for Nell but does not find them\. Nell is not here and does not appear in this reply in any form: no arrival, no voice, no glimpse, no sign of them\. Nobody else stands in for Nell or answers as them\./);
-    assert.doesNotMatch(rec.blocks[FACTS_KEY], /does not find them/);
+    assert.ok(after.split('\n').includes('You looked for Nell and did not find them: Nell is somewhere else, and this reply ends without them. Show the search coming up empty. Anyone who answers is one of the people listed here, speaking as themselves.'), after);
+    assert.doesNotMatch(after, /no voice|no glimpse|does not appear/, 'says where they are not, positively');
+    assert.doesNotMatch(rec.blocks[FACTS_KEY], /did not find them/);
     reply(c, 'Nobody comes.');
     say(c, 'I order a drink.');
     await intercept(c, rec);
-    assert.doesNotMatch(rec.blocks[REMINDER_KEY], /does not find them/, 'only that turn');
+    assert.doesNotMatch(rec.blocks[REMINDER_KEY], /did not find them/, 'only that turn');
 });
 for (const [text, why] of [['[find]', /needs a name/], ['[find] Zed', /No saved person is called "Zed"/]]) {
     test(`"${text}": a failure short-circuit (flagged, error, hidden, one notice); nobody is invented in the next prompt`, async () => {
@@ -301,7 +302,7 @@ for (const [text, why] of [['[find]', /needs a name/], ['[find] Zed', /No saved 
         assert.equal(noticesAfter(c, at).length, 1);
         say(c, 'I look around.');
         await intercept(c, rec);
-        assert.doesNotMatch(`${rec.blocks[FACTS_KEY]}\n${rec.blocks[REMINDER_KEY]}`, /Zed|does not find them/);
+        assert.doesNotMatch(`${rec.blocks[FACTS_KEY]}\n${rec.blocks[REMINDER_KEY]}`, /Zed|did not find them/);
     });
 }
 
@@ -386,9 +387,9 @@ for (const [text, mode] of [['[move] back', 'buttons'], ['I go back', 'typed']])
         assert.equal(c.chat[at].extra.worldscrawl_door.attempt, 'move');
     });
 }
-test('the after-message slot order is arrival, attempt, not-found, identity (source pin on applyFacts)', () => {
+test('the after-message slot order is arrival, on arrival, attempt, found, comings, not-found, identity (source pin on applyFacts)', () => {
     const src = fs.readFileSync(new URL('../../extension/scene.mjs', import.meta.url), 'utf8');
-    assert.match(src, /reminder = \[arrivalReminder\(loc, move\), \.\.\.attemptLines\(loc, move, facts\), \.\.\.\(facts\.after \?\? \[\]\)\]/);
+    assert.match(src, /reminder = \[arrivalReminder\(loc, move\), \.\.\.\(af\.onArrival \?\? \[\]\), \.\.\.attemptLines\(loc, move, facts\), \.\.\.\(af\.found \?\? \[\]\), \.\.\.\(af\.comings \?\? \[\]\), \.\.\.\(af\.notFound \?\? \[\]\)\]/);
     const nf = src.slice(src.indexOf('function notFoundLines'));
     assert.ok(nf.indexOf("'narration.npc_not_found'") < nf.indexOf("'narration.npc_identity'"));
 });
@@ -406,14 +407,14 @@ test('identity: a known name gets "<name> is the landlady of the Drowned Rat." r
         const { c, rec } = boot({ time: '08:00' });
         c.chat[0].extra[NPC_KEY] = [{ type: 'npc_name', id: 'hesk', who: 'player', source: 'bracket' }];
         const lines = await notFoundFor(c, rec, 'hesk', 'Hesk');
-        const i = lines.findIndex(l => /looks for Hesk but does not find them/.test(l));
+        const i = lines.findIndex(l => /looked for Hesk and did not find them/.test(l));
         assert.ok(i >= 0, lines.join('\n'));
         assert.equal(lines[i + 1], 'Hesk is the landlady of the Drowned Rat.');
     }
     {
         const { c, rec } = boot({ time: '08:00' });
         const lines = await notFoundFor(c, rec, 'hesk', 'the landlady');
-        assert.ok(lines.some(l => /looks for The landlady but does not find them/.test(l)), lines.join('\n'));
+        assert.ok(lines.some(l => /looked for The landlady and did not find them/.test(l)), lines.join('\n'));
         assert.ok(!lines.some(l => / is the landlady/.test(l)), 'no identity line while the name is unknown');
         assert.doesNotMatch(lines.join('\n'), /Hesk/);
     }
@@ -432,7 +433,7 @@ test('identity: a saved job spot beats "Is at"; offmap job text; no pick takes t
         const { c, rec } = boot({ time: '10:00' });
         c.chat[0].extra[NPC_KEY] = make(id, name, as, extra);
         const lines = await notFoundFor(c, rec, id, name);
-        const i = lines.findIndex(l => l.includes(`looks for ${name} but does not find them`));
+        const i = lines.findIndex(l => l.includes(`looked for ${name} and did not find them`));
         assert.ok(i >= 0, `${id}: ${lines.join(' | ')}`);
         if (want) assert.match(lines[i + 1] ?? '', want, id);
         else assert.equal(lines[i + 1], undefined, `${id}: no unknownAs, no identity line`);
@@ -544,12 +545,12 @@ test('after a hidden [remember], applyFacts reads nothing from the previous turn
     const { c, rec } = boot({ time: '10:00' });
     say(c, '[find] Nell');
     await intercept(c, rec);
-    assert.match(rec.blocks[REMINDER_KEY], /does not find them/);
+    assert.match(rec.blocks[REMINDER_KEY], /did not find them/);
     reply(c, 'Nobody.');
     say(c, '[remember] Maren');
     await intercept(c, rec);
     await scene.applyFacts();
-    assert.doesNotMatch(rec.blocks[REMINDER_KEY] ?? '', /does not find them/);
+    assert.doesNotMatch(rec.blocks[REMINDER_KEY] ?? '', /did not find them/);
     assert.doesNotMatch(rec.blocks[FACTS_KEY] ?? '', /took/);
 });
 
@@ -636,7 +637,7 @@ test('/ws-find: right here and found make the same decisions as [find] on the la
     await cmds['ws-find'].callback({}, 'Zed');
     assert.match(c.chat.at(-1).mes, /No saved person is called "Zed"/);
     await scene.applyFacts();
-    assert.doesNotMatch(rec.blocks[REMINDER_KEY] ?? '', /does not find them/, 'a slash find never feeds the narrator');
+    assert.doesNotMatch(rec.blocks[REMINDER_KEY] ?? '', /did not find them/, 'a slash find never feeds the narrator');
 });
 
 // ---------------------------------------------------------------- typed notices, a look at a stuck door, regenerate
