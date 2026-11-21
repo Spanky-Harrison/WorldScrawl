@@ -10,7 +10,7 @@ import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stamp
 import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
 import { targetLabel, textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, narratorWeather, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
-import { baseReply, gen, noteCall } from './dig.mjs';
+import { baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { discardFlag, flagMessage, markUnreadTags, syncSwipeExtra, trackerRetryMode } from './discovery.mjs';
 import { currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { renderAllExits } from './footer.mjs';
@@ -48,7 +48,7 @@ export async function modelWait(amount, cal = null, lib = calendarLib) {
         const c = cal ? lib.checkCalendar(cal) : undefined;
         if (Number.isFinite(Number(a?.seconds)) && Number(a.seconds) > 0) return { seconds: Math.min(Math.round(Number(a.seconds)), 30 * 86400) };
         if (typeof a?.until === 'string' && a.until.trim()) {
-            if (NAMES_MINUTES.test(String(amount)) && /^\s*\d{1,2}:00\s*$/.test(a.until)) { console.warn('[WorldScrawl] wait amount: answer on the hour for', amount); return null; }
+            if (NAMES_MINUTES.test(String(amount)) && /^\s*\d{1,2}:00\s*$/.test(a.until)) { markLast(undefined, 'wait amount', 'failed', `the answer ${a.until.trim()} is on the hour, but the amount names minutes`); return null; }
             return lib.parseWait(`until ${a.until.trim()}`, c);
         }
     } catch (e) { console.warn('[WorldScrawl] wait amount', e.message); }
@@ -58,7 +58,8 @@ export async function modelWait(amount, cal = null, lib = calendarLib) {
  * Work out a wait from its arguments: {seconds, sleep, label, until, afterText} or {error}. Nothing is stamped.
  * An "until" time today that is right now: from the player ([wait], /ws-wait, the Wait menu, Approve edited) it is an error
  * (same minute; one minute ahead works, an earlier time means tomorrow). So is a part of the day the clock is already in
- * ("until morning" during the morning). From the narrator (options.narrator: the tracker and the wait tags) a time up to
+ * ("until morning" during the morning; morning, afternoon, evening and night only: noon, midnight, dawn and dusk are points
+ * like a clock time). From the narrator (options.narrator: the tracker and the wait tags) a time up to
  * NEAR_NOW behind, or the part of the day it is now, means it is already then: {seconds: 0, passed: true} (dropped as short).
  * An hour with two readings ("until 9:30") takes the next to come; if either is right now it is the same-minute case above.
  * "tomorrow …" is always the next day's, never an error.
@@ -79,15 +80,14 @@ export async function planWait(args, sleep = false, reason = '', { narrator = fa
         let sun = null; try { sun = sunFor(await currentLocation()); } catch {}
         const hhmm = () => { try { const d = calendarLib.dateAt(now, t?.start_date ?? null, cal); return `${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}`; } catch { return p.until; } };
         const sd = t?.start_date ?? null, readings = p.alt ? [p.until, p.alt] : [p.until];
-        const partWord = w => (w === 'noon' ? 'afternoon' : w);
         try {
             if (p.tomorrow) seconds = calendarLib.untilTomorrowSeconds(now, p.until, sd, cal, sun);
             else {
                 const partNow = calendarLib.untilPartNow(now, p.until, sd, cal, sun);
                 if (narrator) {
                     const behind = readings.map(r => calendarLib.untilBehind(now, r, sd, cal, sun));
-                    if (partNow || behind.some(b => b != null && b <= calendarLib.NEAR_NOW)) return { seconds: 0, passed: true, sleep, until: p.until, label: `no time (already ${partNow ? partWord(p.until) : hhmm()})`, afterText: '', reason: waitReason(reason) };
-                } else if (partNow) return { error: `it is already ${partWord(p.until)}; say how long or a later time` };
+                    if (partNow || behind.some(b => b != null && b <= calendarLib.NEAR_NOW)) return { seconds: 0, passed: true, sleep, until: p.until, label: `no time (already ${partNow ? p.until : hhmm()})`, afterText: '', reason: waitReason(reason) };
+                } else if (partNow) return { error: `it is already ${p.until}; say how long or a later time` };
                 else if (readings.some(r => calendarLib.untilNow(now, r, sd, cal, sun))) return { error: `it is already ${hhmm()}; say how long or a later time` };
                 const ahead = readings.map(r => ({ r, s: calendarLib.untilSeconds(now, r, sd, cal, sun) })).sort((a, b) => a.s - b.s)[0];
                 seconds = ahead.s; p = { ...p, until: ahead.r };

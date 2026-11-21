@@ -351,7 +351,7 @@ function targetOfDay(day0, target, spd, cal, sunAt) {
     let sun = null; try { sun = sunAt?.(Math.max(0, day0 + spd / 2)) ?? null; } catch { sun = null; }
     const okSun = sun && Number.isFinite(sun.sunrise) && Number.isFinite(sun.sunset) && sun.sunset > sun.sunrise;
     const at = { dawn: okSun ? sun.sunrise : frac(6 / 24), morning: okSun ? Math.min(sun.sunrise + 3600, frac(0.5)) : frac(7 / 24),
-        noon: frac(0.5), afternoon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: spd }[target]
+        noon: frac(0.5), afternoon: frac(0.5), dusk: okSun ? sun.sunset : frac(19 / 24), evening: frac(17 / 24), night: frac(21 / 24), midnight: 0 }[target]
         ?? parseClock(target, cal);
     return Math.round(at);
 }
@@ -390,21 +390,19 @@ export function untilTomorrowSeconds(elapsed, target, start = null, cal = null, 
     const day0 = dayStart + spd;
     return day0 + targetOfDay(day0, target, spd, c, sunAt) - Math.floor(elapsed);
 }
-/** The parts of the day a wait word spans, in order: each runs until the next starts (night runs on to the next dawn). */
-const PART_SPANS = ['dawn', 'morning', 'noon', 'evening', 'night'];
+/** The parts of the day a wait word spans: each runs until the next starts (night runs on to the next dawn). */
+const PART_SPANS = { morning: ['morning', 'noon'], afternoon: ['afternoon', 'evening'], evening: ['evening', 'night'], night: ['night', 'dawn'] };
 /**
  * Is game time `elapsed` already in the part of the day `target` names ("until morning" during the morning, "until
- * evening" at 18:30)? dawn, morning, noon/afternoon, evening and night are spans; dusk is a point (within NEAR_NOW).
- * Clock times and midnight are not parts: false.
+ * evening" at 18:30)? Only morning, afternoon, evening and night are spans. Noon, midnight, dawn, dusk and clock times
+ * are points (the clock rule: untilNow / untilBehind): false.
  */
 export function untilPartNow(elapsed, target, start = null, cal = null, sunAt = null) {
-    const word = target === 'afternoon' ? 'noon' : target;
-    if (word !== 'dusk' && !PART_SPANS.includes(word)) return false;
-    const { dayStart, spd, cal: c } = todayTarget(elapsed, word, start, cal, sunAt);
-    const sod = Math.floor(elapsed) - dayStart, at = w => targetOfDay(dayStart, w, spd, c, sunAt);
-    if (word === 'dusk') return Math.abs(sod - at('dusk')) <= NEAR_NOW;
-    if (word === 'night') return sod >= at('night') || sod < at('dawn');
-    return sod >= at(word) && sod < at(PART_SPANS[PART_SPANS.indexOf(word) + 1]);
+    const span = PART_SPANS[target];
+    if (!span) return false;
+    const { dayStart, spd, cal: c } = todayTarget(elapsed, target, start, cal, sunAt);
+    const sod = Math.floor(elapsed) - dayStart, [from, to] = span.map(w => targetOfDay(dayStart, w, spd, c, sunAt));
+    return from < to ? sod >= from && sod < to : sod >= from || sod < to;
 }
 /** Is today's `target` in the same minute as game time `elapsed` (a player's "until 17:15" at 17:15 or 17:15:40)? */
 export function untilNow(elapsed, target, start = null, cal = null, sunAt = null) {
