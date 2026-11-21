@@ -264,4 +264,11 @@ async function renderAllExits() {
     document.querySelectorAll('#chat .mes[mesid]').forEach(el => renderExits(el.getAttribute('mesid')));
 }
 
-export { exitsCache, fetchLocationCached, fetchRaw, locationAt, newRoom, primeCache, renderAllExits, renderStartButton, warmRooms };
+/** Redraw the exits footers of messages `from`..end (display only; the cached rooms, no door sync): after the
+ *  after-reply tracker applied stamps, so "Named NPCs present" shows who it just placed. */
+async function renderExitsFrom(from) {
+    const n = ctx().chat?.length ?? 0;
+    for (let i = Math.max(0, Number(from) || 0); i < n; i++) await renderExits(i);
+}
+
+export { exitsCache, fetchLocationCached, fetchRaw, locationAt, newRoom, primeCache, renderAllExits, renderExitsFrom, renderStartButton, warmRooms };

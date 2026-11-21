@@ -178,9 +178,18 @@ export function madeRefs(raw, op, made, w = 'patch') {
     return o;
 }
 /** One op with its room references written as full addresses and a merge's new "id" as a bare id (the area taken from a full address). */
+/**
+ * An update_area whose notes came under "text" (no "lore"): the notes are its lore, read the same everywhere (applying the
+ * change, its preview, and the rewrite of its text). Any other op is returned as it is.
+ */
+export function loreAlias(op) {
+    if (!isObj(op) || op.op !== 'update_area' || str(op.lore) || !str(op.text)) return op;
+    const { text, ...rest } = op;
+    return { ...rest, lore: text };
+}
 export function normalizeOp(raw, op) {
     if (!isObj(op)) return op;
-    const o = { ...op };
+    const o = { ...loreAlias(op) };
     for (const k of ['loc', 'into']) if (typeof o[k] === 'string' && o[k].trim()) o[k] = resolveRoom(raw, o[k]);
     if (o.op === 'set_fields' && typeof o.target === 'string' && o.target.includes('/')) o.target = resolveRoom(raw, o.target);
     if (o.op === 'add_exit' && typeof o.to === 'string' && o.to.trim()) o.to = resolveRoom(raw, o.to);
