@@ -32,6 +32,8 @@
         check('came_along: the move\'s tracker request lists her under "Just left behind in Common Room", masked', /Just left behind in Common Room \(with the player there before this move/.test(tReq) && /^the landlady \[\w+\]/m.test(tReq.slice(tReq.indexOf('Just left behind in'))) && !/Hesk/.test(tReq), tReq.slice(tReq.indexOf('People here'), tReq.indexOf('People here') + 400));
         const got = await page.evaluate(() => { const r = SillyTavern.getContext().chat.findLast(m => !m.is_user); return { s: (r.extra?.worldscrawl_npc ?? []).filter(x => x.type === 'npc_along'), card: [...document.querySelectorAll('#chat .worldscrawl_npcchange')].map(e => e.textContent).find(t => /came along/.test(t)) ?? '' }; });
         check('came_along: held in the square by a tracker npc_along stamp; a kept card with Turn off and Undo', got.s.length === 1 && got.s[0].place === 'riverton:streets/square' && got.s[0].source === 'tracker' && /came along to Village Square/.test(got.card) && /Turn off/.test(got.card) && /Undo/.test(got.card), JSON.stringify(got));
+        const foot = await page.evaluate(() => { const i = SillyTavern.getContext().chat.length - 1; return document.querySelector(`#chat .mes[mesid="${i}"] .worldscrawl_npcs_here`)?.textContent ?? ''; });
+        check('came_along: the reply\'s footer lists her as present once the tracker is done (no other redraw)', /Named NPCs present: .*the landlady/.test(foot), foot);
         const from = (await reqsOf()).length;
         await turn('I look around the square.', [{ content: 'Stalls are closing for the night.' }]);
         const told = (await narr(from)).map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
