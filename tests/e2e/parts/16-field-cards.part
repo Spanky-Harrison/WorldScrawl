@@ -1,0 +1,58 @@
+    // ---- 4-G field cards: in a fresh Riverton chat at 17:00 in the common room, the (auto) tracker reports one
+    // appearance change for the landlady naming Body and Outfit. Two cards come up ("Body: …" and "Outfit: …"), each
+    // composed alone; approving Outfit leaves Body pending; Looks is asked once, after the Body card is approved too.
+    {
+        const pickedWorld = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.world);
+        await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = 'riverton'; s.dispatchEvent(new Event('change')); });
+        const fcWas = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.moveMode);
+        await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+        await settle(4000);
+        await page.evaluate(async () => {
+            const c = SillyTavern.getContext(), now = Date.now();
+            c.extensionSettings.worldscrawl.moveMode = 'buttons'; // no intent call on the player's line: the queue is the story and the compose calls
+            c.chat.push({ name: c.name1, is_user: true, mes: 'I come in out of the rain.', send_date: now, swipe_id: 0, extra: { worldscrawl_intent_checked: true } },
+                { name: c.name2, is_user: false, mes: 'The common room is warm.', send_date: now, swipe_id: 0, swipes: ['The common room is warm.'], swipe_info: [{ extra: {} }],
+                    extra: { worldscrawl_mid: `m${now}`, worldscrawl_location: 'riverton:drowned_rat/common_room' } });
+            await c.saveChat(); await c.reloadCurrentChat();
+        });
+        await settle(3000);
+        const fcTurn = async (text, items) => {
+            await queue(items);
+            const last = items.filter(x => x.kind !== 'tracker' && !x.after).at(-1).content;
+            await page.fill('#send_textarea', text); await page.click('#send_but');
+            await page.waitForFunction(t => SillyTavern.getContext().chat.at(-1)?.mes === t && !jQuery('#mes_stop').is(':visible'), last, { timeout: 30000 });
+            await settle(4000);
+        };
+        await fcTurn('[wait] 9h', [{ content: 'The evening crowd drifts in.' }]);
+        const castNow = await (await stFetch('/cast?world=riverton')).json();
+        const hk = castNow.npcs?.find(x => x.id === 'hesk') ?? {};
+        const COMPOSED = JSON.stringify({ body: `${hk.body} Rainwater drips from her braids.`, outfit: `${hk.outfit} Everything is soaked through.` });
+        const SOAKED = JSON.stringify({ place: null, people: [{ id: 'hesk', action: 'appearance', intent: 'soaked by the rain', fields: 'body, outfit', lasts: '', scope: 'light', why: 'one detail each' }], wait: null });
+        const STORY = 'The landlady comes in from the yard, soaked by the rain, her braids dripping.';
+        await fcTurn('I nod to her.', [{ content: STORY }, { kind: 'tracker', content: SOAKED }, { content: COMPOSED, after: true }, { content: COMPOSED, after: true }]);
+        const fcFrom = (await reqsOf('all')).length;
+        const fcState = () => page.evaluate(() => {
+            const ch = SillyTavern.getContext().chat, i = ch.length - 1;
+            const os = (ch[i].extra?.worldscrawl_npc ?? []).filter(s => s.type === 'npc_appearance');
+            const cards = [...document.querySelectorAll(`#chat .mes[mesid="${i}"] .worldscrawl_npcpending`)].map(e => e.textContent);
+            return { os: os.map(o => ({ f: o.candidate?.fields ?? o.committed?.fields, phase: o.candidate?.phase ?? null, kept: !!o.committed })), cards };
+        });
+        const s1 = await fcState();
+        check('4-G: one tracker change to Body and Outfit makes two cards, "Body: …" and "Outfit: …", both up for review',
+            s1.os.length === 2 && s1.os.every(o => o.phase === 'review') && s1.cards.some(t => /Body: Proposed person change:/.test(t)) && s1.cards.some(t => /Outfit: Proposed person change:/.test(t)), JSON.stringify(s1));
+        const asked = (await reqsOf()).filter(r => r.messages.some(m => /^(Edit|Rewrite) (body|outfit) for /m.test(String(m.content)))).map(r => r.messages.map(m => String(m.content)).join('\n').match(/^(Edit|Rewrite) (body, outfit|body|outfit) for /m)?.[2]);
+        check('4-G: each card was composed alone (one call for body, one for outfit)', asked.length === 2 && asked.includes('body') && asked.includes('outfit'), JSON.stringify(asked));
+        await page.locator('.worldscrawl_npcpending', { hasText: 'Outfit: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2000);
+        const s2 = await fcState();
+        check('4-G: approving Outfit keeps it and leaves the Body card pending', s2.os.find(o => o.f === 'outfit')?.kept && s2.os.find(o => o.f === 'body')?.phase === 'review' && s2.cards.length === 1 && /Body:/.test(s2.cards[0]), JSON.stringify(s2));
+        // The Body card was composed before Outfit was kept: Approve asks Body again on the kept Outfit (one call), then Approve keeps it and Looks is asked once.
+        await queue([{ content: COMPOSED }, { content: '{"looks":"a big woman with dripping copper braids"}' }]);
+        await page.locator('.worldscrawl_npcpending', { hasText: 'Body: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2500);
+        if ((await fcState()).os.find(o => o.f === 'body')?.kept !== true) { await page.locator('.worldscrawl_npcpending', { hasText: 'Body: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2500); }
+        const s3 = await fcState();
+        const looksCalls = (await reqsOf('all')).slice(fcFrom).filter(r => r.messages.some(m => /Looks line/.test(String(m.content)))).length;
+        check('4-G: both kept; Looks asked once, after the last card', s3.os.every(o => o.kept) && looksCalls === 1, JSON.stringify({ s3, looksCalls }));
+        await page.evaluate(m => { SillyTavern.getContext().extensionSettings.worldscrawl.moveMode = m; }, fcWas);
+        await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
+        await settle(2000);
+    }

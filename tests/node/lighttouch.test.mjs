@@ -67,15 +67,17 @@ test('the Hesk case: the tracker\'s light outfit change (fill runs inside applyT
     assert.equal(o.candidate.liveKey, o.candidate.lastingKey);
 });
 
-test('a light change on both fields uses the light prompt and asks both; an extra field in the answer is ignored', async () => {
-    const { c, calls } = boot(() => JSON.stringify({ body: TIED, outfit: 'damp hem', looks: 'x' }));
+test('4-G: a light change on both fields is two cards, each a light edit of its own field; an extra field in an answer is ignored', async () => {
+    const { c, calls } = boot((prompt) => JSON.stringify(/^Edit body/.test(prompt) ? { body: TIED, outfit: 'x', looks: 'x' } : { outfit: 'damp hem', body: 'x' }));
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'braids tied back, hem damp', fields: 'body,outfit', scope: 'light', why: 'two details' }] });
-    const o = ownerOn(c);
-    assert.equal(o.candidate.phase, 'review');
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].system, LIGHT_SYS);
-    assert.match(calls[0].prompt, /^Edit body, outfit for Hesk:/);
-    assert.deepEqual(o.candidate.lastingPreview, { body: TIED, outfit: 'damp hem' });
+    const os = (c.chat[0].extra[NPC_KEY] ?? []).filter(s => s.type === 'npc_appearance');
+    assert.deepEqual(os.map(o => o.candidate.fields), ['body', 'outfit']);
+    assert.equal(calls.length, 2);
+    for (const x of calls) assert.match(x.system, LIGHT_SYS);
+    assert.match(calls[0].prompt, /^Edit body for Hesk:/);
+    assert.match(calls[1].prompt, /^Edit outfit for Hesk:/);
+    assert.deepEqual(os[0].candidate.lastingPreview, { body: TIED, outfit: BASE.outfit });
+    assert.deepEqual(os[1].candidate.lastingPreview, { body: BASE.body, outfit: 'damp hem' });
 });
 
 test('a body-only light change: an answer that also rewrites the outfit keeps the base outfit', async () => {
@@ -96,7 +98,7 @@ test('an answer missing an asked field is still partial (nothing stored, the car
     assert.equal(calls.length, 2, 'tried twice');
 });
 
-test('mixed light and full keeps the rewrite prompt, with each intent marked', async () => {
+test('a light Outfit change after a kept full Body change: the light edit on the Outfit alone (4-G)', async () => {
     const { c, calls } = boot(() => '{"body":"a furred gnoll","outfit":"damp hem"}');
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'turned into a gnoll', fields: 'body', scope: 'heavy', why: 'whole body' }] });
     const gnoll = ownerOn(c);
@@ -109,10 +111,12 @@ test('mixed light and full keeps the rewrite prompt, with each intent marked', a
     const hem = ownerOn(c, 1);
     assert.equal(hem.candidate.phase, 'review');
     assert.equal(calls.length, 1);
-    assert.match(calls[0].system, FULL_SYS, 'light + full: the old rewrite prompt');
-    assert.match(calls[0].prompt, /turned into a gnoll \[body\] \(full rewrite\)/);
+    // 4-G: the Outfit card is asked on top of the kept gnoll Body: its own field, its own (light) scope.
+    assert.match(calls[0].system, LIGHT_SYS, 'a light Outfit card after a full Body change: the light edit');
     assert.match(calls[0].prompt, /hem damp \[outfit\] \(light touch\)/);
-    assert.match(calls[0].prompt, /^Rewrite body, outfit for Hesk\./, 'both fields: both ops name one');
+    assert.doesNotMatch(calls[0].prompt, /turned into a gnoll/, 'the kept Body change is in the base, not asked again');
+    assert.match(calls[0].prompt, /^Edit outfit for Hesk:/);
+    assert.equal(hem.candidate.lastingPreview.body, 'a furred gnoll', 'Body is the kept gnoll, word for word');
 });
 
 test('a temporary change: lasting is the base (no call), live is one light edit', async () => {
