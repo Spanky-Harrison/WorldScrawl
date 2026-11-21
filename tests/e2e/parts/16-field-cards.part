@@ -45,13 +45,14 @@
         await page.locator('.worldscrawl_npcpending', { hasText: 'Outfit: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2000);
         const s2 = await fcState();
         check('4-G: approving Outfit keeps it and leaves the Body card pending', s2.os.find(o => o.f === 'outfit')?.kept && s2.os.find(o => o.f === 'body')?.phase === 'review' && s2.cards.length === 1 && /Body:/.test(s2.cards[0]), JSON.stringify(s2));
-        // The Body card was composed before Outfit was kept: Approve asks Body again on the kept Outfit (one call), then Approve keeps it and Looks is asked once.
-        await queue([{ content: COMPOSED }, { content: '{"looks":"a big woman with dripping copper braids"}' }]);
+        // Review round 1: keeping Outfit does not make the Body card stale: one Approve keeps its composed text, no compose call; then Looks once.
+        await queue([{ content: '{"looks":"a big woman with dripping copper braids"}' }]);
         await page.locator('.worldscrawl_npcpending', { hasText: 'Body: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2500);
-        if ((await fcState()).os.find(o => o.f === 'body')?.kept !== true) { await page.locator('.worldscrawl_npcpending', { hasText: 'Body: Proposed person change:' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(2500); }
         const s3 = await fcState();
-        const looksCalls = (await reqsOf('all')).slice(fcFrom).filter(r => r.messages.some(m => /Looks line/.test(String(m.content)))).length;
-        check('4-G: both kept; Looks asked once, after the last card', s3.os.every(o => o.kept) && looksCalls === 1, JSON.stringify({ s3, looksCalls }));
+        const fcAll = (await reqsOf('all')).slice(fcFrom);
+        const looksCalls = fcAll.filter(r => r.messages.some(m => /Looks line/.test(String(m.content)))).length;
+        const moreCompose = fcAll.filter(r => r.messages.some(m => /^(Edit|Rewrite) (body|outfit) for /m.test(String(m.content)))).length;
+        check('4-G: one Approve keeps the Body card (no third compose call: two in all); Looks asked once, after the last card', s3.os.every(o => o.kept) && looksCalls === 1 && moreCompose === 0, JSON.stringify({ s3, looksCalls, moreCompose }));
         await page.evaluate(m => { SillyTavern.getContext().extensionSettings.worldscrawl.moveMode = m; }, fcWas);
         await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
         await settle(2000);

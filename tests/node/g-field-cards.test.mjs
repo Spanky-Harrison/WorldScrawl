@@ -188,24 +188,25 @@ test('Looks is rebuilt once: after both cards are approved, and after one approv
     {
         const { c, calls, looks } = boot({});
         const H = await heskHandle(c);
+        calls.length = 0;
         c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit')], wait: null });
         const id = await exchange(c, 'I wait.', SOAK);
+        const composeCalls = calls.length;
+        assert.equal(composeCalls, 2, 'both fields change: two compose calls');
         looks.length = 0; calls.length = 0;
-        btn(cardFor(draw(c), id, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
-        assert.ok(ownerOf(c.chat[id], 'body').committed);
-        assert.equal(looks.length, 0, 'Looks waits for the Outfit card');
-        // The Outfit card was composed before Body was kept: approving it asks its own field again on the kept Body, then it is reviewed again.
-        btn(cardFor(draw(c), id, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
         const outfit = ownerOf(c.chat[id], 'outfit');
-        assert.ok(!outfit.committed, 'stale: asked again first');
-        {
-            assert.equal(calls.length, 1, 'the refill asks the Outfit only');
-            assert.deepEqual(calls[0].fields, ['outfit']);
-            assert.match(outfit.candidate.lastingPreview.body, /\[body changed\]$/, 'its body is the kept Body');
-            assert.equal(looks.length, 0);
-            btn(cardFor(draw(c), id, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
-        }
-        assert.ok(outfit.committed);
+        const composed = outfit.candidate.lastingPreview.outfit;
+        btn(cardFor(draw(c), id, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
+        const body = ownerOf(c.chat[id], 'body');
+        assert.ok(body.committed);
+        assert.equal(looks.length, 0, 'Looks waits for the Outfit card');
+        // Review round 1: keeping Body does not make the Outfit card stale; one Approve keeps its composed text, no call.
+        btn(cardFor(draw(c), id, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+        assert.ok(outfit.committed, 'kept on the first Approve');
+        assert.equal(calls.length, 0, 'no third compose call: two in all');
+        const live = (await import('../../extension/npc.mjs')).npcAt(c.chat, c.chat.length - 1, (await import('../../extension/scene.mjs')).castPack().npcs, 'hesk');
+        assert.equal(live.outfit, composed, 'the outfit is the text the card showed');
+        assert.match(live.body, /\[body changed\]$/, 'the body is the kept Body card\'s');
         assert.equal(looks.length, 1, 'one looks summary after the last card');
         assert.match(looks[0], /\[body changed\]/); assert.match(looks[0], /\[outfit changed\]/);
     }
@@ -247,4 +248,37 @@ test('the map\'s cast Changes tab draws the same one-field card (shared personRe
     const both = stampCard({ ...x, fields: ['body', 'outfit'] }, { who: 'Hesk' });
     assert.equal(both.desc.title, '👤 Proposed person change:');
     assert.equal(both.desc.panel.rows.length, 2);
+});
+
+test('a change to the card\'s own field still makes it stale: a later Outfit card kept first, then the earlier Outfit card asks again', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked' })], wait: null });
+    const a = await exchange(c, 'I wait.', 'The landlady comes in, her hem soaked by the rain.');
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
+    const b = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
+    const first = ownerOf(c.chat[a], 'outfit'), second = ownerOf(c.chat[b], 'outfit');
+    btn(cardFor(draw(c), b, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(second.committed);
+    calls.length = 0;
+    const token = first.candidate.token;
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(!first.committed, 'its own field moved: stale, not kept');
+    assert.equal(calls.length, 1, 'asked again');
+    assert.deepEqual(calls[0].fields, ['outfit']);
+    assert.equal(first.candidate.phase, 'review');
+    assert.equal(first.candidate.token, token);
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(first.committed, 'kept after the new review');
+});
+
+test('the compose prompt for a one-field card shows only its own field (the other field is not in the prompt)', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit')], wait: null });
+    await exchange(c, 'I wait.', SOAK);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].prompt, /^- outfit: /m);
+    assert.doesNotMatch(calls[0].prompt, /^- body: /m);
 });
