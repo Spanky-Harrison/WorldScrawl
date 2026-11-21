@@ -6,7 +6,7 @@ import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } fr
 import { render as P, cards as C } from './shared.mjs';
 import { cardLib, editLib } from './cardlib.mjs';
 import { runCardAction, ticketFor } from './cardacts.mjs';
-import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
+import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, effectFields, npcAt, fileDiff, reviewSummary, stampSummary } from './npc.mjs';
 import { analyzeFlag, clip, flagStatusText, isCarrier, loadPatchLib, parseJsonAnswer, rewritingOf, suggestStart } from './carriers.mjs';
 import { targetLabel, textTargets } from './arearewrite.mjs';
 import { calendarLib, chatChanges, chatElapsed, defaultWorldId, loadCalendar, narratorWeather, placeWeatherNow, weatherLib, worldTimes } from './clock.mjs';
@@ -248,7 +248,10 @@ function personCardEl(msg, s, who) {
     const editing = !!editLib()?.editorOpen(key);
     // The editor edits exactly the panel's changed rows (a body-only change edits only Body); Approve edited keeps this text.
     const fields = editing && phase === 'review' ? rows.map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: (r.part === 'live' ? c.livePreview : c.lastingPreview)?.[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
-    const desc = C.personReview({ key, who, phase, summary: phase === 'review' ? reviewSummary(c, who, rows) : [], panelRows: phase === 'review' ? reviewFields(c, { all: true }) : [],
+    // 4-G: one card per person per field: a one-field change is titled with its field and its panel shows that field.
+    const field = scoped ? C.personField(effectFields(c.fields || 'body,outfit')) : '';
+    const panelRows = phase === 'review' ? reviewFields(c, { all: true }) : [];
+    const desc = C.personReview({ key, who, phase, field, summary: phase === 'review' ? reviewSummary(c, who, rows) : [], panelRows,
         scoped, heavy: scoped && c.scope === 'heavy', why: c?.why ?? '', clockError: c?.clockError ?? '', failReason: failedJob?.reason ?? '', editing, intent: c?.intent ?? '', fields });
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));
 }

@@ -17,6 +17,7 @@ import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, leftBehind, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
+import { appearanceScope } from './npceffects.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { findPerson, handleOf, maskForModel, shownName } from './names.mjs';
@@ -276,6 +277,25 @@ function noteNpcWarning(id, text, source = '') {
     msg.extra[NPC_WARN_KEY] = [...list, { swipe, text, ...(source ? { source } : {}) }];
     noteCall(id, { kind: 'warning', status: 'failed', reason: text });
 }
+/**
+ * 4-G: two tracker appearance items for one person and one field on one message are one change: the intents joined
+ * with "; ", full if either is full (with the full one's why), and the longer lasts (permanent if either is).
+ */
+export function mergeFieldItems(a, b) {
+    const intents = [a.intent, b.intent].map(x => String(x ?? '').trim()).filter(Boolean);
+    const heavyA = appearanceScope(a.scope) === 'heavy', heavyB = appearanceScope(b.scope) === 'heavy';
+    const la = lastsMinutes(a.lasts), lb = lastsMinutes(b.lasts);
+    const lasts = la == null || lb == null ? '' : `${Math.max(la, lb)}m`;
+    return {
+        ...a,
+        intent: [...new Set(intents)].join('; '),
+        scope: heavyA || heavyB ? 'full' : 'light',
+        why: heavyA ? a.why : heavyB ? b.why : (a.why || b.why || ''),
+        lasts,
+        ...(a.body || b.body ? { body: a.body || b.body } : {}),
+        ...(a.outfit || b.outfit ? { outfit: a.outfit || b.outfit } : {}),
+    };
+}
 /** Today's person apply: no-op appearance (empty, "looks", "appeared") warns and does not stamp or rebuild. */
 async function applyPersonStamps(id, stamped) {
     const c = ctx(), msg = c.chat?.[id];
@@ -286,6 +306,23 @@ async function applyPersonStamps(id, stamped) {
     const toFill = [];
     let along = null;
     const warn = (text, source = '') => noteNpcWarning(id, text, source);
+    const fieldItems = new Map(); // 4-G: "person|field" -> the merged tracker appearance item for that field
+    const appearanceOwner = (s, cur) => {
+        const pin = readBaselineMap(c.chat)[s.id] || pinBaseline(c.chat, s.id, cur?.body ?? '', cur?.outfit ?? '');
+        const layer = { ...(s.body ? { body: s.body } : {}), ...(s.outfit ? { outfit: s.outfit } : {}) };
+        const namedFields = s.fields != null && String(s.fields).trim() !== '' ? String(s.fields) : '';
+        const owner = makeOwner({
+            id: s.id, intent: s.intent || '', fields: namedFields || Object.keys(layer).join(',') || 'body,outfit',
+            layer,
+            lasts: lastsMinutes(s.lasts), start: Number.isFinite(clock.elapsed) ? clock.elapsed : 0,
+            scope: s.scope, why: s.why || '',
+            chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: s.source || '',
+        });
+        owner.candidate.epoch = epochOf(msg);
+        addNpcStamp(msg, owner);
+        applied.push(owner);
+        toFill.push({ owner, pin, name: cur?.name || s.id });
+    };
     for (const s0 of stamped) {
         const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
         const t = findPerson(s0.id, folded)?.id ?? null;
@@ -294,36 +331,32 @@ async function applyPersonStamps(id, stamped) {
         const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
         if (s.type === 'npc_fact' && alreadyShown(cur, s.text)) { noteCall(id, { kind: 'npc_fact', status: 'skipped', reason: 'already known' }); continue; }
         if (s.type === 'npc_appearance') {
+            const withIntent = x => { const intent = appearanceIntent(x); return intent && intent !== x.intent ? { ...x, intent } : x; };
+            if (s.source === 'tracker') {
+                if (judgeAppearance(cur, s) === 'reject') { warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom); continue; }
+                // 4-G: one card per person per field. A tracker item naming Body and Outfit (or neither) is one item per
+                // field; items for the same person and field on this message merge into one (fieldItems, below).
+                const named = s.fields != null && String(s.fields).trim() !== '';
+                const fields = (named ? effectFields(s.fields) : ['body', 'outfit'].filter(f => typeof s[f] === 'string' && s[f].trim())).filter(f => f !== 'looks');
+                if (!fields.length) { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'tracker does not set looks' }); continue; }
+                const { looks, body, outfit, ...rest } = s;
+                for (const f of fields) {
+                    const one = { ...rest, fields: f, ...(f === 'body' && body ? { body } : {}), ...(f === 'outfit' && outfit ? { outfit } : {}) };
+                    const decision = judgeAppearance(cur, one);
+                    if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: `already active (${f})` }); continue; }
+                    if (decision === 'reject') { warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom); continue; }
+                    const k = `${t}|${f}`, had = fieldItems.get(k);
+                    fieldItems.set(k, had ? { ...had, s: mergeFieldItems(had.s, withIntent(one)) } : { s: withIntent(one), cur });
+                }
+                continue;
+            }
             const decision = judgeAppearance(cur, s);
             if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
             if (decision === 'reject') {
                 warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom);
                 continue;
             }
-            const intent = appearanceIntent(s);
-            if (intent && intent !== s.intent) s = { ...s, intent };
-            if (s.source === 'tracker') {
-                const named = s.fields != null && String(s.fields).trim() !== '';
-                let fields = named ? effectFields(s.fields) : ['body', 'outfit'].filter(f => typeof s[f] === 'string' && s[f].trim());
-                fields = fields.filter(f => f !== 'looks');
-                if (!fields.length) { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'tracker does not set looks' }); continue; }
-                const { looks, ...rest } = s;
-                s = { ...rest, fields: fields.join(',') };
-            }
-            const pin = readBaselineMap(c.chat)[s.id] || pinBaseline(c.chat, s.id, cur?.body ?? '', cur?.outfit ?? '');
-            const layer = { ...(s.body ? { body: s.body } : {}), ...(s.outfit ? { outfit: s.outfit } : {}) };
-            const namedFields = s.fields != null && String(s.fields).trim() !== '' ? String(s.fields) : '';
-            const owner = makeOwner({
-                id: s.id, intent: s.intent || '', fields: namedFields || Object.keys(layer).join(',') || 'body,outfit',
-                layer,
-                lasts: lastsMinutes(s.lasts), start: Number.isFinite(clock.elapsed) ? clock.elapsed : 0,
-                scope: s.scope, why: s.why || '',
-                chatId: c.chatId ?? c.getCurrentChatId?.() ?? '', message: messageKey(msg), swipe: swipeOf(msg), source: s.source || '',
-            });
-            owner.candidate.epoch = epochOf(msg);
-            addNpcStamp(msg, owner);
-            applied.push(owner);
-            toFill.push({ owner, pin, name: cur?.name || s.id });
+            appearanceOwner(withIntent(s), cur);
             continue;
         }
         let stamp = s;
@@ -345,6 +378,7 @@ async function applyPersonStamps(id, stamped) {
         addNpcStamp(msg, stamp);
         applied.push(stamp);
     }
+    for (const { s, cur } of fieldItems.values()) appearanceOwner(s, cur);
     const seen = new Set();
     for (const s of applied) {
         if (s.pending === true || seen.has(s.id)) continue;

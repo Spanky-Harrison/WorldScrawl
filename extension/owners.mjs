@@ -222,6 +222,50 @@ function textOf(baseline, ops, records) {
 }
 
 /**
+ * 4-G: what a pending card's compose call is asked. An appearance change to one field (one card per person per field)
+ * is asked on top of the text without it: the base is the other changes' result (already composed, through textOf),
+ * the only change is this card's, so the call asks for this card's field alone, with its own light/full scope, and the
+ * other field stays as it is. When that text is not known yet (a combination never composed), the whole replay is
+ * asked as before. Returns [baseline, ops] for askFields.
+ */
+function ownFieldAsk(stamp, base, ops, records) {
+    const cand = stamp.candidate;
+    if (!cand || (cand.kind ?? 'appearance') !== 'appearance' || stamp.kind === 'baseline') return [base, ops];
+    const own = effectFields(cand.fields || 'body,outfit').filter(f => BODY_OUTFIT.includes(f));
+    if (own.length !== 1) return [base, ops];
+    const mine = ops.filter(o => (o.owner || o.identity?.owner) === stamp.owner);
+    const prior = textOf(base, ops.filter(o => (o.owner || o.identity?.owner) !== stamp.owner), records);
+    if (mine.length !== 1 || prior.unresolved) return [base, ops];
+    return [{ body: prior.body, outfit: prior.outfit }, mine];
+}
+
+/**
+ * 4-G review round 1: a one-field card goes stale only when its own field's input changed. When other changes moved
+ * since it was composed (keeping the person's other card, say), but the text its own field was composed on is the same,
+ * the reviewed own-field text still holds: the previews take the other field's current text and the current keys, with
+ * no compose call. Returns the rebased candidate (also stored on the stamp), or null when it is really stale.
+ */
+function ownFieldRebase(chat, stamp, c, elapsed) {
+    if (!c || (c.kind ?? 'appearance') !== 'appearance' || stamp.kind === 'baseline') return null;
+    const own = effectFields(c.fields || 'body,outfit').filter(f => BODY_OUTFIT.includes(f));
+    if (own.length !== 1) return null;
+    const f = own[0];
+    const { lastingWith, liveWith } = previewOps(personOps(chat, stamp.id), c, stamp.owner, stamp.start, elapsed);
+    const base = readBaselineMap(chat)[stamp.id] ?? c.baseline ?? { body: '', outfit: '' };
+    const records = composeRecords(chat);
+    const part = (ops, before, preview) => {
+        const prior = textOf(base, ops.filter(o => (o.owner || o.identity?.owner) !== stamp.owner), records);
+        if (prior.unresolved || !before || before.unresolved || (before[f] ?? '') !== (prior[f] ?? '')) return null;
+        const mine = ops.some(o => (o.owner || o.identity?.owner) === stamp.owner);
+        return { key: fieldKeyOf(base, ops), before: { body: prior.body, outfit: prior.outfit, unresolved: false }, preview: { body: prior.body, outfit: prior.outfit, [f]: mine ? preview?.[f] ?? '' : prior[f] } };
+    };
+    const lasting = part(lastingWith, c.lastingBefore, c.lastingPreview), live = part(liveWith, c.liveBefore, c.livePreview);
+    if (!lasting || !live) return null;
+    stamp.candidate = { ...c, lastingKey: lasting.key, liveKey: live.key, lastingPreview: lasting.preview, livePreview: live.preview, lastingBefore: lasting.before, liveBefore: live.before };
+    return stamp.candidate;
+}
+
+/**
  * Fill the candidate's read-only previews. Both must be valid before phase is review.
  * A late answer is dropped when the token, epoch, or decision revision moved.
  */
@@ -243,8 +287,9 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     let lastingBody = lasting, liveBody = live;
     // The proposal card that asked shows the call working (job.owner), never a second card.
     const working = key => ({ id: identity.npc, npc: identity.npc, key, part: 'fields', name: name || '', owner: stamp.owner });
+    const ask = ops => askFields(name, ...ownFieldAsk(stamp, base, ops, records), timeout);
     if (lasting.unresolved) {
-        const asked = await withWork(found.msg, working(lasting.key), () => askFields(name, base, lastingWith, timeout));
+        const asked = await withWork(found.msg, working(lasting.key), () => ask(lastingWith));
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
         if (!asked.ok) return failCandidate(found, 'fields', lasting.key, asked, name);
         lastingBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: lasting.key };
@@ -252,7 +297,7 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     // Identical inputs (no lasts, nothing expiring): one call, the same text for both.
     if (live.unresolved && live.key === lasting.key) liveBody = { ...lastingBody, key: live.key };
     else if (live.unresolved) {
-        const asked = await withWork(found.msg, working(live.key), () => askFields(name, base, liveWith, timeout));
+        const asked = await withWork(found.msg, working(live.key), () => ask(liveWith));
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
         if (!asked.ok) return failCandidate(found, 'fields', live.key, asked, name);
         liveBody = { body: asked.body, outfit: asked.outfit, unresolved: false, key: live.key };
@@ -339,6 +384,7 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
             return { ok: false, error: 'expired' };
         }
         const now = replayKeys(chat, stamp, c, payload.elapsed);
+        if (now.lasting !== c.lastingKey || now.live !== c.liveKey) c = ownFieldRebase(chat, stamp, c, payload.elapsed) ?? c;
         if (now.lasting !== c.lastingKey || now.live !== c.liveKey) {
             stamp.decisionRev += 1;
             stamp.candidate = { ...c, phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };

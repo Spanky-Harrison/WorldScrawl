@@ -132,7 +132,7 @@ const askAgain = (t, key, over = {}) => once(`${key}:${t.identity?.owner}`, asyn
 });
 /** The person scope switch: hand-typed text in the open editor would be replaced, so ask first (then it goes). */
 async function personScope(t, to) {
-    if (handEdited(t.key) && !(await hooks.confirm(`Switch to ${to === 'heavy' ? 'a full rewrite' : 'a light touch'}? It rewrites the body and outfit again and drops the text you typed in the editor.`))) return 'cancelled';
+    if (handEdited(t.key) && !(await hooks.confirm(`Switch to ${to === 'heavy' ? 'a full rewrite' : 'a light touch'}? It rewrites the ${/^\s*(body|outfit)\s*$/i.test(t.s.candidate?.fields ?? '') ? t.s.candidate.fields.trim().toLowerCase() : 'body and outfit'} again and drops the text you typed in the editor.`))) return 'cancelled';
     E()?.closeCardEditor(t.key);
     return askAgain(t, 'own-scope', { scope: to });
 }

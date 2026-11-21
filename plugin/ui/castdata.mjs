@@ -666,7 +666,7 @@ export function stampCard(x, { who = '', editing = false, play = null } = {}) {
         const rows = Array.isArray(x.diffs) ? x.diffs : [];
         const fields = editing && x.candidate === 'review' ? rows.filter(r => r.changed).map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: r.after ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
         const scoped = !!x.scopeLevel;
-        return { type: 'person', ref, seen, desc: C.personReview({ key, who, phase: x.candidate, summary: x.candidate === 'review' ? [text] : [], panelRows: rows,
+        return { type: 'person', ref, seen, desc: C.personReview({ key, who, phase: x.candidate, field: scoped ? C.personField(x.fields) : '', summary: x.candidate === 'review' ? [text] : [], panelRows: rows,
             scoped, heavy: x.scopeLevel === 'heavy', why: String(x.scope ?? '').replace(/^(full rewrite|light touch):? ?/, ''), editing, intent: x.intent ?? '', fields }) };
     }
     if (APPEARANCE.has(x.type)) {
