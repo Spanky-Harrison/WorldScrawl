@@ -10,7 +10,7 @@ import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow } fr
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
-import { exitsCache, exitsText, locationAt, renderAllExits } from './footer.mjs';
+import { exitsCache, exitsText, locationAt, renderAllExits, renderExitsFrom } from './footer.mjs';
 import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
@@ -638,6 +638,8 @@ async function trackReply(id, { attempt: first = 1 } = {}) {
         markTracked(msg, genNo, status, { tries, unreadable });
         if (status) { syncSwipeExtra(msg); try { await ctx().saveChat?.(); } catch (e) { console.warn('[WorldScrawl] save', e?.message || e); } }
         renderPatchCards();
+        // The footer's "Named NPCs present" reads the same stamps: redraw this reply's footer (and any after it) too.
+        if (status === 'carded' || status === 'tracked') await renderExitsFrom(id).catch(e => console.warn('[WorldScrawl] exits', e?.message || e));
         if (personChanged) try { broadcastMapState(); } catch { /* map window may not be open */ } // debounced: one post per tick
     }
 }

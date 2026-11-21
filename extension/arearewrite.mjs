@@ -2,6 +2,7 @@
 // `rewrite` ('light' | 'full') says how deeply a proposal rewrites existing prose. It is not change.scope (which rooms).
 // It only ever touches text that already exists: room descriptions, area notes, and an existing exit's text.
 // Structure (exits, doors, rooms, moves, merges, travel time, settings, names, lasts) and new-room text never change.
+import { patches } from './shared.mjs';
 
 /** Shown on the card when the tracker left the choice out: light, without a reason nobody gave. */
 export const REWRITE_NOT_JUDGED = 'not judged, so the default';
@@ -29,14 +30,17 @@ export function judgeRewrite(rewrite, why) {
 }
 
 const isObj = v => v != null && typeof v === 'object' && !Array.isArray(v);
+/** The op as the engine reads it: an update_area's notes under "text" are its lore (patches.mjs loreAlias). */
+const asRead = op => patches.loreAlias(op);
 const str = v => (typeof v === 'string' ? v.trim() : '');
 const lc = v => str(v).toLowerCase();
 const FAMILY = { set_description: 'desc', append_description: 'desc', set_lore: 'lore', append_lore: 'lore', update_area: 'lore', set_exit_description: 'exit', set_exit: 'exit' };
 const exitOf = (room, dir) => (Array.isArray(room?.exits) ? room.exits.find(e => isObj(e) && lc(e.direction) === lc(dir)) : null) ?? null;
 
 /** The text target an op rewrites ("desc:ADDR", "lore:AREA", "exit:ADDR|direction"), or '' when it rewrites no existing prose. */
-export function targetKeyOf(op) {
-    if (!isObj(op)) return '';
+export function targetKeyOf(op0) {
+    if (!isObj(op0)) return '';
+    const op = asRead(op0);
     const f = FAMILY[op.op];
     if (f === 'desc' && str(op.loc)) return `desc:${str(op.loc)}`;
     if (f === 'lore' && str(op.area)) return op.op === 'update_area' && !str(op.lore) ? '' : `lore:${str(op.area)}`;
@@ -132,12 +136,13 @@ export function targetLines(targets, rewrite = 'light') {
 }
 
 const TEXT_FIELD = { set_description: 'text', append_description: 'text', set_lore: 'text', append_lore: 'text', update_area: 'lore', set_exit_description: 'text' };
-const textOfAnswer = op => (op.op === 'set_exit' ? op.fields?.description : op.op === 'update_area' ? op.lore : op.text);
+const textOfAnswer = op0 => { const op = asRead(op0); return op.op === 'set_exit' ? op.fields?.description : op.op === 'update_area' ? op.lore : op.text; };
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /** An op with its rewritable text taken out and its family named, so two ops compare on structure only. */
-export function structureOf(op) {
-    if (!isObj(op)) return op;
+export function structureOf(op0) {
+    if (!isObj(op0)) return op0;
+    const op = asRead(op0);
     const fam = targetKeyOf(op) ? FAMILY[op.op] : '';
     const o = structuredClone(op);
     if (!fam) return o;
@@ -174,16 +179,18 @@ export function mergeRewrite(oldOps, targets, answerOps) {
     const ops = structuredClone(oldOps ?? []);
     const byKey = new Map(targets.map(t => [t.key, t]));
     const done = new Set();
-    for (const r of Array.isArray(answerOps) ? answerOps : []) {
-        if (!isObj(r)) return { error: 'the answer had something that is not an edit' };
+    const loreTargets = targets.filter(t => t.family === 'lore');
+    for (const r0 of Array.isArray(answerOps) ? answerOps : []) {
+        if (!isObj(r0)) return { error: 'the answer had something that is not an edit' };
+        const r = answerTarget(asRead(r0), loreTargets);
         const key = targetKeyOf(r), t = byKey.get(key);
-        if (!key) return { error: `the answer had a ${String(r.op ?? 'non-text')} edit, which a rewrite can't change` };
+        if (!key) return { error: unmatchedText(r, loreTargets) };
         if (!t) return { error: `the answer rewrote ${key.replace(/^\w+:/, '')}, which is not one of this change's texts` };
         if (done.has(key)) return { error: `the answer rewrote ${t.where} twice` };
         done.add(key);
         const text = textOfAnswer(r);
         if (typeof text !== 'string' || !text.trim()) return { error: `the answer left ${t.label} empty` };
-        const old = ops[t.i];
+        const old = asRead(ops[t.i]);
         // Anything the answer sets besides the text must match the old op (it is copied over, never trusted).
         for (const [k, v] of Object.entries(r)) {
             if (['op', 'text', 'lore', 'fields', 'loc', 'area', 'direction', 'story'].includes(k)) continue;
@@ -195,8 +202,29 @@ export function mergeRewrite(oldOps, targets, answerOps) {
     }
     return { ops, rewritten: [...done] };
 }
+/**
+ * A notes (lore) answer that names its area under "loc", or names none when this change has exactly one notes text, is
+ * that target's: the area is filled in. Nothing else is guessed (a description or exit answer must name its room).
+ */
+function answerTarget(r, loreTargets) {
+    if (FAMILY[r.op] !== 'lore' || str(r.area)) return r;
+    const { loc, ...rest } = r;
+    if (str(loc)) return { ...rest, area: str(loc).toLowerCase().replace(/\/.*$/, '') };
+    return loreTargets.length === 1 ? { ...rest, area: loreTargets[0].where } : r;
+}
+/** Why an answer op names no text this change has, in plain words. */
+function unmatchedText(r, loreTargets) {
+    const f = FAMILY[r.op];
+    if (f === 'lore' && !str(r.area)) return `the answer's note edit didn't say which area${loreTargets.length > 1 ? ` (this change has ${loreTargets.length} notes texts)` : ''}`;
+    if (f === 'lore') return `the answer's ${r.op} for ${str(r.area)} had no notes text`;
+    if (f === 'desc') return "the answer's description edit didn't say which room";
+    if (f === 'exit' && (!str(r.loc) || !str(r.direction))) return "the answer's exit text edit didn't say which room and direction";
+    if (f === 'exit') return "the answer's exit edit had no description text";
+    return `the answer had a ${String(r.op ?? 'non-text')} edit, which a rewrite can't change`;
+}
 /** The op with its text replaced by `next` (an appended text comes back whole, as a set_*). Structure is untouched. */
-export function withText(old, next) {
+export function withText(old0, next) {
+    const old = asRead(old0);
     if (old.op === 'set_exit') return { ...old, fields: { ...old.fields, description: next } };
     if (old.op === 'update_area') return { ...old, lore: next };
     if (old.op === 'append_description') return { ...old, op: 'set_description', text: next };
