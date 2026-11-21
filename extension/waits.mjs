@@ -249,9 +249,8 @@ function personCardEl(msg, s, who) {
     // The editor edits exactly the panel's changed rows (a body-only change edits only Body); Approve edited keeps this text.
     const fields = editing && phase === 'review' ? rows.map(r => ({ key: `${r.part}.${r.field}`, label: r.label, value: (r.part === 'live' ? c.livePreview : c.lastingPreview)?.[r.field] ?? '', cls: 'worldscrawl_npc_text', data: { part: r.part, field: r.field } })) : [];
     // 4-G: one card per person per field: a one-field change is titled with its field and its panel shows that field.
-    const own = scoped ? effectFields(c.fields || 'body,outfit').filter(f => f === 'body' || f === 'outfit') : [];
-    const field = own.length === 1 ? own[0] : '';
-    const panelRows = phase === 'review' ? reviewFields(c, { all: true }).filter(r => !field || r.field === field || r.changed) : []; // the other field shows only if it changed
+    const field = scoped ? C.personField(effectFields(c.fields || 'body,outfit')) : '';
+    const panelRows = phase === 'review' ? reviewFields(c, { all: true }) : [];
     const desc = C.personReview({ key, who, phase, field, summary: phase === 'review' ? reviewSummary(c, who, rows) : [], panelRows,
         scoped, heavy: scoped && c.scope === 'heavy', why: c?.why ?? '', clockError: c?.clockError ?? '', failReason: failedJob?.reason ?? '', editing, intent: c?.intent ?? '', fields });
     return drawCard(desc, 'person', ticketFor('person', { msg, s, who }));

@@ -62,6 +62,11 @@ export function placeReview(v) {
  * A proposed person (appearance) change. v: {key, who, phase ('working'|'review'|'failed'), summary, panelRows, scoped,
  * heavy, why, clockError, failReason, editing, intent, fields: [{key, label, value, data}]}.
  */
+/** 4-G: the one field a person change card is about ('body' or 'outfit'), or '' for a change to both. */
+export function personField(fields) {
+    const own = [...new Set((fields ?? []).map(f => String(f ?? '').trim().toLowerCase()).filter(f => f === 'body' || f === 'outfit'))];
+    return own.length === 1 ? own[0] : '';
+}
 export function personReview(v) {
     const phase = v.phase || 'working';
     const notes = [];
@@ -83,7 +88,8 @@ export function personReview(v) {
         key: v.key, type: 'person', state: phase, pending: true, cls: 'worldscrawl_npcpending',
         title: `👤 ${head}${phase === 'failed' ? `Appearance for ${v.who} did not resolve.` : phase === 'review' ? 'Proposed person change:' : `Preparing a change to ${v.who}…`}`,
         summary, notes,
-        panel: phase === 'review' ? { type: 'fields', title: v.who, tag: 'person', rows: v.panelRows ?? [] } : null,
+        // A one-field card's panel shows its own field (the other one only if it changed).
+        panel: phase === 'review' ? { type: 'fields', title: v.who, tag: 'person', rows: (v.panelRows ?? []).filter(r => !v.field || r.field === v.field || r.changed) } : null,
         editor: v.editing ? { key: v.key, intent: { label: 'Change:', value: v.intent ?? '', cls: 'worldscrawl_npc_intent' }, fields: phase === 'review' ? (v.fields ?? []) : [] } : null,
         actions: within('person', phase, actions),
     };
