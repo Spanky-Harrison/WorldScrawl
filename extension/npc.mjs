@@ -510,6 +510,15 @@ function applyStamp(state, s, index, elapsed = null) {
         return;
     }
     if (s.type === 'npc_follow') { relUp(n, str(s.who, 40) || PLAYER, 'met', index, 'follow'); n.following = { who: str(s.who, 40) || PLAYER, at: index }; n.held = null; return; }
+    // Came along on the reply to a move (4-NF): held where the player is at that reply, by the same hold as a stay (no
+    // following state). The next move is judged on its own.
+    if (s.type === 'npc_along') {
+        const place = str(s.place, 200);
+        if (!place) return;
+        n.following = null;
+        n.held = { place, at: index, along: true };
+        return;
+    }
     if (s.type === 'npc_stay') {
         n.following = null;
         const place = str(s.place, 200);
@@ -660,7 +669,7 @@ function duePlace(npc, j, env, { useRoll = false } = {}) {
         const address = who === PLAYER ? env.playerAt(j) : (env.actorAt?.(j, who) || env.playerAt(j));
         return address ? { address, activity: `with ${who === PLAYER ? 'the player' : who}`, kind: 'follow', entry: null } : null;
     }
-    if (holdActive(npc, j, env)) return { address: npc.held.place, activity: 'waiting', kind: 'stay', entry: null };
+    if (holdActive(npc, j, env)) return { address: npc.held.place, activity: npc.held.along ? 'with the player' : 'waiting', kind: 'stay', entry: null };
     const clock = env.clock(j);
     const sched = scheduleAt(npc, clock, env);
     if (sched?.kind === 'might') {
@@ -723,7 +732,7 @@ export function presentAt(chat, index, cast, env) {
             if (!then) continue;
             const stamps = stampsOn(chat[j]).filter(s => s.id === npc.id);
             if (stamps.some(s => s.type === 'npc_leave')) { ban = true; inScene = false; }
-            if (stamps.some(s => s.type === 'npc_follow')) ban = false;
+            if (stamps.some(s => s.type === 'npc_follow' || s.type === 'npc_along')) ban = false;
             if (ban) continue;
             const due = duePlace(then, j, env);
             const hereJ = env.playerAt(j);
@@ -1398,7 +1407,7 @@ export function readBack(messages, name, cap = READBACK_CAP) {
     return { start: first < 0 ? 0 : (list[first].index ?? first), messages: sliced, truncated: span.length > sliced.length };
 }
 
-const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', appearance: 'npc_appearance' };
+const TAG_KIND = { fact: 'npc_fact', memory: 'npc_memory', disposition: 'npc_disposition', leave: 'npc_leave', staying: 'npc_staying', follow: 'npc_follow', stay: 'npc_stay', appearance: 'npc_appearance', came_along: 'npc_along' };
 
 /** One [ws_npc: ...] body -> a stamp, or null when it does not parse. */
 export function parseNpcTag(body) {
@@ -1485,6 +1494,7 @@ export function stampSummary(s, name = '') {
     if (s.type === 'npc_disposition') return `${who}: ${s.value}${s.reason ? ` (${s.reason})` : ''}`;
     if (s.type === 'npc_follow') return `${who} comes along`;
     if (s.type === 'npc_stay') return `${who} stays behind`;
+    if (s.type === 'npc_along') return `${who} came along${s.where ? ` to ${s.where}` : ''}`;
     if (s.type === 'npc_leave') return `${who} leaves`;
     if (s.type === 'npc_staying') return `${who} is staying`;
     if (s.type === 'npc_create') return `${who} remembered`;

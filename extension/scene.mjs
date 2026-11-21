@@ -17,12 +17,13 @@ import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
 import { aftermathNote, chatKey, relocationNote } from './expiry.mjs';
-import { EXPIRY_LINE_KEY, hostIndex } from './generations.mjs';
+import { EXPIRY_LINE_KEY, hostIndex, turnStartOf } from './generations.mjs';
 import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, revealNamesOn, toolsOn } from './index.js';
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
 import { renderPatchCards, waitFacts } from './waits.mjs';
-import { askSchedule, prefetchSchedule, scheduleFlight } from './schedulepick.mjs';
+import { askSchedule, placeName, prefetchSchedule, scheduleFlight } from './schedulepick.mjs';
+import { movedThisTurn } from './tracker.mjs';
 
 /** Everyone in the cast as they are at the end of the chat (names, aliases, rel): what the portal masks against. */
 export function peopleNow() {
@@ -73,6 +74,25 @@ export function listedPeople(chat, id, loc) {
             };
         });
     } catch (e) { console.warn('[WorldScrawl] tracker people', e.message); return []; }
+}
+/**
+ * 4-NF: on a reply whose turn moved the player, the saved people who were in the scene the player just left and are not
+ * in this one (followers come along, so they never are). Each row is listedPeople's (shown name, handle, looks…) plus
+ * `npcId` (the saved id), `from` (that room's name) and `fromAddress`. [] on a turn without a move. No model call.
+ */
+export function leftBehind(chat, id, loc) {
+    const pack = castPack();
+    if (!pack?.npcs?.length || !chat?.length || !movedThisTurn(chat, id)) return [];
+    try {
+        const env = npcEnv(chat, loc), start = turnStartOf(chat, id);
+        const now = new Set(presentAt(chat, id, pack.npcs, env).map(p => p.id));
+        const before = presentAt(chat, start - 1, pack.npcs, env).filter(p => !now.has(p.id));
+        if (!before.length) return [];
+        const fromAddress = positionOf(chat, start - 1, PLAYER)?.address ?? '';
+        const move = chat[start]?.extra?.[MOVE_KEY];
+        const from = (move?.from === fromAddress && move?.prev_name) || placeName(fromAddress) || fromAddress;
+        return before.map(p => ({ id: handleOf(p.id), npcId: p.id, name: shownName(p), label: shownName(p), aliases: [...(p.aliases ?? [])], looks: p.looks || '', unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false, from, fromAddress }));
+    } catch (e) { console.warn('[WorldScrawl] tracker left behind', e.message); return []; }
 }
 /** Stamp a lore request for `place` (a name, or ''/"here" for all) on msg. Returns the matched chain entries. */
 function requestLore(msg, loc, place, source) {
@@ -852,6 +872,7 @@ function toolNpcStamp(args = {}) {
     if (action === 'staying') return { type: 'npc_staying', id, elapsed: chatElapsed() };
     if (action === 'follow') return { type: 'npc_follow', id, who: PLAYER };
     if (action === 'stay') return { type: 'npc_stay', id };
+    if (action === 'came_along') return { type: 'npc_along', id };
     if (action === 'appearance') {
         // Keep an empty intent: the reply handler rejects it when nothing changed, instead of dropping it.
         const intent = String(args.intent ?? args.text ?? '').trim();
