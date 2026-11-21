@@ -240,6 +240,32 @@ function ownFieldAsk(stamp, base, ops, records) {
 }
 
 /**
+ * 4-G review round 1: a one-field card goes stale only when its own field's input changed. When other changes moved
+ * since it was composed (keeping the person's other card, say), but the text its own field was composed on is the same,
+ * the reviewed own-field text still holds: the previews take the other field's current text and the current keys, with
+ * no compose call. Returns the rebased candidate (also stored on the stamp), or null when it is really stale.
+ */
+function ownFieldRebase(chat, stamp, c, elapsed) {
+    if (!c || (c.kind ?? 'appearance') !== 'appearance' || stamp.kind === 'baseline') return null;
+    const own = effectFields(c.fields || 'body,outfit').filter(f => BODY_OUTFIT.includes(f));
+    if (own.length !== 1) return null;
+    const f = own[0];
+    const { lastingWith, liveWith } = previewOps(personOps(chat, stamp.id), c, stamp.owner, stamp.start, elapsed);
+    const base = readBaselineMap(chat)[stamp.id] ?? c.baseline ?? { body: '', outfit: '' };
+    const records = composeRecords(chat);
+    const part = (ops, before, preview) => {
+        const prior = textOf(base, ops.filter(o => (o.owner || o.identity?.owner) !== stamp.owner), records);
+        if (prior.unresolved || !before || before.unresolved || (before[f] ?? '') !== (prior[f] ?? '')) return null;
+        const mine = ops.some(o => (o.owner || o.identity?.owner) === stamp.owner);
+        return { key: fieldKeyOf(base, ops), before: { body: prior.body, outfit: prior.outfit, unresolved: false }, preview: { body: prior.body, outfit: prior.outfit, [f]: mine ? preview?.[f] ?? '' : prior[f] } };
+    };
+    const lasting = part(lastingWith, c.lastingBefore, c.lastingPreview), live = part(liveWith, c.liveBefore, c.livePreview);
+    if (!lasting || !live) return null;
+    stamp.candidate = { ...c, lastingKey: lasting.key, liveKey: live.key, lastingPreview: lasting.preview, livePreview: live.preview, lastingBefore: lasting.before, liveBefore: live.before };
+    return stamp.candidate;
+}
+
+/**
  * Fill the candidate's read-only previews. Both must be valid before phase is review.
  * A late answer is dropped when the token, epoch, or decision revision moved.
  */
@@ -358,6 +384,7 @@ export function decideNpc(chat, identity, decisionRev, action, payload = {}) {
             return { ok: false, error: 'expired' };
         }
         const now = replayKeys(chat, stamp, c, payload.elapsed);
+        if (now.lasting !== c.lastingKey || now.live !== c.liveKey) c = ownFieldRebase(chat, stamp, c, payload.elapsed) ?? c;
         if (now.lasting !== c.lastingKey || now.live !== c.liveKey) {
             stamp.decisionRev += 1;
             stamp.candidate = { ...c, phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
