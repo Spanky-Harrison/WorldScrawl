@@ -330,7 +330,7 @@ async function applyPersonStamps(id, stamped) {
         if (s.type === 'npc_along') {
             // 4-NF: only someone just left behind, named in the reply, comes along; held where the player is now.
             along ??= alongContext(c.chat, id);
-            const r = alongCheck({ action: 'came_along', id: s.id }, along.candidates, along.listed, msg.mes ?? '');
+            const r = alongCheck({ action: 'came_along', id: s.id, label: cur ? shownName(cur) : s.id }, along.candidates, along.listed, msg.mes ?? '');
             if (r.verdict !== 'keep') { noteCall(id, { kind: 'came_along', status: 'skipped', reason: r.reason }); continue; }
             const place = positionOf(c.chat, id, PLAYER)?.address || '';
             if (!place) { noteCall(id, { kind: 'came_along', status: 'skipped', reason: 'came_along dropped: the player\'s place is unknown' }); continue; }

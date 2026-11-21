@@ -210,7 +210,7 @@ export function alongCheck(item, candidates = [], listed = [], reply = '') {
         if (cand) return namedIn(reply, cand) ? { verdict: 'keep', reason: '', person: cand } : { verdict: 'drop', reason: `came_along dropped: the reply never shows ${label(cand)}` };
         const here = (listed ?? []).find(p => handleIs(p, item?.id));
         if (here) return { verdict: 'skip', reason: `came_along skipped: ${label(here)} is already here` };
-        return { verdict: 'drop', reason: `came_along dropped: ${item?.id || 'they'} was not with the player before the move` };
+        return { verdict: 'drop', reason: `came_along dropped: ${item?.label || item?.id || 'they'} was not with the player before the move` };
     }
     if (cand && (action === 'appearance' || action === 'fact')) return { verdict: 'drop', reason: `tracker ${action} dropped: ${label(cand)} is not here` };
     return { verdict: 'keep', reason: '' };
