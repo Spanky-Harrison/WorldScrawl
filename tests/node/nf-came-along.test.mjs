@@ -217,6 +217,15 @@ test('a schedule change ends the came_along hold (she goes to bed at 02:00)', as
     assert.ok(!at(c, SQ).includes('hesk'), 'at 02:31 her entry changed: back on her schedule');
 });
 
+test('no move, but someone leaves the scene (a leave tag on a stay turn): nobody is "Just left behind" and came_along is dropped', async () => {
+    const { c, seen } = boot({ tracker: () => along() });
+    const id = await exchange(c, 'I finish my ale.', 'The landlady unties her apron and heads out for the night. [ws_npc: leave | hesk]');
+    assert.ok(!presentNow(c).includes('hesk'), 'she left this turn');
+    assert.equal(seen.length, 1);
+    assert.doesNotMatch(trackerPrompt(seen, 0), /Just left behind in /);
+    assert.equal(stamps(c.chat[id], 'npc_along').length, 0);
+});
+
 test('swipe, Undo and Turn off', async () => {
     {
         const { c } = boot({ tracker: k => (k === 0 ? along() : GOOD) });
