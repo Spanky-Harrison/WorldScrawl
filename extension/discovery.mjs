@@ -417,6 +417,31 @@ function guardOwners(id, people, present = null) {
     }
     return out;
 }
+/** How far apart two "HH:MM" times are in minutes, the short way round midnight. */
+function clockGap(a, b) {
+    const m = x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; };
+    const d = Math.abs(m(a) - m(b));
+    return Math.min(d, 1440 - d);
+}
+/** The story's clock time may correct the tracker's by at most this many minutes. */
+export const STORY_CLOCK_SLACK = 30;
+/**
+ * The clock time a tracker wait should run until instead of the tracker's own reading, and where it came from:
+ * a clock time on the player's line ("I wait until half past five") always wins; else the reply's one until-clock time
+ * when it is within STORY_CLOCK_SLACK minutes of the tracker's clock time (two or more in the reply: the tracker's stands;
+ * a day-part word is not adjusted). An hour with two readings takes the next one after the reply's game time.
+ */
+function waitClockOverride(chat, id, msg, wait) {
+    let sod = null;
+    try { const d = gameDateAt(id, chat); if (d) sod = d.hour * 3600 + d.minute * 60; } catch {}
+    const clocks = text => calendarLib?.untilClocksIn?.(text, undefined, { now: sod }) ?? [];
+    const said = clocks(playerLineBefore(chat, id))[0];
+    if (said) return { said, from: "the player's line" };
+    const tracker = wait.until ? clocks(`until ${wait.until}`)[0] : null;
+    const told = tracker ? clocks(msg?.mes ?? '') : [];
+    if (told.length === 1 && told[0] !== tracker && clockGap(told[0], tracker) <= STORY_CLOCK_SLACK) return { said: told[0], from: 'the reply' };
+    return { said: null, from: '' };
+}
 /** Feed a tracker answer into the place rewrite and the person apply. No third apply path. */
 export async function applyTrackerResult(id, parsed, { present = null } = {}) {
     const c = ctx(), msg = c.chat?.[id];
@@ -434,9 +459,8 @@ export async function applyTrackerResult(id, parsed, { present = null } = {}) {
     if (dropped) { noteCall(id, { kind: 'tracker place', status: 'skipped', reason: dropped }); gated.place = null; }
     if (gated.place && !taggedPlace) await flagMessage(id, { note: gated.place.note, hint: gated.place.hint ?? '', kind: gated.place.kind === 'discover' ? 'discover' : '', source: TRACKER_SOURCE, rewrite: gated.place.rewrite ?? '', why: gated.place.why ?? '', raw: gated.place.raw ?? null });
     if (gated.wait) {
-        // A clock time on the player's own line ("I wait until 17:15") wins over the tracker's reading of it ("17:00").
-        const said = calendarLib?.untilClockIn?.(playerLineBefore(c.chat, id)) ?? null;
-        if (said && (gated.wait.until || '').trim() !== said) noteCall(id, { kind: 'tracker wait', status: 'ok', reason: `until ${said} from the player's line (the tracker read ${gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration})` });
+        const { said, from } = waitClockOverride(c.chat, id, msg, gated.wait);
+        if (said && (gated.wait.until || '').trim() !== said) noteCall(id, { kind: 'tracker wait', status: 'ok', reason: `until ${said} from ${from} (the tracker read ${gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration})` });
         const args = said ? `until ${said}` : gated.wait.until ? `until ${gated.wait.until}` : gated.wait.duration;
         const w = await planWait(args, gated.wait.sleep, gated.wait.reason, { narrator: true });
         if (w.error) noteCall(id, { kind: 'tracker wait', status: 'failed', reason: w.error });
