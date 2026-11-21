@@ -526,3 +526,74 @@ test('a place card drawn before the proposal changed is stale: its Approve keeps
     await flush(60);
     assert.equal(flagOf().status, 'kept');
 });
+
+// ---- fx: full-rewrite answer matching (the playtest: an update_area with its notes under "text", answered with append_lore).
+const AREA = 'riverton:drowned_rat';
+const RATS = 'Rats now scurry in the walls of the inn, and the landlady keeps a terrier.';
+const RATS_FULL = 'The Drowned Rat is overrun: rats nest in every wall, and the landlady has given up on her terrier.';
+
+test('fx: an update_area with its notes under "text" applies them as the area\'s notes (before: refused without a name, dropped with one)', async () => {
+    const P = await import('../../plugin/shared/patches.mjs');
+    const world = () => ({ riverton: { name: 'Riverton', subregions: { drowned_rat: { name: 'The Drowned Rat', lore: 'An inn.', places: {} } } } });
+    let raw = world();
+    assert.deepEqual(P.applyPatch(raw, { ops: [{ op: 'update_area', area: AREA, text: RATS }] }).summary, ['The Drowned Rat: notes rewritten']);
+    assert.equal(raw.riverton.subregions.drowned_rat.lore, RATS);
+    raw = world();
+    const out = P.applyPatch(raw, { ops: [{ op: 'update_area', area: AREA, name: 'The Wet Rat', text: RATS }] });
+    assert.equal(raw.riverton.subregions.drowned_rat.lore, RATS, 'not dropped beside a rename');
+    assert.equal(raw.riverton.subregions.drowned_rat.name, 'The Wet Rat');
+    assert.deepEqual(out.ops[0], { op: 'update_area', area: AREA, name: 'The Wet Rat', lore: RATS }, 'stored as lore');
+    assert.deepEqual(P.loreAlias({ op: 'update_area', area: AREA, lore: 'kept', text: 'ignored' }), { op: 'update_area', area: AREA, lore: 'kept', text: 'ignored' }, 'a real lore wins');
+    assert.deepEqual(P.loreAlias({ op: 'set_lore', area: AREA, text: 'x' }), { op: 'set_lore', area: AREA, text: 'x' }, 'other ops untouched');
+});
+
+test('fx: the playtest case through the card: the note under "text" is a rewrite target, and a full rewrite answered as append_lore with "loc" is matched and kept', async () => {
+    const { f } = await proposed({ note: 'rats in the walls', rewrite: 'light', why: 'one detail' }, ops([{ op: 'update_area', area: AREA, text: RATS }]));
+    assert.equal(f.proposal.after[AREA]?.lore, RATS, 'the preview shows the new notes');
+    assert.deepEqual(rr.textTargets(f.proposal).map(t => t.key), [`lore:${AREA}`]);
+    const calls = model({ rewrite: ops([{ op: 'append_lore', loc: AREA, text: RATS_FULL }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    const g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.equal(g.rewrite, 'full');
+    assert.equal(g.proposal.ops.length, 1);
+    assert.equal(g.proposal.ops[0].op, 'update_area');
+    assert.equal(g.proposal.ops[0].lore, RATS_FULL);
+    assert.match(calls[0].prompt, /the notes of The Drowned Rat \(riverton:drowned_rat\)/);
+});
+
+test('fx: a notes answer with no area is matched when the change has one notes text; with two it fails saying which area is missing', async () => {
+    {
+        await proposed({ note: 'rats in the walls', rewrite: 'light', why: 'one detail' }, ops([{ op: 'update_area', area: AREA, text: RATS }]));
+        model({ rewrite: ops([{ op: 'set_lore', text: RATS_FULL }]) });
+        byText(draw(), 'Make it a full rewrite').click();
+        await flush(60);
+        const g = flagOf();
+        assert.equal(g.rewriteError, undefined, g.rewriteError);
+        assert.equal(g.proposal.ops[0].lore, RATS_FULL);
+    }
+    const two = [{ key: `lore:${AREA}`, i: 0, op: 'update_area', family: 'lore', where: AREA, label: 'a' }, { key: 'lore:riverton', i: 1, op: 'set_lore', family: 'lore', where: 'riverton', label: 'b' }];
+    const old = [{ op: 'update_area', area: AREA, lore: RATS }, { op: 'set_lore', area: 'riverton', text: 'A river town.' }];
+    assert.deepEqual(rr.mergeRewrite(old, two, [{ op: 'set_lore', text: RATS_FULL }]), { error: "the answer's note edit didn't say which area (this change has 2 notes texts)" });
+    assert.equal(rr.mergeRewrite(old, two, [{ op: 'set_lore', loc: 'riverton', text: 'A drowned town.' }]).ops[1].text, 'A drowned town.', '"loc" names it');
+});
+
+test('fx: unmatched text edits say plainly what was missing; the structure guard is unchanged', async () => {
+    const t = [{ key: `desc:${TAVERN}`, i: 0, op: 'set_description', family: 'desc', where: TAVERN, label: 'the description' }];
+    const old = [descOp(BOARDS)];
+    assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'set_description', text: PALACE }]), { error: "the answer's description edit didn't say which room" }, 'a description is never guessed');
+    assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'set_exit_description', loc: TAVERN, text: 'x' }]), { error: "the answer's exit text edit didn't say which room and direction" });
+    assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'block_exit', loc: TAVERN, direction: 'back' }]), { error: "the answer had a block_exit edit, which a rewrite can't change" });
+    const lore = [{ key: `lore:${AREA}`, i: 0, op: 'update_area', family: 'lore', where: AREA, label: 'n' }];
+    const oldLore = [{ op: 'update_area', area: AREA, text: RATS }];
+    assert.deepEqual(rr.mergeRewrite(oldLore, lore, [{ op: 'append_lore', loc: 'riverton:other', text: 'x' }]), { error: "the answer rewrote riverton:other, which is not one of this change's texts" }, 'a "loc" naming another area is still refused');
+    assert.deepEqual(rr.mergeRewrite(oldLore, lore, [{ op: 'update_area', area: AREA, name: 'The Wet Rat', lore: 'x' }]), { error: `the answer changed "name" on ${AREA}` }, 'a rename is still refused');
+    const m = rr.mergeRewrite(oldLore, lore, [{ op: 'append_lore', area: AREA, text: RATS_FULL }]);
+    assert.equal(rr.rewriteGuard(oldLore, m.ops), '', 'the old op read with its notes as lore compares equal in structure');
+    assert.equal(m.ops[0].lore, RATS_FULL);
+    assert.equal(rr.mergeRewrite(oldLore, lore, [{ op: 'update_area', area: AREA, text: RATS_FULL }]).ops?.[0].lore, RATS_FULL, 'an answer with its notes under "text" is read the same way');
+    // Read directly (any caller, not only through a normalized proposal), the note under "text" is the area's notes.
+    assert.equal(rr.targetKeyOf({ op: 'update_area', area: AREA, text: RATS }), `lore:${AREA}`);
+    assert.deepEqual(rr.withText({ op: 'update_area', area: AREA, text: RATS }, RATS_FULL), { op: 'update_area', area: AREA, lore: RATS_FULL }, 'no stray "text" left beside the new notes');
+});

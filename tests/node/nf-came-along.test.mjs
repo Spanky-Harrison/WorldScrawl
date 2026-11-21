@@ -297,3 +297,19 @@ test('alongCheck (pure): candidates by handle or id; named by name, alias or unk
     for (const a of ['memory', 'disposition', 'name']) assert.equal(chk({ action: a, id: 'p1' }), 'keep', a);
     assert.equal(chk({ action: 'appearance', id: 'p2' }), 'keep', 'someone here: not this guard');
 });
+
+test('fx: the after-reply tracker redraws the reply\'s exits footer: after a came_along turn it lists her as present, with no other trigger', async () => {
+    const { c } = boot({ tracker: k => (k === 0 ? along() : GOOD) });
+    ext.settings().showExits = true;
+    const footerOf = id => globalThis.document.querySelector(`#chat .mes[mesid="${id}"]`)?.querySelector('.worldscrawl_npcs_here')?.textContent ?? '';
+    const p = say(c, 'I [move] out');
+    const r = await bracketIntent(c.chat[p], parseBracket(c.chat[p].mes));
+    assert.equal(r.kind, 'move', r.note);
+    await scene.prepareNpcs(c.chat[p]);
+    const id = reply(c, STOMPS);
+    globalThis.document = makeDoc(c.chat.map((_, i) => i));
+    assert.equal(footerOf(id), '', 'no footer drawn before the tracker');
+    await onReplyForFlags(id); await flush(80);
+    assert.equal(stamps(c.chat[id], 'npc_along').length, 1);
+    assert.equal(footerOf(id), 'Named NPCs present: the landlady');
+});
