@@ -1,0 +1,42 @@
+    // ---- 4-NF came_along: in a fresh Riverton chat in the common room at 17:00 (Hesk pours drinks there), the player
+    // moves out to the square; the reply shows the landlady coming out behind them and the (auto) tracker answers
+    // came_along. The tracker request listed her under "Just left behind"; the next narrator request has her under People here.
+    {
+        const pickedWorld = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.world);
+        await page.evaluate(() => { const s = document.getElementById('worldscrawl_world'); s.value = 'riverton'; s.dispatchEvent(new Event('change')); });
+        const was = await page.evaluate(() => SillyTavern.getContext().extensionSettings.worldscrawl.moveMode);
+        await page.evaluate(async () => { const s = await import('/script.js'); await s.doNewChat(); });
+        await settle(4000);
+        await page.evaluate(async () => {
+            const c = SillyTavern.getContext(), now = Date.now();
+            c.extensionSettings.worldscrawl.moveMode = 'buttons';
+            c.chat.push({ name: c.name1, is_user: true, mes: 'I come in out of the rain.', send_date: now, swipe_id: 0, extra: { worldscrawl_intent_checked: true } },
+                { name: c.name2, is_user: false, mes: 'The common room is warm.', send_date: now, swipe_id: 0, swipes: ['The common room is warm.'], swipe_info: [{ extra: {} }],
+                    extra: { worldscrawl_mid: `m${now}`, worldscrawl_location: 'riverton:drowned_rat/common_room' } });
+            await c.saveChat(); await c.reloadCurrentChat();
+        });
+        await settle(3000);
+        const narr = async from => (await reqsOf()).slice(from).filter(r => r.messages.some(m => /Current location:/.test(String(m.content))));
+        const turn = async (text, items) => {
+            await queue(items);
+            const last = items.filter(x => x.kind !== 'tracker').at(-1).content;
+            await page.fill('#send_textarea', text); await page.click('#send_but');
+            await page.waitForFunction(t => SillyTavern.getContext().chat.at(-1)?.mes === t && !jQuery('#mes_stop').is(':visible'), last, { timeout: 30000 });
+            await settle(3000);
+        };
+        await turn('[wait] 9h', [{ content: 'The evening crowd drifts in.' }]);
+        const tFrom = (await reqsOf('tracker')).length;
+        const ALONG = JSON.stringify({ place: null, people: [{ id: 'hesk', action: 'came_along' }], wait: null });
+        await turn('I [move] out', [{ content: 'The landlady stomps out behind you into the square, still arguing about the rent.' }, { kind: 'tracker', content: ALONG }]);
+        const tReq = (await reqsOf('tracker')).slice(tFrom).map(r => r.messages.map(m => String(m.content)).join('\n')).find(t => /Village Square/.test(t)) ?? '';
+        check('came_along: the move\'s tracker request lists her under "Just left behind in Common Room", masked', /Just left behind in Common Room \(with the player there before this move/.test(tReq) && /^the landlady \[\w+\]/m.test(tReq.slice(tReq.indexOf('Just left behind in'))) && !/Hesk/.test(tReq), tReq.slice(tReq.indexOf('People here'), tReq.indexOf('People here') + 400));
+        const got = await page.evaluate(() => { const r = SillyTavern.getContext().chat.findLast(m => !m.is_user); return { s: (r.extra?.worldscrawl_npc ?? []).filter(x => x.type === 'npc_along'), card: [...document.querySelectorAll('#chat .worldscrawl_npcchange')].map(e => e.textContent).find(t => /came along/.test(t)) ?? '' }; });
+        check('came_along: held in the square by a tracker npc_along stamp; a kept card with Turn off and Undo', got.s.length === 1 && got.s[0].place === 'riverton:streets/square' && got.s[0].source === 'tracker' && /came along to Village Square/.test(got.card) && /Turn off/.test(got.card) && /Undo/.test(got.card), JSON.stringify(got));
+        const from = (await reqsOf()).length;
+        await turn('I look around the square.', [{ content: 'Stalls are closing for the night.' }]);
+        const told = (await narr(from)).map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
+        check('came_along: the next narrator request has her under People here, with the player', /^the landlady \[\w+\]: .*Now: with the player\./m.test(told), told.slice(told.indexOf('People here'), told.indexOf('People here') + 300));
+        await page.evaluate(m => { SillyTavern.getContext().extensionSettings.worldscrawl.moveMode = m; }, was);
+        await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
+        await settle(2000);
+    }

@@ -109,11 +109,12 @@ test('the prompt order (T8) and wording: PLACE, PEOPLE, WAIT, each rule before t
     say(c, 'I ask the landlady about the river.');
     await onReplyForFlags(reply(c, 'She shrugs and keeps pouring.'));
     const p = String(trackerCalls()[0].prompt);
-    const order = ['\nPlayer: ', '\nNarrator: ', "Report only what this exchange changed. Most exchanges change nothing about the place or people's looks.", '\nPLACE. ', '\nPEOPLE. ', '\nAppearance: ', '\nFact: ', '\nMemory: ', '\nDisposition: ', '\nName: ', '\nFound: ', '"action": "leave"}: they leave the scene.', '"action": "staying"}: they agree to stay', '"action": "follow"}: they come along', '"action": "stay"}: they stay behind', '\nWAIT. ', SKELETON];
+    const order = ['\nPlayer: ', '\nNarrator: ', "Report only what this exchange changed. Most exchanges change nothing about the place or people's looks.", '\nPLACE. ', '\nPEOPLE. ', '\nAppearance: ', '\nFact: ', '\nMemory: ', '\nDisposition: ', '\nName: ', '\nFound: ', '"action": "leave"}: they leave the scene.', '"action": "staying"}: they agree to stay', '"action": "came_along"}: someone under "Just left behind" whom this reply shows here with the player after they arrived', '"action": "stay"}: they stay behind', '\nWAIT. ', SKELETON];
     const pos = order.map(s => p.indexOf(s));
     assert.ok(pos.every(i => i >= 0), JSON.stringify(order.filter((s, i) => pos[i] < 0)));
     assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'in this order');
     assert.ok(p.includes(entry('npc.fact_rules').text) && p.includes(entry('npc.memory_rules').text));
+    assert.ok(!p.includes('"action": "follow"'), '4-NF: follow is not a tracker action');
     assert.match(p, /Only the people listed above get items \(found is the one exception\)\. If the story changes someone who is not listed \(a stranger, a background figure, the player's own character\), it gets no item; it never goes to a listed person who happens to be nearby\./, 'T2');
     assert.match(p, /fields is exactly one of body or outfit; a change to both is two items\./, 'T3');
     assert.match(p, /scope is "light" when .* and "full" when it remakes them/, 'T6: light or full');
