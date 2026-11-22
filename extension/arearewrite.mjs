@@ -220,10 +220,17 @@ export function appendTo(was, added) {
  * - notes (lore): its area under "loc" (lowercased, "/..." stripped), or none when there is one notes text;
  * - a description: no "loc" when there is one description;
  * - an exit text: no room and/or no direction when exactly one exit text fits what it does give.
+ * A room the answer names is compared to the targets exactly first, then case-insensitively; once matched, the target's
+ * own address is used (an address is never lowercased, so one with capitals still keys to its text).
  * Two or more candidates: nothing is guessed (unmatchedText says why).
  */
 function answerTarget(r, targets) {
     const f = FAMILY[r.op], of = fam => targets.filter(t => t.family === fam);
+    // The targets of `fam` in the room `loc` names: an exact address wins, else the same address in another case.
+    const inRoom = (fam, loc) => {
+        const all = of(fam), exact = all.filter(t => t.where === loc);
+        return exact.length ? exact : all.filter(t => lc(t.where) === lc(loc));
+    };
     if (f === 'lore') {
         if (str(r.area)) return r;
         const { loc, ...rest } = r;
@@ -232,14 +239,12 @@ function answerTarget(r, targets) {
         return lore.length === 1 ? { ...rest, area: lore[0].where } : r;
     }
     if (f === 'desc') {
-        if (str(r.loc)) return { ...r, loc: str(r.loc).toLowerCase() };
-        const desc = of('desc');
+        const loc = str(r.loc), desc = loc ? inRoom('desc', loc) : of('desc');
         return desc.length === 1 ? { ...r, loc: desc[0].where } : r;
     }
     if (f === 'exit') {
-        const loc = str(r.loc).toLowerCase(), dir = lc(r.direction);
-        if (loc && dir) return { ...r, loc };
-        const fit = of('exit').filter(t => (!loc || t.where === loc) && (!dir || lc(t.direction) === dir));
+        const loc = str(r.loc), dir = lc(r.direction);
+        const fit = (loc ? inRoom('exit', loc) : of('exit')).filter(t => !dir || lc(t.direction) === dir);
         return fit.length === 1 ? { ...r, loc: fit[0].where, direction: fit[0].direction } : r;
     }
     return r;
