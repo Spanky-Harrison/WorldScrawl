@@ -173,18 +173,19 @@ export function rewriteGuard(oldOps, newOps) {
 /**
  * Put the rewrite call's answer into the proposal's ops: each answer op must name one of `targets` and set only its text.
  * A target left out keeps its text. Returns {ops} or {error}. An appended text comes back whole as a set_*, or as the
- * added part only (the light touch) as the same append_*.
+ * added part only (the light touch) as the same append_*. An append answer to a whole text is added to the text before
+ * the change (appendTo). An answer that names no place is matched when one target fits (answerTarget). A name on any
+ * answer op must be the old op's name.
  */
 export function mergeRewrite(oldOps, targets, answerOps) {
     const ops = structuredClone(oldOps ?? []);
     const byKey = new Map(targets.map(t => [t.key, t]));
     const done = new Set();
-    const loreTargets = targets.filter(t => t.family === 'lore');
     for (const r0 of Array.isArray(answerOps) ? answerOps : []) {
         if (!isObj(r0)) return { error: 'the answer had something that is not an edit' };
-        const r = answerTarget(asRead(r0), loreTargets);
+        const r = answerTarget(asRead(r0), targets);
         const key = targetKeyOf(r), t = byKey.get(key);
-        if (!key) return { error: unmatchedText(r, loreTargets) };
+        if (!key) return { error: unmatchedText(r, targets) };
         if (!t) return { error: `the answer rewrote ${key.replace(/^\w+:/, '')}, which is not one of this change's texts` };
         if (done.has(key)) return { error: `the answer rewrote ${t.where} twice` };
         done.add(key);
@@ -193,32 +194,69 @@ export function mergeRewrite(oldOps, targets, answerOps) {
         const old = asRead(ops[t.i]);
         // Anything the answer sets besides the text must match the old op (it is copied over, never trusted).
         for (const [k, v] of Object.entries(r)) {
-            if (['op', 'text', 'lore', 'fields', 'loc', 'area', 'direction', 'story'].includes(k)) continue;
-            if (!same(v, old[k])) return { error: `the answer changed "${k}" on ${t.where}` };
+            if (['op', 'text', 'lore', 'fields', 'loc', 'area', 'direction', 'story', 'name'].includes(k)) continue;
+            if (!same(v, old[k])) return { error: `the answer's edit also changed "${k}" on ${t.where}; a rewrite only changes the text` };
         }
-        if (r.op === 'update_area' && str(r.name) && str(r.name) !== str(old.name)) return { error: `the answer renamed ${t.where}` };
+        // A name on the answer (any op, also one whose old op has none) must be the old op's name: a rewrite never renames.
+        if ('name' in r && str(r.name) !== str(old.name)) return { error: `the answer's ${FAMILY_WORD[t.family]} edit also renamed ${t.where}; a rewrite only changes the text` };
         if (r.op === 'set_exit') for (const [k, v] of Object.entries(r.fields ?? {})) if (k !== 'description' && !same(v, old.fields?.[k])) return { error: `the answer changed the exit's "${k}"` };
-        ops[t.i] = /^append_/.test(old.op) && r.op === old.op ? { ...old, text: String(text).trim() } : withText(old, String(text).trim()); // an append answered as an append stays one
+        // An append answered as an append stays one. An append answered to a whole text (set_*, update_area) is added to the
+        // text as it was before the change, so a partial answer never drops the rest of the notes or description.
+        const answer = String(text).trim();
+        ops[t.i] = /^append_/.test(old.op) && r.op === old.op ? { ...old, text: answer }
+            : withText(old, /^append_/.test(r.op) && !/^append_/.test(old.op) ? appendTo(t.was, answer) : answer);
     }
     return { ops, rewritten: [...done] };
 }
+const FAMILY_WORD = { lore: 'notes', desc: 'description', exit: 'exit text' };
+/** `added` after `was` (one space), unless the answer already starts with all of `was`. */
+export function appendTo(was, added) {
+    const w = str(was), a = str(added);
+    if (!w) return a;
+    return a.startsWith(w) ? a : `${w} ${a}`;
+}
 /**
- * A notes (lore) answer that names its area under "loc", or names none when this change has exactly one notes text, is
- * that target's: the area is filled in. Nothing else is guessed (a description or exit answer must name its room).
+ * An answer that leaves out where it goes is matched only when this change has exactly one text it can be:
+ * - notes (lore): its area under "loc" (lowercased, "/..." stripped), or none when there is one notes text;
+ * - a description: no "loc" when there is one description;
+ * - an exit text: no room and/or no direction when exactly one exit text fits what it does give.
+ * A room the answer names is compared to the targets exactly first, then case-insensitively; once matched, the target's
+ * own address is used (an address is never lowercased, so one with capitals still keys to its text).
+ * Two or more candidates: nothing is guessed (unmatchedText says why).
  */
-function answerTarget(r, loreTargets) {
-    if (FAMILY[r.op] !== 'lore' || str(r.area)) return r;
-    const { loc, ...rest } = r;
-    if (str(loc)) return { ...rest, area: str(loc).toLowerCase().replace(/\/.*$/, '') };
-    return loreTargets.length === 1 ? { ...rest, area: loreTargets[0].where } : r;
+function answerTarget(r, targets) {
+    const f = FAMILY[r.op], of = fam => targets.filter(t => t.family === fam);
+    // The targets of `fam` in the room `loc` names: an exact address wins, else the same address in another case.
+    const inRoom = (fam, loc) => {
+        const all = of(fam), exact = all.filter(t => t.where === loc);
+        return exact.length ? exact : all.filter(t => lc(t.where) === lc(loc));
+    };
+    if (f === 'lore') {
+        if (str(r.area)) return r;
+        const { loc, ...rest } = r;
+        if (str(loc)) return { ...rest, area: str(loc).toLowerCase().replace(/\/.*$/, '') };
+        const lore = of('lore');
+        return lore.length === 1 ? { ...rest, area: lore[0].where } : r;
+    }
+    if (f === 'desc') {
+        const loc = str(r.loc), desc = loc ? inRoom('desc', loc) : of('desc');
+        return desc.length === 1 ? { ...r, loc: desc[0].where } : r;
+    }
+    if (f === 'exit') {
+        const loc = str(r.loc), dir = lc(r.direction);
+        const fit = (loc ? inRoom('exit', loc) : of('exit')).filter(t => !dir || lc(t.direction) === dir);
+        return fit.length === 1 ? { ...r, loc: fit[0].where, direction: fit[0].direction } : r;
+    }
+    return r;
 }
 /** Why an answer op names no text this change has, in plain words. */
-function unmatchedText(r, loreTargets) {
-    const f = FAMILY[r.op];
-    if (f === 'lore' && !str(r.area)) return `the answer's note edit didn't say which area${loreTargets.length > 1 ? ` (this change has ${loreTargets.length} notes texts)` : ''}`;
+function unmatchedText(r, targets) {
+    const f = FAMILY[r.op], n = targets.filter(t => t.family === f).length;
+    if (f === 'lore' && !str(r.area)) return `the answer's note edit didn't say which area${n > 1 ? ` (this change has ${n} notes texts)` : ''}`;
     if (f === 'lore') return `the answer's ${r.op} for ${str(r.area)} had no notes text`;
-    if (f === 'desc') return "the answer's description edit didn't say which room";
-    if (f === 'exit' && (!str(r.loc) || !str(r.direction))) return "the answer's exit text edit didn't say which room and direction";
+    if (f === 'desc' && !str(r.loc)) return `the answer's description edit didn't say which room${n > 1 ? ` (this change has ${n} descriptions)` : ''}`;
+    if (f === 'desc') return "the answer's description edit had no text";
+    if (f === 'exit' && (!str(r.loc) || !str(r.direction))) return `the answer's exit text edit didn't say which room and direction${n > 1 ? ` (this change has ${n} exit texts)` : ''}`;
     if (f === 'exit') return "the answer's exit edit had no description text";
     return `the answer had a ${String(r.op ?? 'non-text')} edit, which a rewrite can't change`;
 }
