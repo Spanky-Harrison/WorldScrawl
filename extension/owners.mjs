@@ -363,19 +363,22 @@ function replayKeys(chat, stamp, candidate, elapsed) {
  * that is gone. A card whose keys still match is left alone. One whose own field's input is unchanged is rebased (the
  * other field's current text, no model call). Either way that moved, its decisionRev is bumped, so an Approve drawn
  * before the refresh is stale (the card redraws). One that is really stale (an earlier kept change to its own field was
- * undone, say) goes to "working" and is returned for a refill (fillCandidate), like a stale Approve. Returns
- * {refill: identities to refill, touched: messages whose stamps changed}.
+ * undone, say) goes to "working" and is returned for a refill (fillCandidate), like a stale Approve. Each card is keyed
+ * at its own message's time (`elapsedAt(index)`, Ast round 3), never the decided card's: a lasting change can be in force
+ * on one message and over on the other. Returns {refill: [{identity, index, elapsed}], touched: messages changed}.
  */
-export function refreshSiblings(chat, identity, elapsed) {
+export function refreshSiblings(chat, identity, elapsedAt) {
     const refill = [], touched = new Set();
-    if (!identity?.npc || !Number.isFinite(elapsed)) return { refill, touched };
-    for (const m of chat ?? []) {
+    if (!identity?.npc || typeof elapsedAt !== 'function') return { refill, touched };
+    for (const [index, m] of (chat ?? []).entries()) {
         const active = m?.swipe_id ?? 0;
         for (const s of m?.extra?.worldscrawl_npc ?? []) {
             if (!s || s.id !== identity.npc || !isOwnerStamp(s) || s.off === true || (s.owner || s.identity?.owner) === identity.owner) continue;
             if ((s.swipe ?? 0) !== active) continue;
             const c = s.candidate;
             if (!c || c.phase !== 'review' || !c.lastingKey || !c.liveKey) continue;
+            const elapsed = elapsedAt(index);
+            if (!Number.isFinite(elapsed)) continue;
             let now = replayKeys(chat, s, c, elapsed);
             if (now.lasting === c.lastingKey && now.live === c.liveKey) continue;
             s.decisionRev += 1;
@@ -383,7 +386,7 @@ export function refreshSiblings(chat, identity, elapsed) {
             const rebased = ownFieldRebase(chat, s, c, elapsed);
             if (rebased) { now = replayKeys(chat, s, rebased, elapsed); if (now.lasting === rebased.lastingKey && now.live === rebased.liveKey) continue; }
             s.candidate = { ...(rebased ?? c), phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
-            refill.push(s.identity ?? { owner: s.owner, npc: s.id, message: messageKey(m), swipe: s.swipe ?? 0, domain: 'appearance' });
+            refill.push({ identity: s.identity ?? { owner: s.owner, npc: s.id, message: messageKey(m), swipe: s.swipe ?? 0, domain: 'appearance' }, index, elapsed });
         }
     }
     return { refill, touched };
