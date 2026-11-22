@@ -6,12 +6,12 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, factHasEnd, presentAt, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { calendarLib, chatChanges, chatElapsed, defaultWorldId, gameDateAt, placeWeatherNow, worldTimes } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow, worldCalendar } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
 import { exitsCache, exitsText, locationAt, renderAllExits, renderExitsFrom } from './footer.mjs';
-import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, activeWorld, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
+import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
@@ -503,10 +503,6 @@ export function clockGap(a, b, cal = calendarLib?.GREGORIAN) {
     const day = cal.hours_per_day * 60, d = Math.abs(x - y);
     return Math.min(d, day - d);
 }
-/** This world's calendar (GREGORIAN when it has none or it is malformed). */
-function worldCalendar() {
-    try { return calendarLib.checkCalendar(worldTimes.get(activeWorld || defaultWorldId)?.calendar); } catch { return calendarLib?.GREGORIAN; }
-}
 /** The story's clock time may correct the tracker's by at most this many minutes. */
 export const STORY_CLOCK_SLACK = 30;
 /**
@@ -514,6 +510,9 @@ export const STORY_CLOCK_SLACK = 30;
  * a clock time on the player's line ("I wait until half past five") always wins; else the reply's one until-clock time
  * when it is within STORY_CLOCK_SLACK minutes of the tracker's clock time (two or more in the reply: the tracker's stands;
  * a day-part word is not adjusted). An hour with two readings takes the next one after the reply's game time.
+ * An impossible time on the player's line only reaches here when the verb check judged the line not a wait ("the shop
+ * is open until 11 pm"): a wait with one fails there, with no reply and no tracker (5D). The reply and the tracker's own
+ * until are the model-only guards.
  */
 function waitClockOverride(chat, id, msg, wait) {
     if (!calendarLib?.untilClocksRead) return { said: null, from: '' };

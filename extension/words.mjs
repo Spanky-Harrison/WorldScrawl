@@ -53,3 +53,34 @@ export function normalizeWsTags(text) {
 }
 /** [ws_...] tags still in a reply after every reader ran: the engine couldn't read them. */
 export const unreadTags = text => [...String(text ?? '').matchAll(/\[\s*ws[_ ][^\]]{0,300}\]/gi)].map(m => m[0]);
+
+// ---- 5D: an impossible wait typed as free text ("I wait until 11 pm" on a 20-hour day) fails in the verb check.
+/** A wait word ("wait", "slept", "keep watch"...): the clause after it is a wait. */
+export const WAIT_VERB_RE = /\b(?:wait(?:s|ed|ing)?|sleep(?:s|ing)?|slept|rest(?:s|ed|ing)?|nap(?:s|ped|ping)?|doze(?:s|d)?|dozing|linger(?:s|ed|ing)?|stay(?:s|ed|ing)?|sit(?:s|ting)?|sat|keep(?:s|ing)? watch|kept watch|pass(?:es|ed|ing)? the time)\b/i;
+const SLEEP_VERB_RE = /^(?:sleep|slept|nap|doz)/i;
+/** The text with quoted speech removed: only matched pairs ("…", “…”, «…»); a stray opening quote is left as it is. */
+export function dropQuoted(text) {
+    return String(text ?? '').replace(/"[^"]*"|“[^“”]*”|«[^«»]*»/g, ' ');
+}
+/** Clauses: split at . ! ? ; and line ends, never inside a clock ("11:30", "17.15") or "p.m." ("p.m." reads as "pm"). */
+export function waitClauses(text) {
+    return String(text ?? '').replace(/\b([ap])\.\s?m\.?(?=\s|$|[,;!?])/gi, '$1m').split(/(?<!\d)\.|\.(?!\d)|[!?;\n]/).map(t => t.trim()).filter(Boolean);
+}
+/**
+ * The first impossible wait time on a player's line: {said, why, phrase, verb} or null. `read(text)` is the calendar's
+ * untilClocksRead for this world ({clocks, impossible}). A clause counts as a wait only from a wait word on ("I wait
+ * until 11 pm"), so "the shop is open until 11 pm" and quoted speech never do.
+ */
+export function impossibleWaitIn(text, read) {
+    for (const clause of waitClauses(dropQuoted(text))) {
+        const v = WAIT_VERB_RE.exec(clause);
+        if (!v) continue;
+        const from = clause.slice(v.index);
+        const hit = read(from)?.impossible?.[0];
+        if (!hit) continue;
+        const at = from.toLowerCase().indexOf(hit.said.toLowerCase());
+        const phrase = (at >= 0 ? from.slice(0, at + hit.said.length) : from).replace(/\s+/g, ' ').slice(0, 60);
+        return { said: hit.said, why: hit.why, phrase, verb: SLEEP_VERB_RE.test(v[0]) ? 'sleep' : 'wait' };
+    }
+    return null;
+}

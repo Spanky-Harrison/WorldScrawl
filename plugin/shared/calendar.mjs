@@ -274,10 +274,13 @@ export function readUntil(t, cal = GREGORIAN) {
     if (dw) return out(DAY_WORDS[dw[1]], s.slice(dw[0].length));
     const day24 = cal.hours_per_day === 24, hpd = cal.hours_per_day;
     const said = full => { const t = full.trim().replace(/\s+/g, ' '); return /\..*\.$/.test(t) ? t : t.replace(/\.$/, ''); }; // "11 pm." -> "11 pm"; "11 p.m." stays
-    const impossible = (full, rest, h = null) => ({ impossible: said(full), why: h == null || h < hpd ? `this world's ${hpd}-hour day has no am or pm` : `past the end of this world's ${hpd}-hour day`, rest: rest.trim() });
-    const literal = (full, h, mi, rest) => (h >= hpd ? impossible(full, rest, h) : out(hm(h, mi), rest));
+    // 5D F1: the why reads after `"11 pm" is`; 5D Q3: a minute past 59 is not a time either.
+    const impossible = (full, rest, h = null, mi = 0) => ({ impossible: said(full), why: mi > 59 ? `not a time (an hour has no minute ${mi})` : h == null || h < hpd ? `not a time on this world's ${hpd}-hour day (it has no am or pm)` : `past the end of this world's ${hpd}-hour day`, rest: rest.trim() });
+    // A literal clock: "24:00" ("20:00" on a 20-hour day) is midnight, the end of the day (5D Q6); later is past its end.
+    const literal = (full, h, mi, rest) => (mi > 59 ? impossible(full, rest, h, mi) : h === hpd && mi === 0 ? out('00:00', rest) : h >= hpd ? impossible(full, rest, h) : out(hm(h, mi), rest));
     // A 12-hour reading of hour h, minute mi: am/pm from a suffix, else literal plus the other half of the day.
     const twelve = (h, mi, rest, explicit = '') => {
+        if (h >= 1 && h <= 12 && mi > 59 && explicit) return impossible(s.slice(0, s.length - rest.length), rest, h, mi); // "5:61 pm"
         if (h < 1 || h > 12 || mi > 59) return null;
         const am = explicit === 'a' || (!explicit && AM_RE.test(rest)), pm = explicit === 'p' || (!explicit && PM_RE.test(rest));
         if (!explicit) rest = rest.replace(am ? AM_RE : pm ? PM_RE : /^/, '');
@@ -288,16 +291,18 @@ export function readUntil(t, cal = GREGORIAN) {
     };
     let m;
     // An am/pm time on a short day: past its end, or a clock that day doesn't use; visible, never wrapped.
-    const ampm = (h, mi, ap, full, rest) => { if (day24) return twelve(h, mi, rest, ap); if (h < 1 || h > 12 || mi > 59) return null; return impossible(full, rest, ap === 'a' ? (h === 12 ? 0 : h) : (h === 12 ? 12 : h + 12)); };
+    const ampm = (h, mi, ap, full, rest) => { if (day24) return twelve(h, mi, rest, ap); if (h < 1 || h > 12) return null; if (mi > 59) return impossible(full, rest, h, mi); return impossible(full, rest, ap === 'a' ? (h === 12 ? 0 : h) : (h === 12 ? 12 : h + 12)); };
     if ((m = /^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return ampm(+m[1], +m[2], m[3], m[0], s.slice(m[0].length));
     if ((m = /^(\d{1,2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return ampm(+m[1], 0, m[2], m[0], s.slice(m[0].length));
     if ((m = /^(\d{1,2})h(\d{2})(?![\w:])/.exec(s))) return literal(m[0], +m[1], +m[2], s.slice(m[0].length));
     if ((m = /^(\d{1,2})[:.](\d{2})(?![\w:]|\.\d)/.exec(s))) {
         const h = +m[1], mi = +m[2];
-        if (m[1].startsWith('0') || h >= 13 || h === 0) return literal(m[0], h, mi, s.slice(m[0].length)); // literal
+        if (m[1].startsWith('0') || h >= 13 || h === 0 || mi > 59) return literal(m[0], h, mi, s.slice(m[0].length)); // literal ("17:75", "5:61": no such minute)
         return twelve(h, mi, s.slice(m[0].length));
     }
-    if ((m = /^(\d{4})(?![\w:])/.exec(s))) { const h = +m[1].slice(0, 2), mi = +m[1].slice(2); return h <= 23 && mi <= 59 ? literal(m[0], h, mi, s.slice(m[0].length)) : null; }
+    // Four digits: a clock when the minutes are 00-59 ("2400" is midnight, "2401" and "2500" past the end of the day, 5D C2);
+    // "1999" is not a clock time at all (null, as before).
+    if ((m = /^(\d{4})(?![\w:])/.exec(s))) { const h = +m[1].slice(0, 2), mi = +m[1].slice(2); return mi <= 59 ? literal(m[0], h, mi, s.slice(m[0].length)) : null; }
     if ((m = new RegExp(`^(?:a\\s+)?(quarter|half)\\s+past\\s+${H}(?![\\w:])`).exec(s))) return twelve(hourOf(m[2]), m[1] === 'half' ? 30 : 15, s.slice(m[0].length));
     if ((m = new RegExp(`^(?:a\\s+)?quarter\\s+(?:to|till|til|before)\\s+${H}(?![\\w:])`).exec(s))) { const h = hourOf(m[1]); return twelve(h === 1 ? 12 : h - 1, 45, s.slice(m[0].length)); }
     if ((m = new RegExp(`^${H}\\s*o'?\\s?clock\\b`).exec(s))) return twelve(hourOf(m[1]), 0, s.slice(m[0].length));

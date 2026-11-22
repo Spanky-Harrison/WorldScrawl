@@ -5,7 +5,7 @@
 // a message rolls them back. A string stamp is the player's position (old chats, and still what we write
 // when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
 // is the player (id "player") plus whoever is following them, and nobody follows yet.
-import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags } from './words.mjs';
+import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags, impossibleWaitIn } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
@@ -19,7 +19,7 @@ import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followe
 import { WHICH_PREFIX, addNotice, bracketIntent, helpText, noticeMes, parseBracket, unbracket } from './brackets.mjs';
 export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';
-import { calendarLib, chatElapsed, chatWorld, defaultWorldId, effectiveWorld, listedWorlds, loadCalendar, rememberWorlds, worldLiving, worldMissing, worldName, worldNames, worldTimes } from './clock.mjs';
+import { calendarLib, chatElapsed, chatWorld, defaultWorldId, effectiveWorld, listedWorlds, loadCalendar, rememberWorlds, worldCalendar, worldLiving, worldMissing, worldName, worldNames, worldTimes } from './clock.mjs';
 import { askValid, noteCall } from './dig.mjs';
 import { flagMessage, onReplyForFlags, onStorySwipe, stopTrackerWait, syncSwipeExtra, trackerSettled } from './discovery.mjs';
 import { api, barAction, currentLocation, doorAction, ensurePrompts, getStoredLocation, stampHistory, storedStamp } from './doors.mjs';
@@ -369,6 +369,22 @@ export async function hideCommand(at) {
     try { await c.saveChat(); } catch (e) { console.warn('[WorldScrawl] save after hide failed', e?.message || e); }
 }
 
+/**
+ * 5D: the player's free-text wait to a time this world's day can't have, as a failed command ({kind: 'bracket_failed',
+ * loc, note, verb}), or null. Read with no model call (impossibleWaitIn: wait clauses, quoted speech left out). A line
+ * that passes is not marked: typed mode still asks its intent question.
+ */
+async function impossibleWaitTurn(turn) {
+    if (!(await loadCalendar())) return null;
+    const cal = worldCalendar();
+    if (!cal) return null;
+    const hit = impossibleWaitIn(turn.mes, t => calendarLib.untilClocksRead(t, cal));
+    if (!hit) return null;
+    turn.extra = turn.extra ?? {};
+    turn.extra.worldscrawl_intent_checked = true;
+    return { kind: 'bracket_failed', loc: await currentLocation(), note: `${hit.phrase}: "${hit.said}" is ${hit.why}.`, verb: hit.verb, command: true };
+}
+
 /** Generation interceptor (manifest.generate_interceptor): runs before every prompt is built. */
 globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
     if (offReason) return; // off (version check): the chat goes to the narrator untouched
@@ -397,9 +413,13 @@ globalThis.worldscrawlInterceptor = async function (_chat, _size, abort, type) {
         // notice, system line or /hide'd line after it does not hide them. None in a group's later members.
         const turnAt = !type || type === 'normal' ? turnPlayerIndex(chat) : -1;
         const turn = turnAt >= 0 ? chat[turnAt] : null;
-        const bracket = turn && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked ? parseBracket(turn.mes) : null;
-        if (bracket || (turn && s.moveMode === 'typed' && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked)) {
-            const r = (bracket && await bracketIntent(turn, bracket)) || await parseIntent(turn);
+        const fresh = turn && !turn.extra?.worldscrawl_engine && !turn.extra?.worldscrawl_intent_checked;
+        const bracket = fresh ? parseBracket(turn.mes) : null;
+        // 5D: a free-text wait to a time this world's day can't have ("I wait until 11 pm" on a 20-hour day, "until 25:00")
+        // fails here in every move mode, like a failed bracket: no narrator, no tracker. A bracket verb has its own check.
+        const waitFail = fresh && !bracket ? await impossibleWaitTurn(turn) : null;
+        if (waitFail || bracket || (fresh && s.moveMode === 'typed')) {
+            const r = waitFail || (bracket && await bracketIntent(turn, bracket)) || await parseIntent(turn);
             await c.saveChat();
             // A command ([remember], [help], an already-here [find]) or an outright failure (any failed bracket verb, a typed
             // move that cannot happen): no reply. The player's message is stamped (the error on a failure) and hidden with
