@@ -250,7 +250,7 @@ test('the map\'s cast Changes tab draws the same one-field card (shared personRe
     assert.equal(both.desc.panel.rows.length, 2);
 });
 
-test('a change to the card\'s own field still makes it stale: a later Outfit card kept first, then the earlier Outfit card asks again', async () => {
+test('a change to the card\'s own field still makes it stale: a later Outfit card kept first, and the earlier Outfit card is asked again at once (5A)', async () => {
     const { c, calls } = boot({});
     const H = await heskHandle(c);
     c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked' })], wait: null });
@@ -258,18 +258,20 @@ test('a change to the card\'s own field still makes it stale: a later Outfit car
     c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
     const b = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
     const first = ownerOf(c.chat[a], 'outfit'), second = ownerOf(c.chat[b], 'outfit');
+    const token = first.candidate.token;
+    calls.length = 0;
     btn(cardFor(draw(c), b, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
     assert.ok(second.committed);
-    calls.length = 0;
-    const token = first.candidate.token;
-    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
-    assert.ok(!first.committed, 'its own field moved: stale, not kept');
+    // 5A (A3, Ast): its own field moved, so it is asked again at once, without waiting for its Approve.
+    assert.ok(!first.committed, 'its own field moved: not kept');
     assert.equal(calls.length, 1, 'asked again');
     assert.deepEqual(calls[0].fields, ['outfit']);
     assert.equal(first.candidate.phase, 'review');
     assert.equal(first.candidate.token, token);
+    calls.length = 0;
     btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
     assert.ok(first.committed, 'kept after the new review');
+    assert.equal(calls.length, 0, 'no further call');
 });
 
 test('the compose prompt for a one-field card shows only its own field (the other field is not in the prompt)', async () => {
@@ -518,4 +520,42 @@ test('5A A6: a heavy one-field rewrite names its field in the rebuild line and s
     assert.match(calls[0].system, FULL_SYS);
     assert.match(calls[0].system, /when the outfit is among the fields asked \(outfit\), how the clothes fit the body as it is now/);
     assert.match(calls[0].prompt, /Their body as it is now/);
+});
+
+test('5A A3 (Ast): an approved Outfit0 on an earlier message undone: the pending Outfit card on a later message shows Preparing, is asked once on its own card, returns to review with new keys, and Approve makes no further call', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked' })], wait: null });
+    const a = await exchange(c, 'I wait.', 'The landlady comes in, her hem soaked by the rain.');
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    const outfit0 = ownerOf(c.chat[a], 'outfit');
+    assert.ok(outfit0.committed);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
+    const b = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
+    const pending = ownerOf(c.chat[b], 'outfit');
+    assert.equal(pending.candidate.phase, 'review');
+    const keys = [pending.candidate.lastingKey, pending.candidate.liveKey];
+    assert.match(pending.candidate.lastingPreview.outfit, /\[outfit changed\] \[outfit changed\]$/, 'composed on top of Outfit0');
+    const seen = [];
+    const gen = c.generateRaw;
+    c.generateRaw = async args => {
+        if (!isTrackerCall(args) && /apron torn/.test(String(args?.prompt ?? ''))) seen.push({ phase: pending.candidate?.phase, cards: cardsOf(draw(c), b).map(e => e.textContent).join(' || ') });
+        return gen(args);
+    };
+    calls.length = 0;
+    const kept = keptOf(draw(c), a).find(e => /Character changed here/.test(e.textContent));
+    btn(kept, 'Undo').click(); await flush(150);
+    assert.equal(calls.length, 1, `exactly one compose call: ${JSON.stringify(calls.map(x => x.fields))}`);
+    assert.match(calls[0].prompt, /apron torn/, 'on the pending card');
+    assert.doesNotMatch(calls[0].prompt, /hem soaked/, 'Outfit0 is gone from its base');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].phase, 'working');
+    assert.match(seen[0].cards, /Preparing a change to/, 'the card showed Preparing… while it was asked');
+    assert.equal(pending.candidate.phase, 'review');
+    assert.notDeepEqual([pending.candidate.lastingKey, pending.candidate.liveKey], keys, 'new keys');
+    assert.doesNotMatch(pending.candidate.lastingPreview.outfit, /\[outfit changed\] \[outfit changed\]/, 'no longer on top of Outfit0');
+    calls.length = 0;
+    btn(cardFor(draw(c), b, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(pending.committed, 'kept');
+    assert.equal(calls.length, 0, 'Approve makes no further call');
 });
