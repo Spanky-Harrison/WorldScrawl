@@ -157,4 +157,8 @@ async function applyChanges(loc) {
 }
 export const firstSentence = t => String(t ?? '').trim().split(/(?<=[.!?])\s/)[0].slice(0, 160);
 
-export { applyChanges, calendarLib, defaultWorldId, listedWorlds, rememberWorlds, weatherLib, worldCasts, worldLiving, worldMissing, worldNames, worldTimes };
+/** This world's calendar (GREGORIAN when it has none or it is malformed); null before the calendar code is loaded. */
+function worldCalendar() {
+    try { return calendarLib.checkCalendar(worldTimes.get(activeWorld || defaultWorldId)?.calendar); } catch { return calendarLib?.GREGORIAN ?? null; }
+}
+export { applyChanges, calendarLib, worldCalendar, defaultWorldId, listedWorlds, rememberWorlds, weatherLib, worldCasts, worldLiving, worldMissing, worldNames, worldTimes };
