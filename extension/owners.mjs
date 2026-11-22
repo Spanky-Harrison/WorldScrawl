@@ -358,30 +358,35 @@ function replayKeys(chat, stamp, candidate, elapsed) {
 }
 
 /**
- * 5A: after one of a person's cards on a message is decided (approve, discard, off, on, undo), their other pending
- * one-field cards on that message are brought up to date so the preview never shows a text that is gone. A card whose
- * keys still match is left alone. One whose own field's input is unchanged is rebased (the other field's current text,
- * no model call). Either way that moved, its decisionRev is bumped, so an Approve drawn before the refresh is stale (the
- * card redraws). One that is really stale goes to "working" and is returned for a refill (fillCandidate), like a stale
- * Approve. `host`: the decided card's message (an undone card is gone from it).
+ * 5A: after one of a person's cards is decided (approve, discard, off, on, undo), their other pending one-field cards
+ * (on this message or any other, on each message's active swipe) are brought up to date so a preview never shows a text
+ * that is gone. A card whose keys still match is left alone. One whose own field's input is unchanged is rebased (the
+ * other field's current text, no model call). Either way that moved, its decisionRev is bumped, so an Approve drawn
+ * before the refresh is stale (the card redraws). One that is really stale (an earlier kept change to its own field was
+ * undone, say) goes to "working" and is returned for a refill (fillCandidate), like a stale Approve. Returns
+ * {refill: identities to refill, touched: messages whose stamps changed}.
  */
-export function refreshSiblings(chat, host, identity, elapsed) {
-    const refill = [];
-    if (!host || !identity?.npc || !Number.isFinite(elapsed)) return refill;
-    for (const s of host.extra?.worldscrawl_npc ?? []) {
-        if (!s || s.id !== identity.npc || !isOwnerStamp(s) || s.off === true || (s.owner || s.identity?.owner) === identity.owner) continue;
-        if ((s.swipe ?? 0) !== (host.swipe_id ?? 0)) continue;
-        const c = s.candidate;
-        if (!c || c.phase !== 'review' || !c.lastingKey || !c.liveKey) continue;
-        let now = replayKeys(chat, s, c, elapsed);
-        if (now.lasting === c.lastingKey && now.live === c.liveKey) continue;
-        s.decisionRev += 1;
-        const rebased = ownFieldRebase(chat, s, c, elapsed);
-        if (rebased) { now = replayKeys(chat, s, rebased, elapsed); if (now.lasting === rebased.lastingKey && now.live === rebased.liveKey) continue; }
-        s.candidate = { ...(rebased ?? c), phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
-        refill.push(s.identity ?? { owner: s.owner, npc: s.id, message: messageKey(host), swipe: s.swipe ?? 0, domain: 'appearance' });
+export function refreshSiblings(chat, identity, elapsed) {
+    const refill = [], touched = new Set();
+    if (!identity?.npc || !Number.isFinite(elapsed)) return { refill, touched };
+    for (const m of chat ?? []) {
+        const active = m?.swipe_id ?? 0;
+        for (const s of m?.extra?.worldscrawl_npc ?? []) {
+            if (!s || s.id !== identity.npc || !isOwnerStamp(s) || s.off === true || (s.owner || s.identity?.owner) === identity.owner) continue;
+            if ((s.swipe ?? 0) !== active) continue;
+            const c = s.candidate;
+            if (!c || c.phase !== 'review' || !c.lastingKey || !c.liveKey) continue;
+            let now = replayKeys(chat, s, c, elapsed);
+            if (now.lasting === c.lastingKey && now.live === c.liveKey) continue;
+            s.decisionRev += 1;
+            touched.add(m);
+            const rebased = ownFieldRebase(chat, s, c, elapsed);
+            if (rebased) { now = replayKeys(chat, s, rebased, elapsed); if (now.lasting === rebased.lastingKey && now.live === rebased.liveKey) continue; }
+            s.candidate = { ...(rebased ?? c), phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
+            refill.push(s.identity ?? { owner: s.owner, npc: s.id, message: messageKey(m), swipe: s.swipe ?? 0, domain: 'appearance' });
+        }
     }
-    return refill;
+    return { refill, touched };
 }
 
 /**

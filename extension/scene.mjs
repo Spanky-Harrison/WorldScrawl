@@ -1177,14 +1177,16 @@ async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
         const wrote = await recompose(chat, { npc: identity.npc, at, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed });
         if (wrote?.msg) syncSwipeExtra(wrote.msg);
     }
-    // 5A: the person's other pending cards on this message follow the decision (after any recompose, so a rebase can
-    // use the text it just wrote). A really stale one shows "Preparing…" and is asked again.
+    // 5A: the person's other pending cards (this message or any other) follow the decision, after any recompose, so a
+    // rebase can use the text it just wrote. A really stale one shows "Preparing…" and is asked again.
     if ((res?.ok || res?.removed) && ['approve', 'discard', 'off', 'on', 'undo'].includes(action) && identity?.npc) {
-        const refill = refreshSiblings(chat, host, identity, elapsed);
+        const { refill, touched } = refreshSiblings(chat, identity, elapsed);
+        for (const m of touched) syncSwipeExtra(m);
         if (refill.length) {
-            try { if (host) syncSwipeExtra(host); renderPatchCards(); } catch (e) { console.warn('[WorldScrawl] npc sibling refresh', e?.message || e); }
+            try { renderPatchCards(); } catch (e) { console.warn('[WorldScrawl] npc sibling refresh', e?.message || e); }
             const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
             for (const sib of refill) await fillCandidate(chat, sib, { baseline: live?.pinned || { body: '', outfit: '' }, name: live?.name || identity.npc, elapsed }).catch(e => { console.warn('[WorldScrawl] npc sibling refill', e); return null; });
+            for (const m of touched) syncSwipeExtra(m);
         }
     }
     try {
