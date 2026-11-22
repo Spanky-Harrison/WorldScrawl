@@ -679,6 +679,58 @@ test('5B: an exit text answer with no room or direction is matched when one exit
     assert.deepEqual(rr.mergeRewrite(old, two, [{ op: 'set_description', loc: 'riverton:drowned_rat/kitchens', text: 'x' }]), { error: "the answer rewrote riverton:drowned_rat/kitchens, which is not one of this change's texts" }, 'a room that is not a target is still refused');
 });
 
+test('5B (Ast round 1): the room an answer names is matched exactly first, then in any case, and the target keeps its own address (never lowercased)', async () => {
+    // Through the card: the answer names the room in another case; the rewrite lands on the target's own address.
+    const exitText = { op: 'set_exit_description', loc: YARD, direction: 'in', text: 'The back door into the common room, its sill splintered.' };
+    await proposed({ note: 'the inn became a palace', rewrite: 'light', why: 'judged small' }, ops([descOp(BOARDS), exitText]), { rooms: `{"rooms":["${TAVERN}","${YARD}"]}` });
+    const shout = a => a.replace(/(^|[:/_])([a-z])/g, (m, p, c) => p + c.toUpperCase()); // riverton:drowned_rat/common_room -> Riverton:Drowned_Rat/Common_Room
+    model({ rewrite: ops([{ op: 'set_description', loc: shout(TAVERN), text: PALACE }, { op: 'set_exit_description', loc: shout(YARD), direction: 'IN', text: YARD_EXIT }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    let g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.deepEqual(g.proposal.ops.map(o => [o.op, o.loc, o.direction, o.text]),
+        [['set_description', TAVERN, undefined, PALACE], ['set_exit_description', YARD, 'in', YARD_EXIT]], 'matched in another case; the targets\' own addresses are kept');
+    // ...and named exactly, as before.
+    model({ rewrite: ops([{ op: 'set_description', loc: TAVERN, text: BOARDS }, { op: 'set_exit_description', loc: YARD, direction: 'in', text: exitText.text.replace('splintered', 'cracked') }]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.deepEqual(g.proposal.ops.map(o => o.loc), [TAVERN, YARD]);
+
+    // An address with capitals. World files only allow lowercase ids, so the map can't hold one; the merge the card runs
+    // (mergeRewrite) is driven directly. Named exactly it keys to its text; in another case it is matched and keeps its address.
+    const HALL = 'Riverton:Old_Town/Great_Hall';
+    const desc = [{ key: `desc:${HALL}`, i: 0, op: 'set_description', family: 'desc', where: HALL, label: 'd' }];
+    const was = [{ op: 'set_description', loc: HALL, text: 'a' }];
+    assert.deepEqual(rr.mergeRewrite(was, desc, [{ op: 'set_description', loc: HALL, text: 'b' }]).ops, [{ op: 'set_description', loc: HALL, text: 'b' }], 'named exactly');
+    assert.deepEqual(rr.mergeRewrite(was, desc, [{ op: 'set_description', loc: HALL.toLowerCase(), text: 'b' }]).ops, [{ op: 'set_description', loc: HALL, text: 'b' }], 'another case: the target\'s address');
+    const exit = [{ key: `exit:${HALL}|north`, i: 0, op: 'set_exit_description', family: 'exit', where: HALL, direction: 'north', label: 'e' }];
+    const ewas = [{ op: 'set_exit_description', loc: HALL, direction: 'north', text: 'a' }];
+    for (const loc of [HALL, HALL.toUpperCase()]) {
+        const m = rr.mergeRewrite(ewas, exit, [{ op: 'set_exit_description', loc, direction: 'North', text: 'b' }]);
+        assert.equal(m.error, undefined, m.error);
+        assert.deepEqual([m.ops[0].loc, m.ops[0].direction, m.ops[0].text], [HALL, 'north', 'b'], `exit named ${loc}`);
+    }
+    // Two rooms differing only in case: an exact name picks its own; another case for both is not guessed.
+    const two = [
+        { key: 'desc:a:b/Hall', i: 0, op: 'set_description', family: 'desc', where: 'a:b/Hall', label: 'x' },
+        { key: 'desc:a:b/hall', i: 1, op: 'set_description', family: 'desc', where: 'a:b/hall', label: 'y' },
+    ];
+    const twoWas = [{ op: 'set_description', loc: 'a:b/Hall', text: '1' }, { op: 'set_description', loc: 'a:b/hall', text: '2' }];
+    assert.deepEqual(rr.mergeRewrite(twoWas, two, [{ op: 'set_description', loc: 'a:b/Hall', text: 'n' }]).ops.map(o => o.text), ['n', '2']);
+    assert.deepEqual(rr.mergeRewrite(twoWas, two, [{ op: 'set_description', loc: 'a:b/hall', text: 'n' }]).ops.map(o => o.text), ['1', 'n']);
+    assert.deepEqual(rr.mergeRewrite(twoWas, two, [{ op: 'set_description', loc: 'A:B/HALL', text: 'n' }]), { error: "the answer rewrote A:B/HALL, which is not one of this change's texts" });
+    // An exit answer with a room but no direction: the exact room's one exit is the fit, not both rooms' exits.
+    const twoExits = [
+        { key: 'exit:a:b/Hall|up', i: 0, op: 'set_exit_description', family: 'exit', where: 'a:b/Hall', direction: 'up', label: 'x' },
+        { key: 'exit:a:b/hall|down', i: 1, op: 'set_exit_description', family: 'exit', where: 'a:b/hall', direction: 'down', label: 'y' },
+    ];
+    const exWas = [{ op: 'set_exit_description', loc: 'a:b/Hall', direction: 'up', text: '1' }, { op: 'set_exit_description', loc: 'a:b/hall', direction: 'down', text: '2' }];
+    assert.deepEqual(rr.mergeRewrite(exWas, twoExits, [{ op: 'set_exit_description', loc: 'a:b/hall', text: 'n' }]).ops?.map(o => o.text), ['1', 'n'], 'the exact room wins over the same name in another case');
+});
+
 test('5B: a name on any answer op must be the old name: a renamed description, notes or area edit is refused, the same name passes, set_name is not a text edit', async () => {
     const desc = [{ key: `desc:${TAVERN}`, i: 0, op: 'set_description', family: 'desc', where: TAVERN, label: 'd' }];
     assert.deepEqual(rr.mergeRewrite([descOp(BOARDS)], desc, [{ ...descOp(PALACE), name: 'Throne Hall' }]),
