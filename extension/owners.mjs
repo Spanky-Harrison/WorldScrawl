@@ -164,7 +164,7 @@ export async function askTried(kind, args, { timeout = FILL_TIMEOUT_MS, timeoutR
     return { ok: false, ...last };
 }
 
-async function askFields(name, baseline, ops, timeout) {
+async function askFields(name, baseline, ops, timeout, other = null) {
     const plan = composePlan(ops);
     const intents = (ops ?? []).map((o, i) => {
         const c = o.committed ?? {};
@@ -175,9 +175,11 @@ async function askFields(name, baseline, ops, timeout) {
     }).join('\n') || '(none)';
     const base = plan.fields.map(f => `- ${f}: ${baseline[f] || '(empty)'}`).join('\n');
     const { baseReply } = await model();
+    // 5A (R3 per field): a one-field card's question shows the other field as it is now, for reference only (`other`).
+    const ref = other?.field && plan.fields.length === 1 && !plan.fields.includes(other.field) ? `\n${P('npc.appearance_other_field', { other: other.field, other_text: other.text || '(empty)' })}` : '';
     const ask = retry => askTried('appearance compose', {
-        prompt: maskForModel(P(plan.prompt, { name: name || 'them', fields: plan.fields.join(', '), base, intents }) + (retry ? `\n${P('npc.appearance_edit_light_retry')}` : '')),
-        systemPrompt: P(plan.system, { reply: baseReply('json') }),
+        prompt: maskForModel(P(plan.prompt, { name: name || 'them', fields: plan.fields.join(', '), base, intents }) + ref + (retry ? `\n${P('npc.appearance_edit_light_retry')}` : '')),
+        systemPrompt: P(plan.system, { reply: baseReply('json'), fields: plan.fields.join(', ') }),
         responseLength: 500,
     }, { timeout, read: raw => {
         const classified = classifyAppearanceReply(raw, plan.fields);
@@ -226,7 +228,8 @@ function textOf(baseline, ops, records) {
  * is asked on top of the text without it: the base is the other changes' result (already composed, through textOf),
  * the only change is this card's, so the call asks for this card's field alone, with its own light/full scope, and the
  * other field stays as it is. When that text is not known yet (a combination never composed), the whole replay is
- * asked as before. Returns [baseline, ops] for askFields.
+ * asked as before. Returns [baseline, ops, other] for askFields; `other` (5A) is the other field as it is now, shown to
+ * the one-field call for reference only (not part of any key, so it never makes the card stale).
  */
 function ownFieldAsk(stamp, base, ops, records) {
     const cand = stamp.candidate;
@@ -236,7 +239,8 @@ function ownFieldAsk(stamp, base, ops, records) {
     const mine = ops.filter(o => (o.owner || o.identity?.owner) === stamp.owner);
     const prior = textOf(base, ops.filter(o => (o.owner || o.identity?.owner) !== stamp.owner), records);
     if (mine.length !== 1 || prior.unresolved) return [base, ops];
-    return [{ body: prior.body, outfit: prior.outfit }, mine];
+    const otherField = BODY_OUTFIT.find(f => f !== own[0]);
+    return [{ body: prior.body, outfit: prior.outfit }, mine, { field: otherField, text: prior[otherField] ?? '' }];
 }
 
 /**
@@ -287,7 +291,7 @@ export async function fillCandidate(chat, identity, { baseline, name, elapsed = 
     let lastingBody = lasting, liveBody = live;
     // The proposal card that asked shows the call working (job.owner), never a second card.
     const working = key => ({ id: identity.npc, npc: identity.npc, key, part: 'fields', name: name || '', owner: stamp.owner });
-    const ask = ops => askFields(name, ...ownFieldAsk(stamp, base, ops, records), timeout);
+    const ask = ops => { const [b, o, other] = ownFieldAsk(stamp, base, ops, records); return askFields(name, b, o, timeout, other); };
     if (lasting.unresolved) {
         const asked = await withWork(found.msg, working(lasting.key), () => ask(lastingWith));
         if (!still(found, token, epoch, rev)) return { ok: false, stale: true };
@@ -351,6 +355,41 @@ function replayKeys(chat, stamp, candidate, elapsed) {
     const pin = readBaselineMap(chat)[stamp.id] ?? candidate?.baseline ?? { body: '', outfit: '' };
     const records = composeRecords(chat);
     return { lasting: textOf(pin, lastingWith, records).key, live: textOf(pin, liveWith, records).key };
+}
+
+/**
+ * 5A: after one of a person's cards is decided (approve, discard, off, on, undo), their other pending one-field cards
+ * (on this message or any other, on each message's active swipe) are brought up to date so a preview never shows a text
+ * that is gone. A card whose keys still match is left alone. One whose own field's input is unchanged is rebased (the
+ * other field's current text, no model call). Either way that moved, its decisionRev is bumped, so an Approve drawn
+ * before the refresh is stale (the card redraws). One that is really stale (an earlier kept change to its own field was
+ * undone, say) goes to "working" and is returned for a refill (fillCandidate), like a stale Approve. Each card is keyed
+ * at its own message's time (`elapsedAt(index)`, Ast round 3), never the decided card's: a lasting change can be in force
+ * on one message and over on the other. Returns {refill: [{identity, index, elapsed}], touched: messages changed}.
+ */
+export function refreshSiblings(chat, identity, elapsedAt) {
+    const refill = [], touched = new Set();
+    if (!identity?.npc || typeof elapsedAt !== 'function') return { refill, touched };
+    for (const [index, m] of (chat ?? []).entries()) {
+        const active = m?.swipe_id ?? 0;
+        for (const s of m?.extra?.worldscrawl_npc ?? []) {
+            if (!s || s.id !== identity.npc || !isOwnerStamp(s) || s.off === true || (s.owner || s.identity?.owner) === identity.owner) continue;
+            if ((s.swipe ?? 0) !== active) continue;
+            const c = s.candidate;
+            if (!c || c.phase !== 'review' || !c.lastingKey || !c.liveKey) continue;
+            const elapsed = elapsedAt(index);
+            if (!Number.isFinite(elapsed)) continue;
+            let now = replayKeys(chat, s, c, elapsed);
+            if (now.lasting === c.lastingKey && now.live === c.liveKey) continue;
+            s.decisionRev += 1;
+            touched.add(m);
+            const rebased = ownFieldRebase(chat, s, c, elapsed);
+            if (rebased) { now = replayKeys(chat, s, rebased, elapsed); if (now.lasting === rebased.lastingKey && now.live === rebased.liveKey) continue; }
+            s.candidate = { ...(rebased ?? c), phase: 'working', lastingPreview: null, livePreview: null, lastingKey: '', liveKey: '' };
+            refill.push({ identity: s.identity ?? { owner: s.owner, npc: s.id, message: messageKey(m), swipe: s.swipe ?? 0, domain: 'appearance' }, index, elapsed });
+        }
+    }
+    return { refill, touched };
 }
 
 /**

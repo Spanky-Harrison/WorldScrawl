@@ -17,7 +17,7 @@ import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
 import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, leftBehind, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
-import { appearanceScope } from './npceffects.mjs';
+import { appearanceScope, fieldUnchanged, junkAppearanceIntent } from './npceffects.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
 import { trackerExpiryLines } from './npcexpiry.mjs';
 import { findPerson, handleOf, maskForModel, shownName } from './names.mjs';
@@ -333,26 +333,30 @@ async function applyPersonStamps(id, stamped) {
         if (s.type === 'npc_appearance') {
             const withIntent = x => { const intent = appearanceIntent(x); return intent && intent !== x.intent ? { ...x, intent } : x; };
             if (s.source === 'tracker') {
-                if (judgeAppearance(cur, s) === 'reject') { warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom); continue; }
                 // 4-G: one card per person per field. A tracker item naming Body and Outfit (or neither) is one item per
                 // field; items for the same person and field on this message merge into one (fieldItems, below).
+                // 5A (Ast call 5): "did not change" is judged per field (fieldUnchanged); the warning only when every
+                // field of the item was dropped.
+                const who = cur?.name || t;
                 const named = s.fields != null && String(s.fields).trim() !== '';
                 const fields = (named ? effectFields(s.fields) : ['body', 'outfit'].filter(f => typeof s[f] === 'string' && s[f].trim())).filter(f => f !== 'looks');
-                if (!fields.length) { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'tracker does not set looks' }); continue; }
+                if (!fields.length) {
+                    if (junkAppearanceIntent(s.intent)) warn(`Warning: a person update for ${who} did not land: appearance did not change.`, warnFrom);
+                    else noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'tracker does not set looks' });
+                    continue;
+                }
                 const { looks, body, outfit, ...rest } = s;
+                const dropped = [];
                 for (const f of fields) {
                     const one = { ...rest, fields: f, ...(f === 'body' && body ? { body } : {}), ...(f === 'outfit' && outfit ? { outfit } : {}) };
-                    const decision = judgeAppearance(cur, one);
-                    if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: `already active (${f})` }); continue; }
-                    if (decision === 'reject') { warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom); continue; }
+                    if (fieldUnchanged(cur, one, f)) { dropped.push(f); noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: `the ${f} did not change` }); continue; }
                     const k = `${t}|${f}`, had = fieldItems.get(k);
                     fieldItems.set(k, had ? { ...had, s: mergeFieldItems(had.s, withIntent(one)) } : { s: withIntent(one), cur });
                 }
+                if (dropped.length === fields.length) warn(fields.length === 1 ? `Warning: a person update did not land: ${who}'s ${fields[0]} did not change.` : `Warning: a person update for ${who} did not land: appearance did not change.`, warnFrom);
                 continue;
             }
-            const decision = judgeAppearance(cur, s);
-            if (decision === 'skip') { noteCall(id, { kind: 'npc_appearance', status: 'skipped', reason: 'already active' }); continue; }
-            if (decision === 'reject') {
+            if (judgeAppearance(cur, s) === 'reject') {
                 warn(`Warning: a person update for ${cur?.name || t} did not land: appearance did not change.`, warnFrom);
                 continue;
             }

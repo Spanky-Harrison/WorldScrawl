@@ -339,7 +339,7 @@ function personKeptEl(msg, id, s, who) {
             .map(f => ({ key: f, label: label(f), value: at?.[f] ?? '', cls: 'worldscrawl_npc_text', data: { part: s.lasts > 0 ? 'live' : 'lasting', field: f } }));
     }
     const text = s.off ? `Character change turned off: ${stampSummary(s, who)}` : `Character changed here: ${stampSummary(s, who)}`;
-    return drawCard(C.personKept({ key, state: s.off ? 'off' : 'kept', text, editing, intent: s.committed?.intent ?? '', hasIntent: !base, fields }), 'person', ticketFor('person', { msg, s, who }));
+    return drawCard(C.personKept({ key, state: s.off ? 'off' : 'kept', text, editing, field: C.personField(base ? [s.committed?.field] : String(s.committed?.fields || 'body,outfit').split(',')), intent: s.committed?.intent ?? '', hasIntent: !base, fields }), 'person', ticketFor('person', { msg, s, who }));
 }
 
 /**

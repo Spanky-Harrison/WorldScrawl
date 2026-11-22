@@ -5,8 +5,8 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, alreadyEffect, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
-import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, reviewTyped } from './owners.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, refreshSiblings, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { isOwnerStamp, messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
@@ -1176,6 +1176,21 @@ async function settleNpc(chat, identity, decisionRev, action, payload = {}) {
         const live = npcAt(chat, end, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
         const wrote = await recompose(chat, { npc: identity.npc, at, baseline: live?.pinned || { body: live?.base?.body ?? '', outfit: live?.base?.outfit ?? '' }, name: live?.name || identity.npc, elapsed });
         if (wrote?.msg) syncSwipeExtra(wrote.msg);
+    }
+    // 5A: the person's other pending cards (this message or any other) follow the decision, after any recompose, so a
+    // rebase can use the text it just wrote. A really stale one shows "Preparing…" and is asked again.
+    if ((res?.ok || res?.removed) && ['approve', 'discard', 'off', 'on', 'undo'].includes(action) && identity?.npc) {
+        // Each card at its own message's time and with that message's person (Ast round 3), as its own fill was.
+        const { refill, touched } = refreshSiblings(chat, identity, i => (calendarLib ? npcClock(chat, i).elapsed : NaN));
+        for (const m of touched) syncSwipeExtra(m);
+        if (refill.length) {
+            try { renderPatchCards(); } catch (e) { console.warn('[WorldScrawl] npc sibling refresh', e?.message || e); }
+            for (const sib of refill) {
+                const live = npcAt(chat, sib.index, castPack()?.npcs ?? [], identity.npc, i => npcClock(chat, i));
+                await fillCandidate(chat, sib.identity, { baseline: live?.pinned || { body: '', outfit: '' }, name: live?.name || identity.npc, elapsed: sib.elapsed }).catch(e => { console.warn('[WorldScrawl] npc sibling refill', e); return null; });
+            }
+            for (const m of touched) syncSwipeExtra(m);
+        }
     }
     try {
         if (host) syncSwipeExtra(host);
