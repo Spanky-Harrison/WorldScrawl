@@ -547,7 +547,7 @@ test('fx: an update_area with its notes under "text" applies them as the area\'s
     assert.deepEqual(P.loreAlias({ op: 'set_lore', area: AREA, text: 'x' }), { op: 'set_lore', area: AREA, text: 'x' }, 'other ops untouched');
 });
 
-test('fx: the playtest case through the card: the note under "text" is a rewrite target, and a full rewrite answered as append_lore with "loc" is matched and kept', async () => {
+test('fx: the playtest case through the card: the note under "text" is a rewrite target, and a full rewrite answered as append_lore with "loc" is matched and added to the notes as they were (5B)', async () => {
     const { f } = await proposed({ note: 'rats in the walls', rewrite: 'light', why: 'one detail' }, ops([{ op: 'update_area', area: AREA, text: RATS }]));
     assert.equal(f.proposal.after[AREA]?.lore, RATS, 'the preview shows the new notes');
     assert.deepEqual(rr.textTargets(f.proposal).map(t => t.key), [`lore:${AREA}`]);
@@ -559,8 +559,14 @@ test('fx: the playtest case through the card: the note under "text" is a rewrite
     assert.equal(g.rewrite, 'full');
     assert.equal(g.proposal.ops.length, 1);
     assert.equal(g.proposal.ops[0].op, 'update_area');
-    assert.equal(g.proposal.ops[0].lore, RATS_FULL);
+    const was = f.proposal.before[AREA].lore;
+    assert.ok(was.length > 20);
+    assert.equal(g.proposal.ops[0].lore, `${was} ${RATS_FULL}`, '5B: the appended part goes after the notes before the change, nothing dropped');
     assert.match(calls[0].prompt, /the notes of The Drowned Rat \(riverton:drowned_rat\)/);
+    byText(draw(), 'Approve').click();
+    await flush(60);
+    assert.equal(flagOf().status, 'kept');
+    assert.equal(SillyTavern.getContext().chat[1].extra.worldscrawl_patches[0].ops[0].lore, `${was} ${RATS_FULL}`, 'kept as the whole notes');
 });
 
 test('fx: a notes answer with no area is matched when the change has one notes text; with two it fails saying which area is missing', async () => {
@@ -582,13 +588,13 @@ test('fx: a notes answer with no area is matched when the change has one notes t
 test('fx: unmatched text edits say plainly what was missing; the structure guard is unchanged', async () => {
     const t = [{ key: `desc:${TAVERN}`, i: 0, op: 'set_description', family: 'desc', where: TAVERN, label: 'the description' }];
     const old = [descOp(BOARDS)];
-    assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'set_description', text: PALACE }]), { error: "the answer's description edit didn't say which room" }, 'a description is never guessed');
+    assert.equal(rr.mergeRewrite(old, t, [{ op: 'set_description', text: PALACE }]).ops?.[0].text, PALACE, '5B: one description target: a description with no room is matched to it');
     assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'set_exit_description', loc: TAVERN, text: 'x' }]), { error: "the answer's exit text edit didn't say which room and direction" });
     assert.deepEqual(rr.mergeRewrite(old, t, [{ op: 'block_exit', loc: TAVERN, direction: 'back' }]), { error: "the answer had a block_exit edit, which a rewrite can't change" });
     const lore = [{ key: `lore:${AREA}`, i: 0, op: 'update_area', family: 'lore', where: AREA, label: 'n' }];
     const oldLore = [{ op: 'update_area', area: AREA, text: RATS }];
     assert.deepEqual(rr.mergeRewrite(oldLore, lore, [{ op: 'append_lore', loc: 'riverton:other', text: 'x' }]), { error: "the answer rewrote riverton:other, which is not one of this change's texts" }, 'a "loc" naming another area is still refused');
-    assert.deepEqual(rr.mergeRewrite(oldLore, lore, [{ op: 'update_area', area: AREA, name: 'The Wet Rat', lore: 'x' }]), { error: `the answer changed "name" on ${AREA}` }, 'a rename is still refused');
+    assert.deepEqual(rr.mergeRewrite(oldLore, lore, [{ op: 'update_area', area: AREA, name: 'The Wet Rat', lore: 'x' }]), { error: `the answer's notes edit also renamed ${AREA}; a rewrite only changes the text` }, 'a rename is still refused (5B wording)');
     const m = rr.mergeRewrite(oldLore, lore, [{ op: 'append_lore', area: AREA, text: RATS_FULL }]);
     assert.equal(rr.rewriteGuard(oldLore, m.ops), '', 'the old op read with its notes as lore compares equal in structure');
     assert.equal(m.ops[0].lore, RATS_FULL);
@@ -596,4 +602,103 @@ test('fx: unmatched text edits say plainly what was missing; the structure guard
     // Read directly (any caller, not only through a normalized proposal), the note under "text" is the area's notes.
     assert.equal(rr.targetKeyOf({ op: 'update_area', area: AREA, text: RATS }), `lore:${AREA}`);
     assert.deepEqual(rr.withText({ op: 'update_area', area: AREA, text: RATS }, RATS_FULL), { op: 'update_area', area: AREA, lore: RATS_FULL }, 'no stray "text" left beside the new notes');
+});
+
+// ---- 5B: append answers to a whole text, answers that leave out the room, renames on any op.
+const GILDED = 'A gilded rail now runs along the bar.';
+const YARD_PALACE = 'A paved court of white marble with a fountain at its heart.';
+
+test('5B: a full rewrite answered with append_description on a set_description is added to the description before the change; a set answer is the whole text as before', async () => {
+    const { f } = await proposed({ note: 'gilded bar', rewrite: 'light', why: 'one detail' }, ops([descOp(BOARDS)]));
+    assert.equal(f.proposal.before[TAVERN].description, COMMON_WAS);
+    model({ rewrite: ops([{ op: 'append_description', loc: TAVERN, text: GILDED }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    let g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.deepEqual(g.proposal.ops.map(o => [o.op, o.loc, o.text]), [['set_description', TAVERN, `${COMMON_WAS} ${GILDED}`]], 'still one set_description, now the whole text');
+    model({ rewrite: ops([descOp(BOARDS)]) });
+    byText(draw(), 'Make it a light touch').click();
+    await flush(60);
+    g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.equal(g.proposal.ops[0].text, BOARDS, 'a set answer is the whole text, as asked');
+});
+
+test('5B: appendTo adds after the text before the change, never twice; an append answered to an append stays an append', () => {
+    assert.equal(rr.appendTo('Old notes.', 'More.'), 'Old notes. More.');
+    assert.equal(rr.appendTo('Old notes.', 'Old notes. More.'), 'Old notes. More.', 'an answer that already repeats the text is not doubled');
+    assert.equal(rr.appendTo('', 'More.'), 'More.');
+    const t = [{ key: `lore:${AREA}`, i: 0, op: 'append_lore', family: 'lore', where: AREA, label: 'n', was: 'Old notes.' }];
+    const m = rr.mergeRewrite([{ op: 'append_lore', area: AREA, text: 'Rats.' }], t, [{ op: 'append_lore', area: AREA, text: 'Mice.' }]);
+    assert.deepEqual(m.ops, [{ op: 'append_lore', area: AREA, text: 'Mice.' }], 'unchanged: the added part only');
+    const set = [{ key: `lore:${AREA}`, i: 0, op: 'set_lore', family: 'lore', where: AREA, label: 'n', was: 'Old notes.' }];
+    assert.deepEqual(rr.mergeRewrite([{ op: 'set_lore', area: AREA, text: 'New notes.' }], set, [{ op: 'append_lore', area: AREA, text: 'Mice.' }]).ops,
+        [{ op: 'set_lore', area: AREA, text: 'Old notes. Mice.' }], 'a set_lore target answered with an append: the old notes plus the added part');
+});
+
+test('5B: a description answer with no room is matched when the change has one description; with two it fails with the count and the proposal is kept', async () => {
+    await proposed({ note: 'the inn became a palace', rewrite: 'light', why: 'judged small' }, ops([descOp(BOARDS)]));
+    model({ rewrite: ops([{ op: 'set_description', text: PALACE }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    let g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.equal(g.proposal.ops[0].text, PALACE);
+    assert.equal(g.proposal.ops[0].loc, TAVERN);
+
+    const { f } = await proposed({ note: 'the inn became a palace', rewrite: 'light', why: 'judged small' }, ops([descOp(BOARDS), { op: 'set_description', loc: YARD, text: YARD_PALACE }]),
+        { rooms: `{"rooms":["${TAVERN}","${YARD}"]}` });
+    const old = structuredClone(f.proposal);
+    model({ rewrite: ops([{ op: 'set_description', text: PALACE }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    g = flagOf();
+    assert.deepEqual(g.proposal, old, 'refused: the proposal is as it was');
+    assert.match(g.rewriteError, /Couldn't switch to a full rewrite: the answer's description edit didn't say which room \(this change has 2 descriptions\)\. The change is as it was\./);
+    assert.match(draw().querySelector('.worldscrawl_rewrite_error').textContent, /didn't say which room \(this change has 2 descriptions\)/);
+});
+
+test('5B: an exit text answer with no room or direction is matched when one exit text fits; two in one room need the direction', async () => {
+    const exitText = { op: 'set_exit_description', loc: YARD, direction: 'in', text: 'The back door into the common room, its sill splintered.' };
+    await proposed({ note: 'the inn became a palace', rewrite: 'light', why: 'judged small' }, ops([descOp(BOARDS), exitText]), { rooms: `{"rooms":["${TAVERN}","${YARD}"]}` });
+    model({ rewrite: ops([descOp(PALACE), { op: 'set_exit_description', text: YARD_EXIT }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    const g = flagOf();
+    assert.equal(g.rewriteError, undefined, g.rewriteError);
+    assert.deepEqual([g.proposal.ops[1].loc, g.proposal.ops[1].direction, g.proposal.ops[1].text], [YARD, 'in', YARD_EXIT]);
+
+    const two = [
+        { key: `exit:${YARD}|in`, i: 0, op: 'set_exit_description', family: 'exit', where: YARD, direction: 'in', label: 'a' },
+        { key: `exit:${YARD}|out`, i: 1, op: 'set_exit_description', family: 'exit', where: YARD, direction: 'out', label: 'b' },
+    ];
+    const old = [{ op: 'set_exit_description', loc: YARD, direction: 'in', text: 'a' }, { op: 'set_exit_description', loc: YARD, direction: 'out', text: 'b' }];
+    assert.deepEqual(rr.mergeRewrite(old, two, [{ op: 'set_exit_description', loc: YARD, text: 'x' }]), { error: "the answer's exit text edit didn't say which room and direction (this change has 2 exit texts)" });
+    assert.equal(rr.mergeRewrite(old, two, [{ op: 'set_exit_description', direction: 'out', text: 'x' }]).ops?.[1].text, 'x', 'the direction alone picks the one that fits');
+    assert.deepEqual(rr.mergeRewrite(old, two, [{ op: 'set_description', loc: 'riverton:drowned_rat/kitchens', text: 'x' }]), { error: "the answer rewrote riverton:drowned_rat/kitchens, which is not one of this change's texts" }, 'a room that is not a target is still refused');
+});
+
+test('5B: a name on any answer op must be the old name: a renamed description, notes or area edit is refused, the same name passes, set_name is not a text edit', async () => {
+    const desc = [{ key: `desc:${TAVERN}`, i: 0, op: 'set_description', family: 'desc', where: TAVERN, label: 'd' }];
+    assert.deepEqual(rr.mergeRewrite([descOp(BOARDS)], desc, [{ ...descOp(PALACE), name: 'Throne Hall' }]),
+        { error: `the answer's description edit also renamed ${TAVERN}; a rewrite only changes the text` }, 'a set_description carrying a name (the old op has none)');
+    const lore = [{ key: `lore:${AREA}`, i: 0, op: 'set_lore', family: 'lore', where: AREA, label: 'n' }];
+    assert.deepEqual(rr.mergeRewrite([{ op: 'set_lore', area: AREA, text: RATS }], lore, [{ op: 'append_lore', area: AREA, name: 'The Wet Rat', text: 'x' }]),
+        { error: `the answer's notes edit also renamed ${AREA}; a rewrite only changes the text` }, 'an append_lore carrying a name against a set_lore');
+    const area = [{ key: `lore:${AREA}`, i: 0, op: 'update_area', family: 'lore', where: AREA, label: 'n' }];
+    const named = [{ op: 'update_area', area: AREA, name: 'The Drowned Rat', lore: RATS }];
+    assert.deepEqual(rr.mergeRewrite(named, area, [{ op: 'update_area', area: AREA, name: 'The Wet Rat', lore: 'x' }]), { error: `the answer's notes edit also renamed ${AREA}; a rewrite only changes the text` });
+    assert.equal(rr.mergeRewrite(named, area, [{ op: 'update_area', area: AREA, name: 'The Drowned Rat', lore: 'x' }]).ops?.[0].lore, 'x', 'the same name passes');
+    assert.deepEqual(rr.mergeRewrite(named, area, [{ op: 'set_name', loc: TAVERN, text: 'Throne Hall' }]), { error: "the answer had a set_name edit, which a rewrite can't change" });
+    assert.match(rr.mergeRewrite([descOp(BOARDS, { lasts: '2h' })], desc, [descOp(PALACE, { lasts: '3h' })]).error, /^the answer's edit also changed "lasts" on .*; a rewrite only changes the text$/);
+
+    // Through the card: the renamed description is refused, the proposal kept and the reason shown.
+    const { f } = await proposed({ note: 'the inn became a palace', rewrite: 'light', why: 'judged small' }, ops([descOp(BOARDS)]));
+    const old = structuredClone(f.proposal);
+    model({ rewrite: ops([{ ...descOp(PALACE), name: 'Throne Hall' }]) });
+    byText(draw(), 'Make it a full rewrite').click();
+    await flush(60);
+    assert.deepEqual(flagOf().proposal, old);
+    assert.match(draw().querySelector('.worldscrawl_rewrite_error').textContent, /the answer's description edit also renamed riverton:drowned_rat\/common_room; a rewrite only changes the text/);
 });
