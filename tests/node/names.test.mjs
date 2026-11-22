@@ -461,12 +461,18 @@ test('canary narrator: asleep off the map, fed lore with her token and her plain
     assert.deepEqual(leaks(f), []);
 });
 
-test('canary narrator: a [ws_npc] tag by her handle lands on her', async () => {
-    const { c } = boot();
+test('canary tracker: a person item by her handle lands on her; a reply [ws_npc] tag by her handle is removed and ignored (5C B7)', async () => {
+    const { c } = boot({ tracker: () => JSON.stringify({ place: null, people: [{ id: handle(), action: 'fact', text: 'a scar on her knuckle' }], wait: null }) });
     say(c, 'I look at the landlady.');
-    const id = reply(c, `She glares. [ws_npc: fact | ${handle()} | a scar on her knuckle]`);
+    const id = reply(c, 'She glares, and you see a scar on her knuckle.');
     await onReplyForFlags(id);
     assert.ok((c.chat[id].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_fact' && s.id === 'hesk'), 'stored under the cast id');
+    const { c: c2 } = boot();
+    say(c2, 'I look at the landlady.');
+    const t = reply(c2, `She glares. [ws_npc: fact | ${handle()} | a scar on her knuckle]`);
+    await onReplyForFlags(t);
+    assert.ok(!(c2.chat[t].extra[NPC_KEY] ?? []).some(s => s.type === 'npc_fact'), 'the reply tag never stamps');
+    assert.doesNotMatch(c2.chat[t].mes, /ws_npc/);
 });
 
 // ---- Side calls (S3): every model call but the narrator's sees the same view; the story and player line are theirs.
@@ -491,7 +497,8 @@ test('canary side calls: the tracker lists her as "the landlady [handle]"; after
 });
 
 test('canary side calls: first-meeting disposition and the appearance rebuild never see her name', async () => {
-    const { c, calls } = boot();
+    let item = null;
+    const { c, calls } = boot({ tracker: () => JSON.stringify({ place: null, people: item ? [item] : [], wait: null }) });
     const said = 'I wave at everyone in the room.';
     const user = say(c, said);
     await scene.prepareNpcs(user);
@@ -500,7 +507,8 @@ test('canary side calls: first-meeting disposition and the appearance rebuild ne
     assert.match(dispo.prompt, /the landlady/i);
     assert.deepEqual(leaks(engineOnly(dispo, said)), []);
     calls.length = 0;
-    const id = reply(c, `Her braids turn white. [ws_npc: appearance | ${handle()} | hair turned white | looks,body | 1 hour]`);
+    item = { id: handle(), action: 'appearance', intent: 'hair turned white', fields: 'body', lasts: '1h' }; // the tracker, by her handle (5C B7: no reply tag)
+    const id = reply(c, 'Her braids turn white.');
     await onReplyForFlags(id);
     const rebuild = calls.filter(x => /body/i.test(x.prompt) && !isTrackerCall(x));
     assert.ok(rebuild.length, 'the appearance rebuild ran');

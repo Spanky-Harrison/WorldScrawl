@@ -3,7 +3,7 @@ import { extSource } from './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { normalizeWsTags, unreadTags, parseWaitTag } from '../../extension/words.mjs';
+import { normalizeWsTags, unreadTags, parseWaitTag, NPC_ACTIONS } from '../../extension/words.mjs';
 import { takeNpcTags, takeFoundFlags, takeNameFlags, takeNpcFlags, takeLoreFlags } from '../../extension/npc.mjs';
 import { messageActivity } from '../../extension/activity.mjs';
 
@@ -119,6 +119,8 @@ test('flag short forms normalize to [ws_flag: action | args]', () => {
     assert.equal(normalizeWsTags('[ws_change | the roof caved in]'), '[ws_flag: change | the roof caved in]');
     assert.equal(normalizeWsTags('[ws_discover: a cellar]'), '[ws_flag: discover | a cellar]');
     assert.equal(normalizeWsTags('[ws_npc | Bram]'), '[ws_flag: npc | Bram]');
+    assert.equal(normalizeWsTags('[ws_came_along | hesk]'), '[ws_npc: came_along | hesk]', 'an underscored action is a short form too (5C B7)');
+    assert.equal(normalizeWsTags('[ws_npc_thing | x]'), '[ws_npc_thing | x]', 'an unknown underscored tag is left as it is');
     assert.deepEqual(takeNpcFlags(normalizeWsTags('x [ws_npc: Bram]')).names, ['Bram']);
     assert.equal(normalizeWsTags('[ws_name: Bram]'), '[ws_flag: name | Bram]');
     assert.equal(normalizeWsTags('[ws_lore]'), '[ws_flag: lore]');
@@ -209,6 +211,23 @@ test('story tools are not registered; movement tools still follow the movement r
     assert.deepEqual(registered(), ['ws_look', 'ws_move']);
 });
 
+test('5C B2: commands mode registers no tool either; only the move tools are ever registered', () => {
+    assert.deepEqual(toolsToRegister({ moveMode: 'commands', flagNpcs: true, flagTags: true }), []);
+    assert.deepEqual(toolsToRegister({ moveMode: 'tools', flagNpcs: true }, false), [], 'off for this chat: nothing');
+    ctx().extensionSettings.worldscrawl = { moveMode: 'commands', flagNpcs: true, flagTags: true };
+    assert.deepEqual(registered(), []);
+});
+
+test('5C B2: the README "Tags in story replies" note names every ws_npc action the tag reader knows', () => {
+    const readme = fs.readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+    const note = readme.slice(readme.indexOf('**Tags in story replies.**')).split('\n\n')[0];
+    assert.ok(note.length > 30, 'the note is there');
+    const npcSrc = fs.readFileSync(new URL('../../extension/npc.mjs', import.meta.url), 'utf8');
+    const kinds = Object.keys(Function(`return ${npcSrc.match(/const TAG_KIND = (\{[^}]*\})/)[1]}`)());
+    assert.deepEqual([...kinds].sort(), [...NPC_ACTIONS].sort(), 'the lenient reader and the tag reader agree');
+    for (const k of kinds) assert.ok(note.includes(`\`${k}\``), `README note is missing ${k}`);
+});
+
 test('the story prompt keeps the people list and does not say how to report', () => {
     const story = text => { assert.doesNotMatch(text, /ws_npc|ws_flag|ws_wait|end your reply with|call ws_/); };
     const off = ext.factsText(loc, null, false, { ...people, reportNpcs: false, reportTools: true, moveTools: false });
@@ -232,7 +251,7 @@ test('the story prompt keeps the people list and does not say how to report', ()
     assert.doesNotMatch(ext.newDoorLine('You', 'Hall', true), /ws_flag|ws_npc|ws_wait/);
 });
 
-test('a no-op appearance is warned and not rebuilt; a soaked arrival and a pasted tag still apply', async () => {
+test('a no-op appearance is warned and not rebuilt; a soaked arrival still applies (through the tracker; 5C B7: reply tags are ignored)', async () => {
     saved = saveSettings();
     try {
     rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [hesk] }] });
@@ -244,27 +263,27 @@ test('a no-op appearance is warned and not rebuilt; a soaked arrival and a paste
     let rebuilds = 0;
     c.generateRaw = async () => { rebuilds++; return '{}'; };
     const s = ext.settings();
-    s.flagNpcs = false;
+    s.flagNpcs = true;
     s.moveMode = 'typed';
-    const reply = async mes => {
+    const reply = async (mes, item) => {
         rebuilds = 0;
         const msg = { mes, is_user: false, swipe_id: 0, extra: {} };
         c.chat = [msg];
-        await ext.onReplyForFlags(0);
+        await ext.applyTrackerResult(0, ext.readTrackerAnswer({ place: null, people: [{ id: 'hesk', action: 'appearance', ...item }], wait: null }));
         return msg;
     };
-    const looks = await reply('Hesk is at the bar. [ws_npc: appearance | hesk | looks | 1 hour]');
+    const looks = await reply('Hesk is at the bar.', { intent: 'looks', lasts: '1h' });
     assert.equal((looks.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
     assert.equal(looks.extra?.worldscrawl_appearance, undefined);
     assert.equal(rebuilds, 0);
     assert.match(JSON.stringify(looks.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
-    const appeared = await reply('She is here. [ws_npc: appearance | hesk | appeared]');
+    const appeared = await reply('She is here.', { intent: 'appeared' });
     assert.equal((appeared.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
     assert.match(JSON.stringify(appeared.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
-    const empty = await reply('[ws_npc: appearance | hesk]');
+    const empty = await reply('Hesk.', {});
     assert.equal((empty.extra?.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false);
     assert.match(JSON.stringify(empty.extra?.worldscrawl_npcwarn ?? []), /appearance did not change/);
-    const soaked = await reply('Hesk walks in soaked. [ws_npc: appearance | hesk | soaked from the rain | outfit]');
+    const soaked = await reply('Hesk walks in soaked.', { intent: 'soaked from the rain', fields: 'outfit' });
     const stamp = (soaked.extra?.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance');
     assert.equal(stamp?.intent, 'soaked from the rain');
     assert.equal(stamp?.id, 'hesk');
@@ -357,7 +376,7 @@ test('tracker payloads use the person apply, including the no-op appearance reje
     }
 });
 
-test('flag gates block tracker proposals and still allow a pasted tag; a swipe drops tracker stamps', async () => {
+test('flag gates block tracker proposals; a pasted ws_flag tag still applies and a pasted ws_npc tag is removed and ignored (5C B7); a swipe drops tracker stamps', async () => {
     saved = saveSettings();
     try {
         rememberWorlds({ default: 'riverton', worlds: [{ id: 'riverton', name: 'Riverton', cast: [hesk] }] });
@@ -378,7 +397,8 @@ test('flag gates block tracker proposals and still allow a pasted tag; a swipe d
         const pasted = { mes: 'Soaked. [ws_npc: appearance | hesk | soaked from the rain | outfit] [ws_flag: place | the roof fell in]', is_user: false, swipe_id: 0, extra: {} };
         c.chat = [pasted];
         await ext.onReplyForFlags(0);
-        assert.equal((pasted.extra.worldscrawl_npc ?? []).find(x => x.type === 'npc_appearance')?.intent, 'soaked from the rain');
+        assert.equal((pasted.extra.worldscrawl_npc ?? []).some(x => x.type === 'npc_appearance'), false, '5C B7: the reply ws_npc tag never applies');
+        assert.doesNotMatch(pasted.mes, /ws_npc/, 'and is removed from the reply');
         assert.equal(pasted.extra.worldscrawl_flag?.source, 'tag');
         assert.match(pasted.extra.worldscrawl_flag?.note ?? '', /roof fell in/);
         const swipe = {
