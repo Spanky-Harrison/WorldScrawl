@@ -559,3 +559,53 @@ test('5A A3 (Ast): an approved Outfit0 on an earlier message undone: the pending
     assert.ok(pending.committed, 'kept');
     assert.equal(calls.length, 0, 'Approve makes no further call');
 });
+
+/** Two hours pass on a player line (a wait stamp), with a plain reply after it. */
+function waitTwoHours(c) {
+    c.chat.push({ is_user: true, mes: 'I wait two hours.', swipe_id: 0, extra: { worldscrawl_intent_checked: true, worldscrawl_wait: { seconds: 7200 } } });
+    c.chat.push({ is_user: false, mes: 'Two hours pass in the common room.', swipe_id: 0, swipes: ['Two hours pass in the common room.'], swipe_info: [{ extra: {} }], extra: {} });
+}
+/** A kept one-hour Outfit change (hem soaked) at a; a pending Body card at b while it is in force; two hours on; then
+ *  an Outfit card at c, after it ran out. */
+async function expirySetup() {
+    const env = boot({});
+    const { c } = env;
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked', lasts: '1h' })], wait: null });
+    const a = await exchange(c, 'I wait.', 'The landlady comes in, her hem soaked by the rain.');
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(ownerOf(c.chat[a], 'outfit').committed);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body', { intent: 'a fresh scar on her cheek' })], wait: null });
+    const b = await exchange(c, 'I look at her.', 'The landlady turns; a fresh scar crosses her cheek.');
+    const body = ownerOf(c.chat[b], 'body');
+    assert.equal(body.candidate.phase, 'review');
+    assert.notEqual(body.candidate.liveKey, body.candidate.lastingKey, 'at b the one-hour Outfit is in force: live differs from lasting');
+    waitTwoHours(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
+    const cc = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
+    assert.equal(ownerOf(c.chat[cc], 'outfit').candidate.phase, 'review');
+    return { ...env, a, b, cc, body };
+}
+
+test('5A A3 (Ast round 3): a card decided after an expiry leaves an earlier pending card alone when its keys at its own time are unchanged (no needless refill)', async () => {
+    const { c, calls, cc, body } = await expirySetup();
+    const keys = [body.candidate.lastingKey, body.candidate.liveKey], rev = body.decisionRev, preview = structuredClone(body.candidate.livePreview);
+    calls.length = 0;
+    btn(cardFor(draw(c), cc, 'Outfit: Proposed person change:'), 'Discard').click(); await flush(120);
+    assert.equal(calls.length, 0, 'no call');
+    assert.deepEqual([body.candidate.lastingKey, body.candidate.liveKey], keys, 'its keys at its own message\'s time are unchanged');
+    assert.equal(body.decisionRev, rev, 'not touched: an Approve drawn before stays good');
+    assert.deepEqual(body.candidate.livePreview, preview);
+    assert.equal(body.candidate.phase, 'review');
+});
+
+test('5A A3 (Ast round 3): a card kept after an expiry refreshes an earlier pending card at its own time: the one-hour change still in its live text and base', async () => {
+    const { c, calls, cc, body } = await expirySetup();
+    calls.length = 0;
+    btn(cardFor(draw(c), cc, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(150);
+    assert.equal(body.candidate.phase, 'review');
+    assert.notEqual(body.candidate.liveKey, body.candidate.lastingKey, 'keyed at b: the one-hour Outfit is still in force there');
+    assert.ok(calls.length >= 1, 'its base at b (the one-hour change plus the new one) was never composed: asked again');
+    assert.ok(calls.some(x => /hem soaked/.test(x.prompt) && /a fresh scar/.test(x.prompt)), `the refill is built on b's base, with the one-hour change: ${JSON.stringify(calls.map(x => x.prompt.slice(0, 200)))}`);
+    assert.match(body.candidate.livePreview.outfit, /\[outfit changed\]/, 'its live preview carries the one-hour Outfit');
+});
