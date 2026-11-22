@@ -87,7 +87,8 @@ test('wait-time words: each form reads as its clock time (an hour with two readi
     for (const [t, until, alt] of table) assert.deepEqual(P(t), [until, alt, false], t);
     assert.deepEqual(P('until tomorrow morning'), ['morning', null, true]);
     assert.deepEqual(P('until tomorrow at 9:30'), ['09:30', null, true], 'tomorrow takes the time as written (no second reading)');
-    for (const bad of ['until 5 hours', 'until twenty', 'until 25:00', 'until 2400', 'until tomorrow']) assert.throws(() => calendarLib.parseWait(bad), /say the time like|outside the day|past the end of this world's 24-hour day/, bad); // 5C B6: an hour past the day says so
+    for (const bad of ['until 5 hours', 'until twenty', 'until 25:00', 'until 2401', 'until 2500', 'until tomorrow']) assert.throws(() => calendarLib.parseWait(bad), /say the time like|outside the day|past the end of this world's 24-hour day/, bad); // 5C B6: an hour past the day says so
+    for (const t of ['until 2400', 'until 24:00', 'until 24h00']) assert.deepEqual(calendarLib.parseWait(t), { until: '00:00' }, `${t}: midnight, the end of the day (5D Q6)`);
 });
 test('the reader on a line: every until-time, the next reading of an ambiguous hour, no day-part words or tomorrow', () => {
     const at = (h, m = 0) => h * 3600 + m * 60;
@@ -326,6 +327,8 @@ test('5C B6: readUntil on a 20-hour day: impossible times are named with why (ne
     assert.deepEqual(R('eleven at night and sleep'), { impossible: 'eleven at night', why: "past the end of this world's 20-hour day", rest: 'and sleep' });
     assert.deepEqual(R('23:00'), { impossible: '23:00', why: "past the end of this world's 20-hour day", rest: '' });
     assert.deepEqual(R('2130'), { impossible: '2130', why: "past the end of this world's 20-hour day", rest: '' });
+    for (const t of ['2000', '20:00']) assert.deepEqual(R(t), { until: '00:00', rest: '' }, `${t}: midnight on a 20-hour day (5D Q6)`);
+    for (const t of ['2001', '20:01', '21:00']) assert.equal(R(t).impossible, t, `${t}: past the end of the day`);
     assert.equal(R('9 am').impossible, '9 am', 'a short day has no am or pm');
     assert.match(R('9 am').why, /has no am or pm/);
     assert.deepEqual(R('9:30'), { until: '09:30', rest: '' });
@@ -333,4 +336,114 @@ test('5C B6: readUntil on a 20-hour day: impossible times are named with why (ne
     assert.deepEqual(calendarLib.untilClocksRead('until 9:30, or until 11 pm', CAL20, { now: 0 }), { clocks: ['09:30'], impossible: [{ said: '11 pm', why: "past the end of this world's 20-hour day" }] });
     assert.throws(() => calendarLib.parseWait('until 11 pm', CAL20), e => e.impossible === true && e.message === '"11 pm" is past the end of this world\'s 20-hour day', 'the wait tag and the tracker until fail with the same line');
     assert.deepEqual(calendarLib.readUntil('11 pm'), { until: '23:00', rest: '' }, '24-hour day unchanged');
+});
+
+// ---------------------------------------------------------------- 5D: an impossible free-text wait fails in the verb check
+const { impossibleWaitIn, dropQuoted, waitClauses } = await import('../../extension/words.mjs');
+/** Type `text` and run the interceptor; reports whether it aborted (no narrator) and what the model was asked. */
+async function turn5d(c, calls, text, type = 'normal') {
+    const send = c.executeSlashCommandsWithOptions;
+    if (!send.hides) { c.executeSlashCommandsWithOptions = Object.assign(async cmd => (/^\/hide /.test(cmd) ? undefined : send(cmd)), { hides: true }); } // ST's /hide posts nothing (hideCommand sets the flag itself)
+    const p = say(c, text);
+    const before = calls.length;
+    let aborted = false;
+    await globalThis.worldscrawlInterceptor([], 0, () => { aborted = true; }, type);
+    return { m: c.chat[p], aborted, asked: calls.length - before, notice: c.chat.slice(p + 1).find(x => x.extra?.worldscrawl_notice) ?? null };
+}
+const PAST20 = '"11 pm" is past the end of this world\'s 20-hour day';
+function failedWait(r, verb, error) {
+    assert.equal(r.aborted, true, 'no narrator');
+    assert.equal(r.asked, 0, 'no model call of any kind (no intent, wait amount, narrator or tracker)');
+    assert.ok(hidden(r.m), JSON.stringify(r.m.extra));
+    assert.equal(r.m.extra.worldscrawl_cmd.verb, verb);
+    assert.equal(r.m.extra.worldscrawl_cmd.error, error);
+    assert.equal(r.m.extra[WAIT], undefined);
+    assert.ok(r.notice, 'a notice follows the hidden line');
+}
+test('5D (1): buttons mode, 20-hour day: "I wait until 11 pm." fails in the verb check: hidden, stamped, a notice, no model call, the clock unchanged', async () => {
+    const { c, calls } = boot({ time: '10:00', hours: 20 });
+    const r = await turn5d(c, calls, 'I wait until 11 pm.');
+    failedWait(r, 'wait', `wait until 11 pm: ${PAST20}.`);
+    assert.equal(clock(c), '10:00');
+});
+test('5D (2): typed mode: the same, and the intent question is never asked', async () => {
+    const { c, calls } = boot({ time: '10:00', hours: 20 });
+    ext.settings().moveMode = 'typed';
+    try {
+        const r = await turn5d(c, calls, 'I wait until 11 pm.');
+        failedWait(r, 'wait', `wait until 11 pm: ${PAST20}.`);
+    } finally { ext.settings().moveMode = 'buttons'; }
+});
+test('5D (3): sleep words, "no am or pm", and "tomorrow at 11 pm" on a 20-hour day', async () => {
+    for (const [line, verb, error] of [
+        ['We sleep till eleven at night.', 'sleep', 'sleep till eleven at night: "eleven at night" is past the end of this world\'s 20-hour day.'],
+        ['I rest until 9 am', 'wait', 'rest until 9 am: "9 am" is not a time on this world\'s 20-hour day (it has no am or pm).'],
+        ['I wait until tomorrow at 11 pm', 'wait', `wait until tomorrow at 11 pm: ${PAST20}.`],
+    ]) {
+        const { c, calls } = boot({ time: '10:00', hours: 20 });
+        failedWait(await turn5d(c, calls, line), verb, error);
+        assert.equal(clock(c), '10:00', line);
+    }
+});
+test('5D (4, Q6): any day length: "until 25:00" and "until 2401" fail; [wait] until 2500 fails with no model guess; 2400 and 24:00 are midnight', async () => {
+    for (const t of ['25:00', '2401']) {
+        const { c, calls } = boot({ time: '10:00' });
+        failedWait(await turn5d(c, calls, `I wait until ${t}.`), 'wait', `wait until ${t}: "${t}" is past the end of this world's 24-hour day.`);
+    }
+    { const { c, calls } = boot({ time: '10:00' }); const m = await typed(c, 'I [wait] until 2500'); assert.ok(hidden(m)); assert.equal(asked(calls), 0, 'no wait amount guess'); assert.match(m.extra.worldscrawl_cmd.error, /"2500" is past the end of this world's 24-hour day/); }
+    for (const t of ['2400', '24:00']) { const { c, calls } = boot({ time: '10:00' }); const m = await typed(c, `I [wait] until ${t}`); assert.equal(m.extra[WAIT]?.until, '00:00', t); assert.equal(clock(c), '00:00'); assert.equal(asked(calls), 0); }
+    { const { c, calls } = boot({ time: '10:00', hours: 20 }); const m = await typed(c, 'I [wait] until 20:00'); assert.equal(m.extra[WAIT]?.until, '00:00', 'midnight on a 20-hour day'); assert.equal(clock(c), '00:00'); assert.equal(asked(calls), 0); }
+    { const { c, calls } = boot({ time: '10:00' }); const r = await turn5d(c, calls, 'I wait until 2400.'); assert.equal(r.aborted, false, 'a free-text "until 2400" is not refused'); }
+});
+test('5D (5, Q3): a minute past 59 fails, free text and bracket, with no model guess', async () => {
+    { const { c, calls } = boot({ time: '10:00' }); failedWait(await turn5d(c, calls, 'I wait until 17:75.'), 'wait', 'wait until 17:75: "17:75" is not a time (an hour has no minute 75).'); }
+    { const { c, calls } = boot({ time: '10:00' }); const m = await typed(c, 'I [wait] until 17:75'); assert.ok(hidden(m)); assert.equal(asked(calls), 0); assert.match(m.extra.worldscrawl_cmd.error, /"17:75" is not a time \(an hour has no minute 75\)/); }
+});
+test('5D (6): not caught: no wait verb, quoted speech, a day-part word, a valid time, a duration, a bracket verb: the turn goes on', async () => {
+    for (const line of ['The shop is open until 11 pm, so I browse.', '"Wait until 11 pm," she says.', '“Wait until 11 pm,” she says.', '«Wait until 11 pm» she says.', 'I wait until dawn.', 'I wait until 9:30.', 'I wait two hours.', 'I [look] around until 11 pm']) {
+        const { c, calls } = boot({ time: '10:00', hours: 20 });
+        const r = await turn5d(c, calls, line);
+        assert.ok(!(r.m.extra?.worldscrawl_cmd?.failed && r.m.extra.worldscrawl_cmd.verb === 'wait'), line);
+        if (!/\[look\]/.test(line)) { assert.equal(r.aborted, false, line); assert.equal(r.m.extra?.worldscrawl_cmd, undefined, line); }
+    }
+});
+test('5D (7): the guard stays: a non-wait line with an impossible time goes on, and the tracker\'s 19:50 stands with a failed story clock note', async () => {
+    const { c, calls } = boot({ time: '19:00', hours: 20, tracker: { place: null, people: [], wait: { duration: '', until: '19:50', sleep: false, reason: 'waiting' } } });
+    const r = await turn5d(c, calls, 'The shop is open until 11 pm.');
+    assert.equal(r.aborted, false);
+    const id = reply(c, 'You wait a while.');
+    await D.onReplyForFlags(id);
+    assert.deepEqual(notes(c.chat[id]).filter(x => x.kind === 'story clock').map(x => [x.status, x.reason]), [['failed', PAST20]]);
+    assert.equal(clock(c), '19:50');
+});
+test('5D (8): the bracket and free text share the same "<said>" is <why> core; the bracket notice is unchanged word for word', async () => {
+    const { c, calls } = boot({ time: '10:00', hours: 20 });
+    const m = await typed(c, 'I [wait] until 11 pm');
+    assert.equal(m.extra.worldscrawl_cmd.error, `[wait] until 11 pm: ${PAST20}.`);
+    assert.equal(asked(calls), 0);
+});
+test('5D (9): a regenerate after a failed free-text wait is refused with no model call', async () => {
+    const { c, calls } = boot({ time: '10:00', hours: 20 });
+    await turn5d(c, calls, 'I wait until 11 pm.');
+    const n0 = calls.length;
+    let aborted = false;
+    await globalThis.worldscrawlInterceptor([], 0, () => { aborted = true; }, 'regenerate');
+    assert.equal(aborted, true);
+    assert.equal(calls.length, n0);
+});
+test('5D (10): impossibleWaitIn / dropQuoted / waitClauses units', () => {
+    const cal = { ...calendarLib.GREGORIAN, hours_per_day: 20 }, read = t => calendarLib.untilClocksRead(t, cal);
+    assert.deepEqual(waitClauses('I wait until 11:30. Then until 17.15! ok; at 11 p.m. then'), ['I wait until 11:30', 'Then until 17.15', 'ok', 'at 11 pm then']);
+    assert.equal(dropQuoted('a "b" c “d” e «f» g').replace(/\s+/g, ' '), 'a c e g', 'matched pairs only');
+    assert.equal(dropQuoted('She says "hi. I wait until 11 pm.'), 'She says "hi. I wait until 11 pm.', 'a stray straight quote keeps the rest of the line');
+    assert.equal(dropQuoted('She says “hi. I wait until 11 pm.'), 'She says “hi. I wait until 11 pm.', 'a stray curly quote too');
+    assert.equal(dropQuoted('She says «hi. I wait until 11 pm.'), 'She says «hi. I wait until 11 pm.', 'and a stray «');
+    for (const line of ['She says "hi. I wait until 11 pm.', 'She says “hi. I wait until 11 pm.', 'She says «hi. I wait until 11 pm.']) assert.equal(impossibleWaitIn(line, read)?.said, '11 pm', line);
+    assert.deepEqual(impossibleWaitIn('I wait until 11 pm.', read), { said: '11 pm', why: "past the end of this world's 20-hour day", phrase: 'wait until 11 pm', verb: 'wait' });
+    assert.equal(impossibleWaitIn('Until 11 pm I wait.', read), null, 'the wait word comes first');
+    assert.equal(impossibleWaitIn('I wait until 9:30, no, until 11 pm.', read)?.said, '11 pm', 'Q4: any impossible time in a wait clause');
+    for (const line of ['The shop is open until 11 pm, so I browse.', '"Wait until 11 pm," she says.', '“Wait until 11 pm,” she says.', '«Wait until 11 pm» she says.', 'I wait until dawn.', 'I wait until 9:30.', 'I wait two hours.']) assert.equal(impossibleWaitIn(line, read), null, line);
+    const hit = impossibleWaitIn('I keep watch till 2001', read);
+    assert.equal(hit.said, '2001');
+    assert.equal(read('until 2001').impossible[0].why, hit.why, 'the same why as untilClocksRead');
 });
