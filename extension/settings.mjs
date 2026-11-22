@@ -39,7 +39,7 @@ function addSettingsPanel() {
       <label class="checkbox_label"><input id="worldscrawl_flag_tags" type="checkbox"> Let the after-reply check propose map changes</label>
       <small>On: the after-reply tracker may propose place updates. Off: it does not. A pasted [ws_flag] tag still applies.</small>
       <label class="checkbox_label"><input id="worldscrawl_flag_npcs" type="checkbox"> Let the after-reply check propose NPC changes</label>
-      <small>On: the after-reply tracker may propose person updates. Off: it does not. A pasted [ws_npc] tag still applies.</small>
+      <small>On: the after-reply tracker may propose person updates. Off: it does not. [ws_npc] tags in story replies are removed and ignored; person changes come from the after-reply tracker.</small>
       <label for="worldscrawl_tracker_retry">When the after-reply check can't read its answer</label>
       <div class="flex-container"><select id="worldscrawl_tracker_retry" class="text_pole flex1"><option value="off">Off</option><option value="ask">Ask (Retry button)</option><option value="auto">Retry automatically</option></select>
         <label for="worldscrawl_tracker_retry_count" style="white-space:nowrap;align-self:center;">Retries: 1-3</label>

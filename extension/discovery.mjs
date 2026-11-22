@@ -6,12 +6,12 @@ import { render as P } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { NPC_KEY, NPC_WARN_KEY, FOUND_KEY, factHasEnd, presentAt, framesOf, takeNameFlags, takeFoundFlags, lastsMinutes, takeNpcTags, NPC_FLAG_KEY, takeNpcFlags, takeLoreFlags, LORE_KEY, alreadyShown, appearanceIntent, effectFields, judgeAppearance, npcAt, claimWarnings } from './npc.mjs';
 import { USER_FLAG_NOTE, analyzeFlag, askModel, clip, loadPatchLib, parseJsonAnswer, replyAfter, storyText, suggestStart } from './carriers.mjs';
-import { calendarLib, chatChanges, chatElapsed, gameDateAt, placeWeatherNow } from './clock.mjs';
+import { calendarLib, chatChanges, chatElapsed, defaultWorldId, gameDateAt, placeWeatherNow, worldTimes } from './clock.mjs';
 import { baseReply, duplicatePlace, gen, nearbyRooms, noteCall } from './dig.mjs';
 import { api, currentLocation, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { chatKey } from './expiry.mjs';
 import { exitsCache, exitsText, locationAt, renderAllExits, renderExitsFrom } from './footer.mjs';
-import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
+import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, activeWorld, broadcastMapState, ctx, isOn, lookAction, moveAction, settings } from './index.js';
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
@@ -476,10 +476,10 @@ function alongContext(chat, id, loc = null) {
 /**
  * 4-NF: tracker items about someone just left behind, and the tracker's old follow. An appearance or fact item for them is dropped (they are not here),
  * noted in the Activity log; memory, disposition and name items are kept (a goodbye is a real memory). came_along items
- * go on to applyPersonStamps, which checks them for every source (tracker and tag).
+ * go on to applyPersonStamps, which checks them (the tracker is the only source: reply ws_npc tags are stripped, 5C B7).
  */
 function guardLeftBehind(id, people, candidates) {
-    // came_along replaces the tracker's follow (no following state from the tracker); the [ws_npc: follow] tag still stamps it.
+    // came_along replaces the tracker's follow (no following state from the tracker; reply ws_npc tags are ignored, 5C B7).
     people = (people ?? []).filter(item => {
         if (item.action !== 'follow') return true;
         noteCall(id, { kind: 'tracker follow', status: 'skipped', reason: 'follow is not a tracker action (came_along replaces it): dropped' });
@@ -493,11 +493,19 @@ function guardLeftBehind(id, people, candidates) {
         return r.verdict !== 'drop';
     });
 }
-/** How far apart two "HH:MM" times are in minutes, the short way round midnight. */
-function clockGap(a, b) {
-    const m = x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; };
-    const d = Math.abs(m(a) - m(b));
-    return Math.min(d, 1440 - d);
+/**
+ * How far apart two "HH:MM" times are in minutes on this world's day (`cal`, GREGORIAN when none), the short way round
+ * midnight. Infinity when either is not a time that day has, so an impossible time is never within the slack.
+ */
+export function clockGap(a, b, cal = calendarLib?.GREGORIAN) {
+    let x, y;
+    try { x = calendarLib.parseClock(a, cal) / 60; y = calendarLib.parseClock(b, cal) / 60; } catch { return Infinity; }
+    const day = cal.hours_per_day * 60, d = Math.abs(x - y);
+    return Math.min(d, day - d);
+}
+/** This world's calendar (GREGORIAN when it has none or it is malformed). */
+function worldCalendar() {
+    try { return calendarLib.checkCalendar(worldTimes.get(activeWorld || defaultWorldId)?.calendar); } catch { return calendarLib?.GREGORIAN; }
 }
 /** The story's clock time may correct the tracker's by at most this many minutes. */
 export const STORY_CLOCK_SLACK = 30;
@@ -508,14 +516,22 @@ export const STORY_CLOCK_SLACK = 30;
  * a day-part word is not adjusted). An hour with two readings takes the next one after the reply's game time.
  */
 function waitClockOverride(chat, id, msg, wait) {
+    if (!calendarLib?.untilClocksRead) return { said: null, from: '' };
     let sod = null;
     try { const d = gameDateAt(id, chat); if (d) sod = d.hour * 3600 + d.minute * 60; } catch {}
-    const clocks = text => calendarLib?.untilClocksIn?.(text, undefined, { now: sod }) ?? [];
-    const said = clocks(playerLineBefore(chat, id))[0];
-    if (said) return { said, from: "the player's line" };
-    const tracker = wait.until ? clocks(`until ${wait.until}`)[0] : null;
-    const told = tracker ? clocks(msg?.mes ?? '') : [];
-    if (told.length === 1 && told[0] !== tracker && clockGap(told[0], tracker) <= STORY_CLOCK_SLACK) return { said: told[0], from: 'the reply' };
+    const cal = worldCalendar();
+    const read = text => calendarLib.untilClocksRead(text, cal, { now: sod });
+    // A time this world's day can't have ("11 pm" on a 20-hour day): a failed note, never an override, never wrapped.
+    const impossible = r => { const x = r.impossible[0]; if (!x) return false; noteCall(id, { kind: 'story clock', status: 'failed', reason: `"${x.said}" is ${x.why}` }); return true; };
+    const player = read(playerLineBefore(chat, id));
+    if (impossible(player)) return { said: null, from: '' };
+    if (player.clocks[0]) return { said: player.clocks[0], from: "the player's line" };
+    const tracker = wait.until ? read(`until ${wait.until}`).clocks[0] : null;
+    if (!tracker) return { said: null, from: '' };
+    const reply = read(msg?.mes ?? '');
+    if (impossible(reply)) return { said: null, from: '' };
+    const told = reply.clocks;
+    if (told.length === 1 && told[0] !== tracker && clockGap(told[0], tracker, cal) <= STORY_CLOCK_SLACK) return { said: told[0], from: 'the reply' };
     return { said: null, from: '' };
 }
 /** Feed a tracker answer into the place rewrite and the person apply. No third apply path. */
@@ -748,17 +764,15 @@ export async function onReplyForFlags(id) {
     if (pendingWait) { const w = pendingWait; pendingWait = null; await applyProposedWait(id, w); }
     if (flag && flag.kind !== 'wait' && digFailedBefore(c.chat, id)) { console.log('[WorldScrawl] map flag ignored: breaking through failed on this turn, so nothing new opened'); noteCall(id, { kind: `ws_flag ${flag.kind ?? ''}`.trim(), status: 'skipped', reason: 'breaking through failed on this turn' }); flag = null; }
     if (flag) await flagMessage(id, flag);
+    // 5C B7: the narrator only narrates. [ws_npc: …] tags in a story reply (the lenient forms too, normalized above) are
+    // removed and ignored: no stamp, no note, no warning. Person changes come from the after-reply tracker.
     const taken = takeNpcTags(msg.mes ?? '');
-    const stamped = taken.stamps;
-    for (const s of taken.stamps) emitted.push(`${s.type} tag`);
     noteCall(id, narratorNote(emitted));
-    noteDroppedFacts(id, 'npc_fact tag', taken.dropped);
     if (taken.text !== (msg.mes ?? '')) {
         msg.mes = taken.text;
         if (Array.isArray(msg.swipes) && msg.swipes[swipeOf(msg)] !== undefined) msg.swipes[swipeOf(msg)] = msg.mes;
         try { c.updateMessageBlock?.(id, msg); } catch {}
     }
-    if (stamped.length) await applyPersonStamps(id, stamped);
     const bad = unreadTags(msg.mes ?? '');
     msg.extra = msg.extra ?? {};
     const keepBad = (msg.extra[BADTAG_KEY] ?? []).filter(b => (b?.swipe ?? 0) !== swipeOf(msg));

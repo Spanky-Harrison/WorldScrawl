@@ -118,9 +118,7 @@ function applyTools() {
     const want = new Set(toolsToRegister(settings(), isOn()));
     for (const n of TOOL_NAMES) if (!want.has(n)) { try { c.unregisterFunctionTool(n); } catch { /* not registered */ } }
     if (!want.size) return;
-    // ws_flag, ws_wait and ws_npc take their descriptions from prompts. Look and move do not.
-    const needsPrompts = ['ws_flag', 'ws_wait', 'ws_npc'].some(n => want.has(n));
-    if (needsPrompts && !hasPrompts()) { ensurePrompts().then(applyTools).catch(e => console.warn('[WorldScrawl]', e.message)); return; }
+    // The only tools are look and move, which need no prompts.
     registerTools(want);
 }
 
