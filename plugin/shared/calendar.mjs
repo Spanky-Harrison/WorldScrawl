@@ -261,6 +261,8 @@ export const UNTIL_HELP = 'say the time like "17:15", "5:15 pm" or "a quarter pa
 /**
  * Read a wait target at the start of `t` (lower case, after until/till/to): {until, alt?, tomorrow?, rest} or null.
  * until is a WAIT_TARGETS word or "HH:MM" (the literal reading); rest is whatever follows ("and eat").
+ * A time this world's day can't have (an am/pm time on a day that isn't 24 hours, or an hour at or past hours_per_day)
+ * is {impossible: "11 pm", why: "past the end of this world's 20-hour day", rest}: never null, never wrapped.
  */
 export function readUntil(t, cal = GREGORIAN) {
     let s = String(t ?? '').trim().toLowerCase().replace(/^(?:(?:the|about|around|roughly|approximately|at)\s+)+/, '');
@@ -270,27 +272,32 @@ export function readUntil(t, cal = GREGORIAN) {
     const out = (until, rest, alt = null) => ({ until, ...(alt && !tomorrow ? { alt } : {}), ...(tomorrow ? { tomorrow: true } : {}), rest: rest.trim() });
     const dw = DAY_WORD_RE.exec(s);
     if (dw) return out(DAY_WORDS[dw[1]], s.slice(dw[0].length));
-    const day24 = cal.hours_per_day === 24;
+    const day24 = cal.hours_per_day === 24, hpd = cal.hours_per_day;
+    const said = full => { const t = full.trim().replace(/\s+/g, ' '); return /\..*\.$/.test(t) ? t : t.replace(/\.$/, ''); }; // "11 pm." -> "11 pm"; "11 p.m." stays
+    const impossible = (full, rest, h = null) => ({ impossible: said(full), why: h == null || h < hpd ? `this world's ${hpd}-hour day has no am or pm` : `past the end of this world's ${hpd}-hour day`, rest: rest.trim() });
+    const literal = (full, h, mi, rest) => (h >= hpd ? impossible(full, rest, h) : out(hm(h, mi), rest));
     // A 12-hour reading of hour h, minute mi: am/pm from a suffix, else literal plus the other half of the day.
     const twelve = (h, mi, rest, explicit = '') => {
         if (h < 1 || h > 12 || mi > 59) return null;
         const am = explicit === 'a' || (!explicit && AM_RE.test(rest)), pm = explicit === 'p' || (!explicit && PM_RE.test(rest));
         if (!explicit) rest = rest.replace(am ? AM_RE : pm ? PM_RE : /^/, '');
         if (am) return out(hm(h === 12 ? 0 : h, mi), rest);
-        if (pm) return day24 ? out(hm(h === 12 ? 12 : h + 12, mi), rest) : null;
+        if (pm) return day24 ? out(hm(h === 12 ? 12 : h + 12, mi), rest) : impossible(s.slice(0, s.length - rest.length), rest, h === 12 ? 12 : h + 12); // "eleven at night" on a short day
         if (!day24) return out(hm(h, mi), rest);
         return out(hm(h, mi), rest, hm(h === 12 ? 0 : h + 12, mi));
     };
     let m;
-    if ((m = /^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return day24 ? twelve(+m[1], +m[2], s.slice(m[0].length), m[3]) : null;
-    if ((m = /^(\d{1,2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return day24 ? twelve(+m[1], 0, s.slice(m[0].length), m[2]) : null;
-    if ((m = /^(\d{1,2})h(\d{2})(?![\w:])/.exec(s))) return out(hm(+m[1], +m[2]), s.slice(m[0].length));
+    // An am/pm time on a short day: past its end, or a clock that day doesn't use; visible, never wrapped.
+    const ampm = (h, mi, ap, full, rest) => { if (day24) return twelve(h, mi, rest, ap); if (h < 1 || h > 12 || mi > 59) return null; return impossible(full, rest, ap === 'a' ? (h === 12 ? 0 : h) : (h === 12 ? 12 : h + 12)); };
+    if ((m = /^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return ampm(+m[1], +m[2], m[3], m[0], s.slice(m[0].length));
+    if ((m = /^(\d{1,2})\s*([ap])\.?\s*m\b\.?/.exec(s))) return ampm(+m[1], 0, m[2], m[0], s.slice(m[0].length));
+    if ((m = /^(\d{1,2})h(\d{2})(?![\w:])/.exec(s))) return literal(m[0], +m[1], +m[2], s.slice(m[0].length));
     if ((m = /^(\d{1,2})[:.](\d{2})(?![\w:]|\.\d)/.exec(s))) {
         const h = +m[1], mi = +m[2];
-        if (m[1].startsWith('0') || h >= 13 || h === 0) return out(hm(h, mi), s.slice(m[0].length)); // literal
+        if (m[1].startsWith('0') || h >= 13 || h === 0) return literal(m[0], h, mi, s.slice(m[0].length)); // literal
         return twelve(h, mi, s.slice(m[0].length));
     }
-    if ((m = /^(\d{4})(?![\w:])/.exec(s))) { const h = +m[1].slice(0, 2), mi = +m[1].slice(2); return h <= 23 && mi <= 59 ? out(hm(h, mi), s.slice(m[0].length)) : null; }
+    if ((m = /^(\d{4})(?![\w:])/.exec(s))) { const h = +m[1].slice(0, 2), mi = +m[1].slice(2); return h <= 23 && mi <= 59 ? literal(m[0], h, mi, s.slice(m[0].length)) : null; }
     if ((m = new RegExp(`^(?:a\\s+)?(quarter|half)\\s+past\\s+${H}(?![\\w:])`).exec(s))) return twelve(hourOf(m[2]), m[1] === 'half' ? 30 : 15, s.slice(m[0].length));
     if ((m = new RegExp(`^(?:a\\s+)?quarter\\s+(?:to|till|til|before)\\s+${H}(?![\\w:])`).exec(s))) { const h = hourOf(m[1]); return twelve(h === 1 ? 12 : h - 1, 45, s.slice(m[0].length)); }
     if ((m = new RegExp(`^${H}\\s*o'?\\s?clock\\b`).exec(s))) return twelve(hourOf(m[1]), 0, s.slice(m[0].length));
@@ -307,6 +314,7 @@ export function pickReading(r, sod = null, cal = GREGORIAN) {
 function untilTarget(t, cal) {
     const r = readUntil(t, cal);
     if (!r) throw new Error(`${UNTIL_HELP}; got ${JSON.stringify(String(t ?? '').trim())}`);
+    if (r.impossible) throw Object.assign(new Error(`"${r.impossible}" is ${r.why}`), { impossible: true }); // final: no model guess
     if (/^\d{2}:\d{2}$/.test(r.until)) parseClock(r.until, cal);
     const { rest, ...target } = r;
     return target;
@@ -329,17 +337,25 @@ export function parseWait(text, cal = GREGORIAN) {
  * order, without repeats. `now` (second of the day) picks the next one to come of an hour with two readings; without
  * it the literal reading. Day-part words and "tomorrow …" are left to whoever reads the line.
  */
-export function untilClocksIn(text, cal = GREGORIAN, { now = null } = {}) {
-    const out = [], src = String(text ?? '');
+export function untilClocksIn(text, cal = GREGORIAN, opts = {}) {
+    return untilClocksRead(text, cal, opts).clocks;
+}
+/**
+ * untilClocksIn plus the times this world's day can't have: {clocks, impossible: [{said: "11 pm", why}]}. An impossible
+ * time is never a clock (never wrapped); the caller says so.
+ */
+export function untilClocksRead(text, cal = GREGORIAN, { now = null } = {}) {
+    const clocks = [], impossible = [], src = String(text ?? '');
     for (const m of src.matchAll(/\b(?:until|till|til)\s+/gi)) {
         let r = null;
         try { r = readUntil(src.slice(m.index + m[0].length).slice(0, 60), cal); } catch { r = null; }
+        if (r?.impossible) { if (!impossible.some(x => x.said === r.impossible)) impossible.push({ said: r.impossible, why: r.why }); continue; }
         if (!r || r.tomorrow || !/^\d{2}:\d{2}$/.test(r.until)) continue;
         try { parseClock(r.until, cal); } catch { continue; }
         const t = pickReading(r, now, cal);
-        if (!out.includes(t)) out.push(t);
+        if (!clocks.includes(t)) clocks.push(t);
     }
-    return out;
+    return { clocks, impossible };
 }
 /** The first clock time a line waits until, or null (see untilClocksIn). */
 export function untilClockIn(text, cal = GREGORIAN, opts = {}) {

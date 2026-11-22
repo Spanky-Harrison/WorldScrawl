@@ -118,6 +118,7 @@
     "via": "the rooms passed through on the way, comma separated",
     "what": "what change was flagged, in the narrator's words",
     "where": "where the party is now, for the narrator",
+    "activity": "what a person's schedule entry has them doing (e.g. pouring drinks)",
     "why": "why the door would not move (e.g. it is locked)",
     "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game.",
     "amount": "The wait amount as the player wrote it, e.g. \"a bit over an hour\".",
@@ -1009,6 +1010,28 @@
         },
         {
           "name": "where"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_along_due",
+      "title": "Narration: someone who came along, past their hour",
+      "description": "Alongside, in the people block: a person who came along with the party and is still with them after their schedule moved on, with where they would usually be at this hour.",
+      "group": "narration",
+      "locked": "The game fills the name, the party and the schedule entry (place and activity) from the schedules.",
+      "text": "{{name}} came along with {{party}} and has stayed; at this hour they would usually be at {{where}} ({{activity}}).",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "where"
+        },
+        {
+          "name": "activity"
         }
       ]
     },

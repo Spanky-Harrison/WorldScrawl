@@ -482,7 +482,8 @@ function npcPromptBits(loc) {
         const focus = stored && stored.depth ? stored : focusRules(said, present);
         const asked = askedLoreNames(chat, chat.length - 1, i => env.playerAt(i));
         const gate = p => { gateLines.push(P('narration.name_gate', { shown: shownName(p), name: p.name })); return P('narration.name_gate', { shown: shownName(p), name: `{{npc!:${p.id}}}` }); }; // name-ok: the gated line itself
-        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc, gate });
+        const alongDue = p => P('narration.npc_along_due', { name: capFirst(shownName(p)), party: partyText(), where: p.alongDue.where, activity: p.alongDue.activity });
+        const sl = npcSlices(present, focus, { tiers: npcTiers(present, focus, { chat, index: chat.length - 1, said, asked }), pc: env.pc, gate, lines: { alongDue } });
         return { ...sl, ...(absent.length ? { npcs_present: `${sl.npcs_present}\n${absent.join('\n')}` } : {}), after };
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }

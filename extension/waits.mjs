@@ -70,6 +70,7 @@ export async function planWait(args, sleep = false, reason = '', { narrator = fa
     args = String(args ?? '').trim();
     let p;
     try { p = args ? calendarLib.parseWait(args, cal ? calendarLib.checkCalendar(cal) : undefined) : sleep ? { seconds: calendarLib.SLEEP_DEFAULT } : null; } catch (e) {
+        if (e.impossible) return { error: e.message }; // a time this world's day can't have ("11 pm" on a 20-hour day): no guess
         p = await modelWait(args, cal); // a loose amount the parser can't read: one small model call before failing
         if (!p) return { error: e.message };
     }

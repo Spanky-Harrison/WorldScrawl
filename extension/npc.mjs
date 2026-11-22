@@ -742,17 +742,25 @@ export function presentAt(chat, index, cast, env) {
         if (!inScene) continue;
         const now = frames[end].get(npc.id);
         const due = duePlace(now, end, env);
-        let overdue = '';
+        let overdue = '', alongDue = null, activity = due?.activity ?? '';
         if (!now.following && (!due || due.address !== here)) {
             const sched = scheduleAt(now, clock, env);
             const covered = stayCovers(now, scene, clock);
+            // 5C B1: someone who came along with the player and whose hour has ended is still with the player: no "an
+            // hour late" or absent-elsewhere line, but where they would usually be now (offmap: its own words).
+            if (now.held?.along && !rejoined(now, end, env) && sched && sched.kind !== 'might') {
+                activity = 'with the player';
+                if (!covered) alongDue = { where: sched.offmap ? (sched.where || sched.entry?.where || sched.activity || 'elsewhere') : placeLabel(env, sched.address), activity: sched.entry?.activity || sched.activity || 'elsewhere' };
+                out.push({ ...publicNpc(now), activity, place: here, here, overdue: '', alongDue, kind: 'stay', known: knows(now) });
+                continue;
+            }
             const movedOn = `${capFirst(shownName(now))} would normally have moved on by now.`;
             if (sched?.kind === 'might') overdue = covered || appearedThisBlock(now, sched) ? '' : movedOn;
             else if (sched?.offmap) overdue = covered ? '' : offmapAbsentLine(now, sched);
             else if (sched && sched.address !== here) overdue = covered ? '' : overdueNote(now, sched, clock, env);
             else if (!sched && (now.appearances ?? []).some(a => a.at >= scene)) overdue = covered ? '' : movedOn;
         }
-        out.push({ ...publicNpc(now), activity: due?.activity ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
+        out.push({ ...publicNpc(now), activity, place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -1262,7 +1270,7 @@ export function relLine(p, pc = 'the player') {
 /** Above the memories when the name is unknown to them: memories use real names, but they must not say one they don't know. */
 const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [`(Their memories name people by their real names; ${shownName(p)} does not know the name ${pc} and must not say it.)`]);
 
-export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player', gate = null } = {}) {
+export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player', gate = null, lines: say = {} } = {}) {
     const list = present ?? [];
     if (!list.length) return { npcs_present: '', npc_focus: '' };
     const tierOf = p => tiers?.[p.id] ?? { tier: focus?.id === p.id ? 'engaged' : 'present' };
@@ -1274,6 +1282,7 @@ export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player'
         bits.push(`Demeanor: ${p.line}`);
         if (p.activity) bits.push(`Now: ${p.activity}.`);
         if (p.overdue) bits.push(p.overdue);
+        if (p.alongDue && say.alongDue) bits.push(say.alongDue(p)); // 5C B1: from the narration.npc_along_due prompt
         if (t.tier === 'engaged') {
             if (p.body) bits.push(`Body: ${p.body}`);
             if (p.outfit) bits.push(`Wearing: ${p.outfit}`);
