@@ -250,7 +250,7 @@ test('the map\'s cast Changes tab draws the same one-field card (shared personRe
     assert.equal(both.desc.panel.rows.length, 2);
 });
 
-test('a change to the card\'s own field still makes it stale: a later Outfit card kept first, then the earlier Outfit card asks again', async () => {
+test('a change to the card\'s own field still makes it stale: a later Outfit card kept first, and the earlier Outfit card is asked again at once (5A)', async () => {
     const { c, calls } = boot({});
     const H = await heskHandle(c);
     c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked' })], wait: null });
@@ -258,18 +258,20 @@ test('a change to the card\'s own field still makes it stale: a later Outfit car
     c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
     const b = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
     const first = ownerOf(c.chat[a], 'outfit'), second = ownerOf(c.chat[b], 'outfit');
+    const token = first.candidate.token;
+    calls.length = 0;
     btn(cardFor(draw(c), b, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
     assert.ok(second.committed);
-    calls.length = 0;
-    const token = first.candidate.token;
-    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
-    assert.ok(!first.committed, 'its own field moved: stale, not kept');
+    // 5A (A3, Ast): its own field moved, so it is asked again at once, without waiting for its Approve.
+    assert.ok(!first.committed, 'its own field moved: not kept');
     assert.equal(calls.length, 1, 'asked again');
     assert.deepEqual(calls[0].fields, ['outfit']);
     assert.equal(first.candidate.phase, 'review');
     assert.equal(first.candidate.token, token);
+    calls.length = 0;
     btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
     assert.ok(first.committed, 'kept after the new review');
+    assert.equal(calls.length, 0, 'no further call');
 });
 
 test('the compose prompt for a one-field card shows only its own field (the other field is not in the prompt)', async () => {
@@ -281,4 +283,329 @@ test('the compose prompt for a one-field card shows only its own field (the othe
     assert.equal(calls.length, 1);
     assert.match(calls[0].prompt, /^- outfit: /m);
     assert.doesNotMatch(calls[0].prompt, /^- body: /m);
+});
+
+// ---- 5A: per-field cleanup (A2 "did not change" per field, A3 sibling refresh, A4 alreadyEffect gone, A5 kept-card
+// tooltips, A6 per-field compose wording). Through the same real handlers as above.
+const npcLib = await import('../../extension/npc.mjs');
+const sceneLib = await import('../../extension/scene.mjs');
+const heskNow = c => npcLib.npcAt(c.chat, c.chat.length - 1, sceneLib.castPack().npcs, 'hesk');
+const notesOf = m => Object.values(m.extra?.worldscrawl_calls ?? {}).flat();
+const warnsOf = m => (m.extra?.worldscrawl_npcwarn ?? []).map(w => (typeof w === 'string' ? w : w.text ?? JSON.stringify(w)));
+const keptOf = (doc, id) => [...(doc.querySelector(`.mes[mesid="${id}"]`)?.querySelectorAll('.worldscrawl_npcchange') ?? [])];
+
+test('5A A2: a "looks" item with new Body text and no Outfit text: a Body card only, no warning, and "the outfit did not change"', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body, outfit', { intent: 'looks', body: 'A big woman, now with a fresh scar across one cheek.' })], wait: null });
+    const id = await exchange(c, 'I look at her.', 'The landlady turns; a fresh scar crosses her cheek.');
+    assert.deepEqual(owners(c.chat[id]).map(o => o.candidate?.fields), ['body']);
+    assert.deepEqual(warnsOf(c.chat[id]), [], 'no warning: one field did change');
+    assert.ok(notesOf(c.chat[id]).some(x => x.kind === 'npc_appearance' && x.status === 'skipped' && x.reason === 'the outfit did not change'), JSON.stringify(notesOf(c.chat[id])));
+    assert.equal(calls.length, 0, 'the Body text is given (no compose call), and the Outfit is never asked');
+    assert.match(ownerOf(c.chat[id], 'body').candidate.lastingPreview.body, /fresh scar/);
+});
+
+test('5A A2: a real intent with Body changed and Outfit text equal to the outfit now: one Body card; the Outfit is dropped before any compose call', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    const now = heskNow(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit', { body: `${now.body} Rain runs off her braids.`, outfit: now.outfit })], wait: null });
+    const id = await exchange(c, 'I wait.', SOAK);
+    assert.deepEqual(owners(c.chat[id]).map(o => o.candidate?.fields), ['body']);
+    assert.equal(calls.filter(x => x.fields.includes('outfit')).length, 0, 'the unchanged Outfit is dropped before any compose call');
+    assert.equal(calls.length, 0, 'the given Body text needs no call either');
+    assert.equal(ownerOf(c.chat[id], 'body').candidate.lastingPreview.body, `${now.body} Rain runs off her braids.`);
+    assert.ok(notesOf(c.chat[id]).some(x => x.reason === 'the outfit did not change'));
+    assert.deepEqual(warnsOf(c.chat[id]), []);
+    assert.equal(cardsOf(draw(c), id).length, 1);
+});
+
+test('5A A2: every field unchanged or saying nothing: no card and one warning; one field named: the warning names it', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    const now = heskNow(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit', { intent: 'looks', outfit: now.outfit })], wait: null });
+    const id = await exchange(c, 'I look.', 'The landlady looks as she always does.');
+    assert.equal(owners(c.chat[id]).length, 0);
+    assert.equal(calls.length, 0);
+    const w = warnsOf(c.chat[id]);
+    assert.equal(w.length, 1, JSON.stringify(w));
+    assert.match(w[0], /^Warning: a person update for Hesk did not land: appearance did not change\.$/);
+    assert.deepEqual(notesOf(c.chat[id]).filter(x => x.status === 'skipped').map(x => x.reason).sort(), ['the body did not change', 'the outfit did not change']);
+
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'soaked', outfit: now.outfit })], wait: null });
+    const id2 = await exchange(c, 'I look again.', 'The landlady wears the same dress as ever.');
+    assert.equal(owners(c.chat[id2]).length, 0);
+    assert.deepEqual(warnsOf(c.chat[id2]), ["Warning: a person update did not land: Hesk's outfit did not change."]);
+});
+
+test('5A A3: approving Body refreshes the pending Outfit card at once: its preview takes the kept Body, its Approve keeps its own Outfit; two compose calls in all', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit')], wait: null });
+    const id = await exchange(c, 'I wait.', SOAK);
+    const outfit = ownerOf(c.chat[id], 'outfit');
+    const composed = outfit.candidate.lastingPreview.outfit;
+    const revBefore = outfit.decisionRev;
+    btn(cardFor(draw(c), id, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
+    const keptBody = heskNow(c).body;
+    assert.match(keptBody, /\[body changed\]$/);
+    assert.equal(outfit.candidate.lastingPreview.body, keptBody, 'without a click on it, the Outfit card took the kept Body');
+    assert.equal(outfit.candidate.lastingPreview.outfit, composed, 'and kept its own composed Outfit');
+    assert.ok(outfit.decisionRev > revBefore, 'its decision revision moved (an older Approve is stale)');
+    const oc = cardFor(draw(c), id, 'Outfit: Proposed person change:');
+    assert.ok(oc);
+    btn(oc, 'Approve').click(); await flush(80);
+    assert.ok(outfit.committed);
+    assert.equal(heskNow(c).outfit, composed);
+    assert.equal(calls.length, 2, 'two compose calls in all');
+});
+
+test('5A A3: an Approve drawn before the refresh is stale: refused, the card redraws, nothing is kept until the new card is approved', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit')], wait: null });
+    const id = await exchange(c, 'I wait.', SOAK);
+    const outfit = ownerOf(c.chat[id], 'outfit');
+    const old = draw(c);
+    const oldApprove = btn(cardFor(old, id, 'Outfit: Proposed person change:'), 'Approve');
+    btn(cardFor(old, id, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
+    calls.length = 0;
+    oldApprove.click(); await flush(80);
+    assert.ok(!outfit.committed, 'the old ticket never commits');
+    assert.equal(outfit.candidate.phase, 'review');
+    assert.equal(calls.length, 0);
+    btn(cardFor(draw(c), id, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(outfit.committed, 'the redrawn card approves');
+});
+
+/** A kept Body change on an earlier message (Body0), then Body and Outfit cards on a later one; Body approved, so the
+ *  Outfit card was refreshed onto Body0 + Body. Returns what the Undo test needs. */
+async function undoSetup() {
+    const env = boot({});
+    const { c, calls } = env;
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body', { intent: 'hair cut short', why: 'a haircut' })], wait: null });
+    const a = await exchange(c, 'I hand her the shears.', 'The landlady cuts her braids short.');
+    btn(cardFor(draw(c), a, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
+    const body0 = heskNow(c).body;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body,outfit')], wait: null });
+    const b = await exchange(c, 'I wait.', SOAK);
+    const outfit = ownerOf(c.chat[b], 'outfit');
+    btn(cardFor(draw(c), b, 'Body: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.equal(outfit.candidate.lastingPreview.body, heskNow(c).body, 'refreshed onto the kept Body');
+    return { ...env, a, b, outfit, body0, composed: outfit.candidate.lastingPreview.outfit };
+}
+const undoBody = async (c, b) => {
+    const kept = keptOf(draw(c), b).find(e => /Character changed here/.test(e.textContent));
+    assert.ok(kept, keptOf(draw(c), b).map(e => e.textContent).join(' || '));
+    btn(kept, 'Undo').click(); await flush(120);
+};
+
+test('5A A3 2a: the decided Body undone, the text before it on record: the Outfit card shows that Body again with 0 compose calls', async () => {
+    const { c, calls, b, outfit, body0, composed } = await undoSetup();
+    calls.length = 0;
+    await undoBody(c, b);
+    assert.equal(calls.length, 0, 'no compose call');
+    assert.equal(outfit.candidate.phase, 'review');
+    assert.equal(outfit.candidate.lastingPreview.body, body0, 'the Body before the change');
+    assert.equal(outfit.candidate.lastingPreview.outfit, composed, 'its own Outfit text kept');
+});
+
+test('5A A3 2b: the decided Body undone, the text before it not on record: exactly 1 compose call, then a reviewable card', async () => {
+    const { c, calls, a, b, outfit, composed } = await undoSetup();
+    const rec = c.chat[a].extra.worldscrawl_compose;
+    rec.records = rec.records.filter(r => r.kind !== 'fields');
+    calls.length = 0;
+    await undoBody(c, b);
+    assert.equal(calls.length, 1, 'exactly one compose call');
+    assert.deepEqual(calls[0].fields, ['body'], 'the person\'s text before the change, rebuilt once');
+    assert.equal(outfit.candidate.phase, 'review');
+    assert.equal(outfit.candidate.lastingPreview.body, heskNow(c).body, 'the Outfit card rebased on it: no second call');
+    assert.equal(outfit.candidate.lastingPreview.outfit, composed);
+    assert.ok(cardFor(draw(c), b, 'Outfit: Proposed person change:'));
+});
+
+test('5A A3: a sibling that is really stale (its text before the change cannot be rebuilt) shows Preparing and is asked again on its own card', async () => {
+    const env = await undoSetup();
+    const { c, calls, a, b, outfit } = env;
+    const rec = c.chat[a].extra.worldscrawl_compose;
+    rec.records = rec.records.filter(r => r.kind !== 'fields');
+    // The person's own rebuild (Body0 alone) fails; the Outfit card's full replay (Body0 + its change) answers.
+    const gen = c.generateRaw;
+    c.generateRaw = async args => {
+        const p = String(args?.prompt ?? '');
+        if (/hair cut short/.test(p) && !/soaked by the rain/.test(p) && /^- body: /m.test(p)) { calls.push({ fields: ['body'], prompt: p, failed: true }); return 'not json'; }
+        if (/soaked by the rain/.test(p) && !isTrackerCall(args)) seen.push({ phase: outfit.candidate?.phase, title: cardsOf(draw(c), b).map(e => e.textContent).join(' || ') });
+        return gen(args);
+    };
+    const seen = [];
+    calls.length = 0;
+    await undoBody(c, b);
+    const seenWorking = seen.length === 1 && seen[0].phase === 'working' && /Preparing a change to/.test(seen[0].title);
+    const asked = calls.filter(x => !x.failed);
+    assert.equal(asked.length, 1, JSON.stringify(calls.map(x => [x.fields, x.failed ?? false])));
+    assert.match(asked[0].prompt, /soaked by the rain/, 'asked on the Outfit card');
+    assert.deepEqual(asked[0].fields, ['body', 'outfit'], 'a full replay: its base (Body0 alone) is not known');
+    assert.doesNotMatch(asked[0].prompt, /as it is now \(for reference only/, '5A A6: a two-field replay has no reference line');
+    assert.ok(seenWorking, `it went to "working" (Preparing…) first: ${JSON.stringify(seen)}`);
+    assert.equal(outfit.candidate.phase, 'review');
+    assert.ok(cardFor(draw(c), b, 'Outfit: Proposed person change:'));
+});
+
+test('5A A4: alreadyEffect is gone from the extension; the same tracker item again on a later message still makes a card', async () => {
+    const dir = new URL('../../extension/', import.meta.url);
+    for (const f of fs.readdirSync(dir).filter(f => /\.m?js$/.test(f))) assert.doesNotMatch(fs.readFileSync(new URL(f, dir), 'utf8'), /alreadyEffect/, f);
+    const { c } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit')], wait: null });
+    const a = await exchange(c, 'I wait.', SOAK);
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(ownerOf(c.chat[a], 'outfit').committed);
+    const b = await exchange(c, 'I wait more.', 'The landlady goes out again and comes back soaked by the rain.');
+    assert.deepEqual(owners(c.chat[b]).map(o => o.candidate?.fields), ['outfit'], 'the same intent and field again: a card, as before');
+    assert.ok(cardFor(draw(c), b, 'Outfit: Proposed person change:'));
+});
+
+test('5A A5: a kept one-field card names its own field in Edit (and Save while editing); the map\'s kept card too', async () => {
+    const C = await import('../../plugin/shared/cards.mjs');
+    const t = d => Object.fromEntries(d.actions.map(x => [x.id, x.title]));
+    assert.equal(t(C.personKept({ key: 'k', text: 'x', field: 'outfit' })).edit, 'Change the words or the outfit text of this change');
+    assert.equal(t(C.personKept({ key: 'k', text: 'x', field: 'outfit', editing: true })).save, 'Keep the outfit exactly as typed (or ask again for an edited Change line)');
+    assert.equal(t(C.personKept({ key: 'k', text: 'x', field: 'body' })).edit, 'Change the words or the body text of this change');
+    assert.equal(t(C.personKept({ key: 'k', text: 'x' })).edit, 'Change the words or the body and outfit text of this change', 'two fields: both named');
+
+    const { c } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit')], wait: null });
+    const id = await exchange(c, 'I wait.', SOAK);
+    btn(cardFor(draw(c), id, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    const kept = keptOf(draw(c), id).find(e => /Character changed here/.test(e.textContent));
+    assert.ok(kept);
+    const edit = btn(kept, 'Edit');
+    assert.equal(edit.getAttribute('title') || edit.title, 'Change the words or the outfit text of this change');
+    assert.doesNotMatch(kept.innerHTML ?? kept.textContent, /body and outfit/);
+
+    const { stampCard } = await import('../../plugin/ui/castdata.mjs');
+    const card = stampCard({ type: 'npc_appearance', fields: 'outfit', identity: { owner: 'o1' }, owner: 'o1', msg: 1, index: 0, decisionRev: 1, summary: 'Hesk: outfit soaked' }, { who: 'Hesk' });
+    assert.equal(Object.fromEntries(card.desc.actions.map(x => [x.id, x.title])).edit, 'Change the words or the outfit text of this change');
+});
+
+test('5A A6: a one-field compose shows the other field as it is now, for reference only; the system line names the field', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    const now = heskNow(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit')], wait: null });
+    await exchange(c, 'I wait.', SOAK);
+    assert.equal(calls.length, 1);
+    const masked = s => s.replace(/Hesk/g, 'the landlady');
+    assert.ok(calls[0].prompt.includes(`Their body as it is now (for reference only; do not write it): ${masked(now.body)}`), calls[0].prompt);
+    assert.doesNotMatch(calls[0].prompt, /^- body: /m, 'not a field to write');
+    assert.match(calls[0].system, /only the field\(s\) named in the request \(outfit\)/);
+    assert.doesNotMatch(calls[0].system, /body and\/or outfit/);
+});
+
+test('5A A6: a heavy one-field rewrite names its field in the rebuild line and still shows the other field for reference', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    calls.length = 0;
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'the apron burns away', scope: 'full', why: 'ruined' })], wait: null });
+    await exchange(c, 'I watch.', 'The landlady\'s apron catches fire and burns away.');
+    assert.match(calls[0].system, FULL_SYS);
+    assert.match(calls[0].system, /when the outfit is among the fields asked \(outfit\), how the clothes fit the body as it is now/);
+    assert.match(calls[0].prompt, /Their body as it is now/);
+});
+
+test('5A A3 (Ast): an approved Outfit0 on an earlier message undone: the pending Outfit card on a later message shows Preparing, is asked once on its own card, returns to review with new keys, and Approve makes no further call', async () => {
+    const { c, calls } = boot({});
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked' })], wait: null });
+    const a = await exchange(c, 'I wait.', 'The landlady comes in, her hem soaked by the rain.');
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    const outfit0 = ownerOf(c.chat[a], 'outfit');
+    assert.ok(outfit0.committed);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
+    const b = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
+    const pending = ownerOf(c.chat[b], 'outfit');
+    assert.equal(pending.candidate.phase, 'review');
+    const keys = [pending.candidate.lastingKey, pending.candidate.liveKey];
+    assert.match(pending.candidate.lastingPreview.outfit, /\[outfit changed\] \[outfit changed\]$/, 'composed on top of Outfit0');
+    const seen = [];
+    const gen = c.generateRaw;
+    c.generateRaw = async args => {
+        if (!isTrackerCall(args) && /apron torn/.test(String(args?.prompt ?? ''))) seen.push({ phase: pending.candidate?.phase, cards: cardsOf(draw(c), b).map(e => e.textContent).join(' || ') });
+        return gen(args);
+    };
+    calls.length = 0;
+    const kept = keptOf(draw(c), a).find(e => /Character changed here/.test(e.textContent));
+    btn(kept, 'Undo').click(); await flush(150);
+    assert.equal(calls.length, 1, `exactly one compose call: ${JSON.stringify(calls.map(x => x.fields))}`);
+    assert.match(calls[0].prompt, /apron torn/, 'on the pending card');
+    assert.doesNotMatch(calls[0].prompt, /hem soaked/, 'Outfit0 is gone from its base');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].phase, 'working');
+    assert.match(seen[0].cards, /Preparing a change to/, 'the card showed Preparing… while it was asked');
+    assert.equal(pending.candidate.phase, 'review');
+    assert.notDeepEqual([pending.candidate.lastingKey, pending.candidate.liveKey], keys, 'new keys');
+    assert.doesNotMatch(pending.candidate.lastingPreview.outfit, /\[outfit changed\] \[outfit changed\]/, 'no longer on top of Outfit0');
+    calls.length = 0;
+    btn(cardFor(draw(c), b, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(pending.committed, 'kept');
+    assert.equal(calls.length, 0, 'Approve makes no further call');
+});
+
+/** Two hours pass on a player line (a wait stamp), with a plain reply after it. */
+function waitTwoHours(c) {
+    c.chat.push({ is_user: true, mes: 'I wait two hours.', swipe_id: 0, extra: { worldscrawl_intent_checked: true, worldscrawl_wait: { seconds: 7200 } } });
+    c.chat.push({ is_user: false, mes: 'Two hours pass in the common room.', swipe_id: 0, swipes: ['Two hours pass in the common room.'], swipe_info: [{ extra: {} }], extra: {} });
+}
+/** A kept one-hour Outfit change (hem soaked) at a; a pending Body card at b while it is in force; two hours on; then
+ *  an Outfit card at c, after it ran out. */
+async function expirySetup() {
+    const env = boot({});
+    const { c } = env;
+    const H = await heskHandle(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'hem soaked', lasts: '1h' })], wait: null });
+    const a = await exchange(c, 'I wait.', 'The landlady comes in, her hem soaked by the rain.');
+    btn(cardFor(draw(c), a, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(80);
+    assert.ok(ownerOf(c.chat[a], 'outfit').committed);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'body', { intent: 'a fresh scar on her cheek' })], wait: null });
+    const b = await exchange(c, 'I look at her.', 'The landlady turns; a fresh scar crosses her cheek.');
+    const body = ownerOf(c.chat[b], 'body');
+    assert.equal(body.candidate.phase, 'review');
+    assert.notEqual(body.candidate.liveKey, body.candidate.lastingKey, 'at b the one-hour Outfit is in force: live differs from lasting');
+    waitTwoHours(c);
+    c.generateRaw = withTracker(c.generateRaw, { place: null, people: [item(H, 'outfit', { intent: 'apron torn' })], wait: null });
+    const cc = await exchange(c, 'I watch.', 'The landlady catches her apron on a nail and it tears.');
+    assert.equal(ownerOf(c.chat[cc], 'outfit').candidate.phase, 'review');
+    return { ...env, a, b, cc, body };
+}
+
+test('5A A3 (Ast round 3): a card decided after an expiry leaves an earlier pending card alone when its keys at its own time are unchanged (no needless refill)', async () => {
+    const { c, calls, cc, body } = await expirySetup();
+    const keys = [body.candidate.lastingKey, body.candidate.liveKey], rev = body.decisionRev, preview = structuredClone(body.candidate.livePreview);
+    calls.length = 0;
+    btn(cardFor(draw(c), cc, 'Outfit: Proposed person change:'), 'Discard').click(); await flush(120);
+    assert.equal(calls.length, 0, 'no call');
+    assert.deepEqual([body.candidate.lastingKey, body.candidate.liveKey], keys, 'its keys at its own message\'s time are unchanged');
+    assert.equal(body.decisionRev, rev, 'not touched: an Approve drawn before stays good');
+    assert.deepEqual(body.candidate.livePreview, preview);
+    assert.equal(body.candidate.phase, 'review');
+});
+
+test('5A A3 (Ast round 3): a card kept after an expiry refreshes an earlier pending card at its own time: the one-hour change still in its live text and base', async () => {
+    const { c, calls, cc, body } = await expirySetup();
+    calls.length = 0;
+    btn(cardFor(draw(c), cc, 'Outfit: Proposed person change:'), 'Approve').click(); await flush(150);
+    assert.equal(body.candidate.phase, 'review');
+    assert.notEqual(body.candidate.liveKey, body.candidate.lastingKey, 'keyed at b: the one-hour Outfit is still in force there');
+    assert.ok(calls.length >= 1, 'its base at b (the one-hour change plus the new one) was never composed: asked again');
+    assert.ok(calls.some(x => /hem soaked/.test(x.prompt) && /a fresh scar/.test(x.prompt)), `the refill is built on b's base, with the one-hour change: ${JSON.stringify(calls.map(x => x.prompt.slice(0, 200)))}`);
+    assert.match(body.candidate.livePreview.outfit, /\[outfit changed\]/, 'its live preview carries the one-hour Outfit');
 });
