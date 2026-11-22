@@ -217,9 +217,10 @@ test('a schedule change ends the came_along hold (she goes to bed at 02:00)', as
     assert.ok(!at(c, SQ).includes('hesk'), 'at 02:31 her entry changed: back on her schedule');
 });
 
-test('no move, but someone leaves the scene (a leave tag on a stay turn): nobody is "Just left behind" and came_along is dropped', async () => {
-    const { c, seen } = boot({ tracker: () => along() });
-    const id = await exchange(c, 'I finish my ale.', 'The landlady unties her apron and heads out for the night. [ws_npc: leave | hesk]');
+test('no move, but someone leaves the scene (a tracker leave on a stay turn): nobody is "Just left behind" and came_along is dropped', async () => {
+    const { c, seen } = boot({ tracker: () => ({ place: null, people: [{ id: hesk(), action: 'leave' }, { id: hesk(), action: 'came_along' }], wait: null }) });
+    const id = await exchange(c, 'I finish my ale.', 'The landlady unties her apron and heads out for the night.');
+    assert.equal(stamps(c.chat[id], 'npc_leave').length, 1, 'the tracker leave stamps (5C B7: no reply tag)');
     assert.ok(!presentNow(c).includes('hesk'), 'she left this turn');
     assert.equal(seen.length, 1);
     assert.doesNotMatch(trackerPrompt(seen, 0), /Just left behind in /);
@@ -259,27 +260,28 @@ test('swipe, Undo and Turn off', async () => {
     }
 });
 
-test('follow is gone from the tracker: a tracker follow item is dropped with a note; the [ws_npc: follow] tag still stamps npc_follow; the [ws_npc: came_along] tag goes through the same guard', async () => {
+test('follow is gone from the tracker: a tracker follow item is dropped with a note; reply [ws_npc: follow] and [ws_npc: came_along] tags are removed and ignored (5C B7)', async () => {
     {
         const { c } = boot({ two: true, tracker: () => ({ place: null, people: [{ id: hesk(), action: 'follow' }], wait: null }) });
         const id = await exchange(c, 'I wave the landlady over.', 'The landlady says she will come with you.');
         assert.deepEqual(stamps(c.chat[id], 'npc_follow'), []);
         assert.ok(notes(c.chat[id]).some(x => x.kind === 'tracker follow' && x.status === 'skipped'), JSON.stringify(notes(c.chat[id])));
         const t = await exchange(c, 'Let us go.', 'The landlady unties her apron. [ws_npc: follow | hesk]');
-        assert.equal(stamps(c.chat[t], 'npc_follow').length, 1, 'the tag still stamps it');
+        assert.deepEqual(stamps(c.chat[t], 'npc_follow'), [], '5C B7: the reply tag never stamps');
+        assert.doesNotMatch(c.chat[t].mes, /ws_npc/, 'removed from the reply');
     }
     {
         const { c } = boot();
         const id = await moveTurn(c, 'out', 'The landlady follows you out, still talking. [ws_npc: came_along | hesk]');
-        const [s] = stamps(c.chat[id], 'npc_along');
-        assert.deepEqual([s?.place, s?.source ?? ''], [SQ, ''], 'the tag: held in the square');
+        assert.deepEqual(stamps(c.chat[id], 'npc_along'), [], '5C B7: the reply tag never holds her');
         assert.doesNotMatch(c.chat[id].mes, /ws_npc/);
+        assert.ok(!at(c, SQ).includes('hesk'), 'not held in the square: the tracker did not say so');
     }
     {
         const { c } = boot();
         const id = await exchange(c, 'I sit down.', 'The landlady sits with you. [ws_npc: came_along | hesk]');
-        assert.deepEqual(stamps(c.chat[id], 'npc_along'), [], 'no move this turn: nobody was left behind');
-        assert.ok(notes(c.chat[id]).some(x => x.kind === 'came_along' && /already here/.test(x.reason)), JSON.stringify(notes(c.chat[id])));
+        assert.deepEqual(stamps(c.chat[id], 'npc_along'), []);
+        assert.ok(!notes(c.chat[id]).some(x => x.kind === 'came_along'), '5C B7: ignored silently, no note');
     }
 });
 
@@ -312,4 +314,106 @@ test('fx: the after-reply tracker redraws the reply\'s exits footer: after a cam
     await onReplyForFlags(id); await flush(80);
     assert.equal(stamps(c.chat[id], 'npc_along').length, 1);
     assert.equal(footerOf(id), 'Named NPCs present: the landlady');
+});
+
+// ---- 5C B1: someone who came along and whose hour has ended reads as with the player, not late or elsewhere.
+const CELLAR = 'riverton:drowned_rat/cellar';
+const heskRow = c => NPCM.presentAt(c.chat, c.chat.length - 1, scene.castPack().npcs, env(c)).find(p => p.id === 'hesk');
+async function alongFromCellar(time = '15:30') {
+    const b = boot({ time, tracker: k => (k === 0 ? along() : GOOD) });
+    b.c.chat[0].extra.worldscrawl_location = CELLAR;
+    b.c.chat[0].mes = 'The cellar. The landlady is checking the casks.';
+    const id = await moveTurn(b.c, 'trapdoor', 'The landlady climbs up through the trapdoor after you, still counting casks.');
+    assert.equal(stamps(b.c.chat[id], 'npc_along').length, 1, JSON.stringify(notes(b.c.chat[id])));
+    return b;
+}
+
+test('5C B1: came along at 15:30, past her 16:00 entry: the people block says she came along and has stayed, where she would usually be; no "late"', async () => {
+    const { c, blocks } = await alongFromCellar();
+    say(c, 'I look around the yard.');
+    let row = heskRow(c);
+    assert.equal(row?.alongDue ?? null, null, 'before 16:00 the hold is active: no line');
+    assert.equal(row?.activity, 'with the player');
+    c.chat.pop();
+    assert.equal(await ext.waitCommand('1h40m'), '');
+    say(c, 'I look around the yard.');
+    row = heskRow(c);
+    assert.ok(row, 'still in the scene');
+    assert.deepEqual(row.alongDue, { where: 'Common Room', activity: 'pouring drinks' });
+    assert.equal(row.overdue, '');
+    assert.equal(row.activity, 'with the player');
+    await scene.applyFacts();
+    const block = blocks[ext.FACTS_KEY];
+    assert.match(block, /Now: with the player\. The landlady came along with .+ and has stayed; at this hour they would usually be at Common Room \(pouring drinks\)\./, block);
+    assert.doesNotMatch(block, /is (an|\d+) hours? late for|should be at /);
+});
+
+test('5C B1: came along at 01:30, past her 02:00 offmap entry: the along line names her own room, not the absent-elsewhere line', async () => {
+    const { c, blocks } = boot({ time: '01:30', tracker: k => (k === 0 ? along() : GOOD) });
+    await moveTurn(c, 'out', STOMPS);
+    assert.equal(await ext.waitCommand('50m'), '');
+    say(c, 'I look around.');
+    const row = heskRow(c);
+    assert.deepEqual(row?.alongDue, { where: 'her own room', activity: 'asleep' });
+    await scene.applyFacts();
+    assert.match(blocks[ext.FACTS_KEY], /would usually be at her own room \(asleep\)\./);
+    assert.doesNotMatch(blocks[ext.FACTS_KEY], /elsewhere/);
+});
+
+test('5C B1: a plain stay hold (not came along) keeps the "late" wording', async () => {
+    const { c } = boot({ time: '15:30' });
+    c.chat[0].extra.worldscrawl_location = CELLAR;
+    c.chat[0].mes = 'The cellar. The landlady is checking the casks.';
+    say(c, 'I wait.');
+    const r = reply(c, 'The landlady says she will stay down here with you.');
+    c.chat[r].extra[NPC] = [{ type: 'npc_stay', id: 'hesk', place: CELLAR }];
+    assert.equal(await ext.waitCommand('1h40m'), '');
+    say(c, 'I look around.');
+    const row = heskRow(c);
+    assert.equal(row?.alongDue ?? null, null);
+    assert.match(row?.overdue ?? '', /^The landlady is an hour late for pouring drinks\.$/);
+});
+
+// Ast 5C round 1: a might entry (one of several places) takes the along branch too.
+const heskSchedule = might => [
+    { place: CELLAR, activity: 'checking the casks', from: '15:00', to: '16:00' },
+    { might, activity: 'seeing to the inn', from: '16:00', to: '02:00' },
+    { activity: 'asleep', where: 'her own room', near: 'riverton:drowned_rat', from: '02:00', to: '15:00' },
+];
+async function alongIntoMight(might) {
+    const b = boot({ time: '15:30', tracker: k => (k === 0 ? along() : GOOD) });
+    b.c.chat[0].extra[NPC] = [{ type: 'npc_schedule', id: 'hesk', schedule: heskSchedule(might) }];
+    b.c.chat[0].extra.worldscrawl_location = CELLAR;
+    b.c.chat[0].mes = 'The cellar. The landlady is checking the casks.';
+    const id = await moveTurn(b.c, 'trapdoor', 'The landlady climbs up through the trapdoor after you, still counting casks.');
+    assert.equal(stamps(b.c.chat[id], 'npc_along').length, 1, JSON.stringify(notes(b.c.chat[id])));
+    assert.equal(await ext.waitCommand('1h40m'), '');
+    say(b.c, 'I look around the yard.');
+    return b;
+}
+const NOT_HERE = /is (an|\d+) hours? late for|should be at |would normally have moved on|elsewhere/;
+test('5C B1 (Ast r1): came along, next entry a might entry: the first option that resolves is named; still with the player, no "late" or moved-on line', async () => {
+    const { c, blocks } = await alongIntoMight(['riverton:no_such_place', 'riverton:drowned_rat/common_room', 'riverton:streets/square']);
+    const row = heskRow(c);
+    assert.ok(row, 'still in the scene');
+    assert.equal(row.activity, 'with the player');
+    assert.equal(row.overdue, '');
+    assert.deepEqual(row.alongDue, { where: 'Common Room', activity: 'seeing to the inn' });
+    await scene.applyFacts();
+    const block = blocks[ext.FACTS_KEY];
+    assert.match(block, /Now: with the player\. The landlady came along with .+ and has stayed; at this hour they would usually be at Common Room \(seeing to the inn\)\./, block);
+    assert.doesNotMatch(block, NOT_HERE);
+});
+test('5C B1 (Ast r1): came along, next entry a might entry where no option resolves: still with the player, and the along line is left out', async () => {
+    const { c, blocks } = await alongIntoMight(['riverton:no_such_place', 'nowhere(50)']);
+    const row = heskRow(c);
+    assert.ok(row, 'still in the scene');
+    assert.equal(row.activity, 'with the player');
+    assert.equal(row.overdue, '');
+    assert.equal(row.alongDue, null);
+    await scene.applyFacts();
+    const block = blocks[ext.FACTS_KEY];
+    assert.match(block, /Now: with the player\./, block);
+    assert.doesNotMatch(block, /came along with/);
+    assert.doesNotMatch(block, NOT_HERE);
 });

@@ -231,13 +231,14 @@
     const actPre = await page.evaluate(async () => { const { callNotes } = await import('/scripts/extensions/third-party/WorldScrawl/calllog.mjs'); return SillyTavern.getContext().chat.flatMap(m => callNotes(m)).map(n => n.kind).filter(k => /prefetch/.test(k)); });
     check('remember prefetch: logged in the model-calls activity log', actPre.length >= 2, JSON.stringify(actPre));
     // Typed mode asks intent first. "look" makes that a look-only question, so the story reply is the second call.
-    await queue([{ content: 'stay' }, { content: 'She shows a scar. [ws_npc: fact | maren | a scar on her knuckle]' }]);
+    // 5C B7: person changes come from the after-reply tracker; a reply ws_npc tag is removed and ignored.
+    await queue([{ content: 'stay' }, { content: 'She shows a scar on her knuckle.' }, { kind: 'tracker', content: JSON.stringify({ place: null, people: [{ id: 'maren', action: 'fact', text: 'a scar on her knuckle' }], wait: null }) }]);
     await send('I look at Maren\'s hands.', 2);
     // A lasting model fact waits for Approve (no lasts given), then becomes the bar.
     const pend = page.locator('.worldscrawl_npcpending', { hasText: 'a scar' });
     const pendShown = await pend.count() > 0;
     const pendStamp = await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.pending)));
-    check('a lasting fact tag waits as an Approve/Discard card', pendShown && pendStamp, JSON.stringify({ pendShown, pendStamp }));
+    check('a lasting tracker fact waits as an Approve/Discard card', pendShown && pendStamp, JSON.stringify({ pendShown, pendStamp }));
     await pend.locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click();
     await settle(400);
     const factBar = await page.evaluate(() => {
@@ -247,19 +248,19 @@
         const text = [...document.querySelectorAll('.worldscrawl_npcchange')].map(el => el.textContent ?? '').join('\n');
         return { text, fact: s?.text ?? '', stripped: !!m && !/ws_npc/.test(m.mes ?? '') };
     });
-    check('a fact tag becomes a Character changed here bar and leaves the story', /Character changed here: Maren: a scar/.test(factBar.text) && factBar.fact === 'a scar on her knuckle' && factBar.stripped, JSON.stringify(factBar));
+    check('an approved tracker fact becomes a Character changed here bar', /Character changed here: Maren: a scar/.test(factBar.text) && factBar.fact === 'a scar on her knuckle' && factBar.stripped, JSON.stringify(factBar));
     const factRow = page.locator('.worldscrawl_npcchange', { hasText: 'a scar' });
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Turn off' }).click();
     await settle(400);
     check('Turn off keeps the fact but stops using it', await page.evaluate(() => SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact' && s.off === true))));
-    await queue([{ content: 'stay' }, { content: 'Maren narrows her eyes. [ws_npc: memory | maren | The stranger lied to me about the knife.] [ws_npc: disposition | maren | unfriendly | caught in a lie]' }]);
+    await queue([{ content: 'stay' }, { content: 'Maren narrows her eyes.' }, { kind: 'tracker', content: JSON.stringify({ place: null, people: [{ id: 'maren', action: 'memory', text: 'The stranger lied to me about the knife.' }, { id: 'maren', action: 'disposition', value: 'unfriendly', reason: 'caught in a lie' }], wait: null }) }]);
     await send('I lie to Maren about the knife.', 2);
     const mdBar = await page.evaluate(() => {
         const m = [...SillyTavern.getContext().chat].reverse().find(x => (x.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_disposition'));
         const rows = [...document.querySelectorAll('.worldscrawl_npcchange')].filter(el => /lied to me about the knife|caught in a lie/.test(el.textContent ?? ''));
         return { types: (m?.extra?.worldscrawl_npc ?? []).map(s => s.type), stripped: !!m && !/ws_npc/.test(m.mes ?? ''), rows: rows.map(r => ({ t: r.textContent, b: [...r.querySelectorAll('.worldscrawl_card_btn')].map(b => b.textContent) })) };
     });
-    check('memory and disposition tags: stamped, stripped, each a notice with Edit and Turn off', mdBar.types.includes('npc_memory') && mdBar.types.includes('npc_disposition') && mdBar.stripped
+    check('tracker memory and disposition: stamped, each a notice with Edit and Turn off', mdBar.types.includes('npc_memory') && mdBar.types.includes('npc_disposition') && mdBar.stripped
         && ['lied to me about the knife', 'caught in a lie'].every(w => mdBar.rows.some(r => r.t.includes(w) && r.b.includes('Edit') && r.b.includes('Turn off'))), JSON.stringify(mdBar));
     await queue([{ content: 'stay' }, { content: 'Maren shrugs. [WS_Memory|maren|The stranger shrugged at me.] [ws_bogus | huh]' }]);
     await send('I shrug at Maren.', 2);
@@ -270,8 +271,8 @@
         return { mes: m.mes, mem: (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_memory' && /shrugged/.test(s.note ?? s.text ?? '')), bad: m.extra?.worldscrawl_badtags ?? null, mark: el ? { t: el.textContent, title: el.title } : null,
             call: JSON.stringify(m.extra?.worldscrawl_calls ?? m.extra ?? {}).includes('unreadable tag: [ws_bogus | huh]') };
     });
-    check('lenient tag: [WS_Memory|...] read and hidden; unreadable [ws_bogus] stays visible, marked, and logged as a warning',
-        lt.mem && !/WS_Memory/i.test(lt.mes) && /\[ws_bogus \| huh\]/.test(lt.mes) && lt.bad?.[0]?.tags?.[0] === '[ws_bogus | huh]' && lt.mark?.title === "WorldScrawl couldn't read this tag" && lt.call, JSON.stringify(lt));
+    check('lenient tag: [WS_Memory|...] normalized, removed and ignored (5C B7: no stamp); unreadable [ws_bogus] stays visible, marked, and logged as a warning',
+        !lt.mem && !/WS_Memory/i.test(lt.mes) && /\[ws_bogus \| huh\]/.test(lt.mes) && lt.bad?.[0]?.tags?.[0] === '[ws_bogus | huh]' && lt.mark?.title === "WorldScrawl couldn't read this tag" && lt.call, JSON.stringify(lt));
     await factRow.locator('.worldscrawl_card_btn', { hasText: 'Undo' }).click();
     await settle(400);
     check('Undo removes the fact stamp', await page.evaluate(() => !SillyTavern.getContext().chat.some(m => (m.extra?.worldscrawl_npc ?? []).some(s => s.type === 'npc_fact'))));

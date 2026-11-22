@@ -214,17 +214,50 @@ test('a tracker fact with no duration is a pending review card; Approve adds it 
     const card = stampCard({ ...row, msg: id }, { who: 'Hesk' });
     assert.doesNotMatch(JSON.stringify(card.desc), /\(for |\(until |\(lasting\)/);
 });
-test('a narrator fact tag with a duration is dropped through the tag reader, with an Activity note; one with none is a review card', async () => {
+test('5C B7: every ws_npc tag in a story reply (memory, lenient forms, a timed fact, appearance, came_along) is removed and ignored: no stamp, no warning, no unread-tag mark, no note', async () => {
     const { c } = boot();
     say(c, 'I buy the landlady a third ale.');
-    const id = reply(c, 'She drains it. [ws_npc: fact | hesk | drunk | 3h] [ws_npc: fact | hesk | keeps a cudgel under the bar]');
+    const tags = [
+        `[ws_npc: memory | ${hesk()} | the player bought her a third ale]`,
+        `[ws_memory | ${hesk()} | the player is generous]`,
+        `[WS_NPC : Disposition | ${hesk()} | friendly | a third ale]`,
+        `[ws_npc: fact | ${hesk()} | drunk | 3h]`,
+        `[ws_npc: fact | ${hesk()} | keeps a cudgel under the bar]`,
+        `[ws_npc: appearance | ${hesk()} | cheeks flushed | looks | 1 hour]`,
+        `[ws_came_along | ${hesk()}]`,
+        `[ws_npc: leave | ${hesk()}]`,
+    ];
+    const id = reply(c, `She drains it. ${tags.join(' ')}`);
+    await onReplyForFlags(id);
+    await flush(20);
+    const m = c.chat[id];
+    assert.equal(m.mes, 'She drains it.', 'every tag is taken out of the story');
+    assert.deepEqual(m.extra[NPC_KEY] ?? [], [], 'nothing stamped');
+    assert.deepEqual(m.extra.worldscrawl_npcwarn ?? [], [], 'no warning');
+    assert.deepEqual(m.extra.worldscrawl_badtags ?? [], [], 'not marked as an unread tag');
+    assert.equal(m.extra.worldscrawl_appearance, undefined, 'no appearance job');
+    assert.deepEqual(notes(m).filter(x => /tag|came_along|fact|memory|appearance/.test(x.kind ?? '')).map(x => x.kind), [], 'no tag note (no "a fact has no end: dropped")');
+    assert.doesNotMatch(JSON.stringify(notes(m)), /npc_\w+ tag|has no end|dropped/, 'the narrator note lists no "<type> tag"');
+    assert.deepEqual(notes(m).filter(x => x.status === 'failed' || x.status === 'warning').map(x => x.kind), [], 'no failed or warning note');
+    const folded = npcAt(c.chat, c.chat.length - 1, scene.castPack()?.npcs ?? [], 'hesk');
+    assert.ok(folded, 'Hesk folds');
+    assert.doesNotMatch(JSON.stringify([folded.memory ?? [], folded.facts ?? [], folded.disposition ?? null]), /third ale|generous|cudgel|drunk|friendly/, "Hesk's folded memory, facts and disposition are unchanged");
+});
+test('5C B7: [ws_npc | Name] with no action is still the npc flag', async () => {
+    const { c } = boot();
+    say(c, 'I look around.');
+    const id = reply(c, 'A stranger in a grey cloak nods at you. [ws_npc | Bram]');
     await onReplyForFlags(id);
     const m = c.chat[id];
-    assert.doesNotMatch(m.mes, /ws_npc/, 'both tags are taken out of the story');
-    assert.deepEqual(stamps(m, 'npc_fact').map(s => [s.text, s.pending, 'lasts' in s]), [['keeps a cudgel under the bar', true, false]]);
-    const note = notes(m).find(x => x.kind === 'npc_fact tag');
-    assert.deepEqual({ status: note?.status, reason: note?.reason }, { status: 'skipped', reason: 'a fact has no end: dropped (drunk, 3h)' });
-    assert.equal(stamps(m, 'npc_appearance').length, 0, 'nothing routed into appearance');
+    assert.doesNotMatch(m.mes, /ws_/);
+    assert.deepEqual((m.extra[NPC.NPC_FLAG_KEY] ?? []).flatMap(f => f.names), ['Bram']);
+    assert.deepEqual(m.extra[NPC_KEY] ?? [], []);
+});
+test('5C B7: the NPC settings help says reply ws_npc tags are removed and ignored, never that they still apply', () => {
+    const src = fs.readFileSync(new URL('../../extension/settings.mjs', import.meta.url), 'utf8');
+    const help = src.slice(src.indexOf('id="worldscrawl_flag_npcs"')).split('</small>')[0];
+    assert.match(help, /\[ws_npc\] tags in story replies are removed and ignored/);
+    assert.doesNotMatch(help, /still appl/);
 });
 test('regression: an appearance item with lasts still makes a temporary appearance change (the timed machinery is untouched)', async () => {
     const { c } = boot({ tracker: () => JSON.stringify({ place: null, people: [{ id: hesk(), action: 'appearance', intent: 'hem soaked from the river', fields: 'outfit', lasts: '3h', scope: 'light', why: 'only the hem' }], wait: null }) });

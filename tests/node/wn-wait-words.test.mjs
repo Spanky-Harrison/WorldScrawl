@@ -24,7 +24,7 @@ const WAIT = 'worldscrawl_wait';
 
 let n = 0;
 /** A fresh chat at the start time (before 17:00). `tracker` is the tracker's JSON answer; every model call is recorded. */
-function boot({ tracker = { place: null, people: [], wait: null }, autoKeepWaits = true, time = '08:00', model = '{"until": "17:00"}' } = {}) {
+function boot({ tracker = { place: null, people: [], wait: null }, autoKeepWaits = true, time = '08:00', model = '{"until": "17:00"}', hours = 24 } = {}) {
     exitsCache.clear();
     globalThis.BroadcastChannel = undefined;
     globalThis.document = { querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: () => ({ style: {}, append() {}, appendChild() {} }), body: {}, documentElement: {} };
@@ -35,7 +35,7 @@ function boot({ tracker = { place: null, people: [], wait: null }, autoKeepWaits
     };
     ext.setPrompts(PROMPTS);
     const worlds = server.get('/worlds').json();
-    for (const w of worlds.worlds) w.start_date = { ...w.start_date, time };
+    for (const w of worlds.worlds) { w.start_date = { ...w.start_date, time }; if (hours !== 24) w.calendar = { ...calendarLib.GREGORIAN, hours_per_day: hours }; } // 5C B6: a short-day world, built in-process
     rememberWorlds(worlds);
     const c = SillyTavern.getContext(), id = `wn${++n}`;
     c.chatId = id; c.getCurrentChatId = () => id; c.characterId = 0;
@@ -87,7 +87,7 @@ test('wait-time words: each form reads as its clock time (an hour with two readi
     for (const [t, until, alt] of table) assert.deepEqual(P(t), [until, alt, false], t);
     assert.deepEqual(P('until tomorrow morning'), ['morning', null, true]);
     assert.deepEqual(P('until tomorrow at 9:30'), ['09:30', null, true], 'tomorrow takes the time as written (no second reading)');
-    for (const bad of ['until 5 hours', 'until twenty', 'until 25:00', 'until 2400', 'until tomorrow']) assert.throws(() => calendarLib.parseWait(bad), /say the time like|outside the day/, bad);
+    for (const bad of ['until 5 hours', 'until twenty', 'until 25:00', 'until 2400', 'until tomorrow']) assert.throws(() => calendarLib.parseWait(bad), /say the time like|outside the day|past the end of this world's 24-hour day/, bad); // 5C B6: an hour past the day says so
 });
 test('the reader on a line: every until-time, the next reading of an ambiguous hour, no day-part words or tomorrow', () => {
     const at = (h, m = 0) => h * 3600 + m * 60;
@@ -132,8 +132,8 @@ test('"5.15 pm" and "17h15" land on 17:15', async () => {
 
 // ---------------------------------------------------------------- the tracker and the story's clock
 const coach = { place: null, people: [], wait: { duration: '', until: '17:00', sleep: false, reason: 'waiting for the coach' } };
-async function trackerTurn({ line, story, tracker = coach, time = '14:00' }) {
-    const { c, calls } = boot({ tracker, time });
+async function trackerTurn({ line, story, tracker = coach, time = '14:00', hours = 24 }) {
+    const { c, calls } = boot({ tracker, time, hours });
     say(c, line, { worldscrawl_intent_checked: true });
     const id = reply(c, story);
     await D.onReplyForFlags(id);
@@ -264,4 +264,73 @@ test('only morning, afternoon, evening and night are parts of the day', () => {
 test('the wait-amount prompt asks for HH:MM on a 24-hour clock to the minute, and lists afternoon', () => {
     const e = PROMPTS.prompts.find(p => p.id === 'intent.wait_amount_system');
     assert.match(e.text, /until: a time of day as HH:MM on a 24-hour clock, to the minute the text gives \("17:15" for a quarter past five in the afternoon; never rounded\), or one of dawn, morning, noon, afternoon, dusk, evening, night, midnight\./);
+});
+
+// ---------------------------------------------------------------- 5C B6: the story clock uses the world's calendar
+const CAL20 = { ...calendarLib.GREGORIAN, hours_per_day: 20 };
+const until = (u, reason = 'waiting') => ({ place: null, people: [], wait: { duration: '', until: u, sleep: false, reason } });
+const storyNotes = (c, id) => notes(c.chat[id]).filter(x => x.kind === 'story clock');
+test('5C B6 (1, 2c): on a 20-hour day "I wait until 9:30" at 19:00 reads 09:30 (no 21:30), and the wait ends at 09:30 the next day', async () => {
+    assert.deepEqual(calendarLib.untilClocksIn('until 9:30', CAL20, { now: 19 * 3600 }), ['09:30'], 'one reading: 21:30 is not a time that day has');
+    assert.deepEqual(calendarLib.untilClocksIn('until 9:30', calendarLib.GREGORIAN, { now: 19 * 3600 }), ['21:30'], 'a 24-hour day still takes the next one');
+    const { c, id, n } = await trackerTurn({ line: 'I wait until 9:30.', story: 'You doze by the fire.', tracker: until('09:00'), time: '19:00', hours: 20 });
+    const d0 = calendarLib.dateAt(0, worldTimes.get('riverton').start_date, worldTimes.get('riverton').calendar).day;
+    assert.equal(c.chat[id].extra[WAIT]?.until, '09:30', JSON.stringify(c.chat[id].extra[WAIT]));
+    assert.equal(clock(c), '09:30');
+    assert.equal(day(c), d0 + 1, 'the next day');
+    assert.equal(c.chat[id].extra[WAIT].seconds, (20 - 19) * 3600 + 9.5 * 3600, 'a 20-hour day: 14h30m');
+    assert.ok(n.some(x => x.reason === "until 09:30 from the player's line (the tracker read until 09:00)"), JSON.stringify(n));
+});
+test('5C B6 (2): tracker 19:50, reply "until 0:10": 20 minutes apart on a 20-hour day (the story wins); 260 on a 24-hour day (the tracker stands)', async () => {
+    { const { c } = await trackerTurn({ line: 'I wait for the watch.', story: 'You keep watch until 0:10.', tracker: until('19:50'), time: '19:00', hours: 20 }); assert.equal(clock(c), '00:10', '20-hour day'); }
+    { const { c } = await trackerTurn({ line: 'I wait for the watch.', story: 'You keep watch until 0:10.', tracker: until('19:50'), time: '19:00' }); assert.equal(clock(c), '19:50', '24-hour day'); }
+});
+test('5C B6 (2b): "[wait] until 11 pm" on a 20-hour day: no wait, and the notice says it is past the end of the day; /ws-wait the same', async () => {
+    const { c, calls } = boot({ time: '10:00', hours: 20 });
+    const m = await typed(c, 'I [wait] until 11 pm');
+    assert.ok(hidden(m), JSON.stringify(m.extra));
+    assert.match(m.extra.worldscrawl_cmd.error, /"11 pm" is past the end of this world's 20-hour day/);
+    assert.equal(m.extra[WAIT], undefined);
+    assert.equal(clock(c), '10:00');
+    assert.equal(asked(calls), 0);
+    assert.equal(await ext.waitCommand('until 11 pm'), '"11 pm" is past the end of this world\'s 20-hour day');
+    assert.equal(clock(c), '10:00');
+});
+test('5C B6 (2b): the player line "I wait until 11 pm" with a tracker wait: no override, a failed story clock note, the tracker\'s own time stamped', async () => {
+    const { c, id, n } = await trackerTurn({ line: 'I wait until 11 pm.', story: 'You wait.', tracker: until('19:50'), time: '19:00', hours: 20 });
+    assert.deepEqual(storyNotes(c, id).map(x => [x.status, x.reason]), [['failed', '"11 pm" is past the end of this world\'s 20-hour day']]);
+    assert.equal(clock(c), '19:50');
+    assert.ok(!n.some(x => /from the player's line/.test(x.reason)), JSON.stringify(n));
+});
+test('5C B6 (2b): an impossible time in the reply is a failed story clock note and never overrides', async () => {
+    const { c, id } = await trackerTurn({ line: 'I wait for the watch.', story: 'You keep watch until 11 pm.', tracker: until('19:50'), time: '19:00', hours: 20 });
+    assert.deepEqual(storyNotes(c, id).map(x => x.status), ['failed']);
+    assert.equal(clock(c), '19:50');
+});
+test('5C B6 (2b): a tracker until "23:00" on a 20-hour day fails visibly (a failed tracker wait note) and is never wrapped to 03:00', async () => {
+    const { c, id, n } = await trackerTurn({ line: 'I wait for the watch.', story: 'You wait.', tracker: until('23:00'), time: '19:00', hours: 20 });
+    assert.equal(c.chat[id].extra[WAIT], undefined);
+    assert.equal(clock(c), '19:00');
+    assert.deepEqual(n.map(x => [x.status, x.reason]), [['failed', '"23:00" is past the end of this world\'s 20-hour day']]);
+});
+test('5C B6 (2d): clockGap measures on the world\'s day and is Infinity for a time that day does not have', () => {
+    assert.equal(D.clockGap('19:50', '21:30', CAL20), Infinity);
+    assert.equal(D.clockGap('21:30', '19:50', CAL20), Infinity);
+    assert.equal(D.clockGap('19:50', '00:10', CAL20), 20);
+    assert.equal(D.clockGap('19:50', '00:10', calendarLib.GREGORIAN), 260);
+    assert.equal(D.clockGap('23:50', '00:10'), 20, 'GREGORIAN when none is given');
+});
+test('5C B6: readUntil on a 20-hour day: impossible times are named with why (never null, never wrapped); valid ones read once', () => {
+    const R = t => calendarLib.readUntil(t, CAL20);
+    assert.deepEqual(R('11 pm'), { impossible: '11 pm', why: "past the end of this world's 20-hour day", rest: '' });
+    assert.deepEqual(R('eleven at night and sleep'), { impossible: 'eleven at night', why: "past the end of this world's 20-hour day", rest: 'and sleep' });
+    assert.deepEqual(R('23:00'), { impossible: '23:00', why: "past the end of this world's 20-hour day", rest: '' });
+    assert.deepEqual(R('2130'), { impossible: '2130', why: "past the end of this world's 20-hour day", rest: '' });
+    assert.equal(R('9 am').impossible, '9 am', 'a short day has no am or pm');
+    assert.match(R('9 am').why, /has no am or pm/);
+    assert.deepEqual(R('9:30'), { until: '09:30', rest: '' });
+    assert.deepEqual(R('19:59'), { until: '19:59', rest: '' });
+    assert.deepEqual(calendarLib.untilClocksRead('until 9:30, or until 11 pm', CAL20, { now: 0 }), { clocks: ['09:30'], impossible: [{ said: '11 pm', why: "past the end of this world's 20-hour day" }] });
+    assert.throws(() => calendarLib.parseWait('until 11 pm', CAL20), e => e.impossible === true && e.message === '"11 pm" is past the end of this world\'s 20-hour day', 'the wait tag and the tracker until fail with the same line');
+    assert.deepEqual(calendarLib.readUntil('11 pm'), { until: '23:00', rest: '' }, '24-hour day unchanged');
 });

@@ -37,7 +37,7 @@
     check('clicking a room filters the cast by that place', placeFilt.pf === 'riverton:drowned_rat/common_room' && placeFilt.ids.includes('hesk'), JSON.stringify(placeFilt));
     await cw.evaluate(() => document.querySelector('.cast-placefilter').setValue(''));
     // In play: a new fact in the chat, its stamp links back to the message, and Update shows the diff.
-    await queue([{ content: 'stay' }, { content: 'She glares at a rat. [ws_npc: fact | hesk | hates rats]' }]);
+    await queue([{ content: 'stay' }, { content: 'She glares at a rat.' }, { kind: 'tracker', content: JSON.stringify({ place: null, people: [{ id: 'hesk', action: 'fact', text: 'hates rats' }], wait: null }) }]); // 5C B7: from the tracker
     await send('I point at the rat by the hearth.', 2);
     await settle(800);
     await page.locator('.worldscrawl_npcpending', { hasText: 'hates rats' }).locator('.worldscrawl_card_btn', { hasText: 'Approve' }).click(); await settle(800); // lasting fact: approve first
