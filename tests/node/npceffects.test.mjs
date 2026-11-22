@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     APPEARANCE_FIELDS, effectFields, effectSetKey, resolveAppearance, rebuildInputs,
-    alreadyShown, alreadyEffect, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, looksInputKey, planLooksSummary, acceptLooksSummary,
+    alreadyShown, junkAppearanceIntent, judgeAppearance, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, looksInputKey, planLooksSummary, acceptLooksSummary,
     readAppearanceAnswer, sameAppearanceBase, NPC_KEY, framesOf, parseNpcTag, takeNpcTags,
     stampSummary, comingsAndGoings, npcAt, expiryOf,
 } from '../../extension/npc.mjs';
+import { fieldUnchanged } from '../../extension/npceffects.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
 
 const bot = (stamps = []) => ({ mes: 'x', is_user: false, swipe_id: 0, extra: stamps.length ? { [NPC_KEY]: stamps.map(s => ({ swipe: 0, ...s })) } : {} });
@@ -109,7 +110,7 @@ test('rebuildInputs: base fields + still-active intents in start order; never pr
     ]);
 });
 
-test('alreadyShown / alreadyEffect: Known, Looks, active intent', () => {
+test('alreadyShown: Known, Looks, active intent', () => {
     const npc = {
         facts: ['owes Hesk'], looks: 'blonde braids', body: '', outfit: '',
         effects: [{ intent: 'blonde hair', fields: ['looks'] }],
@@ -118,12 +119,9 @@ test('alreadyShown / alreadyEffect: Known, Looks, active intent', () => {
     assert.equal(alreadyShown(npc, 'blonde braids'), true);
     assert.equal(alreadyShown(npc, 'blonde hair'), true);
     assert.equal(alreadyShown(npc, 'something new'), false);
-    assert.equal(alreadyEffect(npc, 'blonde hair', 'looks'), true);
-    assert.equal(alreadyEffect(npc, 'blonde hair', 'body'), false);
-    assert.equal(alreadyEffect(npc, 'tall', 'body'), false);
 });
 
-test('no-op appearance is rejected; a real change still applies; an already-active effect still skips', () => {
+test('no-op appearance is rejected; a real change still applies; the same intent again is a change (5A: no already-active guard)', () => {
     const hesk = { id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'sturdy', outfit: 'wool dress', effects: [] };
     for (const intent of ['', 'looks', 'Looks.', 'APPEARED', 'she appeared', 'her looks']) {
         assert.equal(junkAppearanceIntent(intent), true, intent);
@@ -136,8 +134,18 @@ test('no-op appearance is rejected; a real change still applies; an already-acti
     assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'soaked from the rain', fields: 'outfit' }), 'apply');
     assert.equal(judgeAppearance(hesk, { type: 'npc_appearance', id: 'hesk', intent: 'walks in soaked', fields: 'outfit' }), 'apply');
     const active = { ...hesk, effects: [{ intent: 'blonde hair', fields: ['looks'] }] };
-    assert.equal(judgeAppearance(active, { type: 'npc_appearance', id: 'hesk', intent: 'blonde hair', fields: 'looks' }), 'skip');
+    assert.equal(judgeAppearance(active, { type: 'npc_appearance', id: 'hesk', intent: 'blonde hair', fields: 'looks' }), 'apply', 'the dead alreadyEffect guard is gone');
     assert.equal(judgeAppearance(active, { type: 'npc_appearance', id: 'hesk', intent: 'soaked from the rain', fields: 'outfit' }), 'apply');
+});
+
+test('5A fieldUnchanged: the same text, or no text with a change line that says nothing; anything else is a change', () => {
+    const hesk = { body: 'sturdy', outfit: 'wool dress' };
+    assert.equal(fieldUnchanged(hesk, { intent: 'soaked', outfit: ' wool dress ' }, 'outfit'), true, 'the same text (trimmed)');
+    assert.equal(fieldUnchanged(hesk, { intent: 'soaked', outfit: 'a soaked wool dress' }, 'outfit'), false);
+    assert.equal(fieldUnchanged(hesk, { intent: 'looks' }, 'outfit'), true, 'no text, a change line that says nothing');
+    assert.equal(fieldUnchanged(hesk, { intent: '' }, 'body'), true);
+    assert.equal(fieldUnchanged(hesk, { intent: 'soaked by the rain' }, 'outfit'), false, 'a real change line with no text still asks');
+    assert.equal(fieldUnchanged(hesk, { intent: 'looks', body: 'tall and gaunt' }, 'outfit'), true, 'only its own field counts');
 });
 
 test('parseNpcTag / takeNpcTags: appearance with fields and lasts', () => {
