@@ -676,7 +676,7 @@ export function stampCard(x, { who = '', editing = false, play = null } = {}) {
         const fs = base ? [x.baseField] : String(x.fields || 'body,outfit').split(',').map(f => f.trim()).filter(f => f === 'body' || f === 'outfit');
         const seed = f => (base || x.lasting ? lastingRec[f] : play?.[f]) ?? '';
         const fields = editing ? (fs.length ? fs : ['body', 'outfit']).map(f => ({ key: f, label: label(f), value: seed(f), cls: 'worldscrawl_npc_text', data: { part: x.lasting || base ? 'lasting' : 'live', field: f } })) : [];
-        return { type: 'person', ref, seen, desc: C.personKept({ key, state: x.off ? 'off' : 'kept', text: x.off ? `Character change turned off: ${text}` : `Character changed here: ${text}`, editing, intent: x.intent ?? '', hasIntent: !base, fields }) };
+        return { type: 'person', ref, seen, desc: C.personKept({ key, state: x.off ? 'off' : 'kept', text: x.off ? `Character change turned off: ${text}` : `Character changed here: ${text}`, editing, field: C.personField(fs), intent: x.intent ?? '', hasIntent: !base, fields }) };
     }
     if (x.type === 'npc_found') {
         const title = `${x.where ? `${who}'s "${x.where}" is now ${x.placeName || x.place}` : `${who} is now placed in ${x.placeName || x.place}`}, for the rest of this chat.`;

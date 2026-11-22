@@ -97,14 +97,16 @@ export function personReview(v) {
 
 /**
  * A kept person (appearance) change on its message. v: {key, state ('kept'|'off'), text, editing, intent, hasIntent,
- * fields: [{key, label, value, data}]}. Edit opens the same Change: + Body/Outfit editor as the review card.
+ * field ('body'|'outfit' for a one-field change), fields: [{key, label, value, data}]}. Edit opens the same Change: + Body/Outfit editor as the review card.
  */
 export function personKept(v) {
     const state = v.state === 'off' ? 'off' : 'kept';
+    // 5A: a one-field kept change (v.field 'body' or 'outfit') names its own field, like the review card.
+    const what = v.field === 'body' || v.field === 'outfit' ? v.field : 'body and outfit';
     const actions = state === 'off'
         ? [act('on', 'Use this change again', true), act('undo', 'Remove this change (deleting the message does the same)', true)]
-        : [v.editing ? act('close', 'Forget the edits') : act('edit', 'Change the words or the body and outfit text of this change'),
-            v.editing ? act('save', 'Keep the body and outfit exactly as typed (or ask again for an edited Change line)', true) : null,
+        : [v.editing ? act('close', 'Forget the edits') : act('edit', `Change the words or the ${what} text of this change`),
+            v.editing ? act('save', `Keep the ${what} exactly as typed (or ask again for an edited Change line)`, true) : null,
             act('off', 'Keep the change here but stop using it', true),
             act('undo', 'Remove this change (deleting the message does the same)', true)];
     return {

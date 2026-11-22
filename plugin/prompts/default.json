@@ -132,6 +132,8 @@
     "line": "One sentence about a person: who they are, as already said in the story or the cast file.",
     "base": "The person's current base Looks, Body and/or Outfit lines, one per field, before active intents are applied.",
     "fields": "Which appearance fields to rewrite this call: looks, body, and/or outfit (comma-separated).",
+    "other": "The other appearance field (body or outfit) shown for reference in a one-field question.",
+    "other_text": "That other field's text as it is now (reference only).",
     "intents": "Active appearance intents that touch those fields, oldest first (intent text and which fields each touches).",
     "rewrite": "How deeply a map change rewrites existing descriptions, notes and exit texts: the 'Map changes: light touch' or 'Map changes: full rewrite' piece (filled in by the game), or empty.",
     "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game).",
@@ -1807,9 +1809,12 @@
       "placeholders": [
         {
           "name": "reply"
+        },
+        {
+          "name": "fields"
         }
       ],
-      "text": "You rewrite a person's body and clothes for a text adventure. {{reply}}: a JSON object with only the fields you were asked to rewrite (body and/or outfit). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, change only the words that intent names and keep every other word as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and how they stand and move, and, when the outfit is part of the change, how the clothes now fit or fail to fit. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
+      "text": "You rewrite a person's body and clothes for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, change only the words that intent names and keep every other word as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and how they stand and move, and, when the outfit is among the fields asked ({{fields}}), how the clothes fit the body as it is now. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
     },
     {
       "id": "npc.appearance_edit_light_system",
@@ -1820,9 +1825,12 @@
       "placeholders": [
         {
           "name": "reply"
+        },
+        {
+          "name": "fields"
         }
       ],
-      "text": "You make a small edit to a person's body or clothes for a text adventure. {{reply}}: a JSON object with only the fields you were asked for (body and/or outfit). Start from the base text of each field and copy it. Change only the words that the active intents name, in order, and keep every other sentence word for word, in the same order. A field no intent touches comes back exactly as the base. Do not rewrite, reword, extend or improve anything else. Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
+      "text": "You make a small edit to a person's body or clothes for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Start from the base text of each field and copy it. Change only the words that the active intents name, in order, and keep every other sentence word for word, in the same order. A field no intent touches comes back exactly as the base. Do not rewrite, reword, extend or improve anything else. Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
     },
     {
       "id": "npc.appearance_rebuild",
@@ -1876,6 +1884,22 @@
       "locked": "The game adds this line to the light-touch edit question as it is.",
       "placeholders": [],
       "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and change only the words the intents name."
+    },
+    {
+      "id": "npc.appearance_other_field",
+      "title": "People: the other field, for reference",
+      "description": "Alongside the appearance question for a one-field card (one card per person per field): added once with the person's other field as it is now, so an Outfit rewrite after a Body change fits the new body. Reference only: the answer never writes it, and it is not part of what makes the card stale.",
+      "group": "npc",
+      "locked": "The game adds this line to the one-field question as it is.",
+      "placeholders": [
+        {
+          "name": "other"
+        },
+        {
+          "name": "other_text"
+        }
+      ],
+      "text": "Their {{other}} as it is now (for reference only; do not write it): {{other_text}}"
     },
     {
       "id": "npc.who",

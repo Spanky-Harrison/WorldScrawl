@@ -158,14 +158,22 @@ export function noopAppearance(npc, stamp) {
 }
 
 /**
- * What to do with an appearance stamp. 'skip' keeps the already-active guard (quiet).
- * 'reject' is a no-op: do not stamp it and do not rebuild. 'apply' is a real change.
+ * What to do with an appearance stamp. 'reject' is a no-op: do not stamp it and do not rebuild. 'apply' is a real change.
  */
 export function judgeAppearance(npc, stamp) {
     if (!stamp || stamp.type !== 'npc_appearance') return 'apply';
-    if (alreadyEffect(npc, stamp.intent, stamp.fields)) return 'skip';
     if (noopAppearance(npc, stamp)) return 'reject';
     return 'apply';
+}
+
+/**
+ * 5A (Ast call 5): "did not change", judged for one field of a tracker appearance item. True when the item carries text
+ * for `field` equal to the person's current text (trimmed, exact), or carries none for it and its intent says nothing.
+ */
+export function fieldUnchanged(npc, item, field) {
+    const next = fieldText(item, field);
+    if (next) return next === String(npc?.[field] ?? '').trim();
+    return junkAppearanceIntent(item?.intent);
 }
 
 /** Intent to store. An empty intent with new field text uses that text so the effect is kept. */
@@ -177,15 +185,6 @@ export function appearanceIntent(stamp) {
         if (next) return next.slice(0, 240);
     }
     return '';
-}
-
-/** True when an equivalent appearance effect (same intent + same fields) is already active. */
-export function alreadyEffect(npc, intent, fields) {
-    const intentKey = String(intent ?? '').trim().toLowerCase();
-    if (!intentKey || !npc) return false;
-    const want = effectFields(fields).slice().sort().join('+');
-    return (npc.effects ?? []).some(e => String(e.intent ?? '').trim().toLowerCase() === intentKey
-        && effectFields(e.fields).slice().sort().join('+') === want);
 }
 
 /** Parsed model rewrite: only non-empty looks/body/outfit strings. null when unusable. */
