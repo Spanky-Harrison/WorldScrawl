@@ -684,6 +684,15 @@ function duePlace(npc, j, env, { useRoll = false } = {}) {
 function placeLabel(env, address) {
     return env.names?.(address) || address;
 }
+/** A might entry's first option that resolves to a place on the live map (a room, or an area with a room to pick), as a label; '' when none does. */
+function firstMightPlace(entry, env) {
+    for (const opt of entry?.options ?? []) {
+        const o = optionRooms(opt, env, entry.anywhere === true);
+        if (o.kind === 'room') return placeLabel(env, o.address);
+        if (o.kind === 'area' && o.rooms.length) return o.name;
+    }
+    return '';
+}
 
 function overdueNote(npc, sched, clock, env) {
     const name = capFirst(shownName(npc));
@@ -748,9 +757,12 @@ export function presentAt(chat, index, cast, env) {
             const covered = stayCovers(now, scene, clock);
             // 5C B1: someone who came along with the player and whose hour has ended is still with the player: no "an
             // hour late" or absent-elsewhere line, but where they would usually be now (offmap: its own words).
-            if (now.held?.along && !rejoined(now, end, env) && sched && sched.kind !== 'might') {
+            // A might entry (one of several places) takes this branch too: the first option that resolves is named, and
+            // with none the line is left out (Ast, 5C round 1).
+            if (now.held?.along && !rejoined(now, end, env) && sched) {
                 activity = 'with the player';
-                if (!covered) alongDue = { where: sched.offmap ? (sched.where || sched.entry?.where || sched.activity || 'elsewhere') : placeLabel(env, sched.address), activity: sched.entry?.activity || sched.activity || 'elsewhere' };
+                const where = sched.kind === 'might' ? firstMightPlace(sched.entry, env) : sched.offmap ? (sched.where || sched.entry?.where || sched.activity || 'elsewhere') : placeLabel(env, sched.address);
+                if (!covered && where) alongDue = { where, activity: sched.entry?.activity || sched.activity || 'elsewhere' };
                 out.push({ ...publicNpc(now), activity, place: here, here, overdue: '', alongDue, kind: 'stay', known: knows(now) });
                 continue;
             }
