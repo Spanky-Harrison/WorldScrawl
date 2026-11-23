@@ -76,6 +76,11 @@ const ANSWERS = { rooms: `{"rooms":["${TAVERN}"],"areas":[]}`, patch: ops([{ op:
 const tracker = place => readTrackerAnswer(JSON.stringify({ place: { changed: true, kind: 'change', rewrite: 'light', why: 'one spot', ...place }, people: [], wait: null }));
 const scopeAsk = p => p.slice(p.indexOf('Which places did the story change'));
 const OLD_WHAT = /The player or narrator noted/;
+/** The flag card's status line for message 1, as drawn. */
+function cardText() {
+    const doc = makeDoc([0, 1]); globalThis.document = doc; renderPatchCards();
+    return doc.querySelector('.worldscrawl_patchcard')?.textContent ?? '';
+}
 
 test('C1 + C2: the scope question has no filled-in area example and the scope system prompt says a person is not a place', async () => {
     boot();
@@ -105,6 +110,27 @@ test('C2 path: a people-only story answered with no rooms and no areas is "nothi
     assert.equal(f.proposal, undefined);
     assert.deepEqual(calls.map(x => x.kind), ['rooms'], 'no patch call');
     assert.match(scopeAsk(calls[0].prompt), /\{"rooms": \[\], "areas": \[\]\}/);
+    // Round 1: the card says so plainly (display text only; the model never sees it).
+    assert.equal(f.empty, true); assert.ok(!f.error, f.error);
+    const card = cardText();
+    assert.ok(card.includes('🗺 Nothing on the map changed (messages #0–#1).'), card);
+    assert.doesNotMatch(card, /no known room was named|No map change found/);
+    assert.ok(calls.every(x => !/Nothing on the map changed/.test(x.prompt + x.sys)), 'not model text');
+    // "Check again" on a story that did change something clears it.
+    model(ANSWERS);
+    await analyzeFlag(1);
+    const g = await settled();
+    assert.equal(g.status, 'review'); assert.equal(g.empty, undefined);
+});
+
+test('empty scope card (round 1): places named that are not on the map keep "no known room was named"', async () => {
+    boot();
+    model({ rooms: '{"rooms":["riverton:nowhere/attic"],"areas":[]}', patch: ANSWERS.patch });
+    await flagMessage(1, { note: 'the attic', source: 'command' });
+    const f = await settled();
+    assert.equal(f.status, 'nothing'); assert.equal(f.error, 'no known room was named'); assert.equal(f.empty, undefined);
+    const card = cardText();
+    assert.ok(card.includes('🗺 No map change found in messages #0–#1. (no known room was named)'), card);
 });
 
 test('C6: {{what}} is worded by who raised the change, in both steps; Edit\'s Change line makes it the player\'s', async () => {
@@ -197,7 +223,7 @@ test('C3: the patch system prompt has the light one-room example first, then the
     ext.setPrompts(PROMPTS);
     const sys = patchSys(shared);
     const light = sys.indexOf('Example, light touch, one room (a smashed bar): {"ops":[{"op":"set_description","loc":"riverton:drowned_rat/common_room","text":"<the same description with only the bar sentence changed>"}]}');
-    const full = sys.indexOf('Example, a full rewrite (a whole inn turned into a palace): {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace","lore":"Formerly the Drowned Rat inn; transmogrified into a palace by magic."}');
+    const full = sys.indexOf('Example, a full rewrite (a whole inn turned into a palace): {"ops":[{"op":"update_area","area":"riverton:drowned_rat","name":"The Golden Palace","lore":"<the area\'s whole notes, rewritten for the palace, keeping what still holds; then: formerly the Drowned Rat inn, turned into a palace by magic>"}');
     assert.ok(light > 0 && full > light, 'light first, then the full rewrite');
     assert.match(sys, /update_area and append_lore are for a building that changed as a whole\./);
     // Both examples parse as JSON ops of the right shape.
@@ -207,6 +233,7 @@ test('C3: the patch system prompt has the light one-room example first, then the
     assert.deepEqual(fullOps.map(o => o.op), ['update_area', 'set_description', 'set_description']);
     assert.equal(typeof fullOps[0].lore, 'string', 'the palace example teaches lore, not text');
     assert.equal(fullOps[0].text, undefined);
+    assert.match(fullOps[0].lore, /^<the area's whole notes, rewritten for the palace, keeping what still holds/, 'round 1: a placeholder that keeps the old notes, not a literal that replaces them');
 });
 
 test('C4 + C5: the description rule says what to write; the timeless line is one shared entry in change.style and discover.style', () => {
@@ -219,7 +246,8 @@ test('C4 + C5: the description rule says what to write; the timeless line is one
         assert.doesNotMatch(sys, /whether a fire is lit|whether a door stands open/, `${name}: the old ban list is gone`);
     }
     const sys = patchSys(shared);
-    assert.match(sys, /DESCRIPTION RULE: write each description as if the place had always been this way: what a visitor finds there today, including visible traces of the past \("scorch marks blacken the beams", "an old brass rail shows under the gold leaf"\)\. How it came to be this way is history: put it in notes as a short append_lore on the area\./);
+    assert.match(sys, /DESCRIPTION RULE: write each description as if the place had always been this way: what a visitor finds there today, including visible traces of the past \("scorch marks blacken the beams", "an old brass rail shows under the gold leaf"\)\. How it came to be this way is history: leave it out of descriptions\. When the building or district as a whole changed, put it in that area's notes\./);
+    assert.doesNotMatch(sys, /short append_lore on the area/, 'round 1: no area op for a one-room change');
     assert.doesNotMatch(sys, /has been replaced by|was transformed|"was once"|"now"/, 'no quoted forbidden phrases');
     // One edit of the shared entry reaches every call that uses it.
     ext.setPrompts({ ...TEXT, 'change.timeless': 'SHARED TIMELESS LINE.' });

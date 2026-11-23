@@ -31,7 +31,7 @@ test('patch prompt (R2 C4): descriptions are written as the place has always bee
     assert.match(sys, /write each description as if the place had always been this way: what a visitor finds there today/);
     assert.match(sys, /including visible traces of the past \("scorch marks blacken the beams"/);
     assert.doesNotMatch(sys, /Never narrate the change itself|has been replaced by|"was once"|"now"/, 'the forbidden phrases are not quoted');
-    assert.match(sys, /How it came to be this way is history: put it in notes as a short append_lore on the area\./);
+    assert.match(sys, /How it came to be this way is history: leave it out of descriptions\. When the building or district as a whole changed, put it in that area's notes\./);
     assert.match(sys, /"op":"append_lore"/);
     assert.match(sys, /temporary change with "lasts".*may mention the event/);
     assert.doesNotMatch(sys.slice(sys.indexOf('Example')), /"text":"[^"]*(has been|was transformed|was once)/, 'the example obeys the rule');
