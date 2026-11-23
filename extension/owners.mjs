@@ -164,22 +164,26 @@ export async function askTried(kind, args, { timeout = FILL_TIMEOUT_MS, timeoutR
     return { ok: false, ...last };
 }
 
+/**
+ * R3 A2: one active change in the compose question, from its prompt pieces. A baseline is the player's replacement text
+ * (npc.appearance_intent_replace); an appearance change names its field and light/full (npc.appearance_intent_line),
+ * plus the player's own text for that field when they edited it on the card (npc.appearance_intent_written), one per field.
+ */
+export function intentLine(c, n) {
+    if (c.kind === 'baseline') return P('npc.appearance_intent_replace', { n, fields: c.field, written_text: c.text ?? '' });
+    const written = BODY_OUTFIT.filter(f => c.layer?.[f]).map(f => ` ${P('npc.appearance_intent_written', { written_text: c.layer[f] })}`).join('');
+    return P('npc.appearance_intent_line', { n, intent: c.intent || 'change', fields: c.fields || 'body,outfit', how: appearanceScope(c.scope) === 'heavy' ? 'full rewrite' : 'light touch', written });
+}
 async function askFields(name, baseline, ops, timeout, other = null) {
     const plan = composePlan(ops);
-    const intents = (ops ?? []).map((o, i) => {
-        const c = o.committed ?? {};
-        if (c.kind === 'baseline') return `${i + 1}. replace ${c.field} with the player's text: ${c.text}`;
-        const layer = c.layer?.body || c.layer?.outfit ? ` text ${JSON.stringify(c.layer)}` : '';
-        const how = appearanceScope(c.scope) === 'heavy' ? ' (full rewrite)' : ' (light touch)';
-        return `${i + 1}. ${c.intent || 'change'} [${c.fields || 'body,outfit'}]${how}${layer}`;
-    }).join('\n') || '(none)';
+    const intents = (ops ?? []).map((o, i) => intentLine(o.committed ?? {}, i + 1)).join('\n') || '(none)';
     const base = plan.fields.map(f => `- ${f}: ${baseline[f] || '(empty)'}`).join('\n');
     const { baseReply } = await model();
     // 5A (R3 per field): a one-field card's question shows the other field as it is now, for reference only (`other`).
     const ref = other?.field && plan.fields.length === 1 && !plan.fields.includes(other.field) ? `\n${P('npc.appearance_other_field', { other: other.field, other_text: other.text || '(empty)' })}` : '';
     const ask = retry => askTried('appearance compose', {
         prompt: maskForModel(P(plan.prompt, { name: name || 'them', fields: plan.fields.join(', '), base, intents }) + ref + (retry ? `\n${P('npc.appearance_edit_light_retry')}` : '')),
-        systemPrompt: P(plan.system, { reply: baseReply('json'), fields: plan.fields.join(', ') }),
+        systemPrompt: P(plan.system, { reply: baseReply('json'), fields: plan.fields.join(', '), rules: P('npc.appearance_rules') }),
         responseLength: 500,
     }, { timeout, read: raw => {
         const classified = classifyAppearanceReply(raw, plan.fields);
