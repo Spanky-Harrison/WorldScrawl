@@ -56,10 +56,6 @@ export const cases = ({ ext, patches, placeform }) => ({
     'change.patch.bare': patches.patchPrompt({ outline: [] }, {}),
     'change.what.tracker': ext.flagWhat({ note: 'Fire!', hint: 'The Inn', source: 'tracker' }),
     'change.what.player': ext.flagWhat({ note: 'Fire!', source: 'command' }),
-    'npc.appearance_intent.light': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light' }, 1),
-    'npc.appearance_intent.written': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light', layer: { outfit: 'Widow\'s black; her braids are tied back.' } }, 2),
-    'npc.appearance_intent.full': intentLine({ intent: 'turned into a gnoll', fields: 'body', scope: 'heavy' }, 1),
-    'npc.appearance_intent.replace': intentLine({ kind: 'baseline', field: 'outfit', text: 'A grey travelling cloak.' }, 3),
     'change.what.narrator': ext.flagWhat({ note: 'Fire!', hint: 'The Inn', source: 'tag' }),
     'discover.system': ext.discoverSys(),
     'discover.question': ext.discoverPrompt(k, { exits: 'south -> r:inn/common', near: 'none', story: 'They open the green door.', start: 2, id: 5, note: 'green door', err: '' }),
@@ -73,6 +69,10 @@ export const cases = ({ ext, patches, placeform }) => ({
     ...Object.fromEntries(looks.map((l, i) => [`narration.look.${i}`, ext.lookText('You', 'Hall', l)])),
     ...Object.fromEntries(facts.map(([m, t, x], i) => [`narration.facts.${i}`, ext.factsText(loc, m, t, x)])),
     ...Object.fromEntries([false, true].map(t => [`narration.lore_index.${t ? 'tools' : 'tags'}`, ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Inn', text: 'Run by {{npc:hesk}}.' }, { level: 'region', name: 'Riverton', text: 'A river town.' }] }, t).lore_index])),
+    'npc.appearance_intent.light': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light' }, 1),
+    'npc.appearance_intent.written': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light', layer: { outfit: 'Widow\'s black; her braids are tied back.' } }, 2),
+    'npc.appearance_intent.full': intentLine({ intent: 'turned into a gnoll', fields: 'body', scope: 'heavy' }, 1),
+    'npc.appearance_intent.replace': intentLine({ kind: 'baseline', field: 'outfit', text: 'A grey travelling cloak.' }, 3),
     'npc.tracker.system': ext.trackerSys(),
     'npc.tracker': ext.trackerPrompt({
         scrap: ext.trackerScrap({

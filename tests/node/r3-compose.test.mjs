@@ -68,10 +68,32 @@ test('A2 (e R3.1): the player\'s text for a change reads "use as written", one f
     const asked = calls.find(x => x.prompt.includes('a clean apron'));
     assert.ok(asked, `the edited card is composed on top of the kept change: ${JSON.stringify(calls.map(x => x.prompt))}`);
     const lines = intentsOf(asked.prompt);
-    assert.deepEqual(lines, [`1. a clean apron [outfit] (light touch) The player wrote this field for it, use as written: "${typed}"`]);
+    assert.deepEqual(lines, [`1. a clean apron [outfit] (light touch) The player wrote outfit for it, use as written: "${typed}"`]);
     assert.doesNotMatch(asked.prompt, /text \{|"outfit":/, 'no raw layer JSON');
     assert.match(asked.prompt, /^Edit outfit for Hesk:/);
     assert.match(asked.system, /^You make a small edit to a person's appearance text \(outfit\)/);
+});
+
+test('A2 round 1: a change whose Body and Outfit were both edited gets one written line per field, each naming its field', async () => {
+    const KEEP = '{"outfit":"Widow\'s black wool, damp at the hem, under a stained leather apron, and a ring of keys at her belt."}';
+    const { c, calls } = boot(() => KEEP);
+    await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'hem damp', fields: 'outfit', scope: 'light' }] });
+    const hem = ownersOn(c, 0).at(-1);
+    assert.ok(scene.decideNpc(c.chat, hem.identity, hem.decisionRev, 'approve', { token: hem.candidate.token, elapsed: 0 }).ok);
+    await flush();
+    const id = say(c, 'She dries off by the fire.', 'm2');
+    await applyTrackerResult(id, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'dried off', fields: 'body,outfit', scope: 'light' }] });
+    const o = ownersOn(c, id).at(-1);
+    calls.length = 0;
+    const body = 'A tall, raw-boned woman with dry copper braids.', outfit = "Widow's black wool, dry now, under a leather apron.";
+    const r = await scene.settleNpc(c.chat, o.identity, o.decisionRev, 'edit', { intent: 'dried off', fields: 'body,outfit', scope: 'light', layer: { body, outfit }, elapsed: 0 });
+    assert.ok(r?.ok !== false, JSON.stringify(r));
+    await flush();
+    const asked = calls.find(x => x.prompt.includes('dried off'));
+    assert.ok(asked, `the edited change is composed: ${JSON.stringify(calls.map(x => x.prompt))}`);
+    const line = intentsOf(asked.prompt).find(l => l.includes('dried off'));
+    assert.equal(line, `2. dried off [body,outfit] (light touch) The player wrote body for it, use as written: "${body}" The player wrote outfit for it, use as written: "${outfit}"`);
+    assert.doesNotMatch(asked.prompt, /wrote this field|text \{/);
 });
 
 test('A2: each line comes from its own entry: overriding the pieces changes the line and only it', async () => {
@@ -82,8 +104,8 @@ test('A2: each line comes from its own entry: overriding the pieces changes the 
     ext.setPrompts(PROMPTS);
     // The baseline and written pieces render through intentLine with the same placeholders.
     const { intentLine } = await import('../../extension/owners.mjs');
-    ext.setPrompts({ ...TEXT, 'npc.appearance_intent_written': 'TYPED[{{written_text}}]', 'npc.appearance_intent_replace': 'R{{n}} {{fields}}={{written_text}}' });
-    assert.equal(intentLine({ intent: 'x', fields: 'outfit', scope: 'light', layer: { outfit: 'grey cloak' } }, 2), '2. x [outfit] (light touch) TYPED[grey cloak]');
+    ext.setPrompts({ ...TEXT, 'npc.appearance_intent_written': 'TYPED {{fields}}[{{written_text}}]', 'npc.appearance_intent_replace': 'R{{n}} {{fields}}={{written_text}}' });
+    assert.equal(intentLine({ intent: 'x', fields: 'outfit', scope: 'light', layer: { outfit: 'grey cloak' } }, 2), '2. x [outfit] (light touch) TYPED outfit[grey cloak]');
     assert.equal(intentLine({ kind: 'baseline', field: 'body', text: 'A gnoll.' }, 4), 'R4 body=A gnoll.');
     ext.setPrompts(PROMPTS);
 });
@@ -100,6 +122,11 @@ test('A1 + A3: the light-touch call is a procedure for the asked field, with the
     assert.doesNotMatch(sys, OLD_BAN);
     assert.doesNotMatch(sys, /body and clothes|body or clothes|body and\/or outfit|\{\{/);
     assert.match(RULES, /^Write how they look in third person \(she, he, they\), as a portrait would show them: no actions, poses or setting\./);
+    // Round 1: the light question says the same procedure; the rules no longer say "Do not write looks".
+    assert.match(calls[0].prompt, /^Edit outfit for Hesk: replace only the phrase each intent affects and copy every other sentence as written\.\n/);
+    assert.doesNotMatch(calls[0].prompt + sys, /change only the words|copy the base and/);
+    assert.doesNotMatch(sys, /Do not write looks/);
+    assert.match(sys, /no actions, poses or setting\. Never copy a previous combined description/);
 });
 
 test('A1 (e R3.2): a light touch that rewrites everything is asked once more with the retry line, then fails visibly', async () => {
@@ -110,6 +137,8 @@ test('A1 (e R3.2): a light touch that rewrites everything is asked once more wit
     assert.equal(calls.length, 2, 'one retry');
     assert.ok(!calls[0].prompt.includes(TEXT['npc.appearance_edit_light_retry']));
     assert.ok(calls[1].prompt.endsWith(`\n${TEXT['npc.appearance_edit_light_retry']}`), 'the retry line, unchanged');
+    // Round 1: the retry line asks for the same procedure.
+    assert.ok(calls[1].prompt.endsWith('\nYour last answer changed most of the base text. Copy each base field word for word, in the same order, and replace only the phrase each intent affects.'));
     for (const x of calls) assert.match(x.system, /find the one phrase in the base it affects/);
     assert.equal(o.candidate.phase, 'failed');
     assert.match(JSON.stringify(c.chat[0].extra), /the light touch changed more than half of the body/, 'the reason is stored for the card');
@@ -121,6 +150,10 @@ test('A3: the full rewrite call names the asked field, keeps the per-field rebui
     const sys = calls[0].system;
     assert.match(sys, /^You rewrite a person's appearance text \(body\) for a text adventure\./);
     assert.match(sys, /when the outfit is among the fields asked \(body\), how the clothes fit the body as it is now/, '5A per-field clause kept');
+    // Round 1: the light-touch sentence is the procedure, and the full rewrite no longer asks for a stance.
+    assert.match(sys, /For a light touch, replace only the phrase that intent affects and copy every other sentence as written\./);
+    assert.match(sys, /head and face, hands, and, when the outfit is among the fields asked \(body\)/);
+    assert.doesNotMatch(sys, /stand and move|change only the words|Do not write looks/);
     assert.equal(sys.split(RULES).length - 1, 1);
     assert.doesNotMatch(sys, OLD_BAN);
     assert.doesNotMatch(sys, /body and clothes|body and\/or outfit|\{\{/);

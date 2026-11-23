@@ -58,7 +58,7 @@ test('the Hesk case: the tracker\'s light outfit change (fill runs inside applyT
     assert.equal(calls.length, 1, 'one compose call: no lasts, so lasting and live are the same inputs');
     assert.match(calls[0].system, LIGHT_SYS, 'the light-only edit prompt');
     assert.doesNotMatch(calls[0].system, /full rewrite|from scratch/);
-    assert.match(calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./, 'the light question says Edit, not Rewrite');
+    assert.match(calls[0].prompt, /^Edit outfit for Hesk: replace only the phrase each intent affects and copy every other sentence as written\./, 'the light question says Edit, not Rewrite');
     assert.match(calls[0].prompt, /- outfit: Widow's black wool/);
     assert.doesNotMatch(calls[0].prompt, /- body:/, 'Body is not asked for');
     assert.equal(o.candidate.lastingPreview.body, BASE.body, 'Body is the base, word for word');
@@ -248,6 +248,6 @@ test('prompt manager: the light-touch edit question is its own entry; a saved pr
     r = boot();
     ext.setPrompts(handlePrompts('GET', '/prompts/active', null, root).body.prompts);
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'apron wet', fields: 'outfit', scope: 'light' }] });
-    assert.match(r.calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./);
+    assert.match(r.calls[0].prompt, /^Edit outfit for Hesk: replace only the phrase each intent affects and copy every other sentence as written\./);
     ext.setPrompts(PROMPTS);
 });

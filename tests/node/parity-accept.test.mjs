@@ -1078,7 +1078,7 @@ test('prompts: the tracker judges scope by the result, and a full rewrite rebuil
     assert.match(sys, /frame and build, skin, fur or scales, head and face, hands/);
     assert.match(sys, /Do not keep the base's sentences or follow its sentence structure/);
     assert.match(sys, /Carry over only identifying details that still make sense on the new body, such as a scar or eye colour/);
-    assert.match(sys, /For a light touch, change only the words that intent names and keep every other word as written\./);
+    assert.match(sys, /For a light touch, replace only the phrase that intent affects and copy every other sentence as written\./);
     assert.match(promptText('npc.appearance_rules'), /Never copy a previous combined description; start from the base\./); // R3 A3: in the shared rules
     assert.match(sys, /\{\{rules\}\}/);
 });
