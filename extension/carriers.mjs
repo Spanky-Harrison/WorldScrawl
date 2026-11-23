@@ -2,13 +2,14 @@
 import { render as P, hasPrompts, patches, text as textLib } from './shared.mjs';
 import { baseReply, gen, mergeDuplicates, nearbyRooms, noteCall } from './dig.mjs';
 import { analyzeDiscovery, keepFlag, syncSwipeExtra } from './discovery.mjs';
-import { api, currentLocation, ensurePrompts } from './doors.mjs';
-import { aftermathNote, applyNudge, applyTools } from './expiry.mjs';
+import { api, ensurePrompts } from './doors.mjs';
+import { applyNudge, applyTools } from './expiry.mjs';
 import { exitsCache, renderAllExits } from './footer.mjs';
 import { FLAG_KEY, MOVE_KEY, PATCH_KEY, baseUrl, broadcastMapState, ctx, isOn, settings } from './index.js';
 import { RANGE_CAP, changeDependents, confirmOff, loadFormLib, mapCtx, patchesOn } from './patches.mjs';
 import { applyFacts } from './scene.mjs';
 import { renderPatchCards } from './waits.mjs';
+import { TRACKER_SOURCE } from './tracker.mjs';
 import { REWRITE_SET_BY_YOU, collapseTextOps, mergeRewrite, rewriteGuard, targetLines, textTargets, writtenText } from './arearewrite.mjs';
 let patchLib = null;
 
@@ -123,7 +124,14 @@ export function parseJsonAnswer(text) {
     return null;
 }
 export const scopeSys = () => P('change.scope_system', { reply: baseReply('json') });
-export const patchSys = pl => P('change.system', { reply: baseReply('json'), edit_types: pl.opDocs(), style: P('change.style') });
+/** The Writing style entry for map changes, with the shared timeless line (change.timeless) filled in. */
+export const changeStyle = () => P('change.style', { timeless: P('change.timeless') });
+export const patchSys = pl => P('change.system', { reply: baseReply('json'), edit_types: pl.opDocs(), style: changeStyle() });
+/** Which note piece fills {{what}}: the player's (flag button, /ws-change, Edit's Change box), the tracker's, or else the narrator's (a ws_flag tag). */
+const whatPiece = f => (f.noteBy === 'player' || f.source === 'button' || f.source === 'command' ? 'change.what_player'
+    : f.source === TRACKER_SOURCE ? 'change.what_tracker' : 'change.what_narrator');
+/** {{what}} for the map change calls: the flag's note, worded by who raised it, and the place mentioned. */
+export const flagWhat = f => [f.note && P(whatPiece(f), { note: clip(f.note, 200) }), f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });
@@ -150,7 +158,7 @@ export function flagStatusText(f, id) {
     switch (f.status) {
         case 'user': return `🗺 ${USER_FLAG_NOTE}`;
         case 'working': return `🗺 Checking what changed on the map (${range})…`;
-        case 'nothing': return `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`;
+        case 'nothing': return f.empty ? `🗺 Nothing on the map changed (${range}).` : `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`;
         case 'cant': return `🗺 Can't show this on the map: ${f.error || 'no reason given'}`;
         case 'review': if (f.proposal) return ''; break;
         case 'error': return `🗺 Map change failed: ${f.error || 'something went wrong.'}`;
@@ -187,15 +195,13 @@ async function analyzeFlag(id, { note } = {}) {
     rewriting.delete(f);
     if (typeof note === 'string' && note.trim() && note.trim() !== f.note) { f.note = clip(note, 200); f.noteBy = 'player'; }
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
-    f.status = 'working'; f.error = ''; delete f.proposal; delete f.rewriteError;
+    f.status = 'working'; f.error = ''; delete f.empty; delete f.proposal; delete f.rewriteError;
     renderPatchCards();
     try {
         await ensurePrompts();
         if (!f.loc) throw new Error('could not tell where the party is for this message');
         const story = storyText(chat, f.start, id);
-        const hereNow = await currentLocation().catch(() => null);
-        const after = hereNow ? await aftermathNote(ctx().chat ?? [], hereNow).catch(() => '') : '';
-        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`, after].filter(Boolean).join(' ');
+        const what = flagWhat(f);
         const c1 = await flagContext(f);
         const scopeQ = scopePrompt(c1, { start: f.start, id, story, what });
         const a1 = parseJsonAnswer(await askModel(c, 'which rooms', { prompt: scopeQ, systemPrompt: scopeSys(), responseLength: 200 }));
@@ -207,7 +213,12 @@ async function analyzeFlag(id, { note } = {}) {
         // A place changed as a whole (a subregion named in areas): every room in it goes to the patch call too.
         const whole = known.filter(k => areas.some(ar => ar.includes(':') && k.startsWith(`${ar}/`)));
         const rooms = [...new Set([...(a1?.rooms ?? []).map(toKnown).filter(Boolean), ...whole])].slice(0, 20);
-        if (!rooms.length && !areas.length) { f.status = 'nothing'; f.error = 'no known room was named'; return; }
+        if (!rooms.length && !areas.length) {
+            f.status = 'nothing';
+            // The model answered no places (a people-only story, say): a plain card line. Places it named that aren't on the map: say so.
+            if ((a1?.rooms ?? []).length || (a1?.areas ?? []).length) f.error = 'no known room was named'; else f.empty = true;
+            return;
+        }
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
         const rewrite = f.rewrite === 'full' ? 'full' : 'light';
@@ -259,7 +270,7 @@ async function analyzeFlag(id, { note } = {}) {
     }
 }
 
-export const rewriteSys = (pl, rewrite) => P('change.rewrite_system', { reply: baseReply('json'), rewrite: pl.rewritePiece(rewrite), style: P('change.style') });
+export const rewriteSys = (pl, rewrite) => P('change.rewrite_system', { reply: baseReply('json'), rewrite: pl.rewritePiece(rewrite), style: changeStyle() });
 export const rewritePrompt = (pl, { story, what, targets, rewrite }) => P('change.rewrite', { story, what, targets: targetLines(targets, rewrite), rewrite: pl.rewritePiece(rewrite) });
 /**
  * The light touch / full rewrite switch on a proposed place change: ask again for ONLY the proposal's existing texts
@@ -283,7 +294,7 @@ async function swapRewrite(id, to) {
         const pl = await loadPatchLib();
         if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
         const story = clip(storyText(chat, f.start ?? id, id), 6000);
-        const what = [f.note && `The player or narrator noted: "${clip(f.note, 200)}".`, f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
+        const what = flagWhat(f);
         const raw = await askModel(c, `rewrite (${to})`, { prompt: rewritePrompt(pl, { story, what, targets, rewrite: to }), systemPrompt: rewriteSys(pl, to), responseLength: 1200 });
         if (stale()) return 'stale';
         const ans = pl.readChangeAnswer(parseJsonAnswer(raw));
