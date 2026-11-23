@@ -136,9 +136,11 @@ test('tracker: the prompt sent after a reply has the fact paragraph, the appeara
 test('appearance rebuild and light-touch system prompts carry the passing-moment guard; entries exist with the right placeholders', () => {
     for (const id of ['npc.appearance_rebuild_system', 'npc.appearance_edit_light_system']) {
         const e = entry(id);
-        assert.ok(e.text.includes(`${MOMENT_GUARD} No other keys, no commentary.`), id);
+        assert.ok(e.text.includes('{{rules}} No other keys, no commentary.'), id); // R3 A3: the guard is in the shared rules piece
+        assert.ok(e.placeholders.some(p => p.name === 'rules' && p.generated), id);
         assert.ok(e.locked, id);
     }
+    assert.ok(entry('npc.appearance_rules').text.endsWith(MOMENT_GUARD), 'the passing-moment guard closes the shared rules');
     const mr = entry('npc.memory_rules');
     assert.deepEqual(mr.placeholders, []);
     assert.equal(mr.group, 'npc');

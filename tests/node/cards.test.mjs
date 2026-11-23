@@ -552,7 +552,8 @@ test('Remember review: the new-person panel marks made-up details; Edit opens ev
     await flush(60);
     assert.equal(calls.length, 2);
     assert.match(calls[1], /The player's note on the last card: older/);
-    assert.match(calls[1], /- Wearing: A leather apron\./);
+    assert.match(calls[1], /- Outfit: A leather apron\./); // R3 A4: side calls say Outfit
+    assert.doesNotMatch(calls[1], /Wearing:/);
     assert.equal(card().proposal.got.outfit, 'A leather apron.', 'the typed field stays');
     assert.equal(card().proposal.got.line, 'An old knife-grinder.', 'the model filled the rest');
     // Approve edited: a changed Body drops its "grey eyes" mark; the History mark stays.

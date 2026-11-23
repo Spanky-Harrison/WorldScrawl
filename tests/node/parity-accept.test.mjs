@@ -1079,7 +1079,8 @@ test('prompts: the tracker judges scope by the result, and a full rewrite rebuil
     assert.match(sys, /Do not keep the base's sentences or follow its sentence structure/);
     assert.match(sys, /Carry over only identifying details that still make sense on the new body, such as a scar or eye colour/);
     assert.match(sys, /For a light touch, change only the words that intent names and keep every other word as written\./);
-    assert.match(sys, /Never copy a previous combined description; start from the base\./);
+    assert.match(promptText('npc.appearance_rules'), /Never copy a previous combined description; start from the base\./); // R3 A3: in the shared rules
+    assert.match(sys, /\{\{rules\}\}/);
 });
 
 test('Edit shows the proposed Body and Outfit text; Approve edited commits exactly that text with no fields call, then re-summarizes Looks', async () => {

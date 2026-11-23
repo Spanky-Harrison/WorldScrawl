@@ -1,5 +1,6 @@
 // Inputs for the prompt snapshot test: every prompt builder, called with fixed inputs. prompts.snapshot.json holds
 // what the code produced before the prompts moved to plugin/prompts/default.json; the default text must match it.
+import { intentLine } from '../../../extension/owners.mjs';
 const exitA = { direction: 'north', to: 'r:inn/hall', to_name: 'Hall', to_display_name: 'Hall', to_summary: 'A long hall.', description: 'An oak door.' };
 const exitB = { direction: 'trapdoor', to: 'r:inn/cellar', to_name: 'Cellar', hidden: true, obscured: true };
 const loc = { address: 'r:inn/common', name: 'Common Room', display_name: 'Common Room', description: 'A smoky room.', exits: [exitA, exitB], views: [],
@@ -55,6 +56,10 @@ export const cases = ({ ext, patches, placeform }) => ({
     'change.patch.bare': patches.patchPrompt({ outline: [] }, {}),
     'change.what.tracker': ext.flagWhat({ note: 'Fire!', hint: 'The Inn', source: 'tracker' }),
     'change.what.player': ext.flagWhat({ note: 'Fire!', source: 'command' }),
+    'npc.appearance_intent.light': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light' }, 1),
+    'npc.appearance_intent.written': intentLine({ intent: 'braids tied back', fields: 'outfit', scope: 'light', layer: { outfit: 'Widow\'s black; her braids are tied back.' } }, 2),
+    'npc.appearance_intent.full': intentLine({ intent: 'turned into a gnoll', fields: 'body', scope: 'heavy' }, 1),
+    'npc.appearance_intent.replace': intentLine({ kind: 'baseline', field: 'outfit', text: 'A grey travelling cloak.' }, 3),
     'change.what.narrator': ext.flagWhat({ note: 'Fire!', hint: 'The Inn', source: 'tag' }),
     'discover.system': ext.discoverSys(),
     'discover.question': ext.discoverPrompt(k, { exits: 'south -> r:inn/common', near: 'none', story: 'They open the green door.', start: 2, id: 5, note: 'green door', err: '' }),
