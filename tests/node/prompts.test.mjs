@@ -24,13 +24,14 @@ import { messageActivity } from '../../extension/activity.mjs';
 
 const src = extSource();
 
-const sys = DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.system').text.replace('{{edit_types}}', opDocs0()).replace('{{style}}', DEFAULT_PROMPTS.prompts.find(e => e.id === 'change.style').text);
+const textOf = id => DEFAULT_PROMPTS.prompts.find(e => e.id === id).text;
+const sys = textOf('change.system').replace('{{edit_types}}', opDocs0()).replace('{{style}}', textOf('change.style').replace('{{timeless}}', textOf('change.timeless')));
 
-test('patch prompt: descriptions say what a place is now, traces allowed, the change itself never narrated, history in notes', () => {
-    assert.match(sys, /only what the place IS now/);
-    assert.match(sys, /traces of the past are fine/);
-    assert.match(sys, /Never narrate the change itself: no "has been replaced by", "was transformed", "was once", "now"/);
-    assert.match(sys, /History goes in notes/);
+test('patch prompt (R2 C4): descriptions are written as the place has always been, traces allowed, history in notes, no quoted ban phrases', () => {
+    assert.match(sys, /write each description as if the place had always been this way: what a visitor finds there today/);
+    assert.match(sys, /including visible traces of the past \("scorch marks blacken the beams"/);
+    assert.doesNotMatch(sys, /Never narrate the change itself|has been replaced by|"was once"|"now"/, 'the forbidden phrases are not quoted');
+    assert.match(sys, /How it came to be this way is history: leave it out of descriptions\. When the building or district as a whole changed, put it in that area's notes\./);
     assert.match(sys, /"op":"append_lore"/);
     assert.match(sys, /temporary change with "lasts".*may mention the event/);
     assert.doesNotMatch(sys.slice(sys.indexOf('Example')), /"text":"[^"]*(has been|was transformed|was once)/, 'the example obeys the rule');
