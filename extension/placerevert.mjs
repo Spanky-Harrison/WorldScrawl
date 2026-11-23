@@ -64,7 +64,7 @@ async function askRevert(need, base, at, timeout) {
     const rewrite = patchShared.rewritePiece?.(rewriteOf(need)) ?? '';
     return askTried('map rebuild', {
         prompt: P('change.revert', { revert_text: base.label, revert_before: base.text || '(empty)', revert_ended: need.dropped.map(w => lineOf(w)).join('\n') || '(none)', revert_kept: need.active.map((w, i) => lineOf(w, i + 1)).join('\n') }),
-        systemPrompt: P('change.revert_system', { reply: baseReply('json'), rewrite, style: P('change.style') }),
+        systemPrompt: P('change.revert_system', { reply: baseReply('json'), rewrite, style: P('change.style', { timeless: P('change.timeless') }) }),
         responseLength: 600,
     }, { timeout, note: true, at, timeoutReason: 'the rebuild did not answer in time', read: raw => {
         const a = parseJsonAnswer(raw);

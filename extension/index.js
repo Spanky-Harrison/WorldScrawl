@@ -48,7 +48,7 @@ export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
 export { revealsDestination } from './shared.mjs';
 export { themeVars, mapState, expandSys, openMapWindow, openWorldFolder } from './mapwindow.mjs';
 export { patchesOn, previewOps, restampChange, changeDependents, toggleChange, liveEdit } from './patches.mjs';
-export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, logEditCall, flagStatusText, USER_FLAG_NOTE, replyAfter } from './carriers.mjs';
+export { isCarrier, removeChange, snapCarriers, lastLostCarriers, restoreCarriers, suggestStart, parseJsonAnswer, scopeSys, patchSys, scopePrompt, flagWhat, logEditCall, flagStatusText, USER_FLAG_NOTE, replyAfter } from './carriers.mjs';
 export { modelWait, planWait, MIN_NARRATOR_WAIT, narratorWaitAction, waitAmount, proposeWait, keepWait, waitExpiryDelta, editKeptWait, discardWait, waitNote, renderPatchCards } from './waits.mjs';
 export { setPrompts, P as render };
 const MODULE = 'worldscrawl';

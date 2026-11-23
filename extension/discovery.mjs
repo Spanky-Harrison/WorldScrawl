@@ -67,7 +67,7 @@ let pendingUserFlag = null;
 // room behind it is added as if it had always been there: one story-made create_place (a new room with an engine-made
 // id and one door pair). No lore, no rewrite of the room it opens from. Kept at once when the player or the narrator asked
 // (button, /ws-change, tag, tool, [open]); a tracker discovery waits on its card for Approve unless Auto-keep is on.
-export const discoverSys = () => P('discover.system', { reply: baseReply('json'), style: P('discover.style') });
+export const discoverSys = () => P('discover.system', { reply: baseReply('json'), style: P('discover.style', { timeless: P('change.timeless') }) });
 export const discoverPrompt = (k, { exits, near, story, start, id, note, err, existing = [] }) => P('discover.question', { existing: existing.length ? P('discover.existing', { places: optionLines(existing) }) : '', region_name: k.region_name, region_notes: k.region_notes, area_name: k.area_name, area_notes: k.area_notes,
     name: k.name, address: k.location, description: k.description, exits, near, start, end: id, story, door: note ? P('discover.door', { note: clip(note, 200) }) + '\n' : '', retry: err ? P('discover.retry', { error: err }) + '\n' : '' });
 /** A discovery answer naming an existing place: one door pair (add_exit) to it. null when the answer is a new room. */

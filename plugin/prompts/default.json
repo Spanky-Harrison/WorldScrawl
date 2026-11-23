@@ -6,7 +6,7 @@
       "id": "style",
       "title": "Writing style",
       "open": true,
-      "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through and New room behind a door say how a new room is named and described, and Map changes says how changed places are described. Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
+      "flow": "The prompts and lines that shape the actual prose the model writes. Each one says which process uses it (Narration, Breaking through, Expand with AI) and which step it is there. Step 1: Narration lines tell the narrator what just happened (a move, a trip, a door, breaking through, looking around) and how to describe it. Step 2: Breaking through and New room behind a door say how a new room is named and described, and Map changes says how changed places are described. Both share one line that keeps descriptions timeless (Places: timeless descriptions). Step 3: Expand with AI writes a place's description or notes in the place form. These are free to edit; prompts whose wording the game reads back stay locked in their own groups."
     },
     {
       "id": "pick",
@@ -46,7 +46,7 @@
     {
       "id": "change",
       "title": "Map changes",
-      "flow": "Runs when a message is flagged as changing the map: the flag button, a [ws_flag: …] tag in a reply, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
+      "flow": "Runs when a message is flagged as changing the map: the flag button, a [ws_flag: …] tag in a reply, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. A change only to people is not a map change, so Step 1 answers no places for it. Both steps see the flag's note through one of three pieces, picked by who raised the change: the after-reply tracker ('The change to look for'), the player, or the narrator. Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
     },
     {
       "id": "discover",
@@ -92,7 +92,7 @@
     "near": "the places near the new room",
     "neighbors": "the places one step beyond the change (from the Map changes piece), or empty",
     "new_place": "The new-place option, only where new rooms are allowed (empty otherwise).",
-    "note": "the narrator's note naming the door",
+    "note": "the note: the narrator's note naming the door (New room), or the note on a map change (Map changes)",
     "option": "the short answer word for this choice, e.g. \"look\" or \"stay\"",
     "option_lines": "the list of possible answers, one per line, each with what it means (built from the Player intent pieces)",
     "options": "the possible answers: \"- key: meaning\" lines (pick-one questions) or a comma-separated list (intent)",
@@ -116,7 +116,7 @@
     "used": "The exit names already used at this place, comma-separated, or \"none\".",
     "verb": "the door action: \"open\" or \"close\" in the door question; \"opens\" or \"closes\" in the narration line",
     "via": "the rooms passed through on the way, comma separated",
-    "what": "what change was flagged, in the narrator's words",
+    "what": "the note on what change to look for, worded by who raised it (the tracker, the player or the narrator), plus the place mentioned, if any",
     "where": "where the party is now, for the narrator",
     "activity": "what a person's schedule entry has them doing (e.g. pouring drinks)",
     "why": "why the door would not move (e.g. it is locked)",
@@ -151,7 +151,8 @@
     "memory_rules": "what counts as a memory: the shared People: what a memory is (shared) text, filled in by the game",
     "fact_rules": "what counts as a fact about a person: the shared People: what a fact is (shared) text, filled in by the game",
     "part": "the part of the day from the game clock: night, dawn, morning, afternoon or evening",
-    "role": "who a saved person is, from their card: what a stranger calls them and their place, e.g. \"the landlady of the Drowned Rat\""
+    "role": "who a saved person is, from their card: what a stranger calls them and their place, e.g. \"the landlady of the Drowned Rat\"",
+    "timeless": "the shared line that keeps descriptions timeless (Places: timeless descriptions), filled in by the game"
   },
   "prompts": [
     {
@@ -1181,22 +1182,42 @@
     {
       "id": "discover.style",
       "title": "New room behind a door: how it is named and described",
-      "description": "Used by New room behind a door: how the new room's name and description are written. Added to its system prompt.",
+      "description": "Used by New room behind a door: how the new room's name and description are written. Added to its system prompt. {{timeless}} is the shared timeless-description line (change.timeless).",
       "group": "style",
       "process": "discover",
       "piece": true,
-      "placeholders": [],
-      "text": "name: short display name (e.g. \"Guest Room\"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. Descriptions are timeless: no time of day, light, weather, whether a fire is lit, smells, who is there, or whether a door stands open."
+      "placeholders": [
+        {
+          "name": "timeless",
+          "generated": true
+        }
+      ],
+      "text": "name: short display name (e.g. \"Guest Room\"). description: present tense, 1-3 sentences, about the place as it always was, not the characters or what they do; fit the area notes. {{timeless}}"
     },
     {
       "id": "change.style",
       "title": "Map changes: how descriptions are written",
-      "description": "Used by Map changes (step 2): how changed descriptions are written, the description rule, and people in a room. Added to its system prompt.",
+      "description": "Used by Map changes (step 2, the light touch / full rewrite switch and Turn off's rewrite): how changed descriptions are written, the description rule, and people in a room. Added to its system prompt. {{timeless}} is the shared timeless-description line (change.timeless).",
+      "group": "style",
+      "process": "change",
+      "piece": true,
+      "placeholders": [
+        {
+          "name": "timeless",
+          "generated": true
+        }
+      ],
+      "text": "Descriptions are present tense, 1-3 sentences, about the place, not the characters. {{timeless}}\nDESCRIPTION RULE: write each description as if the place had always been this way: what a visitor finds there today, including visible traces of the past (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). How it came to be this way is history: put it in notes as a short append_lore on the area. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nUnnamed scenery people and creatures in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule. A {{npc:id}} token is a saved person, not scenery: leave the token as it is. This call writes places only. Do not propose a change to a person's personality, appearance, or other card fields because a place changed."
+    },
+    {
+      "id": "change.timeless",
+      "title": "Places: timeless descriptions (shared)",
+      "description": "Used by Map changes (step 2) and New room behind a door: the shared line that keeps descriptions timeless. The game puts this text into both writing-style entries in place of their timeless placeholder.",
       "group": "style",
       "process": "change",
       "piece": true,
       "placeholders": [],
-      "text": "Descriptions are present tense, 1-3 sentences, about the place, not the characters. Descriptions and notes are timeless: no time of day, light, weather, whether a fire is lit, smells, who is there, or whether a door stands open; those change and are not part of the place.\nDESCRIPTION RULE: a description says only what the place IS now. Visible physical traces of the past are fine, because they are there now (\"scorch marks blacken the beams\", \"an old brass rail shows under the gold leaf\"). Never narrate the change itself: no \"has been replaced by\", \"was transformed\", \"was once\", \"now\". History goes in notes instead: a short append_lore on the place's area, e.g. {\"op\":\"append_lore\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"}. Exception: a temporary change with \"lasts\" (smoke, a fresh fire) may mention the event.\nUnnamed scenery people and creatures in a room's description or notes are part of the room: if the story permanently changed one (hurt, killed, transformed, left, moved in), rewrite that part, following the description rule. A {{npc:id}} token is a saved person, not scenery: leave the token as it is. This call writes places only. Do not propose a change to a person's personality, appearance, or other card fields because a place changed."
+      "text": "Descriptions are timeless: write what a visitor would find at any hour with nobody about. The game adds the time, light, weather, who is there and which doors stand open each turn, so the description leaves those to it."
     },
     {
       "id": "change.scope_system",
@@ -1204,7 +1225,7 @@
       "description": "Step 1 of 2: the system prompt for 'which places changed'. First of the two calls that turn a flagged story change into a map change. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON answer.",
-      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story really changed on the map, for good or for a while (burned, collapsed, flooded, filled with smoke, doors smashed or barricaded, walls knocked through, rooms destroyed, a portal or passage opened for an hour). Moment-to-moment action that leaves no trace (walking, talking, fighting, a door simply opened and shut) is not a map change. {{reply}}.",
+      "text": "You read a short piece of a role-play story and a list of places on a map. You decide which places the story really changed on the map, for good or for a while (burned, collapsed, flooded, filled with smoke, doors smashed or barricaded, walls knocked through, rooms destroyed, a portal or passage opened for an hour). Moment-to-moment action that leaves no trace (walking, talking, fighting, a door simply opened and shut) is not a map change. A change to a person (how they look, what they wear, an injury, their mood, where they went) is not a map change, even when a room's or area's notes mention them. The person tracker handles people. If the story changed only people, reply {\"rooms\": [], \"areas\": []}. {{reply}}.",
       "placeholders": [
         {
           "name": "reply",
@@ -1218,7 +1239,7 @@
       "description": "Step 1 of 2: which places changed (JSON answer). The game reads the JSON answer, so keep the reply format.",
       "group": "change",
       "locked": "The game reads the reply as structured map edits; changing this can break map changes.",
-      "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change on the map, for good or for a while? Reply {\"rooms\": [addresses], \"areas\": [area ids changed as a whole (renamed, or general notes changed), e.g. \"{{area}}\"]}, or {\"rooms\": []} if nothing on the map changed.",
+      "text": "Map around {{area_name}} ({{area}}) in {{region_name}}. Each line: address = name [area]; exits.\n{{outline}}\n\nStory (messages #{{start}}-#{{end}}):\n{{story}}\n\n{{what}}\nWhich places did the story change on the map, for good or for a while? Put an area id in areas only when the building or district as a whole changed: it was renamed, or its notes no longer hold. One room changing is a room, not its area. Reply {\"rooms\": [addresses that changed], \"areas\": []}, or {\"rooms\": [], \"areas\": []} if nothing on the map changed.",
       "placeholders": [
         {
           "name": "area_name"
@@ -1248,12 +1269,54 @@
       ]
     },
     {
+      "id": "change.what_tracker",
+      "title": "Map changes: the note from the tracker",
+      "description": "Piece: fills {{what}} in the map change calls (which places, the patch, the light touch / full rewrite switch) when the after-reply tracker raised the change.",
+      "group": "change",
+      "piece": true,
+      "locked": "The game picks one of these by who raised the change and fills in the note; changing it can mislead the map change calls.",
+      "placeholders": [
+        {
+          "name": "note"
+        }
+      ],
+      "text": "The change to look for: \"{{note}}\"."
+    },
+    {
+      "id": "change.what_player",
+      "title": "Map changes: the note from the player",
+      "description": "Piece: fills {{what}} in the map change calls when the player raised the change (the flag button, /ws-change, or the Change box under Edit).",
+      "group": "change",
+      "piece": true,
+      "locked": "The game picks one of these by who raised the change and fills in the note; changing it can mislead the map change calls.",
+      "placeholders": [
+        {
+          "name": "note"
+        }
+      ],
+      "text": "The player noted: \"{{note}}\"."
+    },
+    {
+      "id": "change.what_narrator",
+      "title": "Map changes: the note from the narrator",
+      "description": "Piece: fills {{what}} in the map change calls when the narrator raised the change (a ws_flag tag).",
+      "group": "change",
+      "piece": true,
+      "locked": "The game picks one of these by who raised the change and fills in the note; changing it can mislead the map change calls.",
+      "placeholders": [
+        {
+          "name": "note"
+        }
+      ],
+      "text": "The narrator noted: \"{{note}}\"."
+    },
+    {
       "id": "change.system",
       "title": "Map changes: the patch (system prompt)",
       "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON edits in this exact format.",
-      "text": "You turn a real change to places in a story, permanent or temporary, into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, a whole inn turned into a palace: {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"append_lore\",\"area\":\"riverton:drowned_rat\",\"text\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nA temporary but real change (a portal open for 1 hour, a room filled with smoke, a tunnel blocked for a day) counts: give its ops \"lasts\" with how long it holds, e.g. \"1h\", \"12h\", \"3d\". Any op may add \"lasts\". Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. Moment-to-moment action that leaves no trace on a place is not a change. If nothing on the map changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
+      "text": "You turn a real change to places in a story, permanent or temporary, into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, light touch, one room (a smashed bar): {\"ops\":[{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"<the same description with only the bar sentence changed>\"}]}\nExample, a full rewrite (a whole inn turned into a palace): {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\",\"lore\":\"Formerly the Drowned Rat inn; transmogrified into a palace by magic.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nupdate_area and append_lore are for a building that changed as a whole.\nA temporary but real change (a portal open for 1 hour, a room filled with smoke, a tunnel blocked for a day) counts: give its ops \"lasts\" with how long it holds, e.g. \"1h\", \"12h\", \"3d\". Any op may add \"lasts\". Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. Moment-to-moment action that leaves no trace on a place is not a change. If nothing on the map changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
       "placeholders": [
         {
           "name": "edit_types",
