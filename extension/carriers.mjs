@@ -158,7 +158,7 @@ export function flagStatusText(f, id) {
     switch (f.status) {
         case 'user': return `🗺 ${USER_FLAG_NOTE}`;
         case 'working': return `🗺 Checking what changed on the map (${range})…`;
-        case 'nothing': return `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`;
+        case 'nothing': return f.empty ? `🗺 Nothing on the map changed (${range}).` : `🗺 No map change found in ${range}.${f.error ? ` (${f.error})` : ''}`;
         case 'cant': return `🗺 Can't show this on the map: ${f.error || 'no reason given'}`;
         case 'review': if (f.proposal) return ''; break;
         case 'error': return `🗺 Map change failed: ${f.error || 'something went wrong.'}`;
@@ -195,7 +195,7 @@ async function analyzeFlag(id, { note } = {}) {
     rewriting.delete(f);
     if (typeof note === 'string' && note.trim() && note.trim() !== f.note) { f.note = clip(note, 200); f.noteBy = 'player'; }
     if (f.start == null || f.start === '' || !Number.isFinite(Number(f.start))) f.start = suggestStart(chat, id, f.loc);
-    f.status = 'working'; f.error = ''; delete f.proposal; delete f.rewriteError;
+    f.status = 'working'; f.error = ''; delete f.empty; delete f.proposal; delete f.rewriteError;
     renderPatchCards();
     try {
         await ensurePrompts();
@@ -213,7 +213,12 @@ async function analyzeFlag(id, { note } = {}) {
         // A place changed as a whole (a subregion named in areas): every room in it goes to the patch call too.
         const whole = known.filter(k => areas.some(ar => ar.includes(':') && k.startsWith(`${ar}/`)));
         const rooms = [...new Set([...(a1?.rooms ?? []).map(toKnown).filter(Boolean), ...whole])].slice(0, 20);
-        if (!rooms.length && !areas.length) { f.status = 'nothing'; f.error = 'no known room was named'; return; }
+        if (!rooms.length && !areas.length) {
+            f.status = 'nothing';
+            // The model answered no places (a people-only story, say): a plain card line. Places it named that aren't on the map: say so.
+            if ((a1?.rooms ?? []).length || (a1?.areas ?? []).length) f.error = 'no known room was named'; else f.empty = true;
+            return;
+        }
         const c2 = await flagContext(f, [...rooms, ...areas]);
         const pl = await loadPatchLib();
         const rewrite = f.rewrite === 'full' ? 'full' : 'light';
