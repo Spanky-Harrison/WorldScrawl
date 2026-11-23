@@ -146,8 +146,8 @@ test('the tracker prompt lists the exits and gives the place definition instead 
     assert.match(p, /A door or way that is not under Exits and actually opens is kind "discover"; coming or going by a listed exit never is\./);
     assert.doesNotMatch(p, /Never set place|Do not set place/, 'no ban list');
     const style = id => PROMPTS.prompts.find(e => e.id === id).text;
-    assert.match(style('change.style'), /Descriptions and notes are timeless/);
-    assert.match(style('discover.style'), /Descriptions are timeless/);
+    assert.match(style('change.timeless'), /^Descriptions are timeless: write what a visitor would find at any hour with nobody about\. The game adds the time, light, weather, who is there and which doors stand open each turn/);
+    for (const id of ['change.style', 'discover.style']) assert.match(style(id), /\{\{timeless\}\}/, `${id} takes the shared timeless line (R2 C5)`);
 });
 
 // ---- Pure pieces.

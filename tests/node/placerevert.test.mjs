@@ -94,6 +94,8 @@ test('(a) smoke runs out under a later permanent change: one rebuild call, the n
     assert.ok(prompt.includes(SMOKE_BOARDS) && prompt.includes('The floorboards by the hearth are splintered'), 'the change still in force is named');
     assert.match(sys, /How much to rewrite: light touch/);
     assert.match(sys, /DESCRIPTION RULE/);
+    assert.match(sys, /Descriptions are timeless: write what a visitor would find at any hour with nobody about\./, 'R2 C5: the shared timeless line is filled in');
+    assert.ok(!sys.includes('{{timeless}}'));
     // The result is in place for every map reader, and the narrator facts were built after the call.
     assert.equal(chatChanges().find(x => x.id === 'p_boards').ops[0].text, BOARDS);
     assert.equal(here(blocks), BOARDS);
