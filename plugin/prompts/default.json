@@ -132,7 +132,7 @@
     "lore": "the lore asked for, one place per line",
     "line": "One sentence about a person: who they are, as already said in the story or the cast file.",
     "base": "The base text of each field asked, one \"- field: text\" line each, before the active changes are applied.",
-    "fields": "The appearance field this call writes (body or outfit; one field for a one-field card), or the field an active change touches (the intent line).",
+    "fields": "The appearance field this call writes (body or outfit; one field for a one-field card), the field an active change touches (the intent line), or the field the player wrote (the player's text piece).",
     "other": "The other appearance field (body or outfit) shown for reference in a one-field question.",
     "other_text": "That other field's text as it is now (reference only).",
     "intents": "The active appearance changes for the asked field, oldest first, one line each (People: one active change in the appearance question).",
@@ -1910,7 +1910,7 @@
           "generated": true
         }
       ],
-      "text": "You rewrite a person's appearance text ({{fields}}) for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, change only the words that intent names and keep every other word as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and how they stand and move, and, when the outfit is among the fields asked ({{fields}}), how the clothes fit the body as it is now. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). {{rules}} No other keys, no commentary."
+      "text": "You rewrite a person's appearance text ({{fields}}) for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, replace only the phrase that intent affects and copy every other sentence as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and, when the outfit is among the fields asked ({{fields}}), how the clothes fit the body as it is now. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). {{rules}} No other keys, no commentary."
     },
     {
       "id": "npc.appearance_edit_light_system",
@@ -1939,7 +1939,7 @@
       "group": "npc",
       "locked": "Both appearance compose system prompts include this text; the game reads their answers as appearance fields.",
       "placeholders": [],
-      "text": "Write how they look in third person (she, he, they), as a portrait would show them: no actions, poses or setting. Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base."
+      "text": "Write how they look in third person (she, he, they), as a portrait would show them: no actions, poses or setting. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base."
     },
     {
       "id": "npc.appearance_rebuild",
@@ -1983,7 +1983,7 @@
           "name": "intents"
         }
       ],
-      "text": "Edit {{fields}} for {{name}}: copy the base and change only the words the intents name.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
+      "text": "Edit {{fields}} for {{name}}: replace only the phrase each intent affects and copy every other sentence as written.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
     },
     {
       "id": "npc.appearance_intent_line",
@@ -2017,16 +2017,19 @@
     {
       "id": "npc.appearance_intent_written",
       "title": "People: the player's text for an appearance change",
-      "description": "Piece: added to an appearance change's line (npc.appearance_intent_line) when the player edited that change's text on its card, so the model uses it as written.",
+      "description": "Piece: added to an appearance change's line (npc.appearance_intent_line) when the player edited that change's text on its card: added once per edited field, naming that field ({{fields}}), so the model uses it as written.",
       "group": "npc",
       "piece": true,
-      "locked": "The game checks the answer against the text the player wrote.",
+      "locked": "The game adds this to the active change's line when the player edited its text.",
       "placeholders": [
+        {
+          "name": "fields"
+        },
         {
           "name": "written_text"
         }
       ],
-      "text": "The player wrote this field for it, use as written: \"{{written_text}}\""
+      "text": "The player wrote {{fields}} for it, use as written: \"{{written_text}}\""
     },
     {
       "id": "npc.appearance_intent_replace",
@@ -2056,7 +2059,7 @@
       "group": "npc",
       "locked": "The game adds this line to the light-touch edit question as it is.",
       "placeholders": [],
-      "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and change only the words the intents name."
+      "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and replace only the phrase each intent affects."
     },
     {
       "id": "npc.appearance_other_field",

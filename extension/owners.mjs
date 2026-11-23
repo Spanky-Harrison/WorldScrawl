@@ -167,11 +167,11 @@ export async function askTried(kind, args, { timeout = FILL_TIMEOUT_MS, timeoutR
 /**
  * R3 A2: one active change in the compose question, from its prompt pieces. A baseline is the player's replacement text
  * (npc.appearance_intent_replace); an appearance change names its field and light/full (npc.appearance_intent_line),
- * plus the player's own text for that field when they edited it on the card (npc.appearance_intent_written), one per field.
+ * plus the player's own text for that field when they edited it on the card (npc.appearance_intent_written), once per edited field, naming it.
  */
 export function intentLine(c, n) {
     if (c.kind === 'baseline') return P('npc.appearance_intent_replace', { n, fields: c.field, written_text: c.text ?? '' });
-    const written = BODY_OUTFIT.filter(f => c.layer?.[f]).map(f => ` ${P('npc.appearance_intent_written', { written_text: c.layer[f] })}`).join('');
+    const written = BODY_OUTFIT.filter(f => c.layer?.[f]).map(f => ` ${P('npc.appearance_intent_written', { fields: f, written_text: c.layer[f] })}`).join('');
     return P('npc.appearance_intent_line', { n, intent: c.intent || 'change', fields: c.fields || 'body,outfit', how: appearanceScope(c.scope) === 'heavy' ? 'full rewrite' : 'light touch', written });
 }
 async function askFields(name, baseline, ops, timeout, other = null) {
