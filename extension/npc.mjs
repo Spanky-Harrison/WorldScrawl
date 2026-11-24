@@ -780,7 +780,8 @@ export function presentAt(chat, index, cast, env) {
 
 /**
  * Saved people who belong here (a schedule stop at this place, or a {{npc:id}} token in the lore being fed, `lore`)
- * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented). `onOffmap` is called for each line about someone elsewhere.
+ * but are not in the scene now. One line each, from the schedule entry in force; with none, no place is named (never invented). `onOffmap` is called for each line
+ * about someone elsewhere (every line: the caller then adds the elsewhere rule, narration.offmap_found).
  */
 export function absentAt(chat, index, cast, env, { lore = '', present = [], onOffmap = () => {} } = {}) {
     const end = Math.max(0, Math.min(index ?? 0, (chat?.length ?? 1) - 1));
@@ -802,7 +803,9 @@ export function absentAt(chat, index, cast, env, { lore = '', present = [], onOf
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
         const who = shownName(npc);
-        out.push(`${capFirst(who)} isn't here right now${where}; do not portray ${who}.`);
+        // R4 N3: what is true, not a ban; the elsewhere rule line (narration.offmap_found) follows it. R5 moves it into narration.npc_absent.
+        out.push(`${capFirst(who)} is elsewhere right now${where}.`);
+        onOffmap();
     }
     return out.sort();
 }
