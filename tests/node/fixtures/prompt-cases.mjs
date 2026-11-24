@@ -70,6 +70,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'discover.question.existing': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: 'green door', err: '', existing: ext.roomOptions([{ name: 'Village Square', display_name: 'Village Square (Streets)', summary: 'Busy.', address: 'r:s/square' }]) }),
     'discover.question.retry': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: '', err: 'no name' }),
     'narration.exits_hint': ext.render('narration.exits_hint'),
+    'pick.said': ext.render('pick.said', { message: 'I look around and head north.' }), // R6: the same line the intent, look, door, dig and travel cases quote as said
     'narration.arrival_reminder': ext.arrivalReminder(loc, move),
     'narration.new_door.tools': ext.newDoorLine('You', 'Hall', true),
     'narration.new_door': ext.newDoorLine('You', 'Hall', false),
@@ -89,7 +90,7 @@ export const cases = ({ ext, patches, placeform }) => ({
             exits: 'out (Village Square)',
             time: { part: 'morning', time: '08:10' },
             weather: 'Fog outside.',
-            peopleLines: ext.trackerPeopleLines([{ id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'Tall, raw-boned.', outfit: "Widow's black.", facts: ['keeps the keys'], memory: ['Joe lied about the coin.'], stance: 'indifferent', stanceReason: 'Strangers are customers until they make trouble.' }]),
+            peopleLines: ext.trackerPeopleLines([{ id: 'hesk', name: 'Hesk', looks: 'copper braids', body: 'Tall, raw-boned.', outfit: "Widow's black.", facts: ['keeps the keys'], memory: ['Joe lied about the coin.'], disposition: 'indifferent', dispositionReason: 'Strangers are customers until they make trouble.' }]),
         }),
         player: 'I look around.', story: 'You look around. Hesk stands at the bar.',
     }),

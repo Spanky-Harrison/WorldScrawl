@@ -232,7 +232,7 @@ test('the who / disposition picks in prepareNpcs show on the busy line during th
     await (await import('../../extension/scene.mjs')).prepareNpcs(c.chat[1]);
     assert.ok(seen.length, 'side calls ran');
     assert.ok(seen.every(t => /^WorldScrawl: .+…$/.test(t)), JSON.stringify(seen));
-    assert.ok(seen.some(t => /how they feel about you|who you're talking to/.test(t)), JSON.stringify(seen));
+    assert.ok(seen.some(t => /their attitude toward you|who you're talking to/.test(t)), JSON.stringify(seen));
 });
 
 test('the shared status: a call its card shows (the tracker\'s "tracking…") stays off the busy line; one with no card is on it', async () => {
