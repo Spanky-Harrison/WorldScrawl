@@ -23,8 +23,8 @@ const { onReplyForFlags, mergeFieldItems } = D;
 const PROMPTS = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8'));
 const server = clientDir(path.dirname(RIVERTON));
 const NPC = 'worldscrawl_npc';
-const LIGHT_SYS = /^You make a small edit to a person's body or clothes/;
-const FULL_SYS = /^You rewrite a person's body and clothes/;
+const LIGHT_SYS = /^You make a small edit to a person's appearance text/;
+const FULL_SYS = /^You rewrite a person's appearance text/;
 
 let n = 0;
 /** A fresh Riverton chat at 17:00 in the common room (Hesk, "the landlady", at the bar). `tracker`: the tracker's

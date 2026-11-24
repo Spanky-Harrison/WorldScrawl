@@ -24,8 +24,8 @@ const BASE = {
 const HESK = { ok: true, id: 'hesk', name: 'Hesk', line: 'landlady', looks: 'copper braids', body: BASE.body, outfit: BASE.outfit, file: 'hesk.json' };
 // A real light touch on Body: one of its three sentences reworded, the other two kept word for word.
 const TIED = BASE.body.replace(/Two thick copper braids[^.]*\./, 'Her copper braids are tied back in a knot for work.');
-const LIGHT_SYS = /^You make a small edit to a person's body or clothes/;
-const FULL_SYS = /^You rewrite a person's body and clothes/;
+const LIGHT_SYS = /^You make a small edit to a person's appearance text/;
+const FULL_SYS = /^You rewrite a person's appearance text/;
 
 /** A chat with Hesk; every compose call is recorded as {system, prompt}; `answer` gives the compose reply. */
 function boot(answer = () => '{"outfit":"Widow\'s black wool, damp at the hem, under a stained leather apron."}') {
@@ -58,7 +58,7 @@ test('the Hesk case: the tracker\'s light outfit change (fill runs inside applyT
     assert.equal(calls.length, 1, 'one compose call: no lasts, so lasting and live are the same inputs');
     assert.match(calls[0].system, LIGHT_SYS, 'the light-only edit prompt');
     assert.doesNotMatch(calls[0].system, /full rewrite|from scratch/);
-    assert.match(calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./, 'the light question says Edit, not Rewrite');
+    assert.match(calls[0].prompt, /^Edit outfit for Hesk: replace only the phrase each intent affects and copy every other sentence as written\./, 'the light question says Edit, not Rewrite');
     assert.match(calls[0].prompt, /- outfit: Widow's black wool/);
     assert.doesNotMatch(calls[0].prompt, /- body:/, 'Body is not asked for');
     assert.equal(o.candidate.lastingPreview.body, BASE.body, 'Body is the base, word for word');
@@ -144,10 +144,14 @@ test('composePlan: fields are the union the ops name; heavy anywhere picks the r
 test('prompts: light edit copies the base; both rewrite prompts describe the look, not the moment; the tracker names only the change and when it wears off', () => {
     const light = PROMPTS.prompts.find(p => p.id === 'npc.appearance_edit_light_system');
     assert.ok(light.locked && light.title && /^Step 1 of 1/.test(light.description));
-    assert.match(light.text, /keep every other sentence word for word/);
+    // R3 A1: a procedure, not "change only the words the intents name".
+    assert.match(light.text, /For each change, find the one phrase in the base it affects \(for "braids tied back", the phrase about the hair\) and replace only that phrase\. If no phrase covers it, add one short clause to the sentence it fits best\. Copy every other sentence exactly as written, in the same order\./);
+    assert.doesNotMatch(light.text, /change only the words that the active intents name/);
     assert.match(light.text, /A field no intent touches comes back exactly as the base\./);
+    // R3 A3: both take the shared rules, which say what to write (a portrait) instead of a ban list.
     for (const id of ['npc.appearance_edit_light_system', 'npc.appearance_rebuild_system'])
-        assert.match(promptText(id), /Describe how they look, not what they are doing, where they are, or the moment/, id);
+        assert.match(promptText(id), /\{\{rules\}\}/, id);
+    assert.match(promptText('npc.appearance_rules'), /^Write how they look in third person \(she, he, they\), as a portrait would show them: no actions, poses or setting\./);
     const tracker = promptText('npc.tracker');
     assert.match(tracker, /intent names only the change to their body or clothes \("braids tied back", "hem soaked from the river"\), not how they arrived or what they did\./);
     assert.match(tracker, /If the change will pass on its own \(soaked, muddy, bruised\), set lasts to a duration such as "2h"/);
@@ -244,6 +248,6 @@ test('prompt manager: the light-touch edit question is its own entry; a saved pr
     r = boot();
     ext.setPrompts(handlePrompts('GET', '/prompts/active', null, root).body.prompts);
     await applyTrackerResult(0, { place: null, wait: null, people: [{ id: 'hesk', action: 'appearance', intent: 'apron wet', fields: 'outfit', scope: 'light' }] });
-    assert.match(r.calls[0].prompt, /^Edit outfit for Hesk: copy the base and change only the words the intents name\./);
+    assert.match(r.calls[0].prompt, /^Edit outfit for Hesk: replace only the phrase each intent affects and copy every other sentence as written\./);
     ext.setPrompts(PROMPTS);
 });

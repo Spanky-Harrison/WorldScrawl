@@ -331,7 +331,8 @@ test('a person item with scope "full" composes with the rebuild prompt (npc.appe
     await flush(80);
     const o = stamps(c.chat[id], 'npc_appearance')[0];
     assert.equal((o.candidate ?? o.committed)?.scope, 'heavy', '"full" reads as a full rewrite');
-    const rebuild = entry('npc.appearance_rebuild_system').text.slice(0, 60);
+    const head = id => entry(id).text.split('{{')[0]; // the fixed opening, before the asked field is filled in
+    const rebuild = head('npc.appearance_rebuild_system');
     assert.ok(sys.some(s => s.startsWith(rebuild)), 'the rebuild system prompt, not the light touch');
-    assert.equal(sys.some(s => s.startsWith(entry('npc.appearance_edit_light_system').text.slice(0, 60))), false);
+    assert.equal(sys.some(s => s.startsWith(head('npc.appearance_edit_light_system'))), false);
 });
