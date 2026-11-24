@@ -967,7 +967,7 @@
       "description": "Step 5 of 5 (map tools off): the last line.",
       "group": "narration",
       "locked": "Keeps the narrator from moving the party itself and from inventing places; the game controls movement.",
-      "text": "You only narrate. Only the story's moves take {{party}} to another location: the scene stays where those moves left it. Use only the locations and exits listed above; if a character tries some other way out, show why it does not work.",
+      "text": "Write only the narration. Only the story's moves take {{party}} to another location: the scene stays where those moves left it. Use only the locations and exits listed above; if a character tries some other way out, show why it does not work.",
       "placeholders": [
         {
           "name": "party"
@@ -1034,7 +1034,7 @@
       "description": "Alongside: added under the people-here list whenever it names someone as elsewhere.",
       "group": "narration",
       "locked": "Keeps someone listed as elsewhere out of the scene until they have actually come here.",
-      "text": "(Anyone above who is elsewhere is not with the characters. Do not narrate them as present unless they have actually come here.)",
+      "text": "(Anyone above who is elsewhere is not with the characters; they stay out of the scene until they actually come here.)",
       "placeholders": []
     },
     {
