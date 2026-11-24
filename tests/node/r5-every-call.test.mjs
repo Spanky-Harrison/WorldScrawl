@@ -154,7 +154,7 @@ const BOARDS = 'A low-beamed common room smelling of woodsmoke and spilled ale. 
 
 /** The scripted pass. Returns every recorded call and narrator block. */
 async function pass(prompts) {
-    const all = { calls: [], blocks: [] };
+    const all = { calls: [], blocks: [], marks: {} };
     const run = async (opts, steps) => {
         const env = boot(prompts, opts);
         await steps(env);
@@ -266,7 +266,10 @@ async function pass(prompts) {
         await turn(env, 'I look behind the bar.', { story: 'Behind the bar, a narrow door you had not noticed stands ajar.', answers: {
             tracker: tracker({ place: { changed: true, kind: 'discover', note: 'a narrow door behind the bar' } }),
             'map edit: discovery': '{"name": "Back Office", "description": "A cramped office.", "direction": "narrow door", "return_direction": "out"}' } });
+        const trackerCalls = () => env.rec.calls.filter(c => c.kind === 'tracker').length;
+        const t0 = trackerCalls();
         await turn(env, 'I wait for her braids to dry.', { answers: { tracker: ['not json at all', tracker({})] } });
+        all.marks.retryTurnTrackerCalls = trackerCalls() - t0; // the first answer is unreadable: asked once more on this turn
         await turn(env, '[wait] 2h');
         await turn(env, 'I talk to the landlady about the drunk.', { answers: { 'pick: who': pickName('the landlady') } });
         await turn(env, 'I ask Zqxhesk about her past, her secrets and her friends.');
@@ -380,8 +383,10 @@ async function pass(prompts) {
     });
     // The room the narrator last saw is gone, the party already elsewhere (moved out, then the change turned off).
     await run({ here: SQUARE, chat: [user('A stall goes up.', { worldscrawl_patches: [STALL()], worldscrawl_move: mv(SQUARE, BOOTH, 'into the stall', 'Village Square', 'Stall') }), ai('You are in the stall.', { worldscrawl_location: BOOTH })] }, async env => {
-        await turn(env, '[move] out');
-        say(env.c, 'I look back.');
+        // The player walks on to Market Lane; no reply is written yet, so the last story is still the one told in the stall. Then
+        // the stall is turned off: the party is not in it (no missing notice), and the narrator is told it is gone.
+        say(env.c, '[move] lane');
+        await intercept(env.c);
         await toggleChange(1, 'stall'); await settle();
         await intercept(env.c);
     });
@@ -398,13 +403,11 @@ async function pass(prompts) {
 const markersIn = t => [...String(t).matchAll(/⟦([a-z_.]+)⟧/g)].map(m => m[1]);
 const reachedIn = got => new Set([...got.calls.flatMap(c => [...markersIn(c.prompt), ...markersIn(c.sys)]), ...got.blocks.flatMap(b => markersIn(b.text))]);
 
-// Entries this pass does not reach, each with its reason. A dead entry is listed as dead (queued for removal); the rest
+// Entries this pass does not reach, each with its reason. They
 // are reached by narrower tests named here. The test fails if one of them is reached after all (the list must stay exact).
 const ALLOW = {
-    'narration.look_stuck': 'dead: a stuck door look is told by the attempt lines (narration.door_stuck, R4); queued for removal',
     'narration.look_beyond_unseen': 'needs a peeked destination that is revealed but has no name, which the shipped worlds have none of; rendered in prompt-cases look.6',
     'narration.travel_cut_short': 'needs a multi-step [move] route that stops on the way (a closed door mid-path) in a world built for it; travel lines are in group1-commands',
-    'narration.aftermath_gone': 'needs the narrated room gone with the party already out of it and no missing notice; covered through POST /aftermath + aftermathLine in expiry.test and prompt-cases aftermath_gone',
     'npc.appearance_intent_written': 'listed only when a change with the player\'s own written text is composed again with a later one; a kept edit bakes into the base here. Through intentLine and the compose call in r3-compose A2',
     'npc.appearance_intent_replace': 'listed only when a replaced base text is composed again with a later change; kept baselines bake into the base here. Through intentLine in r3-compose A2',
 };
@@ -427,7 +430,7 @@ test('R5.4 (a): with every entry a bare marker, each model call and narrator blo
     for (const k of KINDS_REQUIRED) assert.ok(kinds.has(k), `the pass makes a "${k}" call`);
     assert.ok(!kinds.has(''), 'every call is named by its kind');
     // The tracker retry: two tracker calls for one reply (the first answer unreadable).
-    assert.ok(bare.calls.filter(c => c.kind === 'tracker').length >= 2);
+    assert.equal(bare.marks.retryTurnTrackerCalls, 2, 'the retry turn itself asks the tracker twice');
     for (const c of bare.calls) {
         assert.ok(onlyPunct(c.sys), `${c.kind} (system): ${JSON.stringify(left(c.sys).trim()).slice(0, 200)}`);
         assert.ok(onlyPunct(c.prompt), `${c.kind}: ${JSON.stringify(left(c.prompt).trim()).slice(0, 200)}`);
@@ -455,15 +458,20 @@ test('R5.1: every narration.* entry the narrator gets comes from its entry (mark
 
 test('R5.2 (N1): one-time lines come before stay-put, and the rules line is last, on every narrator turn', { timeout: 120000 }, async () => {
     const { bare } = await both();
-    const ONCE = ['narration.waited', 'narration.expired', 'narration.relocated_gone', 'narration.relocated_missing', 'narration.aftermath_lost_exits', 'narration.person_wore_off'];
-    let rules = 0, once = 0;
+    const ONCE = ['narration.waited', 'narration.slept', 'narration.wait_weather', 'narration.wait_wore_off', 'narration.expired', 'narration.aftermath_gone', 'narration.relocated_gone', 'narration.relocated_missing', 'narration.aftermath_lost_exits', 'narration.person_wore_off'];
+    let rules = 0, tools = 0;
+    const seen = new Set();
     for (const b of bare.blocks) {
         const m = markersIn(b.text);
-        if (m.includes('narration.rules')) { rules++; assert.equal(m.at(-1), 'narration.rules', `rules last: ${m.join(' ')}`); }
+        const last = m.filter(id => id === 'narration.rules' || id === 'narration.rules_tools');
+        if (last.length) { rules++; if (last[0] === 'narration.rules_tools') tools++; assert.equal(last.length, 1); assert.equal(m.at(-1), last[0], `rules last: ${m.join(' ')}`); }
         const sp = m.indexOf('narration.stay_put');
-        for (const id of ONCE) if (m.includes(id)) { once++; if (sp >= 0) assert.ok(m.indexOf(id) < sp, `${id} before stay_put: ${m.join(' ')}`); }
+        for (const id of ONCE) if (m.includes(id)) { seen.add(id); if (sp >= 0) assert.ok(m.indexOf(id) < sp, `${id} before stay_put: ${m.join(' ')}`); }
     }
-    assert.ok(rules > 50 && once >= 4, `${rules} rules, ${once} one-time lines`);
+    assert.ok(rules > 50, `${rules} rules lines`);
+    assert.ok(tools >= 1, 'the tools-mode turn (rules_tools) is covered');
+    if (DUMP) console.log('ONCE seen', [...seen].join(' '));
+    assert.deepEqual(ONCE.filter(id => !seen.has(id)), [], 'every one-time line is checked on some turn');
 });
 
 test('R5.3 / R5.3b (N5, N4): with the shipped prompts, the narrator gets durations in words and no handles; the tracker and the who pick keep theirs', { timeout: 120000 }, async () => {

@@ -3,7 +3,7 @@ import './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LOOK_RE, MOVE_RE, lookOnly, durationWords } from '../../extension/words.mjs';
-const { stayPutLine } = await import('../../extension/index.js');
+const { stayPutLine, lookText } = await import('../../extension/index.js');
 import { carrierText } from '../../plugin/ui/patchform.mjs';
 
 // ---- from words.test.mjs
@@ -136,4 +136,19 @@ const { BREAK_RE } = await import('../../extension/movement.mjs');
 test('break-word check: whole words and phrases only', () => {
     assert.deepEqual(['I smash out the window', 'I eat breakfast', 'I go into the tunnel', 'there is a hole here', 'I punch through the wall', 'I make a hole in the floor', 'I kick down the door', 'the smashing pumpkins'].map(t => BREAK_RE.test(t)),
         [true, false, false, false, true, true, true, true]);
+});
+
+test('R5 round 1: a closed see-through exit names its door like every other look line; a stuck look is the stuck-door line', () => {
+    assert.equal(lookText('You', 'Hall', { kind: 'threshold', via: 'north', description: 'An oak door with a grille.', through_closed: true, name: 'Yard' }),
+        'What just happened: You looked through the closed north door. All that can be seen is what is right there: An oak door with a grille. It leads to Yard, but that cannot be seen from here; it may be named but do not describe what lies at the far end. You stayed at Hall.');
+    for (const [via, door] of [['out', 'door out'], ['gate', 'gate']])
+        assert.match(lookText('You', 'Hall', { kind: 'threshold', via, description: 'X.', through_closed: true, unknown: true }), new RegExp(`looked through the closed ${door}\\. `));
+    // The same words for the closed door whichever way the look went: through a gap, at it, through it.
+    for (const extra of [{ peek: true }, { shut: true }, { through_closed: true }]) {
+        const t = lookText('You', 'Hall', { kind: 'threshold', via: 'north', description: 'X.', unknown: true, ...extra });
+        assert.match(t, /the closed north door\. /);
+        assert.doesNotMatch(t, /closed the |closed north\.|\(north\)/);
+    }
+    assert.equal(lookText('You', 'Hall', { kind: 'closed', via: 'north', stuck: 'is locked' }),
+        'What just happened: You tried to open the north door, but it is locked. Show the north door holding fast: nothing beyond it can be seen or reached, and this reply ends with it still shut and You still at Hall.');
 });
