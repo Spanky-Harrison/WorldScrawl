@@ -679,13 +679,13 @@ async function keepRememberNow(c, msg, card, id, edited) {
         else got = await askRemember(id, name); // nothing asked yet (the card was never drawn)
     }
     // R6 F3: no usable answer (cut off, not JSON, empty, or a model error): nothing is saved. The card shows the failure
-    // ("Could not prepare the card.", Ask the model again) and the Approve is undone, never a stand-in person.
+    // ("Could not prepare the card." with Check again) and the Approve is undone, never a stand-in person.
     if (!got) {
         card.proposal = { name, failed: true };
         unmarkDecided(msg, noticeIdOf(card, 'remember'));
         syncSwipeExtra(msg);
         renderPatchCards();
-        toastr.warning(`WorldScrawl: could not prepare ${name}'s card, so nothing was saved. Ask the model again on the card.`);
+        toastr.warning(`WorldScrawl: could not prepare ${name}'s card, so nothing was saved. Use Check again on the card.`);
         await c.saveChat?.();
         return;
     }

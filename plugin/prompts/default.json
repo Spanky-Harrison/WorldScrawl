@@ -105,7 +105,7 @@
     "region_notes": "the notes of the region",
     "retry": "empty, or a note that the last answer was rejected and why (the retry piece)",
     "rooms": "the rooms that may be changed, with their current text",
-    "said": "what the player just wrote (their latest message)",
+    "said": "what the player just wrote (their latest message): the intent, travel, look, door and dig questions get it as the pick.said line (The player wrote: \"…\"); npc.tracker, npc.disposition and npc.who get the raw text",
     "start": "where the story text to look at starts",
     "steps": "what happened on the way, step by step, joined with \"Then:\"",
     "story": "the part of the story that changed the map",
