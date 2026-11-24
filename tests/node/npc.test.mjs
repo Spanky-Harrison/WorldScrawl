@@ -1,10 +1,11 @@
+import './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { exportRecord, resolveSchedulePlace } from '../../plugin/shared/npc.mjs';
 import { validateRecord } from '../../plugin/npc.mjs';
-import { NPC_KEY, SUGGEST_AFTER, absentAt, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, narratorView, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore } from '../../extension/npc.mjs';
+import { NPC_KEY, SUGGEST_AFTER, absentAt, sayLine, clampDisposition, claimResult, claimWarnings, declinesInScene, focusRules, followersAt, framesOf, hashRoll, npcSlices, parseNpcTag, presentAt, readBack, readRememberAnswer, recordDiff, scheduleAt, takeNpcTags, takeNpcFlags, flaggedPeople, NPC_FLAG_KEY, narratorView, npcTiers, takeNameFlags, foundEditOk, judgeFound, loreScope, takeLoreFlags, loreFor, addLoreRequest, loreRequests, activeLore } from '../../extension/npc.mjs';
 import { findPerson, knows, maskText } from '../../extension/names.mjs';
 import { castNameWarnings, loadCast, writeCastNpc, saveCastNpc, tidyRecord } from '../../plugin/cast.mjs';
 import { client, copytree, RIVERTON, TAVERN, tmpPath, makeWorld } from './helpers.mjs';
@@ -136,12 +137,14 @@ test('she does not vanish mid-scene; the note escalates, and a staying stamp cov
     const at = i => clock(i === 0 ? 16 : 18, i === 0 ? 30 : 0, 1, i === 0 ? 16 * 3600 : 18 * 3600);
     const late = presentAt(chat, 1, cast, envOf(BAR, at));
     assert.equal(late.length, 1);
-    assert.equal(late[0].overdue, 'Hesk is an hour late for work.');
+    // R5 N7: presentAt keeps the overdue line as prompt data ({id, vars}); sayLine draws it once the prompts are loaded.
+    assert.equal(late[0].overdue.id, 'narration.npc_late');
+    assert.equal(sayLine(late[0].overdue), 'Hesk is an hour late for work.');
     const just = presentAt(chat, 1, cast, envOf(BAR, i => clock(i === 0 ? 16 : 17, i === 0 ? 0 : 10, 1, i === 0 ? 16 * 3600 : 17 * 3600 + 600)));
-    assert.equal(just[0].overdue, 'Hesk should be at the forge by now (work).');
+    assert.equal(sayLine(just[0].overdue), 'Hesk should be at the forge by now (work).');
     chat[1].extra = npc([{ type: 'npc_staying', id: 'hesk', elapsed: 17 * 3600 }]);
     const stayed = presentAt(chat, 1, cast, envOf(BAR, i => clock(i === 0 ? 16 : 17, i === 0 ? 0 : 30, 1, i === 0 ? 16 * 3600 : 17 * 3600 + 1800)));
-    assert.equal(stayed[0].overdue, '');
+    assert.equal(sayLine(stayed[0].overdue), '');
     chat.push(msg('She goes.', npc([{ type: 'npc_leave', id: 'hesk' }])));
     const gone = presentAt(chat, 2, cast, envOf(BAR, i => at(Math.min(i, 1))));
     assert.deepEqual(gone, []);
@@ -160,7 +163,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     const held = presentAt(chat, 1, cast, envOf(FORGE, clock(9)));
     assert.equal(held[0].kind, 'stay');
     assert.equal(held[0].place, FORGE);
-    assert.equal(held[0].overdue, '');
+    assert.equal(sayLine(held[0].overdue), '');
     assert.equal(followersAt(chat, 1, cast).length, 0);
     chat.push(msg('I step away.'));
     const away = presentAt(chat, 2, cast, envOf(i => (i < 2 ? FORGE : SQUARE), clock(9)));
@@ -169,7 +172,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     const due = presentAt(shift, 2, cast, envOf(FORGE, i => clock(i < 2 ? 9 : 16)));
     assert.equal(due[0].id, 'hesk');
     assert.notEqual(due[0].kind, 'stay');
-    assert.match(due[0].overdue, /should be at .* by now/);
+    assert.match(sayLine(due[0].overdue), /should be at .* by now/);
     const trip = [
         msg('Come.', npc([{ type: 'npc_follow', id: 'hesk' }])),
         msg('Wait.', npc([{ type: 'npc_stay', id: 'hesk', place: FORGE }])),
@@ -178,7 +181,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     ];
     const back = presentAt(trip, 3, cast, envOf(i => (i === 2 ? SQUARE : FORGE), clock(9)));
     assert.equal(back[0].id, 'hesk');
-    assert.match(back[0].overdue, /should be at .* by now/);
+    assert.match(sayLine(back[0].overdue), /should be at .* by now/);
     trip.push(msg('Come along.', npc([{ type: 'npc_follow', id: 'hesk' }])));
     const again = presentAt(trip, 4, cast, envOf(i => (i === 2 ? SQUARE : i === 4 ? BAR : FORGE), clock(9)));
     assert.equal(again[0].kind, 'follow');
@@ -197,7 +200,7 @@ test('told to stay holds this place until the next entry, a return, or follow', 
     assert.equal(hour[0].overdue, '');
     const later = presentAt(sight, 2, [maren], envOf(FORGE, i => clock(i < 2 ? 16 : 17, 10, day)));
     assert.equal(later[0].id, 'maren');
-    assert.match(later[0].overdue, /would normally have moved on by now/);
+    assert.match(sayLine(later[0].overdue), /would normally have moved on by now/);
 });
 
 test('disposition moves one step, memory stays capped, and a no lasts for the scene', () => {
@@ -230,7 +233,8 @@ test('slices, suggestions, read-back and tags', () => {
     assert.equal(focus.depth, 'deep');
     assert.equal(focus.ambiguous, false);
     const slice = npcSlices(present, focus);
-    assert.match(slice.npcs_present, /^Hesk \[p[0-9a-z]+\]:/, 'the shown name and an opaque handle, never the cast id');
+    assert.match(slice.npcs_present, /^Hesk:/, 'the shown name, never the cast id');
+    assert.doesNotMatch(slice.npcs_present, /\[p[0-9a-z]{4}\]/, 'R5 N4: no handle in the narrator\'s people block');
     assert.doesNotMatch(slice.npcs_present, /\bhesk\b/);
     assert.match(slice.npcs_present, /indifferent/);
     assert.match(slice.npcs_present, /Manner: Brisk/);
@@ -431,10 +435,10 @@ test('name knowledge: per actor, from stamps only, never from chat text', () => 
     const [h] = presentAt(chat, 0, [rec()], env);
     assert.deepEqual(h.known, { known: false, reason: 'not known: shown as "the landlady"' });
     const s = npcSlices([h], {}).npcs_present;
-    assert.match(s, /^the landlady \[p[0-9a-z]+\]:/);
+    assert.match(s, /^The landlady:/);
     assert.doesNotMatch(s, /Hesk|\bhesk\b/, 'no gate given: the name is nowhere');
     const gated = npcSlices([h], {}, { gate: p => `GATE(${p.id})` }).npcs_present;
-    assert.match(gated, /^the landlady \[p[0-9a-z]+\]: GATE\(hesk\)/, 'the gated line follows an unknown person');
+    assert.match(gated, /^The landlady: GATE\(hesk\)/, 'the gated line follows an unknown person');
     assert.doesNotMatch(s, /ws_flag/);
     assert.equal(knows(tam).reason, 'known: no unknownAs on the card');
     const flaggedChat = [bot('Hesk glares.', { [NPC_FLAG_KEY]: [{ swipe: 0, names: ['Hesk'] }] })];

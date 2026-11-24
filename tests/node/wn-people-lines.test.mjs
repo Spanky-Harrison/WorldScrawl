@@ -115,7 +115,7 @@ test('the hesk-trace case: moving out to the square, who is already there is tol
     assert.equal(r[1], ARRIVE, r.join('\n'));
     assert.doesNotMatch(R(blocks), /Bryn/, 'whoever stayed behind is not in it');
     assert.doesNotMatch(F(blocks), /Already in/, 'not in the facts block');
-    assert.match(F(blocks), /^the landlady \[\w+\]: .*Now: buying for the inn\./m, 'still listed under People here');
+    assert.match(F(blocks), /^The landlady: .*Now: buying for the inn\./m, 'still listed under People here');
     // Name masking: her name is not known, so every new line says "the landlady"; the reminder never has her name.
     assert.doesNotMatch(R(blocks), /Hesk/);
     assert.ok(!notesOf(c).some(x => x.kind === 'name leak'), JSON.stringify(notesOf(c)));

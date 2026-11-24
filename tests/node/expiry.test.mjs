@@ -160,24 +160,35 @@ test('expiry: /resolve tells the narrated exit what ran out (room, its change, h
     assert.deepEqual(r.options.map(o => o.direction), ['lane', 'stall']);
 });
 
-test('aftermath: a one-time line when the room the narrator last saw is gone or lost exits without narration', () => {
+test('aftermath: a one-time line when the room the narrator last saw is gone or lost exits without narration', async () => {
     const ch = [stall()];
     const am = body => c.post('/aftermath', { json: body }).json();
     // Narrated in the stall at 0; now the stall expired and the party was moved to the lane.
     const gone = am({ then: { changes: ch, now: 0, address: BOOTH }, changes: ch, now: H, address: LANE });
-    assert.match(gone.note, /^Pop-up Stall.* is gone; the characters are now in Market Lane/);
+    // R5 N7: the server returns the facts; the extension words them from narration.aftermath_* (aftermathLine).
+    assert.equal(gone.kind, 'gone');
+    assert.equal(gone.note, undefined, 'no English from the server');
+    assert.match(gone.gone_name, /^Pop-up Stall/);
+    assert.match(gone.place_name, /^Market Lane/);
     assert.equal(gone.why, 'a temporary change ended');
-    assert.match(gone.note, /Anything only in Pop-up Stall.*such as the .*no longer exists/);
+    const { aftermathLine } = await import('../../extension/expiry.mjs');
+    assert.match(aftermathLine(gone), /^Pop-up Stall.* is gone, and the characters are now in Market Lane.*; whatever was only in Pop-up Stall.* went with it\.$/);
+    assert.doesNotMatch(aftermathLine(gone), /such as the|Do not describe/);
     // In the square: the stall's exit from the square is gone (expiry) — a lost-exit line.
     const lost = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: H, address: SQUARE });
-    assert.match(lost.note, /^Since the last reply, the square in Village Square.*no longer exists/);
+    assert.equal(lost.kind, 'lost_exits');
+    assert.deepEqual(lost.lost, ['square']);
+    assert.match(lost.place_name, /^Village Square/);
+    assert.match(aftermathLine(lost), /^The way through the square out of Village Square.* is gone\.$/);
+    assert.equal(aftermathLine({ kind: 'lost_exits', lost: ['north', 'gate'], place_name: 'Hall' }), 'The way north out of Hall is gone. The way through the gate out of Hall is gone.', 'R5 N5: a direction word as it is, a noun with "through the"');
+    assert.equal(aftermathLine({ kind: 'none' }), '');
     assert.equal(lost.why, 'a temporary change ended');
     // Turned off instead: says so.
     const off = am({ then: { changes: ch, now: 0, address: SQUARE }, changes: [{ ...ch[0], off: true }], now: 0, address: SQUARE });
     assert.match(off.why, /turned off or undone/);
     // Nothing changed (or already narrated): no line.
-    assert.equal(am({ then: { changes: ch, now: H, address: LANE }, changes: ch, now: H, address: LANE }).note, '');
-    assert.equal(am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: 10, address: SQUARE }).note, '');
+    assert.equal(am({ then: { changes: ch, now: H, address: LANE }, changes: ch, now: H, address: LANE }).kind, 'none');
+    assert.equal(am({ then: { changes: ch, now: 0, address: SQUARE }, changes: ch, now: 10, address: SQUARE }).kind, 'none');
 });
 
 test('a pending wait card does not cross an expiry until kept; Adjust rechecks; Discard never triggers it', () => {
@@ -314,7 +325,7 @@ test('turning a change on or off adds no chat row; aftermath still describes the
         assert.equal(p.off, true);
         assert.deepEqual(p.narrated, { at: 1, off: false });
         assert.equal(ext.narratedView(chat).changes[0].off, false);
-        assert.match(await aftermathNote(chat, { address: SQUARE }), /^Since the last reply, the .* no longer exists?\. Do not describe/);
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /^The way .* out of Village Square.* is gone\.$/);
 
         const on = await ext.toggleChange(0, 'stall');
         assert.equal(on.off, false);
@@ -331,7 +342,7 @@ test('turning a change on or off adds no chat row; aftermath still describes the
         assert.equal(added.length, 0);
         assert.equal(p.off, true);
         assert.deepEqual(p.narrated, { at: 2, off: false });
-        assert.match(await aftermathNote(chat, { address: SQUARE }), /^Since the last reply, the .* no longer exists?\. Do not describe/);
+        assert.match(await aftermathNote(chat, { address: SQUARE }), /^The way .* out of Village Square.* is gone\.$/);
 
         const bare = [{ is_user: true, mes: 'only me', extra: { worldscrawl_patches: [stallPatch({ id: 'solo' })] } }];
         c.chat = bare;

@@ -573,7 +573,7 @@ test('day shift in play: at the job on the hour, the lunch and evening blocks ro
     assert.ok(presentAt(c.chat, c.chat.length - 1, cast(), envOf(c)).some(n => n.id === id));
     await scene.applyFacts();
     const text = Object.values(blocks).join('\n');
-    assert.match(text, /Maren \[\w+\]: Looks: wiry woman/);
+    assert.match(text, /^Maren: Looks: wiry woman/m);
     for (const w of ['day shift', 'night shift', 'passing through', 'pattern', '%', 'might be', 'wandering', 'nowhere']) assert.ok(!text.toLowerCase().includes(w), `"${w}" reached the narrator`);
 });
 

@@ -1,6 +1,12 @@
 // Inputs for the prompt snapshot test: every prompt builder, called with fixed inputs. prompts.snapshot.json holds
 // what the code produced before the prompts moved to plugin/prompts/default.json; the default text must match it.
 import { intentLine } from '../../../extension/owners.mjs';
+import { glimpseLines, doorWord } from '../../../extension/brackets.mjs';
+import { aftermathLine, relocationNote } from '../../../extension/expiry.mjs';
+import { expiryNarratorNote, trackerExpiryLines } from '../../../extension/npcexpiry.mjs';
+import { npcSlices, offmapAbsentLine, sayLine } from '../../../extension/npc.mjs';
+import { trackerLeftBehind } from '../../../extension/tracker.mjs';
+import { durationWords } from '../../../extension/words.mjs';
 const exitA = { direction: 'north', to: 'r:inn/hall', to_name: 'Hall', to_display_name: 'Hall', to_summary: 'A long hall.', description: 'An oak door.' };
 const exitB = { direction: 'trapdoor', to: 'r:inn/cellar', to_name: 'Cellar', hidden: true, obscured: true };
 const loc = { address: 'r:inn/common', name: 'Common Room', display_name: 'Common Room', description: 'A smoky room.', exits: [exitA, exitB], views: [],
@@ -20,7 +26,8 @@ const looks = [{ kind: 'see', peek: true, via: 'north', name: 'Hall', descriptio
     { kind: 'see', via: 'north', name: 'Hall', description: 'Long.', opened: true, sight: 'clear' }, { kind: 'see', window: true, name: 'Yard', description: 'Mud.' },
     { kind: 'threshold', via: 'north', description: 'An oak door.', unknown: true }, { kind: 'threshold', via: 'gate', description: 'Iron.', shut: true, name: 'Yard' },
     { kind: 'threshold', via: 'gate', description: 'Iron.', peek: true }, { kind: 'closed', via: 'north', stuck: 'is locked' }, { kind: 'closed', via: 'north', word: 'way' },
-    { kind: 'closed', via: 'north' }, { kind: 'listen', via: 'north', sound: 'clear' }, { kind: 'listen', via: 'north', sound: 'none' }, { kind: 'listen', via: 'north' }, { kind: 'nothing', via: 'north', opened: true }];
+    { kind: 'closed', via: 'north' }, { kind: 'listen', via: 'north', sound: 'clear' }, { kind: 'listen', via: 'north', sound: 'none' }, { kind: 'listen', via: 'north' }, { kind: 'nothing', via: 'north', opened: true },
+    { kind: 'threshold', via: 'north', description: 'An oak door with a grille.', through_closed: true, name: 'Yard' }];
 const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weather: 'It rains.', took: '', timeNudge: true }], [trip, true, { took: '10 minutes', date: 'Noon', timeNudge: true }],
     [move, false, { dig: { direction: 'hole' } }], [null, false, { look: looks[2] }], [null, false, { door: { type: 'stuck', direction: 'north', why: 'is locked' } }],
     [null, true, { newDoor: true }], [null, false, { newDoor: true }], [null, false, { door: { type: 'open_door', direction: 'north' } }], [null, false, { door: { type: 'close_door', direction: 'gate' } }],
@@ -86,4 +93,19 @@ export const cases = ({ ext, patches, placeform }) => ({
         }),
         player: 'I look around.', story: 'You look around. Hesk stands at the bar.',
     }),
+
+    // ---- R5 (N7): narrator lines moved out of code into narration.* entries.
+    'narration.glimpses': glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', sight: 'clear', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }).join('\n'),
+    'narration.door_word': ['north', 'out', 'gate', 'trapdoor'].map(doorWord).join(' | '),
+    'narration.durations': [45, 60, 2700, 3600, 5400, 9000, 8100, 95400].map(durationWords).join(' | '),
+    'narration.relocated_gone': relocationNote([{ is_system: true, mes: '', extra: { worldscrawl_notice_kind: 'missing', worldscrawl_notice_expired: true, worldscrawl_location: 'r:inn/common' } }], loc, 'Ana and Hesk'),
+    'narration.relocated_missing': relocationNote([{ is_system: true, mes: '', extra: { worldscrawl_notice_kind: 'missing', worldscrawl_location: 'r:inn/common' } }], loc, 'You'),
+    'narration.aftermath_gone': aftermathLine({ kind: 'gone', gone: 'r:inn/stall', gone_name: 'Pop-up Stall', place_name: 'Market Lane', why: 'a temporary change ended' }),
+    'narration.aftermath_lost_exits': aftermathLine({ kind: 'lost_exits', lost: ['north', 'gate'], place_name: 'Common Room (The Inn)', why: 'a temporary change ended' }),
+    'narration.person_wore_off': expiryNarratorNote([{ shown: 'the landlady', what: 'turned into a gnoll', looks: 'copper braids', body: 'Tall, raw-boned', outfit: "Widow's black." }], 'Ana and Hesk'),
+    'narration.npc_elsewhere': offmapAbsentLine({ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady' }, { activity: 'asleep', where: 'her own room', near: { kind: 'map', name: 'The Drowned Rat' } }),
+    'narration.npc_overdue': [{ id: 'narration.npc_due', vars: { name: 'Hesk', place: 'the forge', activity: 'work' } }, { id: 'narration.npc_late', vars: { name: 'Hesk', late: durationWords(3600), activity: 'work' } }, { id: 'narration.npc_moved_on', vars: { name: 'Tam' } }].map(sayLine).join('\n'),
+    'narration.people': (({ npcs_present, npc_focus }) => `${npcs_present}\n---\n${npc_focus}`)(npcSlices([{ id: 'hesk', name: 'Hesk', unknownAs: 'the landlady', line: 'The landlady.', looks: 'copper braids', activity: 'pouring drinks', body: 'Tall, raw-boned.', outfit: "Widow's black.", manner: 'Brisk.', voice: 'Low.', memory: ['Joe lied about the keys.'], facts: ['keeps the keys'], deep: { history: 'Born in Riverton.', secrets: ['owes money'], relationships: { Bo: 'her cousin' } }, disposition: { player: { value: 'wary', reason: 'a broken mug' } } }, { id: 'tam', name: 'Tam', line: 'A carter.', activity: 'x', activityKind: 'with_player' }], { id: 'hesk', depth: 'deep' }, { pc: 'Ana' })),
+    'npc.tracker.left_behind': trackerLeftBehind([{ id: 'hesk', name: 'the landlady', unknownAs: 'the landlady', nameKnown: false, looks: 'copper braids', from: 'Common Room' }]),
+    'npc.tracker.expired': trackerExpiryLines([{ id: 'hesk', handle: 'pq29k', shown: 'the landlady', what: 'turned into a gnoll' }]),
 });

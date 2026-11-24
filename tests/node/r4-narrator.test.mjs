@@ -32,6 +32,13 @@ const SAMPLE = {
     excerpt: 'The innkeeper shows them a room.', options: '- hall: the Hall', default: 'hall', name: 'Hesk', activity: 'pouring drinks', line: 'The landlady.',
     lines: 'the landlady, pouring drinks', found: 'The landlady', not_found: 'the landlady', shown: 'the landlady', role: 'the landlady of the inn',
     npcs_present: 'the landlady: a big woman', npc_focus: '', lore_places: 'The Drowned Rat', lore: 'The inn is old.', said: 'The player wrote: "I look around."',
+    // R5 (N7): the placeholders of the entries moved out of code.
+    exit_list: 'north (the Hall), out (Village Square)', far: ' The view is open and carries well beyond it.', date: 'Saturday morning (08:30)', date_before: 'Saturday dawn (06:00)',
+    duration: 'an hour and a half', weather: 'Weather (outside): Light rain, cool.', opened: p => `${p} opened the north door first. `, beyond: 'It leads to the Hall, but that cannot be seen from here.',
+    light: ' The light has changed from dawn to morning.', part_before: 'dawn', part: 'morning', items: 'the landlady: "turned into a gnoll"', people: p => ` These people are as they were before:\n- The landlady: "turned into a gnoll" has worn off.\nIf ${p} can see them, describe them as they are now.`,
+    intent: 'turned into a gnoll', appearance: ' What they look like now: Looks: copper braids.', looks: 'copper braids', gone: 'Pop-up Stall', late: 'an hour', time: '18:00',
+    body: 'sturdy.', outfit: 'a wool apron.', manner: 'brisk.', speech: 'low.', pc: p => p, attitude: 'wary', reason: ' (a broken mug)', memories: 'a broken mug', history: 'She has run the inn for years.',
+    facts: 'runs the inn', secrets: 'owes money', relationships: 'Bo: her cousin',
 };
 const fillFor = (def, party) => Object.fromEntries((def.placeholders ?? []).map(ph => {
     assert.ok(ph.name in SAMPLE, `${def.id}: add a sample value for {{${ph.name}}} to the R4 grammar table`);
@@ -145,7 +152,7 @@ test('N8: a wait turn and a move turn get the nudge, through applyFacts', async 
     say(c, 'I wait half an hour.', { worldscrawl_wait: { seconds: 1800, label: 'waited 30m' } });
     const w = await turn(blocks);
     assert.ok(timeLine(w.facts).endsWith(` ${NUDGE}`), `wait turn: ${timeLine(w.facts)}`);
-    assert.match(w.facts, /What just happened: You waited here for 30m, staying put\./, 'the wait line (code) is past tense');
+    assert.match(w.facts, /What just happened: You waited here for 30 minutes, staying put\./, 'the wait line (code) is past tense');
     reply(c, 'Time passes.');
     const m = c.chat[say(c, '[move] out')];
     await bracketIntent(m, parseBracket(m.mes));
@@ -205,11 +212,11 @@ test('N3 + N2 through applyFacts: a failed break-through and a stuck door say FA
     reply(c, 'The wall holds.');
     say(c, 'We open the back door.', { worldscrawl_door: { type: 'stuck', direction: 'back', why: 'is locked' } });
     const door = await turn(blocks);
-    assert.match(door.after, /^What just happened: Ana and Bo tried to open the door \(back\), but it is locked\. Show the door \(back\) holding fast: nothing beyond it can be seen or reached, and this reply ends with it still shut and Ana and Bo still at Common Room \(The Drowned Rat\)\.$/m);
+    assert.match(door.after, /^What just happened: Ana and Bo tried to open the back door, but it is locked\. Show the back door holding fast: nothing beyond it can be seen or reached, and this reply ends with it still shut and Ana and Bo still at Common Room \(The Drowned Rat\)\.$/m);
     reply(c, 'Locked.');
     say(c, 'We go back.', { worldscrawl_door: { type: 'stuck', direction: 'back', why: 'is locked', attempt: 'move' } });
     const move = await turn(blocks);
-    assert.match(move.after, /^What just happened: Ana and Bo tried to go through the door \(back\), but it is locked\. Show the door \(back\) holding fast and nobody passing through it: this reply ends with it still shut and Ana and Bo still at Common Room \(The Drowned Rat\)\.$/m);
+    assert.match(move.after, /^What just happened: Ana and Bo tried to go through the back door, but it is locked\. Show the back door holding fast and nobody passing through it: this reply ends with it still shut and Ana and Bo still at Common Room \(The Drowned Rat\)\.$/m);
     assert.doesNotMatch(`${dig.after}\n${door.after}\n${move.after}`, /\bDo not\b/);
 });
 
@@ -217,7 +224,7 @@ test('N6 + N2: a door opened or closed is told in the past tense, with no stay s
     const { c, blocks } = boot('Ana');
     say(c, 'I close the back door.', { worldscrawl_door: { type: 'close_door', direction: 'back' } });
     const { facts } = await turn(blocks);
-    assert.match(facts, /^What just happened: Ana closed the door \(back\)\.$/m);
+    assert.match(facts, /^What just happened: Ana closed the back door\.$/m);
     assert.equal(facts.split('\n').filter(l => /still there|stays at/.test(l)).length, 1);
 });
 

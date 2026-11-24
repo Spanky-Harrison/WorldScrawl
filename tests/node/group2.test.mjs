@@ -458,7 +458,7 @@ test('presence: in the forge at 09:00 Brask is stamped and present, the narrator
         assert.ok(presentIds(c).includes('brask'));
         const text = await factsText(blocks);
         const people = text.slice(text.indexOf('People here'), text.indexOf('You stays'));
-        assert.match(people, /Brask \[\w+\]: .*Now: working the forge/);
+        assert.match(people, /^Brask: .*Now: working the forge/m);
         assert.doesNotMatch(people, /\b(might|wandering|anywhere|area|schedule|block)\b|\d+%/i, 'in-world words only');
     }
     {
@@ -654,7 +654,7 @@ test('[find] through the typed handler: from the cellar, the flagged block bring
         const text = await factsText(blocks);
         assert.match(blocks[ext.REMINDER_KEY] ?? '', /^Wren came in just now and is here at the end of this reply\. Show them arriving\.$/m);
         const people = text.slice(text.indexOf('People here'), text.indexOf('You stays'));
-        assert.match(people, /Wren \[\w+\]: .*Now: seeing to the inn/);
+        assert.match(people, /^Wren: .*Now: seeing to the inn/m);
         assert.doesNotMatch(people, /anywhere|private|\bmight\b|wander|%|\bblock\b|\bflag\b/i, 'in-world words only: the narrator never sees the flag');
         assert.ok(whoAt(c.chat, c.chat.length - 1, cast(), envOf(c), CELLAR).some(x => x.id === 'wren' && x.here), "Who's here lists her in the cellar");
         // The slash form and the flag source go through the same judge.

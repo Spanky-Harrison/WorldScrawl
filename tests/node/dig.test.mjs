@@ -201,7 +201,7 @@ test('every pick-one prompt asks for a key, not a number', async () => {
 const ext = await import('../../extension/index.js');
 test('glimpse wording: direction words vs nouns', () => {
     assert.deepEqual(ext.glimpseLines({ exits: [{ direction: 'up', view: 'open', to: 'a', to_name: 'Attic', to_summary: 'Dusty.' }, { direction: 'gate', view: 'open', to: 'b', to_name: 'Yard', to_summary: 'Muddy.' }] }),
-        ['Looking up, you can see Attic: Dusty.', 'Through the gate, you can see Yard: Muddy.']);
+        ['Attic can be seen from here, looking up: Dusty.', 'Yard can be seen from here, looking through the gate: Muddy.'], 'R5 N5: no "you can see"');
 });
 test('long road (sight none, not obscured): look describes the road, may name Larkspur, not describe it', () => {
     const t = ext.lookText('Ann', 'East Road', { kind: 'threshold', via: 'east', description: 'The road runs on east and out of sight.', unknown: false, name: 'Larkspur' });
@@ -212,7 +212,7 @@ test('narration: exits hint on arrival and look-around only; obscured exit label
     const arrive = ext.factsText({ ...loc, address: 'r:h' }, { direction: 'south', from_name: 'X', to_name: 'Hall', to: 'r:h' }, false);
     const around = ext.factsText(loc, null, false, { lookAround: true }), plain = ext.factsText(loc, null, false);
     assert.ok(arrive.includes('mention every exit') && around.includes('mention every exit') && around.includes('looked around') && !plain.includes('mention every exit'));
-    assert.ok(!arrive.includes('Vault') && arrive.includes('describe only the exit itself; where it leads stays unknown') && arrive.includes('you can see Yard'), arrive);
+    assert.ok(!arrive.includes('Vault') && arrive.includes('describe only the exit itself; where it leads stays unknown') && arrive.includes('Yard can be seen from here'), arrive);
     assert.deepEqual(['I look around', 'she glances about the room', 'I survey the surroundings', 'I look at the door'].map(x => ext.LOOK_AROUND_RE.test(x)), [true, true, true, false]);
 });
 test('[ws-start] marker stripped from the prompt copy, stored text kept', () => {

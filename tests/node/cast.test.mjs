@@ -1,3 +1,4 @@
+import './useprompts.mjs';
 // NPC phase 1.5: the map's cast browser / editor (pure helpers), the stateless save / delete routes, and the in-play view.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

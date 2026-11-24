@@ -1,3 +1,4 @@
+import './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NPC_KEY, NPC_FLAG_KEY, framesOf, npcSlices, relOf, relLine, parseRelArg, stampSummary } from '../../extension/npc.mjs';
