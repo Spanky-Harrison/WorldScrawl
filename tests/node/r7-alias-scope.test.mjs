@@ -286,3 +286,62 @@ test('R7 came_along: "a guard" came along out of the inn: the guard who was in t
     assert.equal(scene.personScope(c.chat, id).here, SQUARE, 'the reply itself is in the square');
     assert.deepEqual(scene.alongScopeOf(c.chat, id)[1], { from: TAVERN });
 });
+
+// ---- Round 2 (review): the note's message, one note per re-apply, placeless ties.
+test('R7 r2 came_along: a level 2/3 came_along pick notes "person match" on the reply being resolved, not on the message before the move (its scope)', async () => {
+    // No guard was in the common room: the ladder reads "a guard" from the old room, and the nearest is in the square (level 2).
+    const { c } = boot({ cards: [BRAN(SQUARE), TOBIN(GREEN)], here: TAVERN, time: '17:00', tracker: () => people({ id: 'a guard', action: 'came_along' }) });
+    const p = say(c, 'I [move] out');
+    c.chat[p].extra.worldscrawl_intent_checked = true;
+    assert.equal((await bracketIntent(c.chat[p], parseBracket(c.chat[p].mes))).kind, 'move');
+    await scene.prepareNpcs(c.chat[p]);
+    const id = reply(c, 'A guard follows you out of the inn into the square.');
+    globalThis.document = makeDoc(c.chat.map((_, i) => i));
+    await onReplyForFlags(id); await flush(40);
+    const [before] = scene.alongScopeOf(c.chat, id);
+    assert.ok(before < id);
+    assert.deepEqual(matchNotes(c.chat[id]).map(x => x.reason), ["'a guard' read as a guard at Village Square, nearest to you"], JSON.stringify(callNotes(c.chat[id])));
+    for (let i = 0; i < id; i++) assert.deepEqual(matchNotes(c.chat[i]), [], `no person-match note on message ${i}`);
+});
+
+test('R7 r2 re-applying the same reply (re-run, a second apply) leaves exactly one "person match" note', async () => {
+    const fact = people({ id: 'a guard', action: 'fact', text: 'Keeps the gate keys.' });
+    const { c } = boot({ here: TAVERN, tracker: fact });
+    const id = await exchange(c, 'I ask about the guards.', 'The barkeep says a guard in the square keeps the gate keys.');
+    assert.deepEqual(stamps(c.chat[id], 'npc_fact').map(s => s.id), ['guard_a'], JSON.stringify(c.chat[id].extra));
+    assert.equal(matchNotes(c.chat[id]).length, 1, JSON.stringify(callNotes(c.chat[id])));
+    // Re-run: stamps cleared and the reply read again; then once more without clearing.
+    c.chat[id].extra[NPC] = [];
+    await onReplyForFlags(id); await flush(40);
+    await onReplyForFlags(id); await flush(40);
+    assert.deepEqual(matchNotes(c.chat[id]).map(x => x.reason), ["'a guard' read as a guard at Village Square, nearest to you"], JSON.stringify(callNotes(c.chat[id])));
+    // The same [find] resolved twice on one message: still one.
+    const k = say(c, '[find] a guard');
+    scene.resolveAt(c.chat, k, 'a guard', [BRAN(SQUARE), TOBIN(GREEN)].map(g => ({ ...g })));
+    scene.resolveAt(c.chat, k, 'a guard', [BRAN(SQUARE), TOBIN(GREEN)].map(g => ({ ...g })));
+    assert.equal(matchNotes(c.chat[k]).length, 1);
+});
+
+test('R7 r2 a tie with no place: "(somewhere else)", entries that read the same get their handle; no unlearned name leaks', async () => {
+    const LOST_A = guard('guard_a', 'Bran', SQUARE, { schedule: [] }), LOST_B = guard('guard_b', 'Tobin', SQUARE, { schedule: [] });
+    let { c } = boot({ cards: [LOST_A, LOST_B], here: GREEN });
+    const ha = N.handleOf('guard_a'), hb = N.handleOf('guard_b');
+    assert.notEqual(ha, hb);
+    const want = `Which one? a guard (somewhere else) [${ha}], a guard (somewhere else) [${hb}]`;
+    const reasons = [(await bracket(c, '[find] a guard')).r.note, (await bracket(c, '[name] a guard')).r.note];
+    const k = say(c, 'I think about the guards.');
+    reasons.push((await scene.setRelOn(c.chat[k], 'a guard | met')).reason);
+    const from = c.chat.length;
+    await ext.findCommand('a guard');
+    reasons.push(...c.chat.slice(from).map(m => String(m.mes ?? '')));
+    assert.equal(reasons.length, 4);
+    for (const t of reasons) { assert.equal(t, want); assert.doesNotMatch(t, REAL, t); }
+    // The handle shown picks that one.
+    const pick = await bracket(c, `[find] ${hb}`);
+    assert.equal(pick.msg.extra[FOUND][0].id, 'guard_b');
+    // One placed, one placeless: places tell them apart, no handle needed.
+    ({ c } = boot({ cards: [BRAN(DOCKS), LOST_B], here: GREEN }));
+    const mixed = (await bracket(c, '[find] a guard')).r.note;
+    assert.equal(mixed, 'Which one? a guard (River Docks), a guard (somewhere else)');
+    assert.doesNotMatch(mixed, REAL);
+});
