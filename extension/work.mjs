@@ -42,7 +42,7 @@ const CALL_LABELS = [
     [/^intent/, 'reading your move'],
     [/^pick: (look target|closed door|view|door)$/, 'working out what you look at'],
     [/^pick: bracket target$/, 'reading your [bracket]'],
-    [/^pick: disposition$/, 'working out how they feel about you'],
+    [/^pick: disposition$/, 'working out their attitude toward you'],
     [/^pick: who$/, "working out who you're talking to"],
     [/^pick: expiry$/, 'choosing where you end up'],
     [/^discovery \/ dig$/, 'working out the new opening'],

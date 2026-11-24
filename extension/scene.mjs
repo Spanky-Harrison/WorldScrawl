@@ -65,12 +65,12 @@ export function listedPeople(chat, id, loc) {
     try {
         const env = npcEnv(chat, loc);
         return presentAt(chat, id, pack.npcs, env).map(p => {
-            const stance = p.disposition?.[PLAYER];
+            const dispo = p.disposition?.[PLAYER];
             return {
                 id: handleOf(p.id), name: shownName(p), looks: p.looks || '', body: p.body || '', outfit: p.outfit || '',
                 unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false,
                 facts: [...(p.facts ?? [])], memory: [...(p.memory ?? [])],
-                stance: stance?.value || '', stanceReason: stance?.reason || '',
+                disposition: dispo?.value || '', dispositionReason: dispo?.reason || '',
             };
         });
     } catch (e) { console.warn('[WorldScrawl] tracker people', e.message); return []; }
@@ -610,7 +610,8 @@ function rememberWith(got, values = {}, changed = []) {
     if (!disposition) delete out.disposition;
     return { got: out };
 }
-const REMEMBER_BLANK = { manner: '', voice: '', looks: '', body: '', outfit: '', history: '', unknownAs: '', facts: [], memory: [], invented: [] };
+// R6 F3: a full card, up to 8 memories and the made-up list fit; a cut-off answer is not JSON and counts as a failed try.
+const REMEMBER_LENGTH = 1200;
 /** The remember model call for `name` at message `id`: a parsed card, or null after two unusable answers. */
 /** The story since `name` showed up, up to message `id` (the Remember read-back excerpt, at most 6000 characters). */
 function rememberStory(chat, id, name) {
@@ -627,7 +628,7 @@ async function askRemember(id, name, { prefetch = false, hint = '', keep = null 
     const kind = prefetch ? 'remember (prefetch)' : 'remember';
     let got = null;
     for (let t = 0; t < 2 && !got; t++) {
-        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') }), responseLength: 900 }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
+        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') }), responseLength: REMEMBER_LENGTH }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
         if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
     }
     if (got && keep) got = rememberWith(got, keep, Object.keys(keep)).got ?? got; // what the player typed stays exactly
@@ -675,9 +676,19 @@ async function keepRememberNow(c, msg, card, id, edited) {
     if (!got) {
         if (card.proposal?.name === name && card.proposal.got) got = card.proposal.got; // prefetched: instant
         else if (rememberFlights.has(card.nid)) got = await rememberFlights.get(card.nid); // in flight: never a second call
+        else got = await askRemember(id, name); // nothing asked yet (the card was never drawn)
     }
-    if (!got) got = await askRemember(id, name);
-    if (!got) got = { ...REMEMBER_BLANK, name, line: 'Met in this scene.' };
+    // R6 F3: no usable answer (cut off, not JSON, empty, or a model error): nothing is saved. The card shows the failure
+    // ("Could not prepare the card.", Ask the model again) and the Approve is undone, never a stand-in person.
+    if (!got) {
+        card.proposal = { name, failed: true };
+        unmarkDecided(msg, noticeIdOf(card, 'remember'));
+        syncSwipeExtra(msg);
+        renderPatchCards();
+        toastr.warning(`WorldScrawl: could not prepare ${name}'s card, so nothing was saved. Ask the model again on the card.`);
+        await c.saveChat?.();
+        return;
+    }
     // A schedule (passing through the room they were met in) and a stay there, so approving never makes them vanish.
     // The room is the player's room at the card's message on this chat's live map: a room made in play counts.
     // The schedule is the daily pattern the card picked (or the player typed: Approve edited), expanded by the engine;
