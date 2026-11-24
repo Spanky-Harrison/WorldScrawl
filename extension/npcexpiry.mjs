@@ -64,8 +64,6 @@ export function describeExpiries(items, person, party) {
 
 /** "the temporary change "turned into a gnoll" on Hesk": one item, for lists (a wait's summary, the tracker). */
 export const changeLabel = it => `the temporary change "${it.what}" on ${it.who || it.name || it.id}`;
-/** changeLabel as the model may see it: the shown name ("the landlady"), never the real one before it is learned. */
-export const modelChangeLabel = it => changeLabel({ ...it, who: it.shown || it.who });
 
 /** The chat notice text, worded like a place expiry's "[Engine: ...]" line. */
 export function expiryNoticeText(items) {

@@ -290,11 +290,11 @@ export function lookText(who, here, look) {
     if (look.kind === 'see' && look.through_closed) return P('narration.look_through', { ...base, name: look.name, description: look.description });
     if (look.kind === 'see') return P('narration.look_see', { ...base, opened, direction, name: look.name, description: look.description, far: farPiece(look.sight) });
     if (look.kind === 'threshold') {
-        const how = look.through_closed ? `through the closed ${look.via}` : look.peek ? `through a gap in the closed ${door}` : look.shut ? `at the closed ${door}` : direction;
+        const how = look.through_closed ? `through the closed ${door}` : look.peek ? `through a gap in the closed ${door}` : look.shut ? `at the closed ${door}` : direction;
         const beyond = look.unknown ? P('narration.look_beyond_unknown') : look.name ? P('narration.look_beyond_named', { name: look.name }) : P('narration.look_beyond_unseen');
         return P('narration.look_threshold', { ...base, opened, direction: how, description: look.description, beyond });
     }
-    if (look.kind === 'closed' && look.stuck) return P('narration.look_stuck', { ...base, why: look.stuck });
+    if (look.kind === 'closed' && look.stuck) return P('narration.door_stuck', { ...base, why: look.stuck });
     if (look.kind === 'closed') return P(look.word === 'way' ? 'narration.look_blocked' : 'narration.look_closed', base);
     if (look.kind === 'listen') return P(look.sound === 'clear' ? 'narration.listen_clear' : look.sound === 'none' ? 'narration.listen_none' : 'narration.listen_faint', base);
     return P('narration.look_nothing', { ...base, opened, direction });
