@@ -66,31 +66,81 @@ const PLACE_WORD = /\s+(?:behind|beside|by|near|next|at|in|inside|outside|on|und
  * place word ("the landlady behind the bar" -> "the landlady"). Null when none or several match: no match rather than
  * the wrong person. A made-up id ("mo-ran", "elara") is read as text.
  */
-export function findPerson(text, people) {
+export function findPerson(text, people, scope = null) {
+    return resolvePerson(text, people, scope).person;
+}
+/**
+ * findPerson with its reasons (R7). `scope` (personScope in scene.mjs: the player's place and the clock at the message
+ * being resolved) breaks a text match that is not unique by the scope ladder (scopeLevel); without it, several matches
+ * are null as before. {person, tie: [people equally near] when no guess was made, level, biased: the ladder chose}.
+ * Handles and ids never reach the ladder.
+ */
+export function resolvePerson(text, people, scope = null) {
+    const none = { person: null, tie: [], level: null, biased: false };
     const raw = String(text ?? '').trim();
-    if (!raw) return null;
+    if (!raw) return none;
     const list = [...(people ?? [])].filter(Boolean);
     const byHandle = list.filter(p => handleOf(p.id) === raw);
-    if (byHandle.length === 1) return byHandle[0];
+    if (byHandle.length === 1) return { ...none, person: byHandle[0] };
     const byId = list.find(p => p.id === raw);
-    if (byId) return byId;
+    if (byId) return { ...none, person: byId };
     const said = raw.replace(/[_-]+/g, ' ');
-    const hit = matchSaid(said, list);
-    if (hit !== undefined) return hit;
+    const hit = matchSaid(said, list, scope);
+    if (hit) return hit;
     const cut = said.replace(PLACE_WORD, '').trim();
-    return cut && cut !== said ? matchSaid(cut, list) ?? null : null;
+    return (cut && cut !== said ? matchSaid(cut, list, scope) : null) ?? none;
 }
-/** One person for the words `said`, null for several (ambiguous: stop), undefined for none. */
-function matchSaid(said, list) {
+/**
+ * The scope ladder (R7): how far `place` is from the player's room `here`. 0 the same room, 1 the same subregion (the
+ * `region:sub` prefix), 2 the same region (the `region` prefix), 3 elsewhere or unknown. An area or region address
+ * counts at its own level ("riverton:docks" is 1 from any Docks room).
+ */
+export function placeLevel(here, place) {
+    const h = String(here ?? '').trim(), p = String(place ?? '').trim();
+    if (!h || !p) return 3;
+    if (h === p) return 0;
+    const sub = a => a.split('/')[0], region = a => a.split(':')[0];
+    if (sub(h).includes(':') && sub(h) === sub(p)) return 1;
+    return region(h) === region(p) ? 2 : 3;
+}
+/** A person's level from `here`: the place they are in or due at now, else their anchors (job, schedule places) one level wider. */
+export function scopeLevel(here, { now = [], anchors = [] } = {}) {
+    return Math.min(3, ...now.map(a => placeLevel(here, a)), ...anchors.map(a => placeLevel(here, a) + 1));
+}
+/**
+ * One person for the words `said`: {person, tie, level, biased}, a tie (no guess: stop) with person null, or undefined
+ * for no match. With a scope, both tiers are gathered first: someone in the player's room wins at any tier (exact before
+ * loose among them); otherwise exact beats loose at every wider level, and the nearest level of that tier wins.
+ */
+function matchSaid(said, list, scope = null) {
     const key = normName(said), bare = bareName(said);
     if (!key) return undefined;
     const exact = list.filter(p => namesOf(p).some(n => normName(n) === key) || (p.unknownAs && bareName(p.unknownAs) === bare));
-    if (exact.length === 1) return exact[0];
-    if (exact.length > 1) return null;
     const starts = d => { const b = bareName(d); return b === bare || b.startsWith(`${bare} `); };
-    const loose = list.filter(p => namesOf(p).some(n => nameIn(said, n) || nameIn(n, said)) || (p.unknownAs && bare && !ARTICLE.test(`${bare} `) && starts(p.unknownAs)));
-    return loose.length === 1 ? loose[0] : loose.length > 1 ? null : undefined;
+    const looseOf = () => list.filter(p => !exact.includes(p) && (namesOf(p).some(n => nameIn(said, n) || nameIn(n, said)) || (p.unknownAs && bare && !ARTICLE.test(`${bare} `) && starts(p.unknownAs))));
+    const one = (person, extra = {}) => ({ person, tie: [], level: null, biased: false, ...extra });
+    const tie = (people, level = null) => ({ person: null, tie: people, level, biased: false });
+    if (!scope?.levelOf) {
+        if (exact.length === 1) return one(exact[0]);
+        if (exact.length > 1) return tie(exact);
+        const loose = looseOf();
+        return loose.length === 1 ? one(loose[0]) : loose.length > 1 ? tie(loose) : undefined;
+    }
+    const loose = looseOf();
+    if (exact.length + loose.length === 0) return undefined;
+    if (exact.length + loose.length === 1) return one(exact[0] ?? loose[0]);
+    const level = new Map([...exact, ...loose].map(p => [p, scopeOfPerson(scope, p)]));
+    const room = [...exact, ...loose].filter(p => level.get(p) === 0);
+    let pool, best;
+    if (room.length) { best = 0; const e = room.filter(p => exact.includes(p)); pool = e.length ? e : room; }
+    else {
+        const tier = exact.length ? exact : loose;
+        best = Math.min(...tier.map(p => level.get(p)));
+        pool = tier.filter(p => level.get(p) === best);
+    }
+    return pool.length === 1 ? one(pool[0], { level: best, biased: true }) : tie(pool, best);
 }
+const scopeOfPerson = (scope, p) => { try { const l = scope.levelOf(p); return Number.isFinite(l) ? l : 3; } catch { return 3; } };
 
 // ---- Learning a name.
 const QUOTED = /"([^"\n]*)"|“([^”]*)”/g;

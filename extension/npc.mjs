@@ -685,6 +685,38 @@ function duePlace(npc, j, env, { useRoll = false } = {}) {
     return sched;
 }
 
+/**
+ * R7, the scope ladder's places for one person at message `j` (never live now): `now`, where they are or are due at that
+ * message (duePlace: follow, a stay, an appearance stamp, the schedule; an off-map entry by its `near` on the map), and
+ * `anchors`, their job and every place their schedule names (an is-at place, a might option, an off-map near). Addresses
+ * only; scopeLevel (names.mjs) compares them with the player's room.
+ */
+export function personPlaces(npc, j, env) {
+    const now = [], anchors = [];
+    const onMap = text => {
+        const t = String(text ?? '').trim();
+        if (!t || /^offmap:/i.test(t)) return '';
+        const r = resolveSchedulePlace(t, env ?? {});
+        if (r.ok) return r.address;
+        const idx = env?.index;
+        return idx?.subs?.has?.(t) || idx?.regions?.has?.(t) ? t : '';
+    };
+    let due = null;
+    try { due = duePlace(npc, j, env); } catch { due = null; }
+    if (due?.address) now.push(due.address);
+    else if (due?.near?.kind === 'map' && due.near.address) now.push(due.near.address);
+    const job = onMap(npc?.job);
+    if (job) anchors.push(job);
+    for (const e of npc?.schedule ?? []) {
+        if (!e || e.broken) continue;
+        if (isMight(e)) { for (const o of e.options ?? []) { const a = onMap(o?.text); if (a) anchors.push(a); } continue; }
+        if (e.place) { const a = onMap(e.place); if (a) anchors.push(a); continue; }
+        const near = nearOf(e, env);
+        if (near?.kind === 'map' && near.address) anchors.push(near.address);
+    }
+    return { now, anchors: [...new Set(anchors)] };
+}
+
 function placeLabel(env, address) {
     return env.names?.(address) || address;
 }
