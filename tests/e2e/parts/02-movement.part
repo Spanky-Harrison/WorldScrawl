@@ -19,7 +19,7 @@
     check('intent marks where you came from', intentReq.includes('in (to The Drowned Rat, where you came from)'), intentReq.slice(0, 400));
     check('typed movement moved party', (await stored()) === 'riverton:docks/piers', String(await stored()));
     let narr = JSON.stringify((await lastReq()).messages);
-    check('narration got arrival facts', narr.includes('User moved south from Village Square (Riverton Streets) to River Docks') && narr.includes('never move User'), '');
+    check('narration got arrival facts', narr.includes('User moved south from Village Square (Riverton Streets) to River Docks') && narr.includes("Only the story's moves take User to another location"), '');
     check('narration request has no tools', !JSON.stringify((await lastReq()).tools ?? []).includes('ws_move'));
     check('no nudge when tools off', !narr.includes('call ws_look'));
 
