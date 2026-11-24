@@ -109,7 +109,7 @@ test('jargon: someone asleep elsewhere is "elsewhere", with the keep-out line, a
     await bracket(c, '[lore] The Drowned Rat');
     const f = await facts(blocks);
     assert.match(f, /The landlady: asleep, elsewhere \(her own room, in The Drowned Rat\)/);
-    assert.match(f, /\(Anyone above who is elsewhere is not with the characters\./);
+    assert.match(f, /\(Anyone above who is elsewhere is not with the characters; they stay out of the scene until they actually come here\.\)/);
     assert.deepEqual(jargonIn(f), []);
 });
 
