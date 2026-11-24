@@ -621,7 +621,7 @@ async function askRemember(id, name, { prefetch = false, hint = '', keep = null 
     const chat = ctx().chat ?? [];
     const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
     const story = rememberStory(chat, id, name);
-    const kept = Object.entries(keep ?? {}).filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => `- ${C.REMEMBER_FIELDS.find(([f]) => f === k)?.[1] ?? k}: ${String(v).trim()}`);
+    const kept = Object.entries(keep ?? {}).filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => `- ${k === 'outfit' ? 'Outfit' : C.REMEMBER_FIELDS.find(([f]) => f === k)?.[1] ?? k}: ${String(v).trim()}`); // R3 A4: side calls say Outfit (the card label Wearing is for the player)
     const again = hint || kept.length ? `\n\n${P('npc.remember_again', { hint: hint || '(none)', kept: kept.join('\n') || '(none)' })}` : '';
     const prompt = P('npc.remember', { name, place: loc ? displayName(loc) : 'here', story: story || '(nothing was said yet)' }) + again;
     const kind = prefetch ? 'remember (prefetch)' : 'remember';

@@ -41,7 +41,7 @@
     {
       "id": "npc",
       "title": "People",
-      "flow": "Runs when a saved person might be part of the turn. Step 1, only when the player's words do not already name one person who is here: a pick-one question asks who they are addressing or looking at (the keys are those people's ids, plus nobody). How deeply that person is described is decided from the words (a look or a talk is focused; a question about their past is deep), not a second question. The first time someone with no starting attitude is met, a separate pick-one assigns one, leaning toward indifferent. Remembering someone is its own JSON question: it reads the story since they showed up and answers with a name and one line. When the remember answer arrives, one more small JSON question (People: pick a daily pattern) chooses their daily pattern (day shift, night shift or passing through), a job (a room or an area) and a home (a room) from the listed places or off the map, and up to three favorite public spots; the game checks it, asks once more with the error if it does not fit, and otherwise falls back to passing through. The game expands the pattern into their schedule; the narrator never sees the pattern. After a story reply, the tracker question (npc.tracker) lists person, place, and wait changes from that exchange alone. On a reply to a move it also lists the people just left behind (npc.tracker_left_behind); the tracker may say one of them came along (came_along), and the game then keeps them with the player until the next move is judged on its own. Following someone is not a tracker action (the narrator's tag still is). NPC flagging off means it proposes no person updates; a written tag is still read. Map flagging off means it proposes no place updates."
+      "flow": "Runs when a saved person might be part of the turn. Step 1, only when the player's words do not already name one person who is here: a pick-one question asks who they are addressing or looking at (the keys are those people's ids, plus nobody). How deeply that person is described is decided from the words (a look or a talk is focused; a question about their past is deep), not a second question. The first time someone with no starting attitude is met, a separate pick-one assigns one, leaning toward indifferent. Remembering someone is its own JSON question: it reads the story since they showed up and answers with a name and one line. When the remember answer arrives, one more small JSON question (People: pick a daily pattern) chooses their daily pattern (day shift, night shift or passing through), a job (a room or an area) and a home (a room) from the listed places or off the map, and up to three favorite public spots; the game checks it, asks once more with the error if it does not fit, and otherwise falls back to passing through. The game expands the pattern into their schedule; the narrator never sees the pattern. After a story reply, the tracker question (npc.tracker) lists person, place, and wait changes from that exchange alone. On a reply to a move it also lists the people just left behind (npc.tracker_left_behind); the tracker may say one of them came along (came_along), and the game then keeps them with the player until the next move is judged on its own. Following someone is not a tracker action (the narrator's tag still is). Appearance: each card's change is written by one compose call for its own field (People: light-touch edit or rewrite appearance fields, both with the shared People: how appearance is written), listing the active changes one line each (People: one active change in the appearance question); Looks is then summed up in its own call. NPC flagging off means it proposes no person updates; a written tag is still read. Map flagging off means it proposes no place updates."
     },
     {
       "id": "change",
@@ -131,11 +131,11 @@
     "lore_places": "the names of the places here with lore on file, innermost first",
     "lore": "the lore asked for, one place per line",
     "line": "One sentence about a person: who they are, as already said in the story or the cast file.",
-    "base": "The person's current base Looks, Body and/or Outfit lines, one per field, before active intents are applied.",
-    "fields": "Which appearance fields to rewrite this call: looks, body, and/or outfit (comma-separated).",
+    "base": "The base text of each field asked, one \"- field: text\" line each, before the active changes are applied.",
+    "fields": "The appearance field this call writes (body or outfit; one field for a one-field card), the field an active change touches (the intent line), or the field the player wrote (the player's text piece).",
     "other": "The other appearance field (body or outfit) shown for reference in a one-field question.",
     "other_text": "That other field's text as it is now (reference only).",
-    "intents": "Active appearance intents that touch those fields, oldest first (intent text and which fields each touches).",
+    "intents": "The active appearance changes for the asked field, oldest first, one line each (People: one active change in the appearance question).",
     "rewrite": "How deeply a map change rewrites existing descriptions, notes and exit texts: the 'Map changes: light touch' or 'Map changes: full rewrite' piece (filled in by the game), or empty.",
     "targets": "The existing texts a map change rewrites, numbered, each with the op shape to answer with, its text before the change and as proposed now (made by the game).",
     "hint": "The player's Change note on the Remember card, or (none)",
@@ -152,7 +152,13 @@
     "fact_rules": "what counts as a fact about a person: the shared People: what a fact is (shared) text, filled in by the game",
     "part": "the part of the day from the game clock: night, dawn, morning, afternoon or evening",
     "role": "who a saved person is, from their card: what a stranger calls them and their place, e.g. \"the landlady of the Drowned Rat\"",
-    "timeless": "the shared line that keeps descriptions timeless (Places: timeless descriptions), filled in by the game"
+    "timeless": "the shared line that keeps descriptions timeless (Places: timeless descriptions), filled in by the game",
+    "rules": "the shared People: how appearance is written text (npc.appearance_rules), filled in by the game",
+    "n": "the change's number, oldest first",
+    "intent": "what changed, in the tracker's or the player's words (e.g. braids tied back)",
+    "how": "light touch or full rewrite",
+    "written": "the player's own text for this change (People: the player's text for an appearance change), or empty",
+    "written_text": "the text the player wrote for that field"
   },
   "prompts": [
     {
@@ -1884,12 +1890,12 @@
           "name": "reply"
         }
       ],
-      "text": "Write one short Looks line for {{name}}.\nBody: {{body}}\nWearing: {{outfit}}\n{{reply}}: {\"looks\":\"one line\"}"
+      "text": "Write one short Looks line for {{name}}.\nBody: {{body}}\nOutfit: {{outfit}}\n{{reply}}: {\"looks\":\"one line\"}"
     },
     {
       "id": "npc.appearance_rebuild_system",
       "title": "People: rewrite appearance fields",
-      "description": "Step 1 of 1: rewrite Body/Outfit from base + active intents (never a previous combined text). Looks is a separate call. The game reads the JSON fields.",
+      "description": "Step 1 of 1: rewrite the asked appearance field ({{fields}}: one field for a one-field card) from base + active intents (never a previous combined text). Looks is a separate call. The game reads the JSON fields. {{rules}} is the shared People: how appearance is written (npc.appearance_rules).",
       "group": "npc",
       "locked": "The game reads the answer as JSON with only the asked fields.",
       "placeholders": [
@@ -1898,14 +1904,18 @@
         },
         {
           "name": "fields"
+        },
+        {
+          "name": "rules",
+          "generated": true
         }
       ],
-      "text": "You rewrite a person's body and clothes for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, change only the words that intent names and keep every other word as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and how they stand and move, and, when the outfit is among the fields asked ({{fields}}), how the clothes fit the body as it is now. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
+      "text": "You rewrite a person's appearance text ({{fields}}) for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Write present-tense description text for each. Apply every active intent in order to the base for that field. Each intent is marked light touch or full rewrite. For a light touch, replace only the phrase that intent affects and copy every other sentence as written. For a full rewrite, write that field again from scratch for what they are now: their frame and build, skin, fur or scales, head and face, hands, and, when the outfit is among the fields asked ({{fields}}), how the clothes fit the body as it is now. Do not keep the base's sentences or follow its sentence structure. Carry over only identifying details that still make sense on the new body, such as a scar or eye colour, and drop everything that belonged to the old body (a gnoll has a muzzle, fur and a gnoll's build, not a freckled face with a few words swapped). {{rules}} No other keys, no commentary."
     },
     {
       "id": "npc.appearance_edit_light_system",
       "title": "People: light-touch edit of appearance fields",
-      "description": "Step 1 of 1, used instead of the rewrite system line when every active intent is a light touch: edit Body/Outfit from the base, changing only what the intents name. Looks is a separate call. The game reads the JSON fields.",
+      "description": "Step 1 of 1, used instead of the rewrite system line when every active intent is a light touch: edit the asked field ({{fields}}) from the base, replacing only the phrase each change affects. Looks is a separate call. The game reads the JSON fields, and checks that at least half of each base field was kept. {{rules}} is the shared People: how appearance is written (npc.appearance_rules).",
       "group": "npc",
       "locked": "The game reads the answer as JSON with only the asked fields.",
       "placeholders": [
@@ -1914,9 +1924,22 @@
         },
         {
           "name": "fields"
+        },
+        {
+          "name": "rules",
+          "generated": true
         }
       ],
-      "text": "You make a small edit to a person's body or clothes for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Start from the base text of each field and copy it. Change only the words that the active intents name, in order, and keep every other sentence word for word, in the same order. A field no intent touches comes back exactly as the base. Do not rewrite, reword, extend or improve anything else. Describe how they look, not what they are doing, where they are, or the moment: no actions, poses, gestures, doorways, weather, or \"you\". Do not write looks. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base. No other keys, no commentary."
+      "text": "You make a small edit to a person's appearance text ({{fields}}) for a text adventure. {{reply}}: a JSON object with only the field(s) named in the request ({{fields}}). Start from the base text of each field. For each change, find the one phrase in the base it affects (for \"braids tied back\", the phrase about the hair) and replace only that phrase. If no phrase covers it, add one short clause to the sentence it fits best. Copy every other sentence exactly as written, in the same order. A field no intent touches comes back exactly as the base. {{rules}} No other keys, no commentary."
+    },
+    {
+      "id": "npc.appearance_rules",
+      "title": "People: how appearance is written (shared)",
+      "description": "Alongside: shared by both appearance compose system prompts (the light-touch edit and the rewrite), so both write a field the same way. The game puts this text into both in place of their rules placeholder.",
+      "group": "npc",
+      "locked": "Both appearance compose system prompts include this text; the game reads their answers as appearance fields.",
+      "placeholders": [],
+      "text": "Write how they look in third person (she, he, they), as a portrait would show them: no actions, poses or setting. Never copy a previous combined description; start from the base. If an active change describes only a passing moment (holding, glancing, gesturing, posture, mood) and not a lasting change to how they look, leave that field exactly as the base."
     },
     {
       "id": "npc.appearance_rebuild",
@@ -1960,7 +1983,74 @@
           "name": "intents"
         }
       ],
-      "text": "Edit {{fields}} for {{name}}: copy the base and change only the words the intents name.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
+      "text": "Edit {{fields}} for {{name}}: replace only the phrase each intent affects and copy every other sentence as written.\nBase:\n{{base}}\nActive intents (oldest first):\n{{intents}}\nReply with JSON only for those fields."
+    },
+    {
+      "id": "npc.appearance_intent_line",
+      "title": "People: one active change in the appearance question",
+      "description": "Piece: one line per active appearance change in {{intents}} of the appearance questions: its number, what changed, the field it touches and light touch or full rewrite. {{written}} is the player's own text for it (npc.appearance_intent_written), or empty.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game numbers these lines and applies the changes in this order.",
+      "placeholders": [
+        {
+          "name": "n",
+          "generated": true
+        },
+        {
+          "name": "intent"
+        },
+        {
+          "name": "fields"
+        },
+        {
+          "name": "how",
+          "generated": true
+        },
+        {
+          "name": "written",
+          "generated": true
+        }
+      ],
+      "text": "{{n}}. {{intent}} [{{fields}}] ({{how}}){{written}}"
+    },
+    {
+      "id": "npc.appearance_intent_written",
+      "title": "People: the player's text for an appearance change",
+      "description": "Piece: added to an appearance change's line (npc.appearance_intent_line) when the player edited that change's text on its card: added once per edited field, naming that field ({{fields}}), so the model uses it as written.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game adds this to the active change's line when the player edited its text.",
+      "placeholders": [
+        {
+          "name": "fields"
+        },
+        {
+          "name": "written_text"
+        }
+      ],
+      "text": "The player wrote {{fields}} for it, use as written: \"{{written_text}}\""
+    },
+    {
+      "id": "npc.appearance_intent_replace",
+      "title": "People: a field the player replaced, in the appearance question",
+      "description": "Piece: the line in {{intents}} for a change where the player replaced a whole field with their own text (a baseline). The game keeps that text as written.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game numbers these lines and applies the changes in this order.",
+      "placeholders": [
+        {
+          "name": "n",
+          "generated": true
+        },
+        {
+          "name": "fields"
+        },
+        {
+          "name": "written_text"
+        }
+      ],
+      "text": "{{n}}. replace {{fields}} with the player's text: {{written_text}}"
     },
     {
       "id": "npc.appearance_edit_light_retry",
@@ -1969,7 +2059,7 @@
       "group": "npc",
       "locked": "The game adds this line to the light-touch edit question as it is.",
       "placeholders": [],
-      "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and change only the words the intents name."
+      "text": "Your last answer changed most of the base text. Copy each base field word for word, in the same order, and replace only the phrase each intent affects."
     },
     {
       "id": "npc.appearance_other_field",
