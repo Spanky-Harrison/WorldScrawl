@@ -36,7 +36,7 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, or when the part of the day changed since the last narrator reply); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, the chat's first narrated reply, or when the part of the day changed since the previous narrator reply was written); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
     },
     {
       "id": "npc",
@@ -907,7 +907,7 @@
     {
       "id": "narration.time_nudge",
       "title": "Narration: let the time of day show",
-      "description": "Used by Narration. Piece: added after the \"Current time\" line only on a move, a wait, or a turn where the part of the day (morning, noon, ...) changed since the last narrator reply. Otherwise the current time goes alone.",
+      "description": "Used by Narration. Piece: added after the \"Current time\" line only on a move, a wait, the chat's first narrated reply, or a turn whose part of the day (morning, afternoon, ...) differs from the one the previous narrator reply was written in. Otherwise the current time goes alone.",
       "group": "style",
       "process": "narration",
       "piece": true,
