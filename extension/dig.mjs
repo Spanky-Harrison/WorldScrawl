@@ -183,7 +183,7 @@ async function makeDig(loc, r) {
  * the exit names on both sides; stay or go through), retried once with the error. The change is stamped on the player's message.
  */
 async function narrativeDig(msg, loc) {
-    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const said = P('pick.said', { message: String(msg.mes ?? '').slice(0, 1000) }); // R6: the pick.said piece
     const fail = why => { console.log(`[WorldScrawl] dig failed: ${why}`); noteCall(ctx().chat?.indexOf(msg) ?? -1, { kind: 'breaking through', status: 'failed', reason: why }); msg.extra.worldscrawl_dig_failed = true; return { kind: 'dig_failed', loc }; };
     const opts = digOptions((await nearbyRooms(loc)).filter(r => r.address !== loc.address));
     const named = namedPlace(msg.mes, opts);

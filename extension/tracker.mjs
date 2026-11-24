@@ -62,13 +62,13 @@ function placeTitle(placeName, displayName) {
 export function trackerPeopleLines(people) {
     const lines = (people ?? []).map(p => {
         if (!p?.id && !p?.name) return '';
-        const stance = bare(p.stance);
-        const reason = bare(p.stanceReason);
-        const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
+        const dispo = bare(p.disposition);
+        const reason = bare(p.dispositionReason);
+        const dispoLine = !dispo && !reason ? '(none)' : reason ? `${dispo || '(none)'} (${reason})` : dispo;
         const unnamed = p.nameKnown === false && bare(p.unknownAs);
         // R5.4: the labels are the npc.tracker_person piece; the game fills the shown name, the handle and the fields.
         return P('npc.tracker_person', { name: p.name || p.id, handle: p.id || p.name, unnamed: unnamed ? ` ${P('npc.tracker_unnamed')}` : '', // name-ok: listedPeople gives the shown name and handle
-            looks: textOf(p.looks), body: textOf(p.body), outfit: textOf(p.outfit), facts: listOf(p.facts), memories: listOf(p.memory ?? p.memories), stance: stanceLine });
+            looks: textOf(p.looks), body: textOf(p.body), outfit: textOf(p.outfit), facts: listOf(p.facts), memories: listOf(p.memory ?? p.memories), disposition: dispoLine });
     }).filter(Boolean);
     return lines.join('\n') || '(none)';
 }

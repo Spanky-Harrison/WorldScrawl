@@ -40,7 +40,7 @@ export function viewPickPrompt(loc, said, rooms) {
 }
 /** The 'look' intent: pick an exit (or a window), then see / hear / nothing. Stamps door and view-link changes on the message. */
 async function narrativeLook(msg, loc, forced = null, forcedAct = null) {
-    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const said = P('pick.said', { message: String(msg.mes ?? '').slice(0, 1000) }); // R6: the pick.said piece
     const exits = loc.exits.filter(e => !e.hidden || revealsDestination(e)); // an unrevealed hidden exit is never named
     const stampChange = c => { msg.extra[CHANGE_KEY] = [...changesOf(msg), c]; };
     let look;
@@ -93,7 +93,7 @@ export const doorOptions = list => { const taken = new Set(); return list.map(e 
 export const doorPickPrompt = (loc, said, list, type) => P('door.pick', { party: partyText(), place: displayName(loc), said, verb: type === 'open_door' ? 'open' : 'close', options: optionLines(doorOptions(list)) });
 /** The open/close door intents: which door (asked only if several), stamped on the message. */
 async function narrativeDoor(msg, loc, list, type) {
-    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const said = P('pick.said', { message: String(msg.mes ?? '').slice(0, 1000) }); // R6: the pick.said piece
     let e = list.length === 1 ? list[0] : null;
     if (!e) {
         e = (await askValid('door', doorPickPrompt(loc, said, list, type), pickKey(doorOptions(list))))?.exit ?? null;
@@ -145,7 +145,7 @@ async function parseIntent(msg) {
     const onlyLook = canLook && lookOnly(msg.mes);
     const moveDirs = onlyLook ? [] : dirs, movePlaces = onlyLook ? [] : places;
     const options = [...moveDirs, ...movePlaces.map(p => p.label), ...extras, STAY, ...(onlyLook ? [] : [ELSEWHERE, UNCLEAR])];
-    const said = `The player wrote: "${String(msg.mes ?? '').slice(0, 1000)}"`;
+    const said = P('pick.said', { message: String(msg.mes ?? '').slice(0, 1000) }); // R6: the pick.said piece
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
         const nm = lbl.length > e.direction.length ? lbl.slice(e.direction.length) : destLabel(e); // same label as the footer: room, or building (+ room / region)
