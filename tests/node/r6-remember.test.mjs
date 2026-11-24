@@ -137,9 +137,12 @@ test('R6 F3: Approve clicked while the answer is on its way, and the answer fail
     assert.ok(!(scene.castPack()?.npcs ?? []).some(n => /Maren/.test(n.name ?? '')), 'Maren is not in the cast');
     assert.equal(card().status, 'review', 'the card is still open');
     assert.equal(decisionOf(c.chat[1], card().nid) ?? null, null, 'the Approve decision is undone');
+    // The live card (no manual redraw): keepRememberNow's own redraw takes it out of Saving… into failed.
+    failedCard(remEl(doc), 'the live card after a failed Approve');
+    assert.doesNotMatch(remEl(doc).textContent, /Saving…/);
     const el = remEl(draw([0, 1]));
-    failedCard(el, 'after a failed Approve');
-    assert.ok(toasts.some(([k, t]) => k === 'warning' && /could not prepare Maren's card, so nothing was saved/.test(t)), JSON.stringify(toasts));
+    failedCard(el, 'after a failed Approve, drawn again');
+    assert.ok(toasts.some(([k, t]) => k === 'warning' && t === "WorldScrawl: could not prepare Maren's card, so nothing was saved. Use Check again on the card."), JSON.stringify(toasts));
     assert.ok(!toasts.some(([k]) => k === 'success'), 'no "remembered" toast');
     // Check again, then Approve: saved for real.
     byText(el, 'Check again').click();
