@@ -129,7 +129,7 @@ test('came along: the landlady walks out behind the player; the tracker says cam
     assert.deepEqual(btns(card), ['Turn off', 'Undo']);
     say(c, 'I look around the square.');
     await scene.applyFacts();
-    assert.match(blocks[ext.FACTS_KEY], /^the landlady \[\w+\]: .*Now: with the player\./m, blocks[ext.FACTS_KEY]);
+    assert.match(blocks[ext.FACTS_KEY], /^The landlady: .*Now: with the player\./m, blocks[ext.FACTS_KEY]);
     assert.ok(at(c, SQ).includes('hesk') && !at(c, TAVERN).includes('hesk'));
 });
 
@@ -204,7 +204,7 @@ test('not a following state: on the next move the reply does not show her, so sh
     const why = NPCM.npcWhy(NPCM.framesOf(c.chat, c.chat.length - 1, scene.castPack().npcs, env(c).clock).at(-1).get('hesk'), c.chat.length - 1, env(c));
     assert.deepEqual([why.held?.active, why.kind, why.place], [false, 'schedule', TAVERN]);
     const row = NPCM.presentAt(c.chat, c.chat.length - 1, scene.castPack().npcs, env(c)).find(p => p.id === 'hesk');
-    assert.match(row?.overdue ?? '', /^The landlady is .* late for pouring drinks\.$/);
+    assert.match(NPCM.sayLine(row?.overdue), /^The landlady is .* late for pouring drinks\.$/);
     assert.ok(id > 0);
 });
 test('a schedule change ends the came_along hold (she goes to bed at 02:00)', async () => {
@@ -371,7 +371,7 @@ test('5C B1: a plain stay hold (not came along) keeps the "late" wording', async
     say(c, 'I look around.');
     const row = heskRow(c);
     assert.equal(row?.alongDue ?? null, null);
-    assert.match(row?.overdue ?? '', /^The landlady is an hour late for pouring drinks\.$/);
+    assert.match(NPCM.sayLine(row?.overdue), /^The landlady is an hour late for pouring drinks\.$/);
 });
 
 // Ast 5C round 1: a might entry (one of several places) takes the along branch too.

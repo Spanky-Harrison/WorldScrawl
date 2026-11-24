@@ -70,7 +70,8 @@ const facts = async blocks => { await scene.applyFacts(); return blocks[ext.FACT
 const bracket = async (c, text) => { const m = say(c, text); await bracketIntent(m, parseBracket(m.mes)); return m; };
 
 /** Engine jargon the narrator must never get from the engine's own lines. */
-const JARGON = /\bengine\b|\boff the map\b|\bon file\b|\bimportance\b|\bin focus\b|authoritative|\bNOT moved\b|\bthis turn\b|\(expired|\bDisposition\b|saved people|without travelling|for clarity|\bthe party\b|was temporary/i;
+// R5 N5: durations as "8h"/"1h30m"/"45m", "door (north)", "you can see", "Since the last reply" and a [pXXXX] handle are jargon too.
+const JARGON = /\bengine\b|\boff the map\b|\bon file\b|\bimportance\b|\bin focus\b|authoritative|\bNOT moved\b|\bthis turn\b|\(expired|\bDisposition\b|saved people|without travelling|for clarity|\bthe party\b|was temporary|\b\d+h\d*m?\b|\b\d+m\b|\bdoor \(|(?<!\bif )you can see|Since the last reply|\[p[0-9a-z]{4}\]/i;
 /** The engine-added text: the facts block with every piece of world text (the planted sentence, the lore, the card) taken out. */
 const engineText = f => [WORLD_JARGON, CARD.personality.summary, CARD.memory[0], CARD.history].reduce((t, w) => t.split(w).join(''), f);
 const jargonIn = f => engineText(f).split('\n').filter(l => JARGON.test(l));
@@ -89,7 +90,10 @@ test('jargon: a plain look, people here, the stay-put line and the rules read as
     const f = await facts(blocks);
     assert.match(f, /^\[Scene facts\. Treat these as true\.\]/);
     assert.match(f, /People here \(anyone not listed is a background figure, not one of them\):/);
-    assert.match(f, new RegExp(`the landlady \\[${N.handleOf('hesk')}\\]:`), 'handles stay');
+    // R5 N4 (D1): the narrator gets the shown name only; the handle stays with the tracker and the npc.who options.
+    assert.match(f, /^The landlady: /m, 'the shown name');
+    assert.doesNotMatch(f, new RegExp(`\\[${N.handleOf('hesk')}\\]`), 'no handle in the facts block');
+    assert.doesNotMatch(f, /\[p[0-9a-z]{4}\]/, 'no handle of anyone');
     assert.match(f, /Everything in this reply happens in Common Room \(The Drowned Rat\): no move happens/);
     assert.match(f, /Places with local lore: /);
     assert.deepEqual(jargonIn(f), []);
@@ -122,7 +126,7 @@ test('jargon: a move and a kept wait read as what happened, with no engine words
     ({ c, blocks } = boot());
     await bracket(c, '[wait] 8h');
     f = await facts(blocks);
-    assert.match(f, /What just happened: .* waited here for 8h, staying put\./);
+    assert.match(f, /What just happened: .* waited here for 8 hours, staying put\./, 'R5 N5: the duration in words');
     assert.deepEqual(jargonIn(f), []);
 });
 

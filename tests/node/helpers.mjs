@@ -65,3 +65,14 @@ export const extSource = () => fs.readdirSync(path.join(REPO, 'extension')).filt
  *  Takes the args the extension passes to generateRaw ({ prompt, systemPrompt }) or a recorded call ({ prompt, sys }). */
 export const TRACKER_SYSTEM_MARK = 'You are the bookkeeper for a text adventure';
 export const isTrackerCall = a => String(a?.systemPrompt ?? a?.sys ?? a?.system ?? '').includes(TRACKER_SYSTEM_MARK);
+/** R5.4: a prompt entry as a bare marker. */
+export const MARK = id => `⟦${id}⟧`;
+/** default.json with every entry's text replaced by its marker. keepPlaceholders appends the entry's own placeholders
+ *  after the marker, so the entries filled into it (and the data) still come through: that run shows which ids are reached. */
+export const markerPrompts = (def, { keepPlaceholders = false } = {}) => ({ ...def, prompts: def.prompts.map(e => ({ ...e, text: MARK(e.id) + (keepPlaceholders ? (e.placeholders ?? []).map(p => `{{${p.name}}}`).join('') : '') })) });
+let liveCallsOf = null;
+/** Hand callKind the extension's live-call list (work.mjs liveCalls), once the extension is loaded. */
+export const useLiveCalls = fn => { liveCallsOf = fn; };
+/** Which model call this generateRaw is: the gen kind label of the call that is running (work.mjs withCall, the newest
+ *  one started; gen calls generateRaw in the same tick), else the tracker's system prompt (also as a marker), else ''. */
+export const callKind = args => liveCallsOf?.().at(-1)?.kind ?? (isTrackerCall(args) || String(args?.systemPrompt ?? '').includes(MARK('npc.tracker_system')) ? 'tracker' : '');

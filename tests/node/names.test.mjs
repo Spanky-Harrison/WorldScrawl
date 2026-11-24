@@ -243,7 +243,7 @@ test('canary inbound: the player says a name the narrator only mentioned: learne
     assert.ok(callNotes(c.chat[id]).some(n => n.kind === 'name learn' && /tracker: .*already knows/.test(n.reason)), 'the tracker item is skipped, not stamped twice');
     assert.equal(known(c), true);
     say(c, 'I take the key.');
-    assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
+    assert.match(await facts(blocks), new RegExp(`^${CANARY}:`, 'm'), 'the narrator now gets her name (R5 N4: no handle)');
 });
 
 test('canary inbound: the player says a name the narrator only mentioned: learned (off the map, found by that line)', async () => {
@@ -345,7 +345,7 @@ test('canary inbound P1: present, the player says the name the narrator wrote: l
     assert.equal(npcAt(c.chat, id, scene.castPack().npcs, 'hesk').rel.player.by, 'said by the player');
     assert.ok(calls.some(x => isTrackerCall(x)), 'the tracker still ran (and named no one)');
     say(c, 'I order an ale.');
-    assert.match(await facts(blocks), new RegExp(`${CANARY} \\[${handle()}\\]:`), 'the narrator now gets her name');
+    assert.match(await facts(blocks), new RegExp(`^${CANARY}:`, 'm'), 'the narrator now gets her name (R5 N4: no handle)');
     // The same reply read again (a re-run on that swipe): still one stamp.
     await onReplyForFlags(id);
     assert.equal(nameStamps(c.chat[id]).length, 1);
@@ -402,7 +402,7 @@ test('canary inbound P1: present, not learned: a name the narrator never wrote, 
     assert.deepEqual(nameStamps(r.c.chat[id]), []);
     ext.settings().flagNpcs = true;
     say(r.c, 'I order an ale.');
-    assert.match(await facts(r.blocks), new RegExp(`the landlady \\[${handle()}\\]:`), 'still masked');
+    assert.match(await facts(r.blocks), /^The landlady:/m, 'still masked');
 });
 
 test('canary inbound P1: present, a name said only in dialogue (not by the player) still comes from the tracker', async () => {
@@ -434,7 +434,8 @@ test('canary narrator: present and unknown, she is "the landlady [handle]", with
     const { c, blocks } = boot();
     say(c, 'I look around.');
     const f = await facts(blocks);
-    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`));
+    assert.match(f, /^The landlady:/m);
+    assert.doesNotMatch(f, new RegExp(`\\[${handle()}\\]`), 'R5 N4: no handle in the facts block');
     assert.match(f, GATE, 'the one gated line while she is here');
     assert.equal(f.match(new RegExp(CANARY, 'g')).length, 1);
     assert.deepEqual(leaks(f.replace(GATE, '')), [], 'demeanor, memory and everything else are masked; no cast id');
@@ -446,7 +447,7 @@ test('canary narrator: once [name] lands she is named, and the gated line goes a
     const m = say(c, `I [name] ${CANARY}`);
     await bracketIntent(m, parseBracket(m.mes));
     const f = await facts(blocks);
-    assert.match(f, new RegExp(`${CANARY} \\[${handle()}\\]:`));
+    assert.match(f, new RegExp(`^${CANARY}:`, 'm'));
     assert.doesNotMatch(f, GATE);
 });
 
@@ -569,7 +570,7 @@ test('Reveal names: the narrator and the tracker see her real name, with no gate
     assert.match(await ext.revealPlaces('names'), /Reveal names is on/);
     assert.equal(c.chatMetadata.worldscrawl_reveal_names, true);
     let f = await facts(blocks);
-    assert.match(f, new RegExp(`${CANARY} \\[${handle()}\\]:`));
+    assert.match(f, new RegExp(`^${CANARY}:`, 'm'));
     assert.doesNotMatch(f, GATE);
     const id = reply(c, 'She wipes the bar.');
     await onReplyForFlags(id);
@@ -578,7 +579,8 @@ test('Reveal names: the narrator and the tracker see her real name, with no gate
     assert.match(await ext.revealPlaces('names off'), /Reveal names is off/);
     assert.equal('worldscrawl_reveal_names' in c.chatMetadata, false);
     f = await facts(blocks);
-    assert.match(f, new RegExp(`the landlady \\[${handle()}\\]:`));
+    assert.match(f, /^The landlady:/m);
+    assert.doesNotMatch(f, new RegExp(`\\[${handle()}\\]`), 'R5 N4: no handle in the facts block');
     assert.match(f, GATE);
 });
 

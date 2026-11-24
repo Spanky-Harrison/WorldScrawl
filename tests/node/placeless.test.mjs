@@ -1,3 +1,4 @@
+import './useprompts.mjs';
 // Placeless schedule entries, stub regions, and finding someone off the map.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

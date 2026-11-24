@@ -1,7 +1,9 @@
 import './ststub.mjs';
+import './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine } from '../../extension/words.mjs';
+import { LOOK_RE, MOVE_RE, lookOnly, durationWords } from '../../extension/words.mjs';
+const { stayPutLine } = await import('../../extension/index.js');
 import { carrierText } from '../../plugin/ui/patchform.mjs';
 
 // ---- from words.test.mjs
@@ -19,6 +21,14 @@ test('stay-put line: still in the room, not leaving or arriving', () => {
     const t = stayPutLine('Knarfy', "Brask's Smithy");
     assert.equal(t, "Everything in this reply happens in Brask's Smithy: no move happens, and the reply ends with Knarfy still there.");
     assert.doesNotMatch(t, /Do not|stays in/, 'R4 N3: what is true, not a ban list');
+});
+
+test('R5 N5: durations in words, never "45m" or "1h30m"', () => {
+    const cases = [[0, 'no time at all'], [30, 'less than a minute'], [60, 'a minute'], [59, 'less than a minute'], [90, '2 minutes'], [120, '2 minutes'], [45 * 60, '45 minutes'], [3600, 'an hour'], [5400, 'an hour and a half'],
+        [3600 + 15 * 60, 'an hour and 15 minutes'], [2 * 3600, '2 hours'], [9000, '2 and a half hours'], [2 * 3600 + 15 * 60, '2 hours and 15 minutes'], [8 * 3600, '8 hours'],
+        [86400, 'a day'], [90000, 'a day and an hour'], [86400 + 2 * 3600 + 1800, 'a day, 2 hours and 30 minutes'], [2 * 86400, '2 days']];
+    for (const [sec, want] of cases) assert.equal(durationWords(sec), want, `${sec}s`);
+    for (const [sec] of cases) assert.doesNotMatch(durationWords(sec), /\b\d+[hm]\b|\d+h\d+m/);
 });
 }
 

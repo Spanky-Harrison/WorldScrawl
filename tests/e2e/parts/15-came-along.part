@@ -37,7 +37,7 @@
         const from = (await reqsOf()).length;
         await turn('I look around the square.', [{ content: 'Stalls are closing for the night.' }]);
         const told = (await narr(from)).map(r => r.messages.map(m => String(m.content)).join('\n')).join('\n');
-        check('came_along: the next narrator request has her under People here, with the player', /^the landlady \[\w+\]: .*Now: with the player\./m.test(told), told.slice(told.indexOf('People here'), told.indexOf('People here') + 300));
+        check('came_along: the next narrator request has her under People here, with the player', /^The landlady: .*Now: with the player\./m.test(told), told.slice(told.indexOf('People here'), told.indexOf('People here') + 300));
         await page.evaluate(m => { SillyTavern.getContext().extensionSettings.worldscrawl.moveMode = m; }, was);
         await page.evaluate(id => { const s = document.getElementById('worldscrawl_world'); s.value = id; s.dispatchEvent(new Event('change')); }, pickedWorld ?? '');
         await settle(2000);

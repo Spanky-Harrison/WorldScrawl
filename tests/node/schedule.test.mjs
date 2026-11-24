@@ -269,7 +269,7 @@ test('wandering: the stamp holds them in the scene when the chain moves on, no m
     reply(c, 'He keeps at the net.');
     await waitFor(c, '[wait] 1h30m'); // 12:10: the block is over
     p = presentAt(c.chat, c.chat.length - 1, cast(), envOf(c)).find(n => n.id === 'tam');
-    assert.match(p.overdue, /^Tam would normally have moved on by now\.$/);
+    assert.match(NPC.sayLine(p.overdue), /^Tam would normally have moved on by now\.$/);
     // Leave and come back at 10:40 in another chat: the chain (the square), not the old stamp.
     const b = boot({ time: '10:10' });
     const m2 = say(b.c, 'I order a drink.');
@@ -417,7 +417,7 @@ test('narrator text: no %, roll, "might be at", nowhere, wandering or pattern wo
     }
     const all = seen.join('\n');
     assert.match(all, /Tam arrives/, 'the comings lines were in what was checked');
-    assert.match(all, /Bryn \[p[0-9a-z]+\]:|Bryn:/, 'and people here');
+    assert.match(all, /^Bryn:/m, 'and people here');
 });
 
 // ---- 12. Who's here, Why, cast panel lines; export; seen_at is gone.

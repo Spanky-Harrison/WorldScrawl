@@ -1,3 +1,4 @@
+import './useprompts.mjs';
 // The browser live-place refresh goes through api()'s {ok, status, body} wrapper. A rename patch must
 // not empty that list, and a failed refresh must not be stored as an empty map.
 import './ststub.mjs';

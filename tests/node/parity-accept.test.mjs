@@ -1175,7 +1175,7 @@ test('the tracker is told who is not known by name; its name item for someone no
     assert.match(tp, /"action": "name"[^\n]*listed as \(name not yet known\) has their name said in this exchange/);
     assert.match(tp, /id is the handle in \[brackets\] after their name/);
     assert.match(tp, /\{\{memory_rules\}\}/);
-    assert.match(promptText('npc.memory_rules'), /Call people by their names \(as listed above, or as the story names them\), never "the stranger" and never a bracketed handle/);
+    assert.match(promptText('npc.memory_rules'), /Call people by the names the story or this prompt gives them, never "the stranger" and never a bracketed handle/);
     assert.doesNotMatch(tp, /real name/i);
     c.chat = [msg([])];
     assert.equal(knows(npcAt(c.chat, 0, [LANDLADY], 'hesk')).known, false);
@@ -1351,11 +1351,15 @@ test('a person expiry crossed by a wait: the wait summary names her, one engine 
     // B: the narrator's facts say who changed back and how she looks now.
     await scene.applyFacts();
     const text = facts.at(-1);
-    assert.match(text, /these changes to people wore off \(the same people, not someone new\)/);
+    assert.match(text, /^These people are as they were before:$/m, 'R5 N5: narration.person_wore_off');
     // The facts block goes through the name portal: she is not named there.
     assert.match(text, /- The landlady: "turned into a gnoll" has worn off/);
     assert.doesNotMatch(text, /Hesk/);
-    assert.match(text, /What they look like now: Looks: copper braids Body: sturdy Outfit: wool/);
+    assert.match(text, /What they look like now: Looks: copper braids\. Body: sturdy\. Wearing: wool\./, 'the narrator\'s own labels');
+    // R5 N1: the one-time lines come before the stay-put line, and the rules line is last.
+    const rows = text.trim().split('\n');
+    assert.ok(rows.findIndex(l => /^These people are as they were before/.test(l)) < rows.findIndex(l => /^Everything in this reply happens in/.test(l)));
+    assert.match(rows.at(-1), /^Write only the narration\./);
     // C: the story narrates her turning back; the tracker hears it already happened, and its proposal is dropped.
     const reply = { mes: 'Hesk shudders and shrinks back into her human shape, fur falling away.', is_user: false, swipe_id: 0, swipe_info: [{ extra: {} }], extra: {} };
     c.chat.push(reply);
