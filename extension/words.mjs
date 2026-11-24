@@ -6,9 +6,25 @@ export const LOOK_RE = /\b(?:look|looks|looked|looking|peer|peers|peered|peering
 export const MOVE_RE = /\b(?:go|goes|going|went|gone|walk|walks|walked|walking|head|heads|headed|heading|step|steps|stepped|stepping|leave|leaves|left|leaving|enter|enters|entered|entering|exit|exits|exited|exiting|move|moves|moved|moving|run|runs|ran|running|climb|climbs|climbed|climbing|travel|travels|travelled|traveled|travelling|traveling|return|returns|returned|returning|wander|wanders|wandered|wandering|stroll|strolls|strolled|strolling|hurry|hurries|hurried|hurrying|rush|rushes|rushed|rushing|dash|dashes|dashed|dashing|sneak|sneaks|sneaked|snuck|sneaking|creep|creeps|crept|creeping|jump|jumps|jumped|jumping|leap|leaps|leapt|leaped|leaping|crawl|crawls|crawled|crawling|follow|follows|followed|following|descend|descends|descended|descending|ascend|ascends|ascended|ascending|come|comes|came|coming|get out|gets out|got out|pass through|passes through|passed through|through it|into)\b/i;
 /** Only looking (a perception word, no movement word): the intent question offers no move options. */
 export const lookOnly = text => LOOK_RE.test(String(text ?? '')) && !MOVE_RE.test(String(text ?? ''));
-/** The stay-put line for a turn with no move.
- *  R4 (N2, N3): a positive line that reads right for one person or several ("You", "Ana and Hesk"); R5 moves it into narration.stay_put. */
-export const stayPutLine = (who, here) => `Everything in this reply happens in ${here}: no move happens, and the reply ends with ${who} still there.`;
+/**
+ * A duration in words for narrator text (R5 N5): "a minute", "45 minutes", "an hour", "an hour and a half",
+ * "2 hours and 15 minutes", "a day and 3 hours". Never "45m" or "1h30m". Seconds round to the nearest minute;
+ * under a minute (but not zero) is "less than a minute".
+ */
+export function durationWords(sec) {
+    const n = Number(sec) || 0;
+    if (n <= 0) return 'no time at all';
+    if (n < 60) return 'less than a minute';
+    const total = Math.round(n / 60);
+    const days = Math.floor(total / 1440), hours = Math.floor((total % 1440) / 60), mins = total % 60;
+    const unit = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
+    const parts = [];
+    if (days) parts.push(unit(days, 'a day', 'days'));
+    if (hours && mins === 30 && !days) return hours === 1 ? 'an hour and a half' : `${hours} and a half hours`;
+    if (hours) parts.push(unit(hours, 'an hour', 'hours'));
+    if (mins) parts.push(unit(mins, 'a minute', 'minutes'));
+    return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0];
+}
 
 // ---- Narrator wait: the [ws_wait: ...] tag in a reply.
 export const WAIT_TAG = /\[ws_wait:\s*([^\]]{0,100})\]/i;

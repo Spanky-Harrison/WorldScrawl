@@ -892,6 +892,26 @@ function toolNpcStamp(args = {}) {
 
 /** carry: the narrator prompt is being built (the generation interceptor), so a pending expiry's line counts as carried.
  *  type: that generation's type (a swipe or continue rewrites the last reply, so its host is the message before it). */
+/** R5 N1: the turn's other "what just happened" lines, in this order: a temporary place that ran out with the party
+ *  inside (this run's line, or the one a rewritten reply told), else the place being gone or the map changed around the
+ *  party; then a wait; then people back as they were. factsText puts them before the stay-put line and the rules. */
+async function happenedLines(chat, loc, { carry = false, type = 'normal' } = {}) {
+    const out = [];
+    const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
+    if (ep) { if (carry) ep.used = true; if (ep.line) out.push(ep.line); }
+    // A reply that told an expiry, written again (swipe, regenerate, continue): the line from its host, no new run.
+    const told = ep ? null : chat[hostIndex(chat, type === 'swipe' || type === 'continue' ? chat.length - 1 : chat.length)]?.extra?.[EXPIRY_LINE_KEY];
+    const retold = told?.to === loc.address && told.line ? told : null;
+    if (retold) out.push(retold.line);
+    const rn = ep || retold ? '' : relocationNote(chat, loc, partyText());
+    if (rn) out.push(rn);
+    else if (!ep && !retold) { const am = await aftermathNote(chat, loc).catch(() => ''); if (am) out.push(am); }
+    const wf = await waitFacts(chat, loc);
+    if (wf) out.push(wf);
+    const gone = expiryNarratorNote(freshPersonExpiries(chat, chat.length - 1, partyText()), partyText());
+    if (gone) out.push(gone);
+    return out;
+}
 async function applyFacts({ carry = false, type = 'normal' } = {}) {
     await ensurePrompts();
     await refreshLivePlaces();
@@ -914,26 +934,16 @@ async function applyFacts({ carry = false, type = 'normal' } = {}) {
         const prevReply = replyBefore(ch, type === 'swipe' || type === 'continue' ? ch.length - 1 : ch.length);
         const firstReply = prevReply < 1 || !ch.slice(0, prevReply).some(m => m?.is_user);
         const timeNudge = !!d && (!!move || !!recentWait(ch) || firstReply || gameDateAt(prevReply - 1, ch)?.part !== d.part);
-        const facts = { date: d ? calendarLib.describeDate(d) : '', timeNudge, weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
+        // R5 N1: everything else that just happened (a temporary place that ran out with the party inside, the place gone,
+        // the map changed around the party, a wait, people back as they were) goes into the block before the stay-put line
+        // and the rules, so the rules line is always last.
+        const happened = await happenedLines(c.chat ?? [], loc, { carry, type });
+        const facts = { date: d ? calendarLib.describeDate(d) : '', timeNudge, happened, weather: narratorWeather(placeWeatherNow(loc)), dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
         text = factsText(loc, move, moveTools, facts);
         // After the player's message, in this order: where the turn ends, who is already there, a failed attempt's result,
         // who the [find] brought in, who came and went, then who was not found (and who they are).
         const af = facts.after ?? {};
         reminder = [arrivalReminder(loc, move), ...(af.onArrival ?? []), ...attemptLines(loc, move, facts), ...(af.found ?? []), ...(af.comings ?? []), ...(af.notFound ?? [])].filter(Boolean).join('\n');
-        const ep = expiryPending?.chat === chatKey() && expiryPending.to === loc.address ? expiryPending : null;
-        if (ep) { if (carry) ep.used = true; if (ep.line) text = `${text}\n${ep.line}`; }
-        // A reply that told an expiry, written again (swipe, regenerate, continue): the line from its host, no new run.
-        const chat = c.chat ?? [];
-        const told = ep ? null : chat[hostIndex(chat, type === 'swipe' || type === 'continue' ? chat.length - 1 : chat.length)]?.extra?.[EXPIRY_LINE_KEY];
-        const retold = told?.to === loc.address && told.line ? told : null;
-        if (retold) text = `${text}\n${retold.line}`;
-        const rn = ep || retold ? '' : relocationNote(chat, loc, partyText());
-        if (rn) text = `${text}\n${rn}`;
-        else if (!ep && !retold) { const am = await aftermathNote(chat, loc).catch(() => ''); if (am) text = `${text}\n${am}`; }
-        const wf = await waitFacts(c.chat ?? [], loc);
-        if (wf) text = `${text}\n${wf}`;
-        const gone = expiryNarratorNote(freshPersonExpiries(c.chat ?? [], (c.chat ?? []).length - 1, partyText()), partyText());
-        if (gone) text = `${text}\n${gone}`;
     } catch (e) { console.warn('[WorldScrawl] facts unavailable:', e.message); }
     // The prompt choke point: every person name in the block goes through the portal (the gated name line renders here).
     try {

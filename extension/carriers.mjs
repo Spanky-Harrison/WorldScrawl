@@ -131,7 +131,7 @@ export const patchSys = pl => P('change.system', { reply: baseReply('json'), edi
 const whatPiece = f => (f.noteBy === 'player' || f.source === 'button' || f.source === 'command' ? 'change.what_player'
     : f.source === TRACKER_SOURCE ? 'change.what_tracker' : 'change.what_narrator');
 /** {{what}} for the map change calls: the flag's note, worded by who raised it, and the place mentioned. */
-export const flagWhat = f => [f.note && P(whatPiece(f), { note: clip(f.note, 200) }), f.hint && `Place mentioned: "${clip(f.hint, 80)}".`].filter(Boolean).join(' ');
+export const flagWhat = f => [f.note && P(whatPiece(f), { note: clip(f.note, 200) }), f.hint && P('change.place_mentioned', { mentioned: clip(f.hint, 80) })].filter(Boolean).join(' ');
 
 async function flagContext(f, rooms = []) {
     const r = await api('/patch/context', { method: 'POST', body: JSON.stringify({ location: f.loc, rooms, ...mapCtx() }) });

@@ -2,8 +2,9 @@
 // template, and every change is a stamp on the message (extra.worldscrawl_npc), per swipe.
 // Schedules resolve through the same kind of redirect a player position uses. A bad entry is marked, never thrown.
 
-import { npc } from './shared.mjs';
-import { capFirst, knows, labelOf, shownName } from './names.mjs';
+import { npc, render as P } from './shared.mjs';
+import { capFirst, knows, shownName } from './names.mjs';
+import { durationWords } from './words.mjs';
 import { APPEARANCE_FIELDS, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey } from './npceffects.mjs';
 import { composeRecords, isOwnerStamp, pinBaseline, projectAppearance, readBaselineMap, reviewFields } from './replay.mjs';
 export { APPEARANCE_FIELDS, alreadyShown, appearanceFieldsChanged, appearanceIntent, effectFields, effectSetKey, judgeAppearance, junkAppearanceIntent, noopAppearance, resolveAppearance, rebuildInputs, readAppearanceAnswer, sameAppearanceBase, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary, looksInputKey };
@@ -237,8 +238,11 @@ export function scheduleAt(npc, clock, env) {
     return null;
 }
 
-/** Narrator line for someone whose current entry keeps them off the map. */
-export function offmapAbsentLine(npc, sched) {
+/** Narrator line for someone whose current entry keeps them off the map (narration.npc_elsewhere). */
+export const offmapAbsentLine = (npc, sched) => sayLine(offmapAbsent(npc, sched));
+/** A people-block line as data ({id, vars}): presentAt keeps it unrendered, so it works before the prompts load. */
+export const sayLine = l => (l ? P(l.id, l.vars) : '');
+function offmapAbsent(npc, sched) {
     const name = npc ? capFirst(shownName(npc)) : 'Someone';
     const activity = sched?.activity || sched?.entry?.activity || 'away';
     const where = sched?.where || sched?.entry?.where || '';
@@ -248,7 +252,7 @@ export function offmapAbsentLine(npc, sched) {
     else if (near?.kind === 'stub') place = `in ${near.name}${near.about ? `, ${near.about}` : ''}`;
     else if (near?.kind === 'text' && near.text) place = near.text;
     const hint = [where, place].filter(Boolean).join(', ');
-    return `${name}: ${activity}, elsewhere${hint ? ` (${hint})` : ''}`;
+    return { id: 'narration.npc_elsewhere', vars: { name, activity, where: hint ? ` (${hint})` : '' } };
 }
 
 /** How a resolved near reads in the inspector: "map: The Drowned Rat (riverton:drowned_rat)". */
@@ -667,9 +671,9 @@ function duePlace(npc, j, env, { useRoll = false } = {}) {
     if (npc.following) {
         const who = npc.following.who || PLAYER;
         const address = who === PLAYER ? env.playerAt(j) : (env.actorAt?.(j, who) || env.playerAt(j));
-        return address ? { address, activity: `with ${who === PLAYER ? 'the player' : who}`, kind: 'follow', entry: null } : null;
+        return address ? { address, activity: `with ${who === PLAYER ? 'the player' : who}`, activityKind: who === PLAYER ? 'with_player' : 'with', activityWith: who === PLAYER ? '' : who, kind: 'follow', entry: null } : null;
     }
-    if (holdActive(npc, j, env)) return { address: npc.held.place, activity: npc.held.along ? 'with the player' : 'waiting', kind: 'stay', entry: null };
+    if (holdActive(npc, j, env)) return { address: npc.held.place, activity: npc.held.along ? 'with the player' : 'waiting', activityKind: npc.held.along ? 'with_player' : 'waiting', kind: 'stay', entry: null };
     const clock = env.clock(j);
     const sched = scheduleAt(npc, clock, env);
     if (sched?.kind === 'might') {
@@ -705,9 +709,8 @@ function overdueNote(npc, sched, clock, env) {
         if (late < 0) late += day;
         hours = Math.floor(late / 60);
     }
-    if (hours <= 0) return `${name} should be at ${where} by now (${act}).`;
-    if (hours === 1) return `${name} is an hour late for ${act}.`;
-    return `${name} is ${hours} hours late for ${act}.`;
+    if (hours <= 0) return { id: 'narration.npc_due', vars: { name, place: where, activity: act } };
+    return { id: 'narration.npc_late', vars: { name, late: durationWords(hours * 3600), activity: act } };
 }
 
 function stayCovers(npc, scene, clock) {
@@ -761,18 +764,19 @@ export function presentAt(chat, index, cast, env) {
             // with none the line is left out (Ast, 5C round 1).
             if (now.held?.along && !rejoined(now, end, env) && sched) {
                 activity = 'with the player';
+                const activityKind = 'with_player';
                 const where = sched.kind === 'might' ? firstMightPlace(sched.entry, env) : sched.offmap ? (sched.where || sched.entry?.where || sched.activity || 'elsewhere') : placeLabel(env, sched.address);
                 if (!covered && where) alongDue = { where, activity: sched.entry?.activity || sched.activity || 'elsewhere' };
-                out.push({ ...publicNpc(now), activity, place: here, here, overdue: '', alongDue, kind: 'stay', known: knows(now) });
+                out.push({ ...publicNpc(now), activity, activityKind, place: here, here, overdue: '', alongDue, kind: 'stay', known: knows(now) });
                 continue;
             }
-            const movedOn = `${capFirst(shownName(now))} would normally have moved on by now.`;
+            const movedOn = { id: 'narration.npc_moved_on', vars: { name: capFirst(shownName(now)) } };
             if (sched?.kind === 'might') overdue = covered || appearedThisBlock(now, sched) ? '' : movedOn;
-            else if (sched?.offmap) overdue = covered ? '' : offmapAbsentLine(now, sched);
+            else if (sched?.offmap) overdue = covered ? '' : offmapAbsent(now, sched);
             else if (sched && sched.address !== here) overdue = covered ? '' : overdueNote(now, sched, clock, env);
             else if (!sched && (now.appearances ?? []).some(a => a.at >= scene)) overdue = covered ? '' : movedOn;
         }
-        out.push({ ...publicNpc(now), activity, place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
+        out.push({ ...publicNpc(now), activity, activityKind: due?.activityKind ?? '', activityWith: due?.activityWith ?? '', place: due?.address ?? here, here, overdue, kind: due?.kind ?? 'scene', known: knows(now) });
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -803,8 +807,8 @@ export function absentAt(chat, index, cast, env, { lore = '', present = [], onOf
         const where = sched && sched.address !== here
             ? ` (${[sched.activity, env.names ? env.names(sched.address) : sched.address].filter(Boolean).join(', ')})` : '';
         const who = shownName(npc);
-        // R4 N3: what is true, not a ban; the elsewhere rule line (narration.offmap_found) follows it. R5 moves it into narration.npc_absent.
-        out.push(`${capFirst(who)} is elsewhere right now${where}.`);
+        // R4 N3: what is true, not a ban; the elsewhere rule line (narration.offmap_found) follows it (R5: narration.npc_absent).
+        out.push(P('narration.npc_absent', { name: capFirst(who), where }));
         onOffmap();
     }
     return out.sort();
@@ -1118,10 +1122,13 @@ export function comingsAndGoings(chat, end, cast, env) {
     const was = new Set(before.map(n => n.id)), is = new Set(now.map(n => n.id));
     const span = Math.round((c1.elapsed - c0.elapsed) / 60);
     const inside = m => m != null && ((m - (c0.minutes ?? 0)) % 1440 + 1440) % 1440 <= span;
-    const at = m => `[${hhmm(inside(m) ? m : c1.minutes ?? 0)}]`;
+    const at = m => hhmm(inside(m) ? m : c1.minutes ?? 0);
     const shown = n => capFirst(shownName(n));
+    // R5 N7: each line is a prompt piece (narration.npc_arrives / npc_leaves / npc_fades); the list sorts by its [HH:MM] start.
+    const arrives = (time, n) => P('narration.npc_arrives', { time, name: shown(n) });
+    const leaves = (time, n) => P('narration.npc_leaves', { time, name: shown(n) });
     const D = dayOf(env), t0 = absMinutes(c0, env), t1 = t0 + span;
-    const stamp = m => `[${hhmm(((m % D) + D) % D)}]`;
+    const stamp = m => hhmm(((m % D) + D) % D);
     const here = env.playerAt(end);
     const lines = [];
     const covered = new Set(); // people whose lines came from the might walk
@@ -1133,15 +1140,15 @@ export function comingsAndGoings(chat, end, cast, env) {
         if (!visits.length) continue;
         let arrivedNow = false;
         visits.forEach((v, k) => {
-            if (k === visits.length - 1 && v.end >= t1) { if (is.has(n.id)) { lines.push(`${stamp(v.start)} ${shown(n)} arrives.`); arrivedNow = true; } return; }
-            lines.push(`${stamp(v.start)} ${shown(n)} arrives.`, `${stamp(v.end)} ${shown(n)} leaves.`);
+            if (k === visits.length - 1 && v.end >= t1) { if (is.has(n.id)) { lines.push(arrives(stamp(v.start), n)); arrivedNow = true; } return; }
+            lines.push(arrives(stamp(v.start), n), leaves(stamp(v.end), n));
         });
         if (arrivedNow || !is.has(n.id)) covered.add(n.id);
     }
-    for (const n of now) if (!was.has(n.id) && !covered.has(n.id)) lines.push(`${at(scheduleAt(n, c1, env)?.entry?.fromMin)} ${shown(n)} arrives.`);
+    for (const n of now) if (!was.has(n.id) && !covered.has(n.id)) lines.push(arrives(at(scheduleAt(n, c1, env)?.entry?.fromMin), n));
     for (const n of before) if (!is.has(n.id)) {
         const sc = scheduleAt(n, c0, env);
-        lines.push(`${sc?.kind === 'might' ? (sc.segEnd <= t1 ? stamp(sc.segEnd) : stamp(t1)) : at(sc?.entry?.toMin)} ${shown(n)} leaves.`);
+        lines.push(leaves(sc?.kind === 'might' ? (sc.segEnd <= t1 ? stamp(sc.segEnd) : stamp(t1)) : at(sc?.entry?.toMin), n));
     }
     // Appearance effects that expired while the person was still in the scene.
     const beforeMap = new Map(before.map(n => [n.id, n]));
@@ -1155,7 +1162,7 @@ export function comingsAndGoings(chat, end, cast, env) {
             const expiryMin = Number.isFinite(e.start) && e.lasts
                 ? Math.round((e.start + e.lasts * 60) / 60) % 1440
                 : (c1.minutes ?? 0);
-            lines.push(`${at(expiryMin)} ${shown(n)}'s ${e.intent} fades.`);
+            lines.push(P('narration.npc_fades', { time: at(expiryMin), name: shown(n), intent: e.intent }));
         }
     }
     return lines.sort();
@@ -1225,7 +1232,7 @@ export function focusRules(text, present) {
 function dispositionLine(n, pc = 'the player') {
     const d = n.disposition?.[PLAYER];
     if (!d || !d.value || d.value === 'unknown') return '';
-    return ` Attitude toward ${pc}: ${d.value}${d.reason ? ` (${d.reason})` : ''}.`;
+    return P('narration.npc_attitude', { pc, attitude: d.value, reason: d.reason ? ` (${d.reason})` : '' });
 }
 
 const LOOK_BRACKET_RE = /\[\s*look\b/i;
@@ -1278,48 +1285,50 @@ export function npcTiers(present, focus, { chat = [], index = -1, said = '', ask
 /** 'Met Joe but doesn't know him by name.': what this person knows of the player character. */
 export function relLine(p, pc = 'the player') {
     const st = relOf(p).state;
-    if (st === 'named') return `Knows ${pc} by name.`;
-    if (st === 'met') return `Met ${pc} but doesn't know ${pc} by name.`;
-    return `Has not met ${pc} before.`;
+    if (st === 'named') return P('narration.npc_knows_name', { pc });
+    if (st === 'met') return P('narration.npc_met', { pc });
+    return P('narration.npc_not_met', { pc });
 }
 /** Above the memories when the name is unknown to them: memories use real names, but they must not say one they don't know. */
-const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [`(Their memories name people by their real names; ${shownName(p)} does not know the name ${pc} and must not say it.)`]);
+const nameGuard = (p, pc) => (relOf(p).state === 'named' ? [] : [P('narration.npc_name_guard', { shown: shownName(p), pc })]);
 
 export function npcSlices(present, focus = {}, { tiers = null, pc = 'the player', gate = null, lines: say = {} } = {}) {
     const list = present ?? [];
     if (!list.length) return { npcs_present: '', npc_focus: '' };
     const tierOf = p => tiers?.[p.id] ?? { tier: focus?.id === p.id ? 'engaged' : 'present' };
+    // R5: every label is a prompt piece (D8); the person is named as the narrator may call them, with no handle (N4, D1).
+    const activityOf = p => (p.activityKind === 'with_player' ? P('narration.npc_with_player') : p.activityKind === 'with' ? P('narration.npc_with', { name: p.activityWith }) : p.activityKind === 'waiting' ? P('narration.npc_waiting') : p.activity);
     const lines = list.map(p => {
         const t = tierOf(p);
-        const bits = [`${labelOf(p)}:`];
+        const bits = [`${capFirst(shownName(p))}:`];
         if (gate && p.unknownAs && shownName(p) !== p.name) bits.push(gate(p)); // name-ok: portal compare
-        if (p.looks) bits.push(`Looks: ${p.looks}.`);
-        bits.push(`Demeanor: ${p.line}`);
-        if (p.activity) bits.push(`Now: ${p.activity}.`);
-        if (p.overdue) bits.push(p.overdue);
+        if (p.looks) bits.push(P('narration.npc_looks', { looks: p.looks }));
+        bits.push(P('narration.npc_demeanor', { line: p.line }));
+        if (p.activity) bits.push(P('narration.npc_now', { activity: activityOf(p) }));
+        if (p.overdue) bits.push(sayLine(p.overdue));
         if (p.alongDue && say.alongDue) bits.push(say.alongDue(p)); // 5C B1: from the narration.npc_along_due prompt
         if (t.tier === 'engaged') {
-            if (p.body) bits.push(`Body: ${p.body}`);
-            if (p.outfit) bits.push(`Wearing: ${p.outfit}`);
-            if (p.manner) bits.push(`Manner: ${p.manner}`);
-            if (p.voice) bits.push(`Speech: ${p.voice}`);
+            if (p.body) bits.push(P('narration.npc_body', { body: p.body }));
+            if (p.outfit) bits.push(P('narration.npc_wearing', { outfit: p.outfit }));
+            if (p.manner) bits.push(P('narration.npc_manner', { manner: p.manner }));
+            if (p.voice) bits.push(P('narration.npc_speech', { speech: p.voice }));
             const d = dispositionLine(p, pc).trim();
             if (d) bits.push(d);
             bits.push(relLine(p, pc));
-            if (p.memory?.length && focus?.id !== p.id) bits.push(...nameGuard(p, pc), `Remembers: ${p.memory.slice(-3).join('; ')}.`);
+            if (p.memory?.length && focus?.id !== p.id) bits.push(...nameGuard(p, pc), P('narration.npc_remembers', { memories: p.memory.slice(-3).join('; ') }));
         }
-        if (t.topical) bits.push(`History: ${p.deep.history}`);
+        if (t.topical) bits.push(P('narration.npc_history', { history: p.deep.history }));
         return bits.join(' ').replace(/\.\./g, '.');
     });
     const who = focus?.id ? list.find(p => p.id === focus.id) : null;
     let npc_focus = '';
     if (who && focus.depth && focus.depth !== 'present') {
-        const bits = [`More about ${shownName(who)}:`, relLine(who, pc)];
-        if (who.facts?.length) bits.push(`Known facts: ${who.facts.join('; ')}`);
-        if (who.memory?.length) bits.push(...nameGuard(who, pc), `Memory: ${who.memory.map(m => `- ${m}`).join('\n')}`);
+        const bits = [P('narration.npc_more', { shown: shownName(who) }), relLine(who, pc)];
+        if (who.facts?.length) bits.push(P('narration.npc_facts', { facts: who.facts.join('; ') }));
+        if (who.memory?.length) bits.push(...nameGuard(who, pc), P('narration.npc_memory', { memories: who.memory.map(m => `- ${m}`).join('\n') }));
         if (focus.depth === 'deep' && who.deep) {
-            if (who.deep.secrets?.length) bits.push(`Secrets: ${who.deep.secrets.join('; ')}`);
-            if (who.deep.relationships && Object.keys(who.deep.relationships).length) bits.push(`Relationships: ${Object.entries(who.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
+            if (who.deep.secrets?.length) bits.push(P('narration.npc_secrets', { secrets: who.deep.secrets.join('; ') }));
+            if (who.deep.relationships && Object.keys(who.deep.relationships).length) bits.push(P('narration.npc_relationships', { relationships: Object.entries(who.deep.relationships).map(([k, v]) => `${k}: ${v}`).join('; ') }));
         }
         npc_focus = bits.join('\n');
     }
