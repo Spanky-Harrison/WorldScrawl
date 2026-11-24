@@ -215,6 +215,12 @@ test('R7.8 room beats a distant exact alias: [find] guard in the gate guard\'s s
     assert.equal(msg.extra[FOUND][0].id, 'guard_g');
     assert.equal(msg.extra[FOUND][0].here, true);
 });
+test('R7.8b both in the room: the exact match ("a guard") beats the loose one (the gate guard\'s alias) among them', async () => {
+    const { c } = boot({ cards: [GATE, guard('guard_d', 'Dace', SQUARE)], here: SQUARE });
+    const { msg } = await bracket(c, '[find] guard');
+    assert.equal(msg.extra[FOUND][0].id, 'guard_d', JSON.stringify(msg.extra[FOUND]));
+    assert.deepEqual(matchNotes(msg), []);
+});
 test('R7.5 no tier jumping: from the market lane (the gate guard\'s area, level 1, loose) the Docks guard (level 2, exact) wins, with the note', async () => {
     const { c } = boot({ cards: [GATE, DOCKER], here: LANE });
     const { msg } = await bracket(c, '[find] guard');
