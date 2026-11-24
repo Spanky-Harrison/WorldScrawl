@@ -46,8 +46,9 @@ test('a failed break-through is told plainly to the narrator after the player\'s
     assert.equal(t, ext.factsText(up, null, false, { digFailed: true }), 'the look and new-door notes stay outranked');
     const after = ext.attemptLines(up, null, extra);
     assert.equal(after.length, 1);
-    assert.match(after[0], /^What just happened: .* tried to break through, but it FAILED: nothing gave way\. No new opening or passage exists/);
-    assert.match(after[0], /Describe the attempt failing\. Do not create a gap, a crack that opens or a way through\.$/);
+    assert.match(after[0], /^What just happened: .* tried to break through, but it FAILED: nothing gave way, and no new opening or passage exists\./);
+    assert.match(after[0], /Show the blow landing and the wall, floor or window holding: it stays whole, and this reply ends with You still at .+\.$/, 'R4 N3: what is true at the end, not a ban');
+    assert.doesNotMatch(after[0], /Do not|You is/);
     assert.doesNotMatch(after[0], /flag/, 'no engine bookkeeping in the narrator line');
 });
 test('after a failed break-through the reply cannot add a room or passage', () => {
@@ -210,8 +211,8 @@ test('narration: exits hint on arrival and look-around only; obscured exit label
     const loc = { name: 'Hall', description: 'A hall.', exits: [{ direction: 'north', view: 'open', to: 'r:a', to_name: 'Yard', to_summary: 'Muddy.' }, { direction: 'trapdoor', obscured: true, to: 'r:b', to_name: 'Vault', to_summary: 'Gold.' }] };
     const arrive = ext.factsText({ ...loc, address: 'r:h' }, { direction: 'south', from_name: 'X', to_name: 'Hall', to: 'r:h' }, false);
     const around = ext.factsText(loc, null, false, { lookAround: true }), plain = ext.factsText(loc, null, false);
-    assert.ok(arrive.includes('mention every exit') && around.includes('mention every exit') && around.includes('looks around') && !plain.includes('mention every exit'));
-    assert.ok(!arrive.includes('Vault') && arrive.includes('do not hint or guess where it leads') && arrive.includes('you can see Yard'), arrive);
+    assert.ok(arrive.includes('mention every exit') && around.includes('mention every exit') && around.includes('looked around') && !plain.includes('mention every exit'));
+    assert.ok(!arrive.includes('Vault') && arrive.includes('describe only the exit itself; where it leads stays unknown') && arrive.includes('you can see Yard'), arrive);
     assert.deepEqual(['I look around', 'she glances about the room', 'I survey the surroundings', 'I look at the door'].map(x => ext.LOOK_AROUND_RE.test(x)), [true, true, true, false]);
 });
 test('[ws-start] marker stripped from the prompt copy, stored text kept', () => {

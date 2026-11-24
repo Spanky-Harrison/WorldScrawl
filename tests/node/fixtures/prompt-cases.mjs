@@ -21,10 +21,11 @@ const looks = [{ kind: 'see', peek: true, via: 'north', name: 'Hall', descriptio
     { kind: 'threshold', via: 'north', description: 'An oak door.', unknown: true }, { kind: 'threshold', via: 'gate', description: 'Iron.', shut: true, name: 'Yard' },
     { kind: 'threshold', via: 'gate', description: 'Iron.', peek: true }, { kind: 'closed', via: 'north', stuck: 'is locked' }, { kind: 'closed', via: 'north', word: 'way' },
     { kind: 'closed', via: 'north' }, { kind: 'listen', via: 'north', sound: 'clear' }, { kind: 'listen', via: 'north', sound: 'none' }, { kind: 'listen', via: 'north' }, { kind: 'nothing', via: 'north', opened: true }];
-const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weather: 'It rains.', took: '' }], [trip, true, { took: '10 minutes', date: 'Noon' }],
+const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weather: 'It rains.', took: '', timeNudge: true }], [trip, true, { took: '10 minutes', date: 'Noon', timeNudge: true }],
     [move, false, { dig: { direction: 'hole' } }], [null, false, { look: looks[2] }], [null, false, { door: { type: 'stuck', direction: 'north', why: 'is locked' } }],
     [null, true, { newDoor: true }], [null, false, { newDoor: true }], [null, false, { door: { type: 'open_door', direction: 'north' } }], [null, false, { door: { type: 'close_door', direction: 'gate' } }],
-    [null, false, { dig: { direction: 'hole', to_name: 'Cellar' } }], [null, false, { digFailed: true }], [null, false, { lookAround: true }], [{ ...trip, stopped: true }, false, {}]];
+    [null, false, { dig: { direction: 'hole', to_name: 'Cellar' } }], [null, false, { digFailed: true }], [null, false, { lookAround: true }], [{ ...trip, stopped: true }, false, {}],
+    [null, false, { date: 'Noon, day 3' }]]; // R4 N8: a plain stay in the same part of the day: the time without the nudge
 const pl = opDocs => ({ opDocs });
 export const cases = ({ ext, patches, placeform }) => ({
     'pick.system': ext.pickSys(),

@@ -19,7 +19,7 @@
     check('intent marks where you came from', intentReq.includes('in (to The Drowned Rat, where you came from)'), intentReq.slice(0, 400));
     check('typed movement moved party', (await stored()) === 'riverton:docks/piers', String(await stored()));
     let narr = JSON.stringify((await lastReq()).messages);
-    check('narration got arrival facts', narr.includes('User moved south from Village Square (Riverton Streets) to River Docks') && narr.includes('never move User'), '');
+    check('narration got arrival facts', narr.includes('User moved south from Village Square (Riverton Streets) to River Docks') && narr.includes("Only the story's moves take User to another location"), '');
     check('narration request has no tools', !JSON.stringify((await lastReq()).tools ?? []).includes('ws_move'));
     check('no nudge when tools off', !narr.includes('call ws_look'));
 
@@ -28,7 +28,7 @@
     await send('I look at the boats.', 2);
     check('non-movement keeps location', (await stored()) === 'riverton:docks/piers');
     narr = JSON.stringify((await lastReq()).messages);
-    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks') && narr.includes('User stays in River Docks'));
+    check('no arrival line without a move', !narr.includes('What just happened') && narr.includes('Current location: River Docks') && narr.includes('Everything in this reply happens in River Docks') && narr.includes('the reply ends with User still there.'));
 
     // Invalid answer (not on the list) is treated as none.
     await queue([{ content: 'I think they go to the temple' }, { content: 'no' }, { content: 'Hmm.' }]);
@@ -128,7 +128,7 @@
     lm = await lastMsg();
     narr = JSON.stringify((await lastReq()).messages);
     check('bar: normal reply, no game message', !lm.sys && lm.mes === 'The wood is smooth.' && (await stored()) === 'riverton:drowned_rat/common_room', JSON.stringify(lm));
-    check('bar: not-moved injection', narr.includes('User stays in Common Room (The Drowned Rat)'));
+    check('bar: not-moved injection', narr.includes('Everything in this reply happens in Common Room (The Drowned Rat): no move happens'));
 
     // Think tags stripped before matching; a real move still works, and the game messages never reach the model.
     await queue([{ content: '<think>they want to go outside</think>\nOut' }, { content: 'The square.' }]);

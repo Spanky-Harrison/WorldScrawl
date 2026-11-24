@@ -99,7 +99,7 @@
     let lq = (await reqsNow()).slice(rL), lk = await lastU();
     check('look: intent offers look; target list has the exits plus a window', promptOf(lq[0]).includes('- look: the player looks, peers, peeks or listens') && promptOf(lq[1]).includes('- around: around here in general, nothing specific') && promptOf(lq[1]).includes('- down: the down exit (to Common Room)') && promptOf(lq[1]).includes('- window: out a window or opening with no exit') && promptOf(lq[1]).includes('Reply with just the key.'), promptOf(lq[1]).slice(-400));
     check('look: window view picked from the nearby list and stamped as a view link', promptOf(lq[2]).includes('Which place can they most likely see? Reply with just the key.') && JSON.stringify(lk.extra.worldscrawl_change) === JSON.stringify([{ type: 'view_link', from: 'riverton:drowned_rat/upstairs', to: 'riverton:streets/square' }]), JSON.stringify(lk.extra));
-    check('look: narration sees the square, party stays', promptOf(lq[3]).includes('looks out and sees Village Square') && promptOf(lq[3]).includes('Visible from here (no way through): Village Square') && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(lq[3]).slice(-900));
+    check('look: narration sees the square, party stays', promptOf(lq[3]).includes('looked out and saw Village Square') && promptOf(lq[3]).includes('Visible from here (no way through): Village Square') && (await stored()) === 'riverton:drowned_rat/upstairs', promptOf(lq[3]).slice(-900));
     rL = (await reqsNow()).length;
     await queue([{ content: 'look' }, { content: 'window' }, { content: 'The square again.' }]);
     await send('I glance out the window again', 3);
@@ -112,7 +112,7 @@
     await send('I look out the door', 2);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look out the door: no move options offered, party stays', !promptOf(lq[0]).includes('the player goes through the') && !promptOf(lq[0]).includes('- elsewhere:') && (await stored()) === 'riverton:drowned_rat/common_room' && !lk.extra.worldscrawl_move, promptOf(lq[0]).slice(-700));
-    check('stay-put narration: still in the room, no leaving/arriving', promptOf(lq.at(-1)).includes('User stays in Common Room (The Drowned Rat): no move happens. Do not describe User leaving'), promptOf(lq.at(-1)).slice(-700));
+    check('stay-put narration: still in the room, no leaving/arriving', promptOf(lq.at(-1)).includes('Everything in this reply happens in Common Room (The Drowned Rat): no move happens, and the reply ends with User still there.') && !promptOf(lq.at(-1)).includes('Do not describe User leaving'), promptOf(lq.at(-1)).slice(-700));
     rL = (await reqsNow()).length;
     await queue([{ content: 'out' }, { content: 'You step out.' }]);
     await send('I go out', 2);

@@ -309,24 +309,24 @@ test('absent note: Hesk off-shift in the common room is named as not here, from 
     const cast = [hesk()];
     const chat = [msg('I sit at the bar.')];
     const morning = absentAt(chat, 0, cast, envOf(BAR, clock(8)), { present: [] });
-    assert.deepEqual(morning, ["Hesk isn't here right now (asleep, Upstairs Rooms); do not portray Hesk."]);
+    assert.deepEqual(morning, ['Hesk is elsewhere right now (asleep, Upstairs Rooms).']);
     const evening = absentAt(chat, 0, cast, envOf(BAR, clock(18)), { present: presentAt(chat, 0, cast, envOf(BAR, clock(18))) });
     assert.deepEqual(evening, []);
     assert.deepEqual(absentAt(chat, 0, cast, envOf(FORGE, clock(8)), { present: [] }), [], 'not her place, not in the notes');
     const tom = [validateRecord({ id: 'tom', name: 'Tom', line: 'A smith.' }, { file: 'tom.json', places })];
     const named = absentAt(chat, 0, tom, envOf(FORGE, clock(8)), { lore: 'The forge is run by {{npc:tom}}.', present: [] });
-    assert.deepEqual(named, ["Tom isn't here right now; do not portray Tom."], 'no schedule: no place invented');
+    assert.deepEqual(named, ['Tom is elsewhere right now.'], 'no schedule: no place invented');
     assert.deepEqual(absentAt(chat, 0, tom, envOf(FORGE, clock(8)), { lore: 'Tom works here.', present: [] }), [], 'a plain name is not a token: no presence line');
 });
 
 test('absent note at 08:00: a fallback entry names where; a timed-only schedule names nowhere', () => {
     const chat = [msg('I sit at the bar.')];
     assert.deepEqual(absentAt(chat, 0, [hesk()], envOf(BAR, clock(8)), { present: [] }),
-        ["Hesk isn't here right now (asleep, Upstairs Rooms); do not portray Hesk."], 'Hesk: her fallback entry (asleep upstairs) is in force');
+        ['Hesk is elsewhere right now (asleep, Upstairs Rooms).'], 'Hesk: her fallback entry (asleep upstairs) is in force');
     const pell = validateRecord({ id: 'pell', name: 'Pell', line: 'The evening fiddler.', schedule: [{ place: BAR, activity: 'fiddling', from: '18:00', to: '23:00' }] }, { file: 'pell.json', places });
     assert.equal(pell.ok, true);
     assert.deepEqual(absentAt(chat, 0, [pell], envOf(BAR, clock(8)), { present: [] }),
-        ["Pell isn't here right now; do not portray Pell."], 'timed entry only, out of hours: no location invented');
+        ['Pell is elsewhere right now.'], 'timed entry only, out of hours: no location invented');
 });
 
 test('world load warns about plain cast names or aliases in lore/descriptions, and unknown token ids', () => {

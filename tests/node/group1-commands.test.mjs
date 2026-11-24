@@ -361,13 +361,13 @@ test('[open] a locked door: narrated; the stuck-door line is in the after-messag
     const at = say(c, '[open] back');
     assert.equal((await intercept(c, rec)).aborted, 0);
     assert.equal(c.chat[at].is_system, undefined);
-    assert.match(rec.blocks[REMINDER_KEY], /What just happened: You tries to open the door \(back\), but it is locked\. The door \(back\) does not open and it stays shut; nothing beyond it can be seen or reached\./);
-    assert.doesNotMatch(rec.blocks[FACTS_KEY], /does not open/);
-    assert.match(rec.blocks[FACTS_KEY], /You stays in Common Room \(The Drowned Rat\): no move happens\./);
+    assert.match(rec.blocks[REMINDER_KEY], /What just happened: You tried to open the door \(back\), but it is locked\. Show the door \(back\) holding fast: nothing beyond it can be seen or reached, and this reply ends with it still shut and You still at Common Room \(The Drowned Rat\)\./);
+    assert.doesNotMatch(rec.blocks[FACTS_KEY], /holding fast/);
+    assert.match(rec.blocks[FACTS_KEY], /Everything in this reply happens in Common Room \(The Drowned Rat\): no move happens, and the reply ends with You still there\./);
     reply(c, 'It will not budge.');
     say(c, 'I sit down.');
     await intercept(c, rec);
-    assert.doesNotMatch(rec.blocks[REMINDER_KEY], /does not open/, 'only that turn');
+    assert.doesNotMatch(rec.blocks[REMINDER_KEY], /holding fast/, 'only that turn');
 });
 for (const [text, mode] of [['[move] back', 'buttons'], ['I go back', 'typed']]) {
     test(`a move into a stuck door ("${text}", ${mode}): narrated attempt, no move stamp, no time, the door stamp survives a reload`, async () => {
@@ -380,7 +380,7 @@ for (const [text, mode] of [['[move] back', 'buttons'], ['I go back', 'typed']])
         assert.equal(m.extra[CMD_KEY], undefined);
         assert.equal(chatElapsed(c.chat), before);
         assert.deepEqual(m.extra.worldscrawl_door, { type: 'stuck', direction: 'back', why: 'is locked', attempt: 'move' });
-        assert.match(rec.blocks[REMINDER_KEY], /You tries to go through the door \(back\), but it is locked\. The door \(back\) does not open, no one passes through it, and it stays shut\. You is still at .* and does not arrive anywhere else\. Describe the attempt failing\. Do not move You out of /);
+        assert.match(rec.blocks[REMINDER_KEY], /You tried to go through the door \(back\), but it is locked\. Show the door \(back\) holding fast and nobody passing through it: this reply ends with it still shut and You still at Common Room \(The Drowned Rat\)\./);
         assert.doesNotMatch(rec.blocks[FACTS_KEY], /What just happened: You moved/, 'no narration.move');
         assert.match(rec.blocks[FACTS_KEY], /no move happens/);
         reload(c);
@@ -661,7 +661,7 @@ test('a regenerate of a narrated attempt keeps the same after-message line', asy
     const at = say(c, '[open] back');
     await intercept(c, rec);
     const line = rec.blocks[REMINDER_KEY];
-    assert.match(line, /does not open and it stays shut/);
+    assert.match(line, /holding fast: .* still shut/);
     // ST removes the reply, then regenerates from the player's line.
     const r = await intercept(c, rec, 'regenerate');
     assert.equal(r.aborted, 0);
@@ -676,7 +676,7 @@ test('a look that tries a stuck door (look kind closed + stuck): the stuck-door 
     const extra = { look: { kind: 'closed', via: 'back', word: 'door', stuck: 'is locked' } };
     const after = attemptLines(loc, null, extra);
     assert.equal(after.length, 1);
-    assert.match(after[0], /^What just happened: You tries to open the door \(back\), but it is locked\. The door \(back\) does not open and it stays shut/);
+    assert.match(after[0], /^What just happened: You tried to open the door \(back\), but it is locked\. Show the door \(back\) holding fast: .* still shut/);
     const facts = factsText(loc, null, false, extra);
     assert.doesNotMatch(facts, /is locked/);
     assert.match(facts, /no move happens/);

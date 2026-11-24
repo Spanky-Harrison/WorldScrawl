@@ -248,7 +248,7 @@ test('the narration line: what ran out, what made it, an excerpt, and where they
     const ex = ext.excerptOf(msg);
     assert.ok(ex.length <= 240 && ex.endsWith('...'), ex);
     const line = ext.expiryNarrationLine(room, { address: 'inn/upstairs', name: 'Upstairs Rooms' }, 'door', 'Ann', ex);
-    for (const w of ['Guest Room 1 has come to an end', 'lasted 1h, from message #5', 'A narrow room with a broken window.', 'How it came about: innkeeper shows them a room\n', `"${ex}"`, 'ends up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ends up'])
+    for (const w of ['Guest Room 1 has come to an end', 'lasted 1h, from message #5', 'A narrow room with a broken window.', 'How it came about: innkeeper shows them a room\n', `"${ex}"`, 'ended up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ended up'])
         assert.ok(line.includes(w), w);
     assert.ok(!line.includes('added place'), 'the engine summary stays off the narrator; the story note is enough');
 });

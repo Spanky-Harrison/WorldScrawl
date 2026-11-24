@@ -90,7 +90,7 @@ test('jargon: a plain look, people here, the stay-put line and the rules read as
     assert.match(f, /^\[Scene facts\. Treat these as true\.\]/);
     assert.match(f, /People here \(anyone not listed is a background figure, not one of them\):/);
     assert.match(f, new RegExp(`the landlady \\[${N.handleOf('hesk')}\\]:`), 'handles stay');
-    assert.match(f, /stays in Common Room \(The Drowned Rat\): no move happens/);
+    assert.match(f, /Everything in this reply happens in Common Room \(The Drowned Rat\): no move happens/);
     assert.match(f, /Places with local lore: /);
     assert.deepEqual(jargonIn(f), []);
 });
@@ -109,7 +109,7 @@ test('jargon: someone asleep elsewhere is "elsewhere", with the keep-out line, a
     await bracket(c, '[lore] The Drowned Rat');
     const f = await facts(blocks);
     assert.match(f, /The landlady: asleep, elsewhere \(her own room, in The Drowned Rat\)/);
-    assert.match(f, /\(Anyone above who is elsewhere is not with the characters\./);
+    assert.match(f, /\(Anyone above who is elsewhere is not with the characters; they stay out of the scene until they actually come here\.\)/);
     assert.deepEqual(jargonIn(f), []);
 });
 
