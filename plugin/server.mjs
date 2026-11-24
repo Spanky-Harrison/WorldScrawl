@@ -455,35 +455,33 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
             return { hard, overlaps };
         },
         'POST /aftermath': ({ q, body }) => {
-            // The one-time "what just happened" line: the room the narrator last described (the map as it saw it) against
-            // the map now. Empty when nothing changed around the party without narration. Derived, never stored.
+            // The one-time "what just happened" facts: the room the narrator last described (the map as it saw it) against
+            // the map now. Data only (R5 N7): the extension words the line from its narration.aftermath_* prompts.
+            // { kind: 'none' } when nothing changed around the party without narration. Derived, never stored.
             needBody(body);
             const wid = q('world'), then = isObj(body.then) ? body.then : {};
             const thenChanges = Array.isArray(then.changes) ? then.changes : [], thenNow = typeof then.now === 'number' ? then.now : null;
             const was = typeof then.address === 'string' ? then.address : null, at = field(body, 'address', 'str');
             const now = nowOf(body), changes = field(body, 'changes', 'list', []);
-            if (!was) return { note: '' };
+            if (!was) return { kind: 'none' };
             let wThen, wNow;
-            try { wThen = changed_for(wid, thenChanges, thenNow, false).w; wNow = changed_for(wid, changes, now).w; } catch { return { note: '' }; }
+            try { wThen = changed_for(wid, thenChanges, thenNow, false).w; wNow = changed_for(wid, changes, now).w; } catch { return { kind: 'none' }; }
             const old = wThen.locations.get(was), here = wNow.locations.get(at);
-            if (!old || !here) return { note: '' };
+            if (!old || !here) return { kind: 'none' };
             const label = (w, l) => World.place_label(l.name, w.sub_of(l).name);
             let why = 'a map change was turned off or undone';
             try { if (now !== null && changed_for(wid, changes, null, false).w.locations.has(was) && !wNow.locations.has(was)) why = 'a temporary change ended'; } catch { /* keep */ }
             const nowRoom = wNow.locations.get(was);
             if (!nowRoom) {
                 if (now !== null) try { if (changed_for(wid, changes, null, false).w.locations.has(was)) why = 'a temporary change ended'; } catch { /* keep */ }
-                const keep = new Set(here.exits.map(x => x.direction.toLowerCase()));
-                const only = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
-                const name = label(wThen, old);
-                return { note: `${name} is gone; the characters are now in ${label(wNow, here)}.${only.length ? ` Anything only in ${name}, such as the ${only.slice(0, 4).join(', the ')}, no longer exists.` : ''} Do not describe it.`, why, gone: was };
+                return { kind: 'gone', gone: was, gone_name: label(wThen, old), place_name: label(wNow, here), why };
             }
-            if (was !== at) return { note: '' };
+            if (was !== at) return { kind: 'none' };
             const keep = new Set(nowRoom.exits.map(x => x.direction.toLowerCase()));
             const lost = old.exits.filter(x => !keep.has(x.direction.toLowerCase())).map(x => x.direction);
-            if (!lost.length) return { note: '' };
+            if (!lost.length) return { kind: 'none' };
             if (now !== null) try { const nc = changed_for(wid, changes, null, false).w.locations.get(was); if (nc && lost.every(d => nc.exits.some(x => x.direction.toLowerCase() === d.toLowerCase()))) why = 'a temporary change ended'; } catch { /* keep */ }
-            return { note: `Since the last reply, the ${lost.join(', the ')} in ${label(wNow, nowRoom)} no longer ${lost.length === 1 ? 'exists' : 'exist'}. Do not describe ${lost.length === 1 ? 'it' : 'them'}.`, why };
+            return { kind: 'lost_exits', lost, place_name: label(wNow, nowRoom), why };
         },
         'POST /resolve': ({ q, body }) => {
             // Blanket position resolver: any stored location -> a real room of the effective map.

@@ -36,7 +36,7 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, the chat's first narrated reply, or when the part of the day changed since the previous narrator reply was written); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts, each its own entry (where the party is, the lore lines, the exits, what can be seen from here, the time, the weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, the chat's first narrated reply, or when the part of the day changed since the previous narrator reply was written; then the people-here block, built from the people label pieces); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, a look result, and so on), then any other thing that just happened (a temporary place that ran out, the place being gone, the map changing around the party, a wait, people back as they were), then on every turn without a move the stay-put line; Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules (always the last line of the block). Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
     },
     {
       "id": "npc",
@@ -68,9 +68,9 @@
     "arrival": "what the party sees on arrival (the new room's description)",
     "context": "what is already around the place (its region, area and neighbours), or empty",
     "cut_short": "empty, or \" (the trip was cut short there)\" when the trip stopped early (the Narration piece)",
-    "description": "the description of the room the prompt is about",
+    "description": "the description of the room (or view, or person's look) the line is about",
     "direction": "the exit or direction, e.g. \"north\", \"up\" or \"through the trapdoor\"",
-    "door": "the door being used, e.g. \"the north door\"",
+    "door": "the door or exit being used, as the narrator line names it, e.g. \"north door\", \"door out\" or \"trapdoor\" (the line adds \"the\")",
     "draft": "your draft text for the field, or empty (the Expand with AI piece)",
     "edit_types": "the list of map edit types the model may use (made by the game)",
     "end": "where the story text to look at ends",
@@ -84,7 +84,7 @@
     "label": "the name of a place the player already knows about",
     "found": "the saved people the player's [find] just brought to this room, as the narrator may call them (comma-separated), e.g. The landlady",
     "not_found": "a saved person the player's [find] looked for and did not find, as the narrator may call them, e.g. The landlady",
-    "lines": "the narrator's lines about saved people, one per entry: who came or went since the last reply with the game time (e.g. [14:20] The landlady arrives.), or who is already in the place just reached with what they are doing (e.g. the landlady (buying for the inn)); or, in the after-reply tracker, the people just left behind, one \"name [handle]. Looks: …\" line each",
+    "lines": "the narrator's lines about saved people, one per entry: who came or went since the last reply with the game time (e.g. [14:20] The landlady arrives.), or who is already in the place just reached with what they are doing (e.g. the landlady (buying for the inn)); or, in the after-reply tracker, the people just left behind, one \"name [handle]. Looks: …\" line each; or, in the tracker's Already done by the game list, one line per change that ran out.",
     "mentions": "other world text that names a changed place (from the Map changes piece), or empty",
     "name": "the name of the place or person being written about",
     "body": "the person's resolved Body text, the physical description already in force",
@@ -98,7 +98,7 @@
     "options": "the possible answers: \"- key: meaning\" lines (pick-one questions) or a comma-separated list (intent)",
     "outline": "an outline of the rooms and exits in the area",
     "party": "who is travelling: the \"Who moves\" setting, e.g. your persona name, or your persona and the character (\"You\" when it is empty). Narrator lines use it with the past tense or as a noun (\"ends with Ana and Hesk still at …\"), so it reads right for one person or several; side-call questions say \"the player\" instead.",
-    "place": "the name of the room the party is in now",
+    "place": "the name of the room the party is in now (in the people lines: where someone is due)",
     "places": "the nearby places, one \"- key: name: short summary\" line each",
     "range": "which rooms the patch may touch",
     "region_name": "the name of the region",
@@ -117,7 +117,7 @@
     "verb": "the door action: \"open\" or \"close\" in the door question; \"opened\", \"closed\", \"barred\" or \"unbarred\" in the narration line",
     "via": "the rooms passed through on the way, comma separated",
     "what": "the note on what change to look for, worded by who raised it (the tracker, the player or the narrator), plus the place mentioned, if any",
-    "where": "where the party is now, for the narrator",
+    "where": "where the party is now, for the narrator (in the people lines: empty, or where someone is, in brackets)",
     "activity": "what a person's schedule entry has them doing (e.g. pouring drinks)",
     "why": "why the door would not move (e.g. it is locked)",
     "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game.",
@@ -158,7 +158,38 @@
     "intent": "what changed, in the tracker's or the player's words (e.g. braids tied back)",
     "how": "light touch or full rewrite",
     "written": "the player's own text for this change (People: the player's text for an appearance change), or empty",
-    "written_text": "the text the player wrote for that field"
+    "written_text": "the text the player wrote for that field",
+    "exit_list": "the exits from here, comma-separated, each with where it leads when known (e.g. out (Village Square)), or \"none\" (narrator) / \"(none)\" (tracker)",
+    "far": "empty, or the Narration: a view that carries far piece when the sight is clear",
+    "date": "the game date and time, in words (e.g. Saturday morning, 12th of April, year 1247 (08:00))",
+    "date_before": "the game date and time before the wait, in words",
+    "duration": "how long it took or lasted, in words (e.g. a minute, 45 minutes, an hour and a half)",
+    "weather": "the weather here now (or before the wait), in words from the game's weather; in the tracker, (none) when unknown",
+    "opened": "empty, or the Narration: opened it first, to look piece when the party opened the door to look",
+    "beyond": "what is known of where an exit leads: one of the Narration: where it leads pieces",
+    "light": "empty, or the Narration: the light changed during the wait piece",
+    "part_before": "the part of the day before the wait: night, dawn, morning, afternoon or evening",
+    "items": "the temporary changes that ran out, \"; \"-separated: a person's as Name: \"change\", a place's as \"note\"",
+    "people": "empty, or the Narration: describe the people as they are now piece when a person's change ran out",
+    "appearance": "empty, or the Narration: what they look like now piece with the person's Looks, Body and Wearing labels",
+    "looks": "a person's short look (the Looks label), or their Looks, Body and Wearing labels (What they look like now); (none) in the tracker when empty",
+    "gone": "the name of a room that is gone from the map since the last reply",
+    "late": "how late someone is, in words (e.g. an hour, 3 hours)",
+    "manner": "how a person behaves (their manner, from the cast)",
+    "speech": "how a person speaks (their speech, from the cast)",
+    "pc": "the player character as people know them: the persona name, or \"the player\"",
+    "attitude": "how a person feels about the player character (e.g. indifferent, friendly)",
+    "reason": "empty, or why they feel that way, in brackets",
+    "memories": "a person's memories: the last few \"; \"-separated (Remembers), every one as a \"- \" line (Memory), or \"; \"-separated / (none) in the tracker",
+    "history": "a person's history, from the cast",
+    "facts": "the facts about a person, \"; \"-separated ((none) in the tracker when empty)",
+    "secrets": "a person's secrets, \"; \"-separated",
+    "relationships": "a person's relationships, \"name: how\" pairs \"; \"-separated",
+    "handle": "a saved person's handle, the short id the game reads back (e.g. pdvko)",
+    "unnamed": "empty, or the People: after-reply tracker, name not known yet piece",
+    "people_lines": "the tracker's person lines, one per saved person here, or (none)",
+    "stance": "how the person feels about the player, with the reason in brackets, or (none)",
+    "mentioned": "the place the note names, as written"
   },
   "prompts": [
     {
@@ -1286,6 +1317,20 @@
       "text": "The player noted: \"{{note}}\"."
     },
     {
+      "id": "change.place_mentioned",
+      "title": "Map changes: the place the note mentions",
+      "description": "Piece: after the note in {{what}} of the map change calls, when the note names a place.",
+      "group": "change",
+      "piece": true,
+      "locked": "The game fills the place the note named; the map change calls use it to find the rooms.",
+      "placeholders": [
+        {
+          "name": "mentioned"
+        }
+      ],
+      "text": "Place mentioned: \"{{mentioned}}\"."
+    },
+    {
       "id": "change.what_narrator",
       "title": "Map changes: the note from the narrator",
       "description": "Piece: fills {{what}} in the map change calls when the narrator raised the change (a ws_flag tag).",
@@ -1752,6 +1797,1172 @@
       ]
     },
     {
+      "id": "narration.location",
+      "title": "Narration: where the party is",
+      "description": "Alongside, right after the first line: the room the party is in and its description.",
+      "group": "narration",
+      "locked": "The game fills this from the map and the clock; the narrator reads it as fact.",
+      "text": "Current location: {{place}}\nThis location: {{description}}",
+      "placeholders": [
+        {
+          "name": "place"
+        },
+        {
+          "name": "description"
+        }
+      ]
+    },
+    {
+      "id": "narration.exits",
+      "title": "Narration: the exits",
+      "description": "Alongside, in the world facts after the lore lines: the exits from this room, with where each leads when the party knows it.",
+      "group": "narration",
+      "locked": "The game fills this from the map and the clock; the narrator reads it as fact.",
+      "text": "Exits from here: {{exit_list}}",
+      "placeholders": [
+        {
+          "name": "exit_list"
+        }
+      ]
+    },
+    {
+      "id": "narration.glimpse_open",
+      "title": "Narration: what an open way shows",
+      "description": "Used by Narration. Alongside, in the world facts after the exits: one line per open exit whose far side can be seen from here.",
+      "group": "style",
+      "process": "narration",
+      "text": "{{name}} can be seen from here, looking {{direction}}: {{description}}{{far}}",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "far",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.glimpse_closed",
+      "title": "Narration: what a closed see-through way shows",
+      "description": "Used by Narration. Alongside, in the world facts after the exits: one line per closed exit that can be seen through (glass, bars).",
+      "group": "style",
+      "process": "narration",
+      "text": "{{name}} can be seen from here, through the closed {{door}}: {{description}}{{far}}",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "far",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.glimpse_sound",
+      "title": "Narration: what a closed way lets through",
+      "description": "Used by Narration. Alongside, in the world facts after the exits: a closed exit that carries sound clearly but shows nothing.",
+      "group": "style",
+      "process": "narration",
+      "text": "Sounds from {{name}} carry clearly through the closed {{door}}, though nothing can be seen through it.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "door"
+        }
+      ]
+    },
+    {
+      "id": "narration.view",
+      "title": "Narration: a view with no way through",
+      "description": "Used by Narration. Alongside, in the world facts after the exits: one line per view (a window, a balcony) with no way through.",
+      "group": "style",
+      "process": "narration",
+      "text": "Visible from here (no way through): {{name}}: {{description}}",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "description"
+        }
+      ]
+    },
+    {
+      "id": "narration.view_far",
+      "title": "Narration: a view that carries far",
+      "description": "Used by Narration. Piece: added after a glimpse or a look when the sight is clear and carries well beyond the next place.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "The view is open and carries well beyond it.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.time",
+      "title": "Narration: the time",
+      "description": "Alongside, in the world facts: the game time now. On a move or a journey the time it took follows; the time-of-day nudge follows only when it applies.",
+      "group": "narration",
+      "locked": "The game fills this from the map and the clock; the narrator reads it as fact.",
+      "text": "Current time: {{date}}.",
+      "placeholders": [
+        {
+          "name": "date"
+        }
+      ]
+    },
+    {
+      "id": "narration.move_took",
+      "title": "Narration: how long the move took",
+      "description": "Piece: after the time line on a one-step move turn.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the map and the clock; the narrator reads it as fact.",
+      "text": "(That move took {{duration}}.)",
+      "placeholders": [
+        {
+          "name": "duration"
+        }
+      ]
+    },
+    {
+      "id": "narration.journey_took",
+      "title": "Narration: how long the journey took",
+      "description": "Piece: after the time line on a journey through several places.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the map and the clock; the narrator reads it as fact.",
+      "text": "(That journey took {{duration}}.)",
+      "placeholders": [
+        {
+          "name": "duration"
+        }
+      ]
+    },
+    {
+      "id": "narration.weather",
+      "title": "Narration: the weather",
+      "description": "Used by Narration. Alongside, in the world facts after the time: the weather here now, from the game's weather.",
+      "group": "style",
+      "process": "narration",
+      "text": "{{weather}} Let the weather and temperature show in the narration where it fits; do not change them.",
+      "placeholders": [
+        {
+          "name": "weather"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_opened",
+      "title": "Narration: opened it first, to look",
+      "description": "Used by Narration. Piece: starts a look line when the party opened the door to look.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "{{party}} opened the {{door}} first.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_peek",
+      "title": "Narration: peeked through a closed door",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party peeked through a closed door without opening it.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} peeked through the closed {{door}} without opening it and glimpsed {{name}}: {{description}} The door stays closed, and {{party}} stayed at {{place}}. Describe only the glimpse.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_through",
+      "title": "Narration: looked through a closed see-through way",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked through a closed exit that can be seen through.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} looked through the closed {{door}} (it can be seen through) and saw {{name}}: {{description}} It stays closed, and {{party}} stayed at {{place}}. Describe only what can be seen from here.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_see",
+      "title": "Narration: looked and saw the place beyond",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked out or through an exit and saw the place beyond.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{opened}}{{party}} looked {{direction}} and saw {{name}}: {{description}}{{far}} {{party}} did not go there and stayed at {{place}}. Describe only what can be seen from here.",
+      "placeholders": [
+        {
+          "name": "opened",
+          "optional": true
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "far",
+          "optional": true
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_threshold",
+      "title": "Narration: looked, and only the near side shows",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked at an exit whose far side cannot be seen; {{beyond}} says what is known of where it leads.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{opened}}{{party}} looked {{direction}}. All that can be seen is what is right there: {{description}} {{beyond}} {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "opened",
+          "optional": true
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "beyond"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_beyond_unknown",
+      "title": "Narration: where it leads is unknown",
+      "description": "Used by Narration. Piece: fills {{beyond}} in the look line when the party does not know where the exit leads.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "Where it leads is not clear and is unknown; do not name, describe or guess what lies beyond.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.look_beyond_named",
+      "title": "Narration: where it leads is known but unseen",
+      "description": "Used by Narration. Piece: fills {{beyond}} in the look line when the party knows the name of the place beyond but cannot see it.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "It leads to {{name}}, but that cannot be seen from here; it may be named but do not describe what lies at the far end.",
+      "placeholders": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_beyond_unseen",
+      "title": "Narration: where it leads cannot be seen",
+      "description": "Used by Narration. Piece: fills {{beyond}} in the look line when the place beyond cannot be seen and has no name the party knows.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "Where it leads cannot be seen from here; do not describe what lies at the far end.",
+      "placeholders": []
+    },
+    {
+      "id": "narration.look_stuck",
+      "title": "Narration: tried to open it to look, and it held",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party tried to open a door to look and it would not open.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} tried to open the {{door}}, but it {{why}}. Nothing beyond it can be seen. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "why"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_closed",
+      "title": "Narration: looked at a closed door",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked at a closed door.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} looked at the {{door}}. The door is closed; nothing beyond it can be seen. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_blocked",
+      "title": "Narration: looked at a blocked way",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked at a way that is blocked.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} looked at the {{door}}. The way is blocked; nothing beyond it can be seen. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.listen_clear",
+      "title": "Narration: listened, sounds carry clearly",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party listened at a closed door that carries sound clearly.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} listened at the closed {{door}}. Sounds from beyond it carry clearly. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.listen_none",
+      "title": "Narration: listened, no sound",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party listened at a closed door that lets no sound through.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} listened at the closed {{door}}. No sound at all comes through it. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.listen_faint",
+      "title": "Narration: listened, faint sounds",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party listened at a closed door that lets only muffled sound through.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} listened at the closed {{door}}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "door"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.look_nothing",
+      "title": "Narration: looked, nothing beyond",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): the party looked, and nothing beyond can be made out.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{opened}}{{party}} looked {{direction}}, but nothing can be made out beyond it. {{party}} stayed at {{place}}.",
+      "placeholders": [
+        {
+          "name": "opened",
+          "optional": true
+        },
+        {
+          "name": "party"
+        },
+        {
+          "name": "direction"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.waited",
+      "title": "Narration: the party waited",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line, on a wait turn: how long the party waited and the time before and now.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} waited here for {{duration}}, staying put. It was {{date_before}}; it is now {{date}}.{{light}}",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "duration"
+        },
+        {
+          "name": "date_before"
+        },
+        {
+          "name": "date"
+        },
+        {
+          "name": "light",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.slept",
+      "title": "Narration: the party slept",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line, on a sleep turn: how long the party slept and the time before and now.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: {{party}} slept here for {{duration}}, staying put. It was {{date_before}}; it is now {{date}}.{{light}} Narrate waking up.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "duration"
+        },
+        {
+          "name": "date_before"
+        },
+        {
+          "name": "date"
+        },
+        {
+          "name": "light",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.wait_light",
+      "title": "Narration: the light changed during the wait",
+      "description": "Used by Narration. Piece: fills {{light}} in the wait line when the part of the day changed.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "The light has changed from {{part_before}} to {{part}}.",
+      "placeholders": [
+        {
+          "name": "part_before"
+        },
+        {
+          "name": "part"
+        }
+      ]
+    },
+    {
+      "id": "narration.wait_weather",
+      "title": "Narration: the weather before the wait",
+      "description": "Used by Narration. Alongside, right after the wait line, when the weather changed during the wait.",
+      "group": "style",
+      "process": "narration",
+      "text": "Before the wait: {{weather}} Describe how the weather has changed.",
+      "placeholders": [
+        {
+          "name": "weather"
+        }
+      ]
+    },
+    {
+      "id": "narration.wait_wore_off",
+      "title": "Narration: what wore off during the wait",
+      "description": "Used by Narration. Alongside, after the wait line, when temporary changes to places or people ran out during the wait.",
+      "group": "style",
+      "process": "narration",
+      "text": "While time passed, these wore off and no longer hold: {{items}}.{{people}}",
+      "placeholders": [
+        {
+          "name": "items"
+        },
+        {
+          "name": "people",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.wait_wore_off_people",
+      "title": "Narration: describe the people as they are now",
+      "description": "Used by Narration. Piece: fills {{people}} in the wore-off line when a change to a person ran out.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "Describe the people as they are now (see the people listed).",
+      "placeholders": []
+    },
+    {
+      "id": "narration.person_wore_off",
+      "title": "Narration: people back as they were",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line: people whose temporary change ran out since the last reply.",
+      "group": "style",
+      "process": "narration",
+      "text": "These people are as they were before:\n{{lines}}\nIf {{party}} can see them, describe them as they are now.",
+      "placeholders": [
+        {
+          "name": "lines"
+        },
+        {
+          "name": "party"
+        }
+      ]
+    },
+    {
+      "id": "narration.person_wore_off_line",
+      "title": "Narration: one person back as they were",
+      "description": "Used by Narration. Piece: one line of the people-back-as-they-were list.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "- {{name}}: \"{{intent}}\" has worn off; they look as they did before it.{{appearance}}",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "intent"
+        },
+        {
+          "name": "appearance",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.person_looks_now",
+      "title": "Narration: what they look like now",
+      "description": "Used by Narration. Piece: fills {{appearance}} in a people-back-as-they-were line.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "text": "What they look like now: {{looks}}",
+      "placeholders": [
+        {
+          "name": "looks"
+        }
+      ]
+    },
+    {
+      "id": "narration.relocated_gone",
+      "title": "Narration: the place sealed behind the party",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line: the place the party was in ran out and the way back sealed behind them.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: the place where {{party}} stood is gone; the way back sealed behind them, and {{party}} ended up back in {{place}}. Narrate this naturally.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.relocated_missing",
+      "title": "Narration: the place is no longer there",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line: the place the party was in is no longer on the map, and the game put them in another room.",
+      "group": "style",
+      "process": "narration",
+      "text": "What just happened: the place where {{party}} stood is no longer there, and {{party}} ended up in {{place}}. Narrate this naturally, as where the scene is now.",
+      "placeholders": [
+        {
+          "name": "party"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.aftermath_gone",
+      "title": "Narration: the room the narrator last saw is gone",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line: the map changed around the party without narration (a change ran out, or was turned off or undone) and the room is gone.",
+      "group": "style",
+      "process": "narration",
+      "text": "{{gone}} is gone, and the characters are now in {{place}}; whatever was only in {{gone}} went with it.",
+      "placeholders": [
+        {
+          "name": "gone"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.aftermath_lost_exits",
+      "title": "Narration: a way out is gone",
+      "description": "Used by Narration. Alongside, in Step 2 after the 'what just happened' line: one line per exit of this room that went away without narration.",
+      "group": "style",
+      "process": "narration",
+      "text": "The way {{direction}} out of {{place}} is gone.",
+      "placeholders": [
+        {
+          "name": "direction"
+        },
+        {
+          "name": "place"
+        }
+      ]
+    },
+    {
+      "id": "narration.stay_put",
+      "title": "Narration: the scene stays here",
+      "description": "Step 2 of 5, last (every turn without a move): where the scene is at the end of the reply.",
+      "group": "narration",
+      "locked": "Tells the narrator the scene does not move; the game controls movement.",
+      "text": "Everything in this reply happens in {{place}}: no move happens, and the reply ends with {{party}} still there.",
+      "placeholders": [
+        {
+          "name": "place"
+        },
+        {
+          "name": "party"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_absent",
+      "title": "Narration: someone who belongs here is away",
+      "description": "Alongside, in the people block: a saved person who belongs here (their schedule, or the lore names them) and is elsewhere now.",
+      "group": "narration",
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "{{name}} is elsewhere right now{{where}}.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "where",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_elsewhere",
+      "title": "Narration: someone off the map",
+      "description": "Alongside, in the people block: a saved person whose schedule keeps them off the map now, with what they are doing.",
+      "group": "narration",
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "{{name}}: {{activity}}, elsewhere{{where}}",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "activity"
+        },
+        {
+          "name": "where",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_due",
+      "title": "Narration: someone due elsewhere",
+      "description": "Alongside, in the people block: someone still in the scene whose schedule has them due elsewhere from this hour.",
+      "group": "narration",
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "{{name}} should be at {{place}} by now ({{activity}}).",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "place"
+        },
+        {
+          "name": "activity"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_late",
+      "title": "Narration: someone late for their schedule",
+      "description": "Alongside, in the people block: someone still in the scene an hour or more after their schedule moved them elsewhere.",
+      "group": "narration",
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "{{name}} is {{late}} late for {{activity}}.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "late"
+        },
+        {
+          "name": "activity"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_moved_on",
+      "title": "Narration: someone who would have moved on",
+      "description": "Alongside, in the people block: someone wandering who would usually have moved on from here by now.",
+      "group": "narration",
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "{{name}} would normally have moved on by now.",
+      "placeholders": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_arrives",
+      "title": "Narration: someone arrived",
+      "description": "Piece: one line inside the who-came-and-went list.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "[{{time}}] {{name}} arrives.",
+      "placeholders": [
+        {
+          "name": "time"
+        },
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_leaves",
+      "title": "Narration: someone left",
+      "description": "Piece: one line inside the who-came-and-went list.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "[{{time}}] {{name}} leaves.",
+      "placeholders": [
+        {
+          "name": "time"
+        },
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_fades",
+      "title": "Narration: a change to someone faded",
+      "description": "Piece: one line inside the who-came-and-went list: a temporary change to someone in the scene ran out.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "[{{time}}] {{name}}'s {{intent}} fades.",
+      "placeholders": [
+        {
+          "name": "time"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "intent"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_with_player",
+      "title": "Narration: with the player",
+      "description": "Piece: what someone is doing when they came along with the player or follow them (the Now: label).",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "with the player",
+      "placeholders": []
+    },
+    {
+      "id": "narration.npc_with",
+      "title": "Narration: with someone else",
+      "description": "Piece: what someone is doing when they follow someone other than the player (the Now: label).",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "with {{name}}",
+      "placeholders": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_waiting",
+      "title": "Narration: waiting",
+      "description": "Piece: what someone told to stay put is doing (the Now: label).",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the cast, the schedules and the stamps.",
+      "text": "waiting",
+      "placeholders": []
+    },
+    {
+      "id": "narration.npc_looks",
+      "title": "Narration: Looks label",
+      "description": "Piece: a person's short look in the people-here block.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Looks: {{looks}}.",
+      "placeholders": [
+        {
+          "name": "looks"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_demeanor",
+      "title": "Narration: Demeanor label",
+      "description": "Piece: a person's one-sentence line in the people-here block.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Demeanor: {{line}}",
+      "placeholders": [
+        {
+          "name": "line"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_now",
+      "title": "Narration: Now label",
+      "description": "Piece: what a person is doing now, in the people-here block.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Now: {{activity}}.",
+      "placeholders": [
+        {
+          "name": "activity"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_body",
+      "title": "Narration: Body label",
+      "description": "Piece: a person's body, for someone the player is engaged with.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Body: {{body}}",
+      "placeholders": [
+        {
+          "name": "body"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_wearing",
+      "title": "Narration: Wearing label",
+      "description": "Piece: what a person is wearing, for someone the player is engaged with (and in the people-back-as-they-were line).",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Wearing: {{outfit}}",
+      "placeholders": [
+        {
+          "name": "outfit"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_manner",
+      "title": "Narration: Manner label",
+      "description": "Piece: a person's manner, for someone the player is engaged with.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Manner: {{manner}}",
+      "placeholders": [
+        {
+          "name": "manner"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_speech",
+      "title": "Narration: Speech label",
+      "description": "Piece: how a person speaks, for someone the player is engaged with.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Speech: {{speech}}",
+      "placeholders": [
+        {
+          "name": "speech"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_attitude",
+      "title": "Narration: Attitude label",
+      "description": "Piece: how a person feels about the player character, for someone the player is engaged with.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Attitude toward {{pc}}: {{attitude}}{{reason}}.",
+      "placeholders": [
+        {
+          "name": "pc"
+        },
+        {
+          "name": "attitude"
+        },
+        {
+          "name": "reason",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_knows_name",
+      "title": "Narration: knows the player by name",
+      "description": "Piece: what a person knows of the player character.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Knows {{pc}} by name.",
+      "placeholders": [
+        {
+          "name": "pc"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_met",
+      "title": "Narration: met the player, name unknown",
+      "description": "Piece: what a person knows of the player character.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Met {{pc}} but doesn't know {{pc}} by name.",
+      "placeholders": [
+        {
+          "name": "pc"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_not_met",
+      "title": "Narration: has not met the player",
+      "description": "Piece: what a person knows of the player character.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Has not met {{pc}} before.",
+      "placeholders": [
+        {
+          "name": "pc"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_name_guard",
+      "title": "Narration: their memories use real names",
+      "description": "Piece: above a person's memories when they do not know the player character's name.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "(Their memories name people by their real names; {{shown}} does not know the name {{pc}} and must not say it.)",
+      "placeholders": [
+        {
+          "name": "shown"
+        },
+        {
+          "name": "pc"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_remembers",
+      "title": "Narration: Remembers label",
+      "description": "Piece: a person's last few memories, for someone the player is engaged with.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Remembers: {{memories}}.",
+      "placeholders": [
+        {
+          "name": "memories"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_history",
+      "title": "Narration: History label",
+      "description": "Piece: a person's history, when a lore request in this scene names them.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "History: {{history}}",
+      "placeholders": [
+        {
+          "name": "history"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_more",
+      "title": "Narration: More about label",
+      "description": "Piece: opens the detail for the person in focus ({{npc_focus}}).",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "More about {{shown}}:",
+      "placeholders": [
+        {
+          "name": "shown"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_facts",
+      "title": "Narration: Known facts label",
+      "description": "Piece: the facts about the person in focus.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Known facts: {{facts}}",
+      "placeholders": [
+        {
+          "name": "facts"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_memory",
+      "title": "Narration: Memory label",
+      "description": "Piece: the full memory of the person in focus, one per line.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Memory: {{memories}}",
+      "placeholders": [
+        {
+          "name": "memories"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_secrets",
+      "title": "Narration: Secrets label",
+      "description": "Piece: the secrets of the person in focus, when the talk goes deep.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Secrets: {{secrets}}",
+      "placeholders": [
+        {
+          "name": "secrets"
+        }
+      ]
+    },
+    {
+      "id": "narration.npc_relationships",
+      "title": "Narration: Relationships label",
+      "description": "Piece: the relationships of the person in focus, when the talk goes deep.",
+      "group": "narration",
+      "piece": true,
+      "locked": "A label in the people-here block; the game fills the text from the cast and the stamps.",
+      "text": "Relationships: {{relationships}}",
+      "placeholders": [
+        {
+          "name": "relationships"
+        }
+      ]
+    },
+    {
       "id": "npc.tracker_system",
       "title": "People: after-reply tracker, system",
       "description": "Step 1 of 1: the system prompt for the after-reply tracker. The game reads one JSON object.",
@@ -1823,6 +3034,164 @@
       "text": "Just left behind in {{from}} (with the player there before this move; not here unless this reply shows them here with the player now):\n{{lines}}"
     },
     {
+      "id": "npc.tracker_place",
+      "title": "People: after-reply tracker, the place lines",
+      "description": "Piece of the after-reply tracker's scrap, first: the room (name and display name), its description and its exits, so arriving by an exit is not a discovery.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "place"
+        },
+        {
+          "name": "description"
+        },
+        {
+          "name": "exit_list"
+        }
+      ],
+      "text": "This place: {{place}}\nDescription: {{description}}\nExits: {{exit_list}}"
+    },
+    {
+      "id": "npc.tracker_weather",
+      "title": "People: after-reply tracker, the weather line",
+      "description": "Piece of the after-reply tracker's scrap, after the time-of-day line: the known weather, so it is never read as a change to the place.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "weather"
+        }
+      ],
+      "text": "Weather (known; not a reason to rewrite this place): {{weather}}"
+    },
+    {
+      "id": "npc.tracker_people",
+      "title": "People: after-reply tracker, who is here",
+      "description": "Piece of the after-reply tracker's scrap, after the weather line: one line per saved person here (People: after-reply tracker, one person), or (none).",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "people_lines"
+        }
+      ],
+      "text": "People here:\n{{people_lines}}"
+    },
+    {
+      "id": "npc.tracker_person",
+      "title": "People: after-reply tracker, one person",
+      "description": "Piece: one line of the tracker's People here: the shown name and handle, and every field the tracker may write for them, as they are now.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "handle"
+        },
+        {
+          "name": "unnamed",
+          "optional": true
+        },
+        {
+          "name": "looks"
+        },
+        {
+          "name": "body"
+        },
+        {
+          "name": "outfit"
+        },
+        {
+          "name": "facts"
+        },
+        {
+          "name": "memories"
+        },
+        {
+          "name": "stance"
+        }
+      ],
+      "text": "{{name}} [{{handle}}]{{unnamed}}. Looks: {{looks}}. Body: {{body}}. Outfit: {{outfit}}. Known facts: {{facts}}. Memories: {{memories}}. Stance toward the player: {{stance}}"
+    },
+    {
+      "id": "npc.tracker_left_person",
+      "title": "People: after-reply tracker, one person left behind",
+      "description": "Piece: one line of the tracker's Just left behind list (People: who was just left behind).",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "handle"
+        },
+        {
+          "name": "unnamed",
+          "optional": true
+        },
+        {
+          "name": "looks"
+        }
+      ],
+      "text": "{{name}} [{{handle}}]{{unnamed}}. Looks: {{looks}}"
+    },
+    {
+      "id": "npc.tracker_unnamed",
+      "title": "People: after-reply tracker, name not known yet",
+      "description": "Piece: after the shown name and handle of a tracker person line when the player has not learned their name.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [],
+      "text": "(name not yet known)"
+    },
+    {
+      "id": "npc.tracker_done",
+      "title": "People: after-reply tracker, what the game already did",
+      "description": "Piece of the after-reply tracker's scrap, last, only when the game changed someone back this turn: one line each (People: after-reply tracker, a change that ran out).",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "lines"
+        }
+      ],
+      "text": "Already done by the game (not new changes; do not report them):\n{{lines}}"
+    },
+    {
+      "id": "npc.tracker_expired",
+      "title": "People: after-reply tracker, a change that ran out",
+      "description": "Piece: one line of the tracker's Already done by the game list: a temporary change to a person that ran out, which the game already undid.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The tracker reads these labels; the game fills them from the map, the cast and the stamps.",
+      "placeholders": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "handle"
+        },
+        {
+          "name": "intent"
+        },
+        {
+          "name": "shown"
+        }
+      ],
+      "text": "{{name}} [{{handle}}]: The temporary change \"{{intent}}\" on {{shown}} ran out; the game already changed them back. The Body and Outfit listed above are the result."
+    },
+    {
       "id": "npc.fact_rules",
       "title": "People: what a fact is (shared)",
       "description": "Alongside: shared by the after-reply tracker and the Remember card, what counts as a fact about a person, so both write the same kind. A fact has no end date. The game puts this text into both prompts in place of their fact_rules placeholder.",
@@ -1838,7 +3207,7 @@
       "group": "npc",
       "locked": "Both the tracker and the Remember card include this text; the game reads the memories they write.",
       "placeholders": [],
-      "text": "A memory is something this person would still remember tomorrow: a promise, agreement, revelation, threat, favor, conflict, shared experience, or other important interaction. Only what they witnessed, did, or were told; write a claim as a claim. Call people by their names (as listed above, or as the story names them), never \"the stranger\" and never a bracketed handle, and name the specific thing, in one short line. Skip greetings, small talk and speculation."
+      "text": "A memory is something this person would still remember tomorrow: a promise, agreement, revelation, threat, favor, conflict, shared experience, or other important interaction. Only what they witnessed, did, or were told; write a claim as a claim. Call people by the names the story or this prompt gives them, never \"the stranger\" and never a bracketed handle, and name the specific thing, in one short line. Skip greetings, small talk and speculation."
     },
     {
       "id": "npc.looks_summary_system",

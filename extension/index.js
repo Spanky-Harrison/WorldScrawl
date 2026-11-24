@@ -5,7 +5,7 @@
 // a message rolls them back. A string stamp is the player's position (old chats, and still what we write
 // when only the player moved). A per-actor stamp is {actorId: address}. There is no stored party: the party
 // is the player (id "player") plus whoever is following them, and nobody follows yet.
-import { LOOK_RE, MOVE_RE, lookOnly, stayPutLine, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags, impossibleWaitIn } from './words.mjs';
+import { LOOK_RE, MOVE_RE, lookOnly, durationWords, WAIT_TAG, waitArgs, parseWaitTag, waitReason, normalizeWsTags, unreadTags, impossibleWaitIn } from './words.mjs';
 import { messageActivity } from './activity.mjs';
 import { timeLabel } from './timelabels.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, decisionOf, isDecided, markDecided, unmarkDecided, once } from './notices.mjs';
@@ -17,7 +17,7 @@ import { PLAYER, LOC_KEY, playerAddress, partyAddresses, positionOf, placeStamp,
 import { exportRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
 import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, followersAt, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, recordDiff, npcTiers, askedLoreNames, takeNameFlags, takeFoundFlags, judgeFound, foundEditOk, offMapReport, scheduleAt, stampSummary, takeNpcTags, NPC_FLAG_KEY, flaggedPeople, sceneStartOf, takeNpcFlags, takeLoreFlags, loreFor, addLoreRequest, activeLore, loreRequests, LORE_KEY } from './npc.mjs';
 import { WHICH_PREFIX, addNotice, bracketIntent, helpText, noticeMes, parseBracket, unbracket } from './brackets.mjs';
-export { LOOK_RE, MOVE_RE, lookOnly, stayPutLine };
+export { LOOK_RE, MOVE_RE, lookOnly, durationWords };
 import { onMessagesDeleted, snapCarriers } from './carriers.mjs';
 import { calendarLib, chatElapsed, chatWorld, defaultWorldId, effectiveWorld, listedWorlds, loadCalendar, rememberWorlds, worldCalendar, worldLiving, worldMissing, worldName, worldNames, worldTimes } from './clock.mjs';
 import { askValid, noteCall } from './dig.mjs';
@@ -42,7 +42,7 @@ export { shouldTrackReply, newSwipePending, readTrackerAnswer, gateTracker, trac
 export { trimAnswer, parseChoice, normKey, keyFor, matchKey, optionLines, pickKey, stepsTaken, syncDoors, applyReveals, sameWord, sameLabel, sameAsDirection, exitLabel, destLabel, collidingNames, exitLabels, placeLabel, displayName, previousAddress, findPath, matchCandidates, namedInText, alreadyText, whoMoves, partyMembers, partyText, moveNote, narrate, STAY, ELSEWHERE, UNCLEAR, OPEN, BREAK_RE, cleanAnswer, parseIntentAnswer, parseYesNo } from './movement.mjs';
 export { baseReply, digSys, DIG_TRIES, pickSys, COMPASS, closeName, duplicatePlace, mergeDuplicates, NEW_PLACE, digOptions, digPrompt, readDigAnswer, namedPlace, digWordFrom } from './dig.mjs';
 export { LOOK, OPEN_DOOR, CLOSE_DOOR, NEW_DOOR, DOOR_OPEN_RE, DOOR_CLOSE_RE, NO_EXIT, AROUND, WINDOW_WORD_RE, offerWindow, lookOptions, lookTargetPrompt, DOOR_LOOK, closedDoorPrompt, roomOptions, viewPickPrompt, doorOptions, doorPickPrompt, DIG_FAILED_NOTICE, travelSys, travelYesNoPrompt, intentSys, intentPrompt } from './looking.mjs';
-export { VERBS, parseBracket, unbracket, SLASH_ONLY, helpText, bracketTargetPrompt, bracketIntent, exitMentioned, checkExitChoice, WHICH_PREFIX, WAY_OUT_PREFIX, LEAVING_RE, noticePrefix, unreachableText, whichText, arrival, arrivalReminder, isDirWord, glimpseLines, lookText, LOOK_AROUND_RE, newDoorLine, factsText, attemptLines } from './brackets.mjs';
+export { VERBS, parseBracket, unbracket, SLASH_ONLY, helpText, bracketTargetPrompt, bracketIntent, exitMentioned, checkExitChoice, WHICH_PREFIX, WAY_OUT_PREFIX, LEAVING_RE, noticePrefix, unreachableText, whichText, arrival, arrivalReminder, isDirWord, glimpseLines, lookText, LOOK_AROUND_RE, newDoorLine, factsText, attemptLines, stayPutLine, doorWord } from './brackets.mjs';
 export { renderTokens, fedLore, loreBits, refreshLivePlaces, flaggedInScene } from './scene.mjs';
 export { exitsText, namedNpcsAt, START_MARKER } from './footer.mjs';
 export { revealsDestination } from './shared.mjs';

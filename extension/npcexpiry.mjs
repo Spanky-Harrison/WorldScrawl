@@ -3,6 +3,7 @@
 // The engine drops an elapsed one from the replay by itself; this module names it, so the narrator,
 // the tracker, the chat notice and a wait's summary all hear about it once.
 import { NPC_KEY } from './npc.mjs';
+import { render as P } from './shared.mjs';
 import { capFirst, handleOf, knows, shownName } from './names.mjs';
 import { isOwnerStamp } from './replay.mjs';
 
@@ -72,21 +73,21 @@ export function expiryNoticeText(items) {
     return `[Engine: ${parts.join(' ')}]`;
 }
 
-/** The narrator's one-time note: who changed back, and what they look like now, so the next reply gets it right. */
+/** The narrator's one-time note: who changed back, and what they look like now, so the next reply gets it right
+ *  (narration.person_wore_off; R5 N5: "as they were before", in the narrator's own labels). */
 export function expiryNarratorNote(items, party = 'the player') {
     if (!items?.length) return '';
     const lines = items.map(it => {
-        const who = capFirst(it.shown || it.who);
-        const now = [it.looks && `Looks: ${it.looks}`, it.body && `Body: ${it.body}`, it.outfit && `Outfit: ${it.outfit}`].filter(Boolean).join(' ');
-        return `- ${who}: "${it.what}" has worn off; they look as they did before it.${now ? ` What they look like now: ${now}` : ''}`;
+        const now = [it.looks && P('narration.npc_looks', { looks: it.looks }), it.body && P('narration.npc_body', { body: it.body }), it.outfit && P('narration.npc_wearing', { outfit: it.outfit })].filter(Boolean).map(t => /[.!?]$/.test(t) ? t : `${t}.`).join(' ').replace(/\.\./g, '.');
+        return P('narration.person_wore_off_line', { name: capFirst(it.shown || it.who), intent: it.what, appearance: now ? ` ${P('narration.person_looks_now', { looks: now })}` : '' });
     });
-    return `While time passed, these changes to people wore off (the same people, not someone new):\n${lines.join('\n')}\nIf ${party} can see them, describe them as they are now.`;
+    return P('narration.person_wore_off', { lines: lines.join('\n'), party });
 }
 
 /** The tracker's list of what the engine already did, so a story that narrates it is not reported again. */
 export function trackerExpiryLines(items) {
     if (!items?.length) return '(none)';
-    return items.map(it => `${capFirst(it.shown || it.name)} [${it.handle || it.id}]: ${modelChangeLabel(it).replace(/^the/, 'The')} ran out; the game already changed them back. The Body and Outfit listed above are the result.`).join('\n');
+    return items.map(it => P('npc.tracker_expired', { name: capFirst(it.shown || it.name), handle: it.handle || it.id, intent: it.what, shown: it.shown || it.who || it.name || it.id })).join('\n');
 }
 
 /** Keys of the expiries a notice in this chat already announced (people, and timed place changes: patches.mjs). */

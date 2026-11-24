@@ -7,6 +7,7 @@ import { api, ensurePrompts, getStoredLocation } from './doors.mjs';
 import { fetchLocationCached } from './footer.mjs';
 import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld } from './index.js';
 import { displayName, keyFor, optionLines, partyText } from './movement.mjs';
+import { isDirWord } from './brackets.mjs';
 import { revealsDestination } from './shared.mjs';
 import { mapCtx, patchSig } from './patches.mjs';
 
@@ -53,7 +54,8 @@ export function narratedView(chat) {
     const changes = withRevertRecords(chatChanges(head, { raw: true }).map(c => (c.narrated?.at === L ? { ...c, off: !!c.narrated.off } : c)), head); // rebuilt texts as they stood then
     return { index: L, address, changes, now: clockAt(L, chat) };
 }
-/** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo). */
+/** One-time "what just happened" line when the map changed around the party without narration (expiry, Turn off, Undo).
+ *  The server returns the facts (/aftermath); the words are narration.aftermath_gone / narration.aftermath_lost_exits (R5 N7). */
 async function aftermathNote(chat, loc) {
     const L = lastStory(chat);
     const remembered = L >= 0 && chatChanges(chat).some(c => c?.narrated?.at === L);
@@ -61,16 +63,23 @@ async function aftermathNote(chat, loc) {
     const then = narratedView(chat);
     if (!then) return '';
     const r = await api('/aftermath', { method: 'POST', body: JSON.stringify({ then, address: loc.address, ...mapCtx() }) }).catch(() => null);
-    return r?.ok ? r.body?.note ?? '' : '';
+    return r?.ok ? aftermathLine(r.body) : '';
+}
+/** The narrator line for an /aftermath answer: the room gone, or each way out of this room that went away. */
+export function aftermathLine(a) {
+    if (a?.kind === 'gone') return P('narration.aftermath_gone', { gone: a.gone_name, place: a.place_name });
+    if (a?.kind === 'lost_exits' && a.lost?.length) return a.lost.map(d => P('narration.aftermath_lost_exits', { direction: isDirWord(d) ? d : `through the ${d}`, place: a.place_name })).join(' ');
+    return '';
 }
 /** A temporary change ran out with the party inside: they go back out the way they came in. */
 export const expiredNotice = (to, via) => `[Engine: the passage seals behind you. You're back in ${displayName(to)}${via ? ` (out through the ${via})` : ''}.]`;
-/** The narrator's one "you're now in X" note: a resolver move not yet followed by a narrated reply. */
+/** The narrator's one "you're now in X" note: a resolver move not yet followed by a narrated reply
+ *  (narration.relocated_gone / narration.relocated_missing; R5 N7, worded for any party). */
 export function relocationNote(chat, loc, who) {
     for (let i = (chat?.length ?? 0) - 1; i >= 0; i--) {
         const m = chat[i];
-        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in is gone; the way back sealed behind ${who}, and ${who} is back in ${displayName(loc)}. Narrate this naturally.` : '';
-        if (m?.extra?.worldscrawl_notice_kind === 'missing') return playerAddress(m.extra[LOC_KEY]) === loc?.address ? `Note: the place ${who} was in is no longer there. ${who} is now in ${displayName(loc)}. Narrate this naturally as where ${who} finds themself now.` : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing' && m.extra.worldscrawl_notice_expired) return playerAddress(m.extra[LOC_KEY]) === loc?.address ? P('narration.relocated_gone', { party: who, place: displayName(loc) }) : '';
+        if (m?.extra?.worldscrawl_notice_kind === 'missing') return playerAddress(m.extra[LOC_KEY]) === loc?.address ? P('narration.relocated_missing', { party: who, place: displayName(loc) }) : '';
         if (m && !m.is_system && !m.is_user) return '';
     }
     return '';

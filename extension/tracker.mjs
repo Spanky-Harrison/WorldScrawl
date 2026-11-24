@@ -66,15 +66,9 @@ export function trackerPeopleLines(people) {
         const reason = bare(p.stanceReason);
         const stanceLine = !stance && !reason ? '(none)' : reason ? `${stance || '(none)'} (${reason})` : stance;
         const unnamed = p.nameKnown === false && bare(p.unknownAs);
-        return [
-            `${p.name || p.id} [${p.id || p.name}]${unnamed ? ' (name not yet known)' : ''}`, // name-ok: listedPeople gives the shown name and handle
-            `Looks: ${textOf(p.looks)}`,
-            `Body: ${textOf(p.body)}`,
-            `Outfit: ${textOf(p.outfit)}`,
-            `Known facts: ${listOf(p.facts)}`,
-            `Memories: ${listOf(p.memory ?? p.memories)}`,
-            `Stance toward the player: ${stanceLine}`,
-        ].join('. ');
+        // R5.4: the labels are the npc.tracker_person piece; the game fills the shown name, the handle and the fields.
+        return P('npc.tracker_person', { name: p.name || p.id, handle: p.id || p.name, unnamed: unnamed ? ` ${P('npc.tracker_unnamed')}` : '', // name-ok: listedPeople gives the shown name and handle
+            looks: textOf(p.looks), body: textOf(p.body), outfit: textOf(p.outfit), facts: listOf(p.facts), memories: listOf(p.memory ?? p.memories), stance: stanceLine });
     }).filter(Boolean);
     return lines.join('\n') || '(none)';
 }
@@ -83,7 +77,7 @@ export function trackerPeopleLines(people) {
 export function trackerLeftBehind(rows) {
     const list = (rows ?? []).filter(p => p?.id || p?.name);
     if (!list.length) return '';
-    const lines = list.map(p => `${p.name || p.id} [${p.id || p.name}]${p.nameKnown === false && bare(p.unknownAs) ? ' (name not yet known)' : ''}. Looks: ${textOf(p.looks)}`); // name-ok: leftBehind gives the shown name and handle
+    const lines = list.map(p => P('npc.tracker_left_person', { name: p.name || p.id, handle: p.id || p.name, unnamed: p.nameKnown === false && bare(p.unknownAs) ? ` ${P('npc.tracker_unnamed')}` : '', looks: textOf(p.looks) })); // name-ok: leftBehind gives the shown name and handle
     return P('npc.tracker_left_behind', { from: list[0].from || 'the last place', lines: lines.join('\n') });
 }
 /**
@@ -93,14 +87,12 @@ export function trackerLeftBehind(rows) {
  */
 export function trackerScrap({ placeName = '', displayName = '', placeDescription = '', exits = '', time = null, weather = '', peopleLines = '(none)', leftBehind = '', engineLines = '' } = {}) {
     return [
-        `This place: ${placeTitle(placeName, displayName)}`,
-        `Description: ${String(placeDescription ?? '').trim() || '(none)'}`,
-        `Exits: ${String(exits ?? '').trim() || '(none)'}`,
+        P('npc.tracker_place', { place: placeTitle(placeName, displayName), description: String(placeDescription ?? '').trim() || '(none)', exit_list: String(exits ?? '').trim() || '(none)' }),
         ...(time?.part && time?.time ? [P('npc.tracker_time', { part: time.part, time: time.time })] : []),
-        `Weather (known; not a reason to rewrite this place): ${weather ? clip(weather, 200) : '(none)'}`,
-        `People here:\n${peopleLines || '(none)'}`,
+        P('npc.tracker_weather', { weather: weather ? clip(weather, 200) : '(none)' }),
+        P('npc.tracker_people', { people_lines: peopleLines || '(none)' }),
         ...(leftBehind ? [leftBehind] : []),
-        ...(engineLines && engineLines !== '(none)' ? [`Already done by the game (not new changes; do not report them):\n${engineLines}`] : []),
+        ...(engineLines && engineLines !== '(none)' ? [P('npc.tracker_done', { lines: engineLines })] : []),
     ].join('\n');
 }
 export const trackerSys = () => P('npc.tracker_system');

@@ -1,6 +1,6 @@
 // Moved out of index.js unchanged (see docs/CODEMAP.md).
 import { trackFailure, trackMark, trackTry } from './tracker.mjs';
-import { waitReason } from './words.mjs';
+import { durationWords, waitReason } from './words.mjs';
 import { capFirst } from './names.mjs';
 import { DECIDED_KEY, noticeIdOf, newNoticeId, isDecided, markDecided, once } from './notices.mjs';
 import { render as P, cards as C } from './shared.mjs';
@@ -210,18 +210,19 @@ async function waitFacts(chat, loc) {
     const r = recentWait(chat);
     if (!r || !calendarLib) return '';
     const t = worldTimes.get(activeWorld || defaultWorldId), after = chatElapsed(chat.slice(0, r.i + 1)), before = after - r.w.seconds;
-    const who = partyText(), dur = calendarLib.formatDuration(r.w.seconds);
+    const who = partyText(), dur = durationWords(r.w.seconds);
     const lines = [];
     try {
         const d0 = calendarLib.dateAt(before, t?.start_date ?? null, t?.calendar ?? null), d1 = calendarLib.dateAt(after, t?.start_date ?? null, t?.calendar ?? null);
-        lines.push(`What just happened: ${who} ${r.w.sleep ? 'slept' : 'waited'} here for ${dur}, staying put. It was ${calendarLib.describeDate(d0)}; it is now ${calendarLib.describeDate(d1)}.${d0.part !== d1.part ? ` The light has changed from ${d0.part} to ${d1.part}.` : ''}${r.w.sleep ? ' Narrate waking up.' : ''}`);
+        const light = d0.part !== d1.part ? ` ${P('narration.wait_light', { part_before: d0.part, part: d1.part })}` : '';
+        lines.push(P(r.w.sleep ? 'narration.slept' : 'narration.waited', { party: who, duration: dur, date_before: calendarLib.describeDate(d0), date: calendarLib.describeDate(d1), light }));
     } catch {}
     const w0 = placeWeatherNow(loc, chat.map((m, j) => (j === r.i ? { ...m, extra: { ...m.extra, [WAIT_KEY]: undefined } } : m))), w1 = placeWeatherNow(loc, chat);
     const s0 = narratorWeather(w0), s1 = narratorWeather(w1);
-    if (s0 && s1 && s0 !== s1) lines.push(`Before the wait: ${s0} Describe how the weather has changed.`);
+    if (s0 && s1 && s0 !== s1) lines.push(P('narration.wait_weather', { weather: s0 }));
     const lib = await loadPatchLib();
     const gone = expiredAll(chat, lib, who)(chatChanges(chat), before, after);
-    if (gone.length) lines.push(`While ${who} ${r.w.sleep ? 'slept' : 'waited'}, these wore off and no longer hold: ${gone.map(g => (g.person ? `${capFirst(g.person.shown || g.person.who)}: "${g.person.what}"` : `"${g.story || g.note}"`)).join('; ')}.${gone.some(g => g.person) ? ' Describe the people as they are now (see the people listed).' : ''}`);
+    if (gone.length) lines.push(P('narration.wait_wore_off', { items: gone.map(g => (g.person ? `${capFirst(g.person.shown || g.person.who)}: "${g.person.what}"` : `"${g.story || g.note}"`)).join('; '), people: gone.some(g => g.person) ? ` ${P('narration.wait_wore_off_people')}` : '' }));
     return lines.join('\n');
 }
 
