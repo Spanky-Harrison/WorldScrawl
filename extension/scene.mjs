@@ -12,16 +12,16 @@ import { isOwnerStamp, messageKey } from './replay.mjs';
 import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrival, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
-import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
+import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, gameDateAt, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
 import { askValid, baseReply, gen, markLast, noteCall } from './dig.mjs';
 import { syncSwipeExtra } from './discovery.mjs';
 import { api, currentLocation, doorOverrides, ensurePrompts } from './doors.mjs';
 import { aftermathNote, chatKey, relocationNote } from './expiry.mjs';
-import { EXPIRY_LINE_KEY, hostIndex, turnStartOf } from './generations.mjs';
+import { EXPIRY_LINE_KEY, hostIndex, replyBefore, turnStartOf } from './generations.mjs';
 import { FACTS_KEY, MOVE_KEY, PATCH_KEY, REMINDER_KEY, activeWorld, broadcastMapState, ctx, expiryPending, isOn, revealNamesOn, toolsOn } from './index.js';
 import { displayName, lastUserIndex, optionLines, partyText, pickKey, stamp } from './movement.mjs';
 import { mapCtx, patchSig, swipeOf } from './patches.mjs';
-import { renderPatchCards, waitFacts } from './waits.mjs';
+import { recentWait, renderPatchCards, waitFacts } from './waits.mjs';
 import { askSchedule, placeName, prefetchSchedule, scheduleFlight } from './schedulepick.mjs';
 import { movedThisTurn } from './tracker.mjs';
 
@@ -906,7 +906,14 @@ async function applyFacts({ carry = false, type = 'normal' } = {}) {
         await loadCalendar();
         const d = gameDate();
         const moveTools = toolsOn();
-        const facts = { date: d ? calendarLib.describeDate(d) : '', weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
+        // R4 N8: the time-of-day nudge only on a move, a wait, or a part of the day (morning, noon…) new since the
+        // narrator reply this one follows (a swipe or continue rewrites the last reply, so its previous one is the one before).
+        // The chat's first narrated reply nudges too: before it there is no reply, or only the greeting, which the game's time never reached.
+        const ch = c.chat ?? [];
+        const prevReply = replyBefore(ch, type === 'swipe' || type === 'continue' ? ch.length - 1 : ch.length);
+        const firstReply = prevReply < 0 || !ch.slice(0, prevReply).some(m => m?.is_user);
+        const timeNudge = !!d && (!!move || !!recentWait(ch) || firstReply || gameDateAt(prevReply, ch)?.part !== d.part);
+        const facts = { date: d ? calendarLib.describeDate(d) : '', timeNudge, weather: narratorWeather(placeWeatherNow(loc)), took: move?.seconds && calendarLib ? calendarLib.formatDuration(move.seconds) : '', dig: um.worldscrawl_dig, digFailed: um.worldscrawl_dig_failed, look: um.worldscrawl_look, newDoor: um.worldscrawl_new_door, lookAround: ui >= 0 && LOOK_AROUND_RE.test(c.chat[ui].mes ?? '') && !(um.worldscrawl_look && (um.worldscrawl_look.via || um.worldscrawl_look.window)), door: um.worldscrawl_door, open: doorOverrides(), moveTools, ...loreBits(loc), ...npcPromptBits(loc) };
         text = factsText(loc, move, moveTools, facts);
         // After the player's message, in this order: where the turn ends, who is already there, a failed attempt's result,
         // who the [find] brought in, who came and went, then who was not found (and who they are).

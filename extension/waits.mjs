@@ -200,7 +200,7 @@ export function waitNote(who, w) {
     return `*${who} ${w.sleep ? 'sleeps' : 'waits'} for ${dur}${w.until ? `, until ${w.until}` : ''}.*`;
 }
 /** The latest wait the narrator has not described yet: on the latest user message or after it. */
-function recentWait(chat) {
+export function recentWait(chat) {
     const ui = lastUserIndex(chat);
     for (let i = chat.length - 1; i >= Math.max(0, ui); i--) if (chat[i]?.extra?.[WAIT_KEY]?.seconds > 0) return { i, w: chat[i].extra[WAIT_KEY] };
     return null;

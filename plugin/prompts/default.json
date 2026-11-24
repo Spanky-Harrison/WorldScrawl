@@ -36,7 +36,7 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts (place, exits, what can be seen, time, weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, or when the part of the day changed since the last narrator reply); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, and so on); Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules. Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
     },
     {
       "id": "npc",
@@ -97,7 +97,7 @@
     "option_lines": "the list of possible answers, one per line, each with what it means (built from the Player intent pieces)",
     "options": "the possible answers: \"- key: meaning\" lines (pick-one questions) or a comma-separated list (intent)",
     "outline": "an outline of the rooms and exits in the area",
-    "party": "who is travelling: the \"Who moves\" setting, e.g. your persona name, or your persona and the character",
+    "party": "who is travelling: the \"Who moves\" setting, e.g. your persona name, or your persona and the character (\"You\" when it is empty). Narrator lines use it with the past tense or as a noun (\"ends with Ana and Hesk still at …\"), so it reads right for one person or several; side-call questions say \"the player\" instead.",
     "place": "the name of the room the party is in now",
     "places": "the nearby places, one \"- key: name: short summary\" line each",
     "range": "which rooms the patch may touch",
@@ -114,7 +114,7 @@
     "text": "your draft text",
     "to": "the room the party arrived in",
     "used": "The exit names already used at this place, comma-separated, or \"none\".",
-    "verb": "the door action: \"open\" or \"close\" in the door question; \"opens\" or \"closes\" in the narration line",
+    "verb": "the door action: \"open\" or \"close\" in the door question; \"opened\", \"closed\", \"barred\" or \"unbarred\" in the narration line",
     "via": "the rooms passed through on the way, comma separated",
     "what": "the note on what change to look for, worded by who raised it (the tracker, the player or the narrator), plus the place mentioned, if any",
     "where": "where the party is now, for the narrator",
@@ -224,9 +224,6 @@
       "locked": "The game reads the JSON answer with these exact keys; changing this can break breaking through.",
       "placeholders": [
         {
-          "name": "party"
-        },
-        {
           "name": "place"
         },
         {
@@ -253,7 +250,7 @@
           "generated": true
         }
       ],
-      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. It can lead to one of these places nearby (key: place):\n{{places}}\n{{new_place}}Exits already used here: {{used}}.\n{{retry}}Reply with JSON only."
+      "text": "The player is in {{place}}. {{description}}\n{{said}}\n\nThe player is breaking a new opening. It can lead to one of these places nearby (key: place):\n{{places}}\n{{new_place}}Exits already used here: {{used}}.\n{{retry}}Reply with JSON only."
     },
     {
       "id": "dig.new",
@@ -290,11 +287,8 @@
       "description": "Step 1 of 2: what the player is looking at. Asks what the player is looking at or listening to. The options (key: meaning) are made by the game.",
       "group": "look",
       "locked": "The game reads the chosen option key back; changing this can break looking.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the key.",
+      "text": "The player is in {{place}}.\n{{said}}\n\nWhat is the player looking at or listening to?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -329,11 +323,8 @@
       "description": "Step 2 of 2 (a window with no view yet): which nearby place can be seen. Asks which nearby place can be seen out of a window or opening.",
       "group": "look",
       "locked": "The game reads the chosen place key back; changing this can break looking.",
-      "text": "{{party}} is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the key.",
+      "text": "The player is in {{place}}. {{description}}\n{{said}}\n\nThe player looks out of a window or opening. Places nearby:\n{{places}}\n\nWhich place can they most likely see? Reply with just the key.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -356,11 +347,8 @@
       "description": "Step 1 of 1 (only when several doors fit): which door. Asks which door the player opens or closes.",
       "group": "door",
       "locked": "The game reads the chosen door key back; changing this can break doors.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the key.",
+      "text": "The player is in {{place}}.\n{{said}}\n\nWhich door does the player {{verb}}?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -397,11 +385,8 @@
       "description": "Step 1 of 2: the question itself. {{option_lines}} is built from the option pieces below. The multiple-choice question about the player's message. The option lines come from the \"Player intent: option\" prompts below.",
       "group": "intent",
       "locked": "The game reads the model's answer as one of a fixed set of words; changing this can break how moves are understood.",
-      "text": "{{party}} is at {{place}}. Its exits are:\n{{exits}}\n\n{{said}}\n\nAnswer with one option:\n{{option_lines}}Which option: {{options}}? Reply with exactly one option from that list.",
+      "text": "The player is at {{place}}. Its exits are:\n{{exits}}\n\n{{said}}\n\nAnswer with one option:\n{{option_lines}}Which option: {{options}}? Reply with exactly one option from that list.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -576,11 +561,8 @@
       "description": "Step 1 (bracket commands only): used only when the words after a bracket verb (\"I [move] up the stairs\") don't name an exit or place exactly. The options (key: meaning) are made by the game.",
       "group": "intent",
       "locked": "The game reads the chosen option key back; changing this can break bracket commands.",
-      "text": "{{party}} is in {{place}}.\nThe player wrote the command [{{verb}}] {{target}}\n\nWhich of these does \"{{target}}\" mean? If none of them, reply none.\n{{options}}\n\nReply with just the key.",
+      "text": "The player is in {{place}}.\nThe player wrote the command [{{verb}}] {{target}}\n\nWhich of these does \"{{target}}\" mean? If none of them, reply none.\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -611,11 +593,8 @@
       "description": "Step 2 of 2 (only if step 1's answer can't be read): asks whether the player is trying to travel. Must be answered yes or no. Asked when the intent answer could not be read. Must be answered yes or no.",
       "group": "intent",
       "locked": "The game reads the model's answer as one of a fixed set of words; changing this can break how moves are understood.",
-      "text": "{{party}} is at {{place}}.\n{{said}}\n\nIs the player trying to travel to a different place? Answer yes or no.",
+      "text": "The player is at {{place}}.\n{{said}}\n\nIs the player trying to travel to a different place? Answer yes or no.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -774,7 +753,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): broke through, stayed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. The opening is there now. {{party}} has not gone through it yet and is still at {{place}}. Narrate the breakthrough.",
+      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. The opening is there now, and nobody has gone through it yet: the scene stays at {{place}}. Narrate the breakthrough.",
       "placeholders": [
         {
           "name": "party"
@@ -796,7 +775,7 @@
       "description": "Used by Narration. Alongside, after the player's message: breaking through failed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way. No new opening or passage exists, and none appears in this reply: the wall, floor or window holds. {{party}} is still at {{place}}. Describe the attempt failing. Do not create a gap, a crack that opens or a way through.",
+      "text": "What just happened: {{party}} tried to break through, but it FAILED: nothing gave way, and no new opening or passage exists. Show the blow landing and the wall, floor or window holding: it stays whole, and this reply ends with {{party}} still at {{place}}.",
       "placeholders": [
         {
           "name": "party"
@@ -812,7 +791,7 @@
       "description": "Used by Narration. Alongside, after the player's message: a door the party tried to open does not open.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tries to open the {{door}}, but it {{why}}. The {{door}} does not open and it stays shut; nothing beyond it can be seen or reached. {{party}} is still at {{place}}. Describe the attempt failing. Do not let the {{door}} open, give way or be passed through in this reply.",
+      "text": "What just happened: {{party}} tried to open the {{door}}, but it {{why}}. Show the {{door}} holding fast: nothing beyond it can be seen or reached, and this reply ends with it still shut and {{party}} still at {{place}}.",
       "placeholders": [
         {
           "name": "party"
@@ -834,7 +813,7 @@
       "description": "Used by Narration. Alongside, after the player's message: the party tried to go through a stuck door.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tries to go through the {{door}}, but it {{why}}. The {{door}} does not open, no one passes through it, and it stays shut. {{party}} is still at {{place}} and does not arrive anywhere else. Describe the attempt failing. Do not move {{party}} out of {{place}} in this reply.",
+      "text": "What just happened: {{party}} tried to go through the {{door}}, but it {{why}}. Show the {{door}} holding fast and nobody passing through it: this reply ends with it still shut and {{party}} still at {{place}}.",
       "placeholders": [
         {
           "name": "party"
@@ -853,10 +832,10 @@
     {
       "id": "narration.door",
       "title": "Narration: opening or closing a door",
-      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): opening or closing a door.",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): opening or closing a door. The stay-put line that always follows says where the party is.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} {{verb}} the {{door}}. {{party}} stays at {{place}}.",
+      "text": "What just happened: {{party}} {{verb}} the {{door}}.",
       "placeholders": [
         {
           "name": "party"
@@ -867,19 +846,16 @@
         },
         {
           "name": "door"
-        },
-        {
-          "name": "place"
         }
       ]
     },
     {
       "id": "narration.new_door",
       "title": "Narration: a door not on the map",
-      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): a door not on the map.",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): a door not on the map. The stay-put line that always follows says where the party is.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} tries a door that is not among the exits. If such a door plausibly fits {{place}} (its description and the area notes), narrate it opening. If no such door fits, narrate that there is none. {{party}} stays at {{place}} for now.",
+      "text": "What just happened: {{party}} tried a door that is not among the exits. If such a door plausibly fits {{place}} (its description and the area notes), narrate it opening. If no such door fits, narrate that there is none.",
       "placeholders": [
         {
           "name": "party"
@@ -892,10 +868,10 @@
     {
       "id": "narration.look_around",
       "title": "Narration: looking around",
-      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): looking around.",
+      "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): looking around. The stay-put line that always follows says where the party is.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} looks around {{place}}. {{party}} stays here.",
+      "text": "What just happened: {{party}} looked around {{place}}.",
       "placeholders": [
         {
           "name": "party"
@@ -925,8 +901,18 @@
       "description": "Used by Narration. Step 4 of 5 (after a move or looking around): mention the exits. Added after a move or looking around.",
       "group": "style",
       "process": "narration",
-      "text": "In this reply, mention every exit above, and weave in what can be seen through the open ones. For an exit whose destination is not given, mention only the exit itself; do not hint or guess where it leads.",
+      "text": "In this reply, mention every exit above, and weave in what can be seen through the open ones. For an exit whose destination is not given, describe only the exit itself; where it leads stays unknown.",
       "placeholders": []
+    },
+    {
+      "id": "narration.time_nudge",
+      "title": "Narration: let the time of day show",
+      "description": "Used by Narration. Piece: added after the \"Current time\" line only on a move, a wait, or a turn where the part of the day (morning, noon, ...) changed since the last narrator reply. Otherwise the current time goes alone.",
+      "group": "style",
+      "process": "narration",
+      "piece": true,
+      "placeholders": [],
+      "text": "Let the time of day show in the narration."
     },
     {
       "id": "narration.expired",
@@ -934,7 +920,7 @@
       "description": "Used by Narration. Step 2 of 2 when a temporary place runs out with the party inside (setting \"Narrate expiries\"): the game has already picked where the party ends up and moved them; this line, sent with one automatic narrator reply, lets the narrator decide why and how the place ends.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{place}} has come to an end; {{ended}}. About it: {{description}}\nHow it came about: {{change}}\nFrom the story where it appeared: \"{{excerpt}}\"\n{{party}} has to leave it and ends up in {{to}}{{via}}. You are free to decide why and how it ends (it fades, collapses, they are shown out or thrown out, the spell breaks...), in keeping with what made it. Do not change where {{party}} ends up. Describe leaving and arriving in {{to}}.",
+      "text": "What just happened: {{place}} has come to an end; {{ended}}. About it: {{description}}\nHow it came about: {{change}}\nFrom the story where it appeared: \"{{excerpt}}\"\n{{party}} had to leave it and ended up in {{to}}{{via}}. You are free to decide why and how it ends (it fades, collapses, they are shown out or thrown out, the spell breaks...), in keeping with what made it. Do not change where {{party}} ended up. Describe leaving and arriving in {{to}}.",
       "placeholders": [
         {
           "name": "place"
@@ -971,8 +957,8 @@
       "title": "Narration: last line (tools on)",
       "description": "Step 5 of 5 (map tools on): the last line.",
       "group": "narration",
-      "locked": "Keeps the narrator from inventing places the map does not have.",
-      "text": "Do not invent locations or exits that are not listed.",
+      "locked": "Keeps the narrator to the places and exits the map has.",
+      "text": "Use only the locations and exits listed above; if a character tries some other way out, show why it does not work.",
       "placeholders": []
     },
     {
@@ -980,8 +966,8 @@
       "title": "Narration: last line (tools off)",
       "description": "Step 5 of 5 (map tools off): the last line.",
       "group": "narration",
-      "locked": "Keeps the narrator from moving the party itself; the game controls movement.",
-      "text": "You only narrate. {{party}} goes only where the story's moves take them: never move {{party}} to a different location yourself, and do not invent locations or exits that are not listed. If a character tries to leave some other way, describe why they cannot.",
+      "locked": "Keeps the narrator from moving the party itself and from inventing places; the game controls movement.",
+      "text": "You only narrate. Only the story's moves take {{party}} to another location: the scene stays where those moves left it. Use only the locations and exits listed above; if a character tries some other way out, show why it does not work.",
       "placeholders": [
         {
           "name": "party"
@@ -994,7 +980,7 @@
       "description": "Alongside (move and travel turns): a short reminder after the latest message. Short last-line reminder on move and travel turns.",
       "group": "narration",
       "locked": "Tells the narrator where the turn ends; the game relies on it to keep the story and map in step.",
-      "text": "[At the end of this reply the characters are in {{where}}. Do not narrate entering any other room. If the last message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits (they may notice or want the other place), but do not narrate them reaching it.]",
+      "text": "[At the end of this reply the characters are in {{where}}, and the reply ends there. If the last message assumes they arrive somewhere else or do things there, they actually stopped in {{where}}. Keep their intent where it fits: they may notice or want the other place, which is still ahead of them.]",
       "placeholders": [
         {
           "name": "where"
@@ -1083,11 +1069,8 @@
       "description": "Step 1 of 2 when a temporary place runs out with the party inside (setting \"Narrate expiries\"): which nearby place they end up in. The options are the places its exits still reach; the way they came in is the default. Step 2 is the narrator reply (Narration: a temporary place ends).",
       "group": "narration",
       "locked": "The game reads the chosen place key back; changing this can break expiries.",
-      "text": "{{party}} is in {{place}}, which is coming to an end: {{ended}}.\n{{description}}\n\nWhere does {{party}} end up?\n{{options}}\n\nReply with just the key. If unsure: {{default}}.",
+      "text": "The player is in {{place}}, which is coming to an end: {{ended}}.\n{{description}}\n\nWhere does the player end up?\n{{options}}\n\nReply with just the key. If unsure: {{default}}.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },
@@ -2083,11 +2066,8 @@
       "description": "Step 1 of 1 (only when the message does not already name one person here): who the player is addressing or looking at.",
       "group": "npc",
       "locked": "The game reads the answer as one person's id, or nobody.",
-      "text": "{{party}} is in {{place}}.\n{{said}}\n\nWho is the player addressing or looking at?\n{{options}}\n\nReply with just the key.",
+      "text": "The player is in {{place}}.\n{{said}}\n\nWho is the player addressing or looking at?\n{{options}}\n\nReply with just the key.",
       "placeholders": [
-        {
-          "name": "party"
-        },
         {
           "name": "place"
         },

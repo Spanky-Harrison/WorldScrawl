@@ -237,7 +237,7 @@ export function arrival(loc, move) {
     const subOf = a => String(a ?? '').split('/')[0];
     const newBuilding = !!move?.from && subOf(move.from) !== subOf(loc.address);
     const dir = move?.last_direction ?? move?.direction;
-    let text = `arrives in ${where}`;
+    let text = `arrived in ${where}`; // past tense: reads right after "You" or "Ana and Hesk" (R4 N2)
     if (newBuilding && dir && !PLAIN_DIRECTIONS.has(String(dir).toLowerCase())) text += `, entering through the ${dir}${move.prev_name ? ` from ${move.prev_name}` : ''}`;
     let not = '';
     if (newBuilding && sub.name && sub.name !== room && sub.entrance && sub.entrance !== loc.address)
@@ -269,17 +269,17 @@ export function glimpseLines(loc, open = new Map()) {
 }
 export function lookText(who, here, look) {
     const how = look.window ? 'out' : look.via ? (isDirWord(look.via) ? look.via : `through the ${look.via}`) : 'around';
-    const first = look.opened ? `${who} opens the ${doorWord(look.via)} first. ` : '';
-    if (look.kind === 'see' && look.peek) return `What just happened: ${who} peeks through the closed ${doorWord(look.via)} without opening it and glimpses ${look.name}: ${look.description} The door stays closed. ${who} is still at ${here}. Describe only the glimpse.`;
-    if (look.kind === 'see' && look.through_closed) return `What just happened: ${who} looks through the closed ${look.via} (it can be seen through) and sees ${look.name}: ${look.description} It stays closed. ${who} is still at ${here}. Describe only what can be seen from here.`;
-    if (look.kind === 'see') return `What just happened: ${first}${who} looks ${how} and sees ${look.name}: ${look.description}${look.sight === 'clear' ? ' The view is open and carries far.' : ''} ${who} does not go there and is still at ${here}. Describe only what can be seen from here.`;
-    if (look.kind === 'threshold') return `What just happened: ${first}${who} looks ${look.through_closed ? `through the closed ${look.via}` : look.peek ? `through a gap in the closed ${doorWord(look.via)}` : look.shut ? `at the closed ${doorWord(look.via)}` : how}. All that can be seen is what is right there: ${look.description} ${look.unknown ? 'Where it leads is not clear and is unknown; do not name, describe or guess what lies beyond.' : `${look.name ? `It leads to ${look.name}, but that` : 'Where it leads'} cannot be seen from here; ${look.name ? 'it may be named but' : ''} do not describe what lies at the far end.`} ${who} is still at ${here}.`;
-    if (look.kind === 'closed' && look.stuck) return `What just happened: ${who} tries to open the ${doorWord(look.via)}, but it ${look.stuck}. Nothing beyond it can be seen. ${who} stays at ${here}.`;
-    if (look.kind === 'closed') return `What just happened: ${who} looks at the ${doorWord(look.via)}. ${look.word === 'way' ? 'The way is blocked' : 'The door is closed'}; nothing beyond it can be seen. ${who} stays at ${here}.`;
-    if (look.kind === 'listen' && look.sound === 'clear') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Sounds from beyond it carry clearly. ${who} stays at ${here}.`;
-    if (look.kind === 'listen' && look.sound === 'none') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. No sound at all comes through it. ${who} stays at ${here}.`;
-    if (look.kind === 'listen') return `What just happened: ${who} listens at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stays at ${here}.`;
-    return `What just happened: ${first}${who} looks ${how}, but nothing can be made out beyond it. ${who} stays at ${here}.`;
+    const first = look.opened ? `${who} opened the ${doorWord(look.via)} first. ` : '';
+    if (look.kind === 'see' && look.peek) return `What just happened: ${who} peeked through the closed ${doorWord(look.via)} without opening it and glimpsed ${look.name}: ${look.description} The door stays closed, and ${who} stayed at ${here}. Describe only the glimpse.`;
+    if (look.kind === 'see' && look.through_closed) return `What just happened: ${who} looked through the closed ${look.via} (it can be seen through) and saw ${look.name}: ${look.description} It stays closed, and ${who} stayed at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'see') return `What just happened: ${first}${who} looked ${how} and saw ${look.name}: ${look.description}${look.sight === 'clear' ? ' The view is open and carries far.' : ''} ${who} did not go there and stayed at ${here}. Describe only what can be seen from here.`;
+    if (look.kind === 'threshold') return `What just happened: ${first}${who} looked ${look.through_closed ? `through the closed ${look.via}` : look.peek ? `through a gap in the closed ${doorWord(look.via)}` : look.shut ? `at the closed ${doorWord(look.via)}` : how}. All that can be seen is what is right there: ${look.description} ${look.unknown ? 'Where it leads is not clear and is unknown; do not name, describe or guess what lies beyond.' : `${look.name ? `It leads to ${look.name}, but that` : 'Where it leads'} cannot be seen from here; ${look.name ? 'it may be named but' : ''} do not describe what lies at the far end.`} ${who} stayed at ${here}.`;
+    if (look.kind === 'closed' && look.stuck) return `What just happened: ${who} tried to open the ${doorWord(look.via)}, but it ${look.stuck}. Nothing beyond it can be seen. ${who} stayed at ${here}.`;
+    if (look.kind === 'closed') return `What just happened: ${who} looked at the ${doorWord(look.via)}. ${look.word === 'way' ? 'The way is blocked' : 'The door is closed'}; nothing beyond it can be seen. ${who} stayed at ${here}.`;
+    if (look.kind === 'listen' && look.sound === 'clear') return `What just happened: ${who} listened at the closed ${doorWord(look.via)}. Sounds from beyond it carry clearly. ${who} stayed at ${here}.`;
+    if (look.kind === 'listen' && look.sound === 'none') return `What just happened: ${who} listened at the closed ${doorWord(look.via)}. No sound at all comes through it. ${who} stayed at ${here}.`;
+    if (look.kind === 'listen') return `What just happened: ${who} listened at the closed ${doorWord(look.via)}. Only faint, muffled sounds come from beyond it; nothing can be made out clearly. ${who} stayed at ${here}.`;
+    return `What just happened: ${first}${who} looked ${how}, but nothing can be made out beyond it. ${who} stayed at ${here}.`;
 }
 export const LOOK_AROUND_RE = /\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|gaz(?:e|es|ed|ing)|peer(?:s|ed|ing)?)\s+(?:around|about|round)\b|\b(?:survey(?:s|ed|ing)?|take(?:s)? in) (?:the|my|our) surroundings\b/i;
 /** The narration line for a door that is not on the map yet: open it only if it fits the room. The story does not say how to flag it. */
@@ -315,7 +315,8 @@ export function factsText(loc, move, toolsOn, extra = {}) {
         extra.lore_fed || '',
         exitsText(loc).replace(/^Exits:/, 'Exits from here:'),
         ...glimpseLines(loc, extra.open),
-        extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''} Let the time of day show in the narration.` : '',
+        // R4 N8: the time-of-day nudge only when the caller says so (applyFacts: a move, a wait, or a new part of the day).
+        extra.date ? `Current time: ${extra.date}.${move?.seconds ? ` (That ${move.path?.length > 2 ? 'journey' : 'move'} took ${extra.took}.)` : ''}${extra.timeNudge ? ` ${P('narration.time_nudge')}` : ''}` : '',
         extra.weather ? `${extra.weather} Let the weather and temperature show in the narration where it fits; do not change them.` : '',
         (extra.npcs_present || extra.npc_focus) ? P('narration.npcs', { npcs_present: extra.npcs_present || '(none)', npc_focus: extra.npc_focus || '' }) : '',
     ];
@@ -329,7 +330,7 @@ export function factsText(loc, move, toolsOn, extra = {}) {
     else if (attemptKind(extra)) { /* attemptLines */ }
     else if (extra.look && extra.look.kind !== 'around') lines.push(lookText(who, place, extra.look));
     else if (extra.newDoor) lines.push(newDoorLine(who, place));
-    else if (extra.door) lines.push(P('narration.door', { party: who, verb: ({ open_door: 'opens', close_door: 'closes', bar_door: 'bars', unbar_door: 'unbars' })[extra.door.type] ?? 'closes', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
+    else if (extra.door) lines.push(P('narration.door', { party: who, verb: ({ open_door: 'opened', close_door: 'closed', bar_door: 'barred', unbar_door: 'unbarred' })[extra.door.type] ?? 'closed', door: doorWord(extra.door.direction) + (isDirWord(extra.door.direction) ? '' : ' door'), place }));
     else if (extra.dig) lines.push(P('narration.dig_here', { party: who, direction: extra.dig.direction, to: extra.dig.to_name, place }));
     else if (extra.lookAround || extra.look?.kind === 'around') lines.push(P('narration.look_around', { party: who, place }));
     else lines.push(stayPutLine(who, displayName(loc)));

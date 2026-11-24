@@ -79,6 +79,11 @@ export function hostIndex(chat, at) {
     for (let i = Math.min(at, chat?.length ?? 0) - 1; i >= 0; i--) if (!offStory(chat[i])) return i;
     return -1;
 }
+/** The nearest story reply (not the player's, not off-story) before `at`, or -1: the narrator reply a new one follows. */
+export function replyBefore(chat, at) {
+    for (let i = Math.min(at, chat?.length ?? 0) - 1; i >= 0; i--) if (!offStory(chat[i]) && !chat[i].is_user) return i;
+    return -1;
+}
 /** The player line a reply at `at` answers (works after the reply is in, unlike turnPlayerIndex): its host when that is
  *  the player's, else -1 (an automatic reply, such as a told expiry, answers no player line). */
 export function answeredPlayerIndex(chat, at) {
