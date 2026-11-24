@@ -328,7 +328,7 @@ async function applyPersonStamps(id, stamped) {
         // R7: a label that fits several people is read by the scope ladder at this reply. came_along is read from the
         // room the party just left (its candidates were there), at the message before the move.
         const [scopeAt, scopeOpts] = s0.type === 'npc_along' ? alongScopeOf(c.chat, id) : [id, {}];
-        const hit = resolveAt(c.chat, scopeAt, s0.id, folded, scopeOpts);
+        const hit = resolveAt(c.chat, scopeAt, s0.id, folded, { ...scopeOpts, noteAt: id });
         const t = hit.person?.id ?? null;
         if (!t && hit.tie.length) { warn(`Warning: a person update did not land: "${s0.id}" matches ${hit.tie.length} saved people ${LEVEL_WHERE[hit.level] ?? 'here'}; not applied.`, warnFrom); continue; }
         if (!t) { warn(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }

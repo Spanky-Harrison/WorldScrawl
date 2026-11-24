@@ -21,6 +21,9 @@ export function addCallNote(msg, note, { swipe = swipeIdx(msg), cap = CALL_CAP }
     if (note.answer != null && String(note.answer).trim()) n.answer = clip(note.answer, 80);
     if (note.emitted) n.emitted = note.emitted.slice(0, 8).map(e => clip(e, 40));
     const last = list[list.length - 1];
+    // once: a note that restates a result (not a call) is kept one time per swipe, so re-applying the same reply
+    // (re-run, edit, a second apply) does not stack copies. Matched on kind and reason anywhere in the swipe's list.
+    if (note.once) { const same = list.find(o => o.kind === n.kind && o.reason === n.reason); if (same) return same; }
     if (note.retry && last && last.kind === n.kind) { Object.assign(last, n, { tries: (last.tries ?? 1) + 1 }); if (!note.reason) delete last.reason; }
     else list.push(n);
     all[swipe] = list.slice(-cap);
