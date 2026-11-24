@@ -19,7 +19,7 @@
     await send('I look around', 2);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('look around: no target question, no view_link, kind around', lq.length === 2 && !lk.extra.worldscrawl_change && lk.extra.worldscrawl_look?.kind === 'around' && !lq.some(q => promptOf(q).includes('What is the player looking at')), JSON.stringify(lk.extra) + lq.length);
-    check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looks around') && promptOf(lq[1]).includes('mention every exit above') && !promptOf(lq[1]).includes('looks out and sees'), promptOf(lq[1]).slice(-600));
+    check('look around: narration uses look-around + exits hint', promptOf(lq[1]).includes('looked around') && promptOf(lq[1]).includes('mention every exit above') && !promptOf(lq[1]).includes('looked out and saw'), promptOf(lq[1]).slice(-600));
     // Bracket commands: a known verb skips the intent question; [help] and unresolved targets never reach the narrator.
     const lastChatMsg = () => page.evaluate(() => { const m = SillyTavern.getContext().chat.at(-1); return { mes: m.mes, sys: !!m.is_system, kind: m.extra?.worldscrawl_notice_kind }; });
     rL = (await reqsNow()).length;
@@ -32,7 +32,7 @@
     await send('I [look] around.', 1);
     lq = (await reqsNow()).slice(rL); lk = await lastU();
     check('a hidden command stays out of the next prompt (ST drops is_system rows)', lq.length === 1 && !lq[0].messages.some(m => String(m.content).includes('[help]') || /(^|: )help$/.test(String(m.content).trim())), JSON.stringify(lq.map(q => q.messages.map(m => String(m.content).slice(0, 60)))));
-    check('bracket [look] around: no intent question, look-around narration, brackets gone for the narrator', lq.length === 1 && lk.extra.worldscrawl_look?.kind === 'around' && promptOf(lq[0]).includes('looks around') && promptOf(lq[0]).includes('I look around.') && !promptOf(lq[0]).includes('[look]'), lq.length + JSON.stringify(lk.extra));
+    check('bracket [look] around: no intent question, look-around narration, brackets gone for the narrator', lq.length === 1 && lk.extra.worldscrawl_look?.kind === 'around' && promptOf(lq[0]).includes('looked around') && promptOf(lq[0]).includes('I look around.') && !promptOf(lq[0]).includes('[look]'), lq.length + JSON.stringify(lk.extra));
     rL = (await reqsNow()).length;
     await queue([{ content: 'none' }]);
     await send('I [move] sideways', 1);

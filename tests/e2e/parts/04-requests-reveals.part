@@ -27,7 +27,7 @@
     await go('The Drowned Rat');
     check('fast travel: exactly one request (/travel)', (await stored()) === 'riverton:drowned_rat/common_room' && JSON.stringify(apiCalls) === '["/travel"]', JSON.stringify(apiCalls));
     narr = JSON.stringify((await lastReq()).messages);
-    check('journey note lists rooms in order', narr.includes('User travelled from Temple of the Tides through Village Square (Riverton Streets) to Common Room (The Drowned Rat). User arrives in the Common Room of The Drowned Rat. Narrate the journey briefly, in that order, ending with arriving in the Common Room of The Drowned Rat.'), narr.slice(0, 300));
+    check('journey note lists rooms in order', narr.includes('User travelled from Temple of the Tides through Village Square (Riverton Streets) to Common Room (The Drowned Rat). User arrived in the Common Room of The Drowned Rat. Narrate the journey briefly, in that order, ending with arriving in the Common Room of The Drowned Rat.'), narr.slice(0, 300));
     // A server-side stop (here: a blocked step injected into the request) leaves the party at the last valid room.
     const travelStub = u => u.pathname.endsWith('/travel');
     await page.route(travelStub, async route => { const b = JSON.parse(route.request().postData()); b.steps.splice(1, 0, 'bogus'); await route.continue({ postData: JSON.stringify(b) }); });

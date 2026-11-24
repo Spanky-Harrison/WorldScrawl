@@ -90,7 +90,7 @@ test('jargon: a plain look, people here, the stay-put line and the rules read as
     assert.match(f, /^\[Scene facts\. Treat these as true\.\]/);
     assert.match(f, /People here \(anyone not listed is a background figure, not one of them\):/);
     assert.match(f, new RegExp(`the landlady \\[${N.handleOf('hesk')}\\]:`), 'handles stay');
-    assert.match(f, /stays in Common Room \(The Drowned Rat\): no move happens/);
+    assert.match(f, /Everything in this reply happens in Common Room \(The Drowned Rat\): no move happens/);
     assert.match(f, /Places with local lore: /);
     assert.deepEqual(jargonIn(f), []);
 });

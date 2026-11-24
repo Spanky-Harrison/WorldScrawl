@@ -17,9 +17,8 @@ test('look-only messages: a perception word and no movement word', () => {
 
 test('stay-put line: still in the room, not leaving or arriving', () => {
     const t = stayPutLine('Knarfy', "Brask's Smithy");
-    assert.match(t, /stays in Brask's Smithy: no move happens\./);
-    assert.match(t, /Do not describe Knarfy leaving, stepping out, going through any exit or arriving anywhere else/);
-    assert.match(t, /Everything in this reply happens in Brask's Smithy\./);
+    assert.equal(t, "Everything in this reply happens in Brask's Smithy: no move happens, and the reply ends with Knarfy still there.");
+    assert.doesNotMatch(t, /Do not|stays in/, 'R4 N3: what is true, not a ban list');
 });
 }
 

@@ -242,7 +242,7 @@ test('the story prompt keeps the people list and does not say how to report', ()
     story(report);
     assert.match(report, /You only narrate/);
     const moving = ext.factsText(loc, null, true, { reportTools: false, moveTools: true });
-    assert.match(moving, /Do not invent locations or exits that are not listed\./);
+    assert.match(moving, /Use only the locations and exits listed above; if a character tries some other way out, show why it does not work\./);
     assert.doesNotMatch(moving, /You only narrate/);
     story(moving);
     const lore = ext.loreBits({ ...loc, lore_chain: [{ level: 'subregion', name: 'The Drowned Rat', text: 'Old.' }] }, true);

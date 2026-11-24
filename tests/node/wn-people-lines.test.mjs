@@ -111,7 +111,7 @@ test('the hesk-trace case: moving out to the square, who is already there is tol
     await scene.applyFacts();
     assert.equal(calls.length, n, 'no model call');
     const r = lines(blocks);
-    assert.match(r[0], /^\[At the end of this reply the characters are in Village Square\./);
+    assert.match(r[0], /^\[At the end of this reply the characters are in Village Square, and the reply ends there\./);
     assert.equal(r[1], ARRIVE, r.join('\n'));
     assert.doesNotMatch(R(blocks), /Bryn/, 'whoever stayed behind is not in it');
     assert.doesNotMatch(F(blocks), /Already in/, 'not in the facts block');
