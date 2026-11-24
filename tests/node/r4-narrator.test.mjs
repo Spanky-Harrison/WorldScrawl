@@ -89,18 +89,19 @@ test('N2: the narrator lines still built in code (stay-put, every look result, t
 });
 
 // ---- Through applyFacts: the facts block and the after-message slot.
-const server = (() => { const d = tmpPath(); copytree(path.dirname(RIVERTON), d); return clientDir(d); })();
-function boot(who = '') {
+const serverWith = (cards = [], drop = []) => { const d = tmpPath(); copytree(path.dirname(RIVERTON), d); for (const id of drop) fs.rmSync(path.join(d, 'riverton', 'cast', `${id}.json`)); for (const card of cards) fs.writeFileSync(path.join(d, 'riverton', 'cast', `${card.id}.json`), JSON.stringify(card, null, 2)); return clientDir(d); };
+const server = serverWith();
+function boot(who = '', srv = server) {
     exitsCache.clear();
     globalThis.BroadcastChannel = undefined;
     globalThis.document = { querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: () => ({ style: {}, append() {}, appendChild() {} }), body: {}, documentElement: {} };
     globalThis.fetch = async (url, opts = {}) => {
         const u = new URL(String(url), 'http://local');
-        const r = server.request(opts.method || 'GET', u.pathname.replace(/^\/api\/plugins\/worldscrawl/, '') + u.search, { json: opts.body ? JSON.parse(opts.body) : undefined });
+        const r = srv.request(opts.method || 'GET', u.pathname.replace(/^\/api\/plugins\/worldscrawl/, '') + u.search, { json: opts.body ? JSON.parse(opts.body) : undefined });
         return { ok: r.status_code < 400, status: r.status_code, headers: { get: k => r.headers.get(k) }, json: async () => r.json() };
     };
     ext.setPrompts(PROMPTS);
-    rememberWorlds(server.get('/worlds').json());
+    rememberWorlds(srv.get('/worlds').json());
     const c = SillyTavern.getContext();
     c.chatId = 'r4'; c.getCurrentChatId = () => 'r4';
     c.chatMetadata = { worldscrawl_enabled: true };
@@ -191,7 +192,7 @@ test('N3 + N6 through applyFacts: look-around has one stay line; rules, exits hi
     assert.equal(facts.split('\n').filter(l => /still there|stays here|stays at/.test(l)).length, 1, 'N6: only the stay-put line');
     assert.match(facts, /^Everything in this reply happens in Common Room \(The Drowned Rat\): no move happens, and the reply ends with Ana and Bo still there\.$/m);
     assert.match(facts, /For an exit whose destination is not given, describe only the exit itself; where it leads stays unknown\./);
-    assert.match(facts.split('\n').at(-1), /^Use only the locations and exits listed above; if a character tries some other way out, show why it does not work\.$|^You only narrate\. Only the story's moves take Ana and Bo to another location/);
+    assert.match(facts.split('\n').at(-1), /^Use only the locations and exits listed above; if a character tries some other way out, show why it does not work\.$|^Write only the narration\. Only the story's moves take Ana and Bo to another location/);
     assert.doesNotMatch(facts, /\bDo not (invent|describe|hint)|do not hint or guess|Ana and Bo (is|has|stays|looks|tries|does|was)\b/);
 });
 
@@ -220,12 +221,49 @@ test('N6 + N2: a door opened or closed is told in the past tense, with no stay s
     assert.equal(facts.split('\n').filter(l => /still there|stays at/.test(l)).length, 1);
 });
 
-test('N3: someone who belongs here but is away is "elsewhere right now", and the elsewhere rule follows', () => {
-    const npc = PROMPTS.prompts.find(e => e.id === 'narration.offmap_found');
-    assert.ok(npc, 'the elsewhere rule entry exists');
-    const src = fs.readFileSync(new URL('../../extension/npc.mjs', import.meta.url), 'utf8');
-    assert.match(src, /is elsewhere right now\$\{where\}\.`\);\n\s+onOffmap\(\);/, 'every absent line raises the elsewhere rule');
-    assert.doesNotMatch(src, /do not portray/);
+// Round 1 (Ast): absentAt through the real handlers, not a regex over the source. Pell fiddles in the Common Room in the
+// evening and works the forge by day, so at the 08:00 start she belongs here but is elsewhere (a placed entry, not off the map).
+const FORGE = 'riverton:smithy/forge';
+const PELL = { id: 'pell', name: 'Pell', personality: { summary: 'The evening fiddler.' }, schedule: [
+    { place: FORGE, activity: 'working the bellows', from: '06:00', to: '17:00' },
+    { place: TAVERN, activity: 'fiddling', from: '18:00', to: '23:00' },
+] };
+
+test('N3 (round 1): absentAt on an absent scheduled person returns "is elsewhere right now" and fires onOffmap', async () => {
+    const { absentAt } = await import('../../extension/npc.mjs');
+    const { validateRecord } = await import('../../plugin/npc.mjs');
+    const pell = validateRecord(PELL, { file: 'pell.json' });
+    assert.equal(pell.ok, true);
+    const env = { exists: () => true, relocate: {}, names: a => ({ [FORGE]: 'the forge' })[a] ?? a, playerAt: () => TAVERN,
+        clock: () => ({ day: 1, hour: 8, minute: 0, minutes: 480, elapsed: 86400 + 8 * 3600 }) };
+    let fired = 0;
+    const lines = absentAt([{ mes: 'I sit at the bar.', is_user: true, extra: {} }], 0, [pell], env, { present: [], onOffmap: () => { fired++; } });
+    assert.deepEqual(lines, ['Pell is elsewhere right now (working the bellows, the forge).']);
+    assert.equal(fired, 1, 'the absent line raises the elsewhere rule');
+    assert.doesNotMatch(lines.join('\n'), /do not portray/i);
+});
+
+test('N3 (round 1): through applyFacts, an absent scheduled person is "elsewhere right now" and the positive elsewhere rule follows', async () => {
+    // Hesk is left out: her 08:00 entry is off the map and would raise the elsewhere rule on its own.
+    const { c, blocks } = boot('', serverWith([PELL], ['hesk']));
+    say(c, 'I sit at the bar.');
+    const { facts } = await turn(blocks);
+    const all = Object.values(blocks).join('\n');
+    assert.deepEqual(facts.split('\n').filter(l => /elsewhere/.test(l)), ["Pell is elsewhere right now (working the bellows, Brask's Smithy).", TEXT['narration.offmap_found']], facts);
+    assert.ok(facts.includes(TEXT['narration.offmap_found']), facts);
+    assert.equal(TEXT['narration.offmap_found'], '(Anyone above who is elsewhere is not with the characters; they stay out of the scene until they actually come here.)');
+    assert.doesNotMatch(all, /do not portray/i);
+    assert.doesNotMatch(all, /Do not narrate them/);
+});
+
+test('round 1: narration.rules opens "Write only the narration." (no "You" for the narrator); rules_tools has no "You" either', () => {
+    ext.setPrompts(PROMPTS);
+    for (const party of PARTIES) {
+        const out = ext.render('narration.rules', { party });
+        assert.match(out, new RegExp(`^Write only the narration\\. Only the story's moves take ${party} to another location`));
+    }
+    assert.doesNotMatch(TEXT['narration.rules'], /\bYou\b/);
+    assert.doesNotMatch(TEXT['narration.rules_tools'], /\bYou\b/);
 });
 
 test('rev 6 check: the group 4 not-found line (N3) and the wait-amount until rule (W1) still match rev 6', () => {
