@@ -210,19 +210,29 @@ function personScope(chat, at, { from = '' } = {}) {
     };
     return { at: when, here, levelOf: p => scopeLevel(here, placesOf(p)), whereOf: p => { const a = best(p); return a ? env.names(a) : ''; } };
 }
-const whoWhere = (scope, p) => { const w = scope.whereOf(p); return w ? `${shownName(p)} (${w})` : shownName(p); };
-/** "Which one? the guard (Village Square), the guard (Larkspur Green)": shown names only (the name portal). */
-const whichOne = (scope, tie) => `Which one? ${tie.map(p => whoWhere(scope, p)).join(', ')}`;
+/** Where a tied person is: the place that set their level, or "somewhere else" when they have none (as /ws-find says). */
+const whoWhere = (scope, p) => `${shownName(p)} (${scope.whereOf(p) || 'somewhere else'})`;
+/**
+ * "Which one? the guard (Village Square), the guard (Larkspur Green)": shown names only (the name portal). Two entries
+ * that still read the same (same label, same place) get the person's handle, as prompts list people (labelOf), so the
+ * choices stay distinct and the player can answer with it.
+ */
+const whichOne = (scope, tie) => {
+    const shown = tie.map(p => whoWhere(scope, p));
+    return `Which one? ${shown.map((t, i) => (shown.indexOf(t) !== shown.lastIndexOf(t) ? `${t} [${handleOf(tie[i].id)}]` : t)).join(', ')}`;
+};
 /**
  * resolvePerson in the scope at message `at`. A pick the ladder made at the town level or wider is noted in the Activity
- * log ("'a guard' read as the guard at Village Square, nearest to you"). {person, tie, level, biased, scope}.
+ * log ("'a guard' read as the guard at Village Square, nearest to you"). The note goes on `noteAt`, the message being
+ * resolved for (came_along resolves in the previous message's scope but belongs to this reply); `once`, so re-applying
+ * the same reply does not add it again. {person, tie, level, biased, scope}.
  */
-function resolveAt(chat, at, text, people, { from = '' } = {}) {
+function resolveAt(chat, at, text, people, { from = '', noteAt = at } = {}) {
     const scope = personScope(chat, at, { from });
     const r = resolvePerson(text, people, scope);
     if (r.person && r.biased && r.level >= 2) {
         const w = scope.whereOf(r.person);
-        noteCall(scope.at, { kind: 'person match', status: 'ok', reason: `'${String(text ?? '').trim()}' read as ${shownName(r.person)}${w ? ` at ${w}` : ''}, nearest to you` });
+        noteCall(noteAt, { kind: 'person match', status: 'ok', once: true, reason: `'${String(text ?? '').trim()}' read as ${shownName(r.person)}${w ? ` at ${w}` : ''}, nearest to you` });
     }
     return { ...r, scope };
 }
