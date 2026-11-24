@@ -753,7 +753,7 @@
       "description": "Used by Narration. Step 2 of 5 (one 'what just happened' line is picked): broke through, stayed.",
       "group": "style",
       "process": "narration",
-      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. The opening is there now, and nobody has gone through it yet: the scene stays at {{place}}. Narrate the breakthrough.",
+      "text": "What just happened: {{party}} broke through, making a new opening ({{direction}}) from here to {{to}}. The opening is there now; nobody has gone through it yet, so the scene stays at {{place}}. Narrate the breakthrough.",
       "placeholders": [
         {
           "name": "party"
