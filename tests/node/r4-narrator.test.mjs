@@ -127,6 +127,8 @@ test('N8: the chat\'s first narrated reply gets the nudge; a plain stay in the s
     const first = timeLine((await turn(blocks)).facts);
     assert.match(first, /^Current time: .+\. Let the time of day show in the narration\.$/, 'first narrated reply (only the greeting before it)');
     reply(c, 'The fire crackles.');
+    // A swipe of that first reply is the first narrated reply again: the nudge stays.
+    assert.ok(timeLine((await turn(blocks, { type: 'swipe' })).facts).endsWith(` ${NUDGE}`), 'swipe of the first narrated reply');
     say(c, 'I sip my ale.');
     const plain = timeLine((await turn(blocks)).facts);
     assert.match(plain, /^Current time: [^\n]+\.$/);
