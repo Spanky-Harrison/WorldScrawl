@@ -305,7 +305,7 @@ test('person updates come from the tracker: its prompt guides memory, dispositio
     assert.ok(P('npc.memory_rules').locked);
     assert.match(tracker, /nobody has to ask you to remember/);
     assert.match(tracker, /nobody gained a memory they would keep/);
-    assert.match(tracker, /stance toward the player actually shifted/);
+    assert.match(tracker, /when their disposition actually shifted/);
     assert.doesNotMatch(tracker, /end your reply with|\[ws_flag|\[ws_npc|\[ws_wait/);
     assert.ok(P('npc.tracker').locked);
     assert.ok(P('npc.tracker_system').locked);

@@ -106,7 +106,7 @@ function boot(prompts, { time = '10:00', here = TAVERN, mode = 'buttons', chat =
     c.executeSlashCommandsWithOptions = async () => {};
     c.generateRaw = async args => {
         const kind = callKind(args);
-        rec.calls.push({ kind, prompt: String(args?.prompt ?? ''), sys: String(args?.systemPrompt ?? '') });
+        rec.calls.push({ kind, prompt: String(args?.prompt ?? ''), sys: String(args?.systemPrompt ?? ''), len: args?.responseLength });
         const a = rec.answers[kind] ?? DEFAULT_ANSWERS[kind] ?? '{}';
         return typeof a === 'function' ? a(args) : Array.isArray(a) ? (a.length > 1 ? a.shift() : a[0]) : a;
     };
@@ -412,8 +412,9 @@ const ALLOW = {
     'npc.appearance_intent_replace': 'listed only when a replaced base text is composed again with a later change; kept baselines bake into the base here. Through intentLine in r3-compose A2',
 };
 // Not asserted by (a), reported instead: text that is data or answer keys, not prompt wording.
-//  - OP_DOCS (the map-edit op list filled into {{edit_types}}), the pick/intent answer keys and option labels, and
-//    pick.said's "The player wrote:" (R6) ride inside placeholder values; (a) sees only text outside every entry.
+//  - OP_DOCS (the map-edit op list filled into {{edit_types}}) and the pick/intent answer keys and option labels ride
+//    inside placeholder values; (a) sees only text outside every entry. The player's quoted message is the pick.said
+//    entry since R6, so it is a marker like any other (no exception here).
 // The group 4 side calls (R5.4): the tracker retry, the own-field compose and the scope-switch rewrite are model calls too.
 const KINDS_REQUIRED = ['intent', 'intent: travel yes/no', 'wait amount', 'tracker', 'schedule', 'map expand', 'map rebuild', 'appearance compose',
     'looks summary', 'remember (prefetch)', 'discovery / dig', 'pick: look target', 'pick: closed door', 'pick: view', 'pick: door', 'pick: bracket target',
@@ -486,6 +487,62 @@ test('R5.3 / R5.3b (N5, N4): with the shipped prompts, the narrator gets duratio
     const tracker = real.calls.filter(c => c.kind === 'tracker' && /\bp[0-9a-z]{4}\b/.test(c.prompt));
     assert.ok(tracker.length, 'the tracker lists people by handle');
     assert.ok(real.calls.some(c => c.kind === 'pick: who' && /^- p[0-9a-z]{4}: /m.test(c.prompt)), 'the who pick lists handles');
+});
+
+// ---- R6 (prompt polish), through the same passes.
+// The kinds whose question quotes the player's message ({{said}}): intent, travel, look, door and dig.
+const SAID_KINDS = ['intent', 'intent: travel yes/no', 'pick: look target', 'pick: closed door', 'pick: view', 'pick: door', 'discovery / dig'];
+test('R6 pick.said: the customized entry (its marker) is the only way the player\'s words reach intent, travel, look, door and dig; the shipped one reads The player wrote: "…"', { timeout: 120000 }, async () => {
+    const { keep, real } = await both();
+    for (const kind of SAID_KINDS) {
+        const calls = keep.calls.filter(c => c.kind === kind);
+        assert.ok(calls.length, `the pass makes a "${kind}" call`);
+        for (const c of calls) {
+            assert.match(c.prompt, /⟦pick\.said⟧\S/, `${kind}: the player's words come through pick.said`);
+            assert.doesNotMatch(c.prompt, /The player wrote/, `${kind}: no hardcoded "The player wrote"`);
+        }
+        const shipped = real.calls.filter(c => c.kind === kind);
+        assert.ok(shipped.length && shipped.every(c => /^The player wrote: "[^"\n]+"$/m.test(c.prompt)), `${kind}: shipped pick.said`);
+    }
+    // Only those questions use it: no other call or narrator block quotes the player through pick.said.
+    assert.deepEqual([...new Set(keep.calls.filter(c => /⟦pick\.said⟧/.test(c.prompt + c.sys)).map(c => c.kind))].sort(), [...SAID_KINDS].sort());
+    assert.ok(!keep.blocks.some(b => /⟦pick\.said⟧/.test(b.text)));
+});
+test('R6 F3 / P5 / P6 on the shipped prompts: the Remember budget, the pattern question one line per key, attitude in prose and disposition once in the tracker', { timeout: 120000 }, async () => {
+    const { real } = await both();
+    // F3: the Remember call may write 1200 tokens.
+    const rem = real.calls.filter(c => c.kind.startsWith('remember'));
+    assert.ok(rem.length && rem.every(c => c.len === 1200), JSON.stringify(rem.map(c => [c.kind, c.len])));
+    // P5: the daily pattern system prompt, one line per key, every sentence as it was.
+    const sched = real.calls.find(c => c.kind === 'schedule');
+    assert.ok(sched, 'the pass asks the pattern');
+    const lines = sched.sys.split('\n');
+    assert.equal(lines.length, 7, sched.sys);
+    assert.match(lines[1], /^Reply with JSON only: \{"pattern": /);
+    assert.deepEqual(lines.slice(2, 6).map(l => l.split(' ')[1]), ['pattern', 'job', 'home', 'favorites']);
+    for (const l of lines.slice(2, 6)) assert.match(l, /^- [a-z]+ (is|are) /);
+    assert.equal(lines[6], 'Use only KEYs from the list. No other keys.');
+    // The wording is the same as the one paragraph it was (R5), sentence for sentence.
+    assert.equal(lines[0], 'You choose the daily routine of a person the story has just met in a text adventure. The game turns your choice into their schedule.');
+    assert.match(lines[2], /, passing through for a traveller, a visitor or anyone not settled here, and unsure when the story gives no hint\.$/);
+    assert.match(lines[3], /\(an innkeeper, a smith whose workplace is a whole building, a watchman on rounds\); an area job means anywhere public in that area\. job can also be offmap: and a few words, or null when you cannot tell\.$/);
+    assert.match(lines[4], /^- home is a room KEY from the list, or offmap: and a few words for a place that is not on the list \(at most 80 characters\), or null when you cannot tell\.$/);
+    assert.equal(lines[5], '- favorites are up to 3 KEYs of public places (not marked [private]) where they spend free time; an area KEY means anywhere public in that area.');
+    // P6: the tracker names it once, then says disposition; the people lines say Disposition; never "stance".
+    const trackers = real.calls.filter(c => c.kind === 'tracker');
+    assert.ok(trackers.length);
+    for (const t of trackers) {
+        assert.equal(t.prompt.split('disposition (their attitude toward the player)').length - 1, 1, 'introduced once');
+        assert.match(t.prompt, /when their disposition actually shifted compared to the disposition and reason listed above/);
+        assert.doesNotMatch(t.prompt + t.sys, /stance/i);
+    }
+    assert.ok(trackers.some(t => /\. Disposition: friendly \(a towel\)$/m.test(t.prompt)), 'a listed person\'s Disposition line');
+    // The first-attitude pick and the narrator say attitude.
+    const dispo = real.calls.filter(c => c.kind === 'pick: disposition');
+    assert.ok(dispo.length && dispo.every(c => /What is .+'s attitude toward .+\?/.test(c.prompt) && !/feel about|stance/i.test(c.prompt)));
+    const narrator = real.blocks.map(b => b.text).join('\n');
+    assert.match(narrator, /Attitude toward [^:\n]+: /);
+    assert.doesNotMatch(narrator, /stance|feel about/i);
 });
 
 test('R5.4 dump', { skip: !DUMP }, async () => {

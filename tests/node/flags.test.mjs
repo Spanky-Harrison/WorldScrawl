@@ -482,7 +482,7 @@ test('the tracker scrap is one pass over the live place and every field a person
         id: 'hesk', name: 'Hesk', looks: 'copper braids.', body: 'Tall.', outfit: '',
         facts: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'],
         memory: ['Joe lied about the coin.'],
-        stance: 'indifferent', stanceReason: 'Strangers are customers.',
+        disposition: 'indifferent', dispositionReason: 'Strangers are customers.',
     }]);
     const scrap = ext.trackerScrap({
         placeName: 'Uncommon Room', displayName: 'Uncommon Room (The Uncommon Room)',
@@ -500,7 +500,8 @@ test('the tracker scrap is one pass over the live place and every field a person
     assert.match(people, /Outfit: \(none\)/);
     assert.match(people, /Known facts: one; two; three; four; five; six; seven/);
     assert.match(people, /Memories: Joe lied about the coin/);
-    assert.match(people, /Stance toward the player: indifferent \(Strangers are customers\)/);
+    assert.match(people, /Disposition: indifferent \(Strangers are customers\)/);
+    assert.doesNotMatch(people, /[Ss]tance/, 'R6 P6: the person line says Disposition, never stance');
     assert.match(ext.trackerScrap({ placeName: 'Hall' }), /This place: Hall\nDescription: \(none\)/);
     assert.match(ext.trackerScrap({ placeName: 'Taproom', displayName: 'The Uncommon Room' }), /This place: Taproom \(The Uncommon Room\)/);
     assert.doesNotMatch(scrap, /Time of day/, 'no clock given: no time line');
@@ -511,7 +512,7 @@ test('the tracker scrap is one pass over the live place and every field a person
     const prompt = ext.trackerPrompt({ scrap, player: 'I look around.', story: 'You look around.' });
     assert.match(prompt, /see Time of day and Weather above/);
     assert.match(prompt, /facts and memories listed above are already known/);
-    assert.match(prompt, /stance and reason listed above/);
+    assert.match(prompt, /disposition and reason listed above/);
     assert.match(prompt, /walk in soaked/);
     assert.match(prompt, /time actually passed/);
     assert.match(prompt, /being looked at or described is not a change/);
@@ -535,8 +536,8 @@ test('the tracker scrap is one pass over the live place and every field a person
     assert.equal(listed.length, 1);
     assert.equal(listed[0].facts.length, 7);
     assert.deepEqual(listed[0].memory, ['Joe lied about the coin.']);
-    assert.equal(listed[0].stance, 'friendly');
-    assert.equal(listed[0].stanceReason, 'they paid');
+    assert.equal(listed[0].disposition, 'friendly');
+    assert.equal(listed[0].dispositionReason, 'they paid');
     assert.equal(listed[0].looks, 'copper braids');
 });
 }
