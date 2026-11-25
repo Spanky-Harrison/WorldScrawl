@@ -227,7 +227,7 @@ const whichOne = (scope, tie) => {
  * resolved for (came_along resolves in the previous message's scope but belongs to this reply); `once`, so re-applying
  * the same reply does not add it again. {person, tie, level, biased, scope}.
  */
-function resolveAt(chat, at, text, people, { from = '', noteAt = at } = {}) {
+function resolveAt(chat, at, text, people, { from = '', noteAt = Math.max(0, at) } = {}) {
     const scope = personScope(chat, at, { from });
     const r = resolvePerson(text, people, scope);
     if (r.person && r.biased && r.level >= 2) {
