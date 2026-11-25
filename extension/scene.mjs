@@ -544,22 +544,19 @@ function npcPromptBits(loc) {
     } catch (e) { console.warn('[WorldScrawl] npcs', e.message); return {}; }
 }
 const DRAMATIC_RE = /\b(attacks?|stab(?:s|bed)?|rescues?|sav(?:e|es|ed)|kills?)\b/i;
-const DISPO_OPTS = [
-    { key: 'indifferent', label: 'the usual answer; no reason to feel strongly either way' },
-    { key: 'unfriendly', label: 'cold, short or suspicious' },
-    { key: 'friendly', label: 'warm, glad to see them' },
-    { key: 'helpful', label: 'goes out of their way to help' },
-    { key: 'hostile', label: 'wants to harm them' },
-];
+// R8: each attitude's meaning is a prompt entry (npc.disposition_option.<key>); the keys are the game's own.
+const DISPO_KEYS = ['indifferent', 'unfriendly', 'friendly', 'helpful', 'hostile'];
+const dispoOpts = () => DISPO_KEYS.map(key => ({ key, label: P(`npc.disposition_option.${key}`) }));
 async function askDisposition(person, said) {
     await ensurePrompts();
-    const prompt = P('npc.disposition', { name: shownName(person), line: maskForModel(person.line), party: partyText(), said: String(said ?? '').slice(0, 800), options: optionLines(DISPO_OPTS) });
-    const hit = await askValid('disposition', prompt, pickKey(DISPO_OPTS));
+    const opts = dispoOpts();
+    const prompt = P('npc.disposition', { name: shownName(person), line: maskForModel(person.line), party: partyText(), said: String(said ?? '').slice(0, 800), options: optionLines(opts) });
+    const hit = await askValid('disposition', prompt, pickKey(opts));
     return hit?.key ?? 'indifferent';
 }
 async function askWho(loc, said, present) {
     await ensurePrompts();
-    const opts = [...present.map(p => ({ key: handleOf(p.id), label: shownName(p) })), { key: 'nobody', label: 'nobody in particular' }];
+    const opts = [...present.map(p => ({ key: handleOf(p.id), label: shownName(p) })), { key: 'nobody', label: P('npc.who_nobody') }];
     const prompt = P('npc.who', { party: partyText(), place: displayName(loc), said: String(said ?? '').slice(0, 800), options: optionLines(opts) });
     const hit = await askValid('who', prompt, pickKey(opts));
     return hit?.key && hit.key !== 'nobody' ? present.find(p => handleOf(p.id) === hit.key)?.id ?? null : null;
@@ -674,6 +671,24 @@ function rememberStory(chat, id, name) {
     const back = readBack(chat.slice(0, id + 1).filter(m => !m.is_system).map((m, i) => ({ text: m.mes ?? '', index: i })), name);
     return back.messages.map(m => m.text).join('\n').slice(0, 6000);
 }
+/**
+ * R8: why one Remember try gave no card, for its Activity note: the call timed out or failed, the reply was empty, cut off
+ * (its JSON never closed: the length budget ran out), not JSON at all (a refusal or plain text; its start is quoted), or
+ * JSON without a name and a line.
+ */
+export function rememberFailure(raw, err = null) {
+    if (err) return err.code === 'timeout' ? 'timed out (no answer in time)' : `the call failed (${String(err?.message ?? err).trim() || 'unknown error'})`;
+    const t = String(raw ?? '').replace(/```(?:json)?/gi, '').trim();
+    if (!t) return 'empty answer';
+    const start = t.indexOf('{');
+    if (start < 0) return `not JSON ("${t.replace(/\s+/g, ' ').slice(0, 40)}")`;
+    if (parseJsonAnswer(t) == null) {
+        let depth = 0, inStr = false, esc = false;
+        for (const ch of t.slice(start)) { if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; } if (ch === '"') inStr = true; else if (ch === '{') depth++; else if (ch === '}') depth--; }
+        return depth > 0 ? 'cut off (the reply stopped before its JSON closed)' : 'unreadable JSON';
+    }
+    return 'no name or no one-line summary in the JSON';
+}
 async function askRemember(id, name, { prefetch = false, hint = '', keep = null } = {}) {
     const chat = ctx().chat ?? [];
     const [, loc] = await Promise.all([ensurePrompts(), currentLocation().catch(() => null)]);
@@ -684,8 +699,10 @@ async function askRemember(id, name, { prefetch = false, hint = '', keep = null 
     const kind = prefetch ? 'remember (prefetch)' : 'remember';
     let got = null;
     for (let t = 0; t < 2 && !got; t++) {
-        try { got = readRememberAnswer(parseJsonAnswer(await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') }), responseLength: REMEMBER_LENGTH }, { at: id, shown: 'card', retry: t > 0 }))); } catch { got = null; }
-        if (!got) markLast(id, kind, 'failed', 'answer was not a usable person');
+        let raw = null, cause = '';
+        try { raw = await gen(kind, { prompt, systemPrompt: P('npc.remember_system', { reply: baseReply('json'), fact_rules: P('npc.fact_rules'), memory_rules: P('npc.memory_rules') }), responseLength: REMEMBER_LENGTH }, { at: id, shown: 'card', retry: t > 0 }); } catch (e) { cause = rememberFailure(null, e); }
+        if (!cause) { try { got = readRememberAnswer(parseJsonAnswer(raw)); } catch { got = null; } if (!got) cause = rememberFailure(raw); }
+        if (!got) markLast(id, kind, 'failed', `no usable person: ${cause}`); // R8: the Activity note says why
     }
     if (got && keep) got = rememberWith(got, keep, Object.keys(keep)).got ?? got; // what the player typed stays exactly
     return got;

@@ -225,14 +225,18 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
         if (typeof a === 'string') { try { const w = changed_for(wid, [], null, false).w, l = w.locations.get(a); if (l) return World.place_label(l.name, w.sub_of(l).name); } catch { /* the address then */ } return a; }
         return 'a temporary change';
     };
-    /** "Guest Room 1 expired at <date> (lasted 1h, from message #5)" for a change whose ops ran out at `now`, or null. */
-    function expiredText(wid, c, now) {
+    /** A change whose ops ran out at `now`: {text, lasted}, or null. text is the bookkeeping line for the log, cards and
+     *  Activity ("Guest Room 1 expired at <date> (lasted 1h, from message #5)"); lasted is how long it was set to last, in
+     *  seconds. The model never gets text: the client words the plain fact from lasted (narration.ended). */
+    function expiredInfo(wid, c, now) {
         if (now === null || c?.type !== 'patch' || !Array.isArray(c.ops)) return null;
         const op = c.ops.find(o => !opActive(o, c, now));
         if (!op) return null;
-        let end; try { end = Number(c.at) + parseLasts(op.lasts); } catch { return null; }
-        return `${opSubject(wid, op)} expired at ${gameDate(wid, end)} (lasted ${op.lasts}, from ${msgRef(c)})`;
+        let lasted; try { lasted = parseLasts(op.lasts); } catch { return null; }
+        const end = Number(c.at) + lasted;
+        return { text: `${opSubject(wid, op)} expired at ${gameDate(wid, end)} (lasted ${op.lasts}, from ${msgRef(c)})`, lasted };
     }
+    const expiredText = (wid, c, now) => expiredInfo(wid, c, now)?.text ?? null;
     /** Changes the replay skipped because something they built on is inactive (expired, turned off, or itself skipped):
      *  marked `inactive` with a plain note naming the cause, nearest first. Ones that fail on their own keep the raw error. */
     function explainInactive(wid, changesIn, now, info) {
@@ -512,7 +516,7 @@ export function createServer({ worldDir = null, worldsDir = null, env = process.
                     const made = changes.map((c, i) => [c, i]).reverse().find(([c]) => c?.type === 'patch' && Array.isArray(c.ops) && c.ops.some(o => !opActive(o, c, now)
                         && (o.op === 'create_place' ? `${o.area}/${o.id}` === address || address.endsWith(`/${o.id}`) : [o.loc, o.into, ...(Array.isArray(o.locs) ? o.locs : [])].includes(address))));
                     r.expired_room = { address, name: old ? World.place_label(old.name, all.w.sub_of(old).name) : address, description: old?.description ?? '',
-                        ...(made ? { change: { msg: made[0]._msg ?? null, note: made[0].note ?? '', summary: made[0].summary ?? (all.info.patches ?? []).filter(p => p.msg === (made[0]._msg ?? null) && p.id === (made[0].id ?? null)).flatMap(p => p.summary ?? []), ...(expiredText(wid, made[0], now) ? { ended: expiredText(wid, made[0], now) } : {}) } } : {}) };
+                        ...(made ? { change: { msg: made[0]._msg ?? null, note: made[0].note ?? '', summary: made[0].summary ?? (all.info.patches ?? []).filter(p => p.msg === (made[0]._msg ?? null) && p.id === (made[0].id ?? null)).flatMap(p => p.summary ?? []), ...(expiredInfo(wid, made[0], now) ? { ended: expiredInfo(wid, made[0], now).text, lasted: expiredInfo(wid, made[0], now).lasted } : {}) } } : {}) };
                     const seen = new Set();
                     r.options = (old?.exits ?? []).filter(x => e.w.locations.has(x.to) && !seen.has(x.to) && seen.add(x.to))
                         .map(x => { const l = e.w.locations.get(x.to); return { address: x.to, direction: x.direction, name: World.place_label(l.name, e.w.sub_of(l).name) }; })

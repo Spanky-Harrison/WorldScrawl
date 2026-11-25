@@ -11,12 +11,12 @@
     {
       "id": "pick",
       "title": "Shared bases",
-      "flow": "Not a process of its own: the shared base for every question that asks the model to pick one option from a list (which exit to look at, what to do at a closed door, which place a window shows, which door to open or close). Step 1: the game lists the options as short text keys (\"- key: meaning\") and sends this system prompt with the question. The answer is matched to a key ignoring case, punctuation and extra words; if nothing matches, the question is asked once more. The shared base lines (pick.base_one, pick.base_json, pick.base_text) are the generic reply rules every system prompt ends with; each call's system prompt adds its own task line and fills the base in as {{reply}}. A saved profile that replaced a whole system prompt (without {{reply}}) keeps working as it was. The player's own words reach those questions through one shared piece, pick.said (\"The player wrote: ...\"), filled in as each question's {{said}}."
+      "flow": "Not a process of its own: the shared base for every question that asks the model to pick one option from a list (which exit to look at, what to do at a closed door, which place a window shows, which door to open or close). Step 1: the game lists the options as short text keys (\"- key: meaning\") and sends this system prompt with the question. The answer is matched to a key ignoring case, punctuation and extra words; if nothing matches, the question is asked once more. The shared base lines (pick.base_one, pick.base_json, pick.base_text) are the generic reply rules every system prompt ends with; each call's system prompt adds its own task line and fills the base in as {{reply}}. A saved profile that replaced a whole system prompt (without {{reply}}) keeps working as it was. The player's own words reach those questions through one shared piece, pick.said (\"The player wrote: ...\"), filled in as each question's {{said}}. An exit offered as an option reads from the pieces pick.exit and pick.exit_to (\"the north exit (to the Hall)\"); the keys stay the game's own."
     },
     {
       "id": "intent",
       "title": "Player intent",
-      "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'. Bracket commands: when the message has a known verb in brackets (\"I [move] north\", \"[look] out the window\"), step 1 is skipped. The words after the verb are matched to an exit or place by name; only if that fails, 'Bracket command: which target' asks which option they mean. If nothing fits, the game shows a note and the narrator is not called. Unknown bracket words like [OOC: ...] are ignored."
+      "flow": "Runs on every message the player sends, before the narrator replies. Step 1: one multiple-choice question asks what the player is doing. The exits are listed one line each from the pieces Player intent: an exit in the list and the exit they came in by. The game builds the list of choices from the option pieces: one line per exit and per known place, plus 'breaking through', 'look', 'open/close a door' or 'a door not on the map' only when the message uses one of those kinds of words. The answer decides what happens next: an exit or place moves the party; breaking through goes to 'Breaking through'; look goes to 'Looking'; opening or closing a door goes to 'Doors'; a door not on the map tells the narrator to open it if it fits (which can lead to 'New room behind a door'); otherwise the party stays. Step 2 (only if the answer can't be read and no place name matches): a yes/no question asks whether the player is trying to travel at all. Yes means 'somewhere unlisted', no means they stay. Whatever happened is then handed to 'Narration'. Bracket commands: when the message has a known verb in brackets (\"I [move] north\", \"[look] out the window\"), step 1 is skipped. The words after the verb are matched to an exit or place by name; only if that fails, 'Bracket command: which target' asks which option they mean. If nothing fits, the game shows a note and the narrator is not called. Unknown bracket words like [OOC: ...] are ignored."
     },
     {
       "id": "dig",
@@ -26,7 +26,7 @@
     {
       "id": "look",
       "title": "Looking",
-      "flow": "Runs when Player intent decides the player is looking or listening. 'Look around' needs no question. Step 1: what are they looking at: around in general, one of the exits, or out of a window (only offered if a window is mentioned or the room has a view). Step 2 depends on the pick: for a closed door, ask whether they listen, peek, open it, or just look at it; for a window with no view set yet, ask which nearby place can be seen (the answer is saved so it's the same next time). The game then works out what can be seen or heard and hands it to 'Narration'."
+      "flow": "Runs when Player intent decides the player is looking or listening. 'Look around' needs no question. Step 1: what are they looking at: around in general, one of the exits, or out of a window (only offered if a window is mentioned or the room has a view). The meanings of around and window are their own pieces (Looking: option, around and option, window). Step 2 depends on the pick: for a closed door, ask whether they listen, peek, open it, or just look at it; for a window with no view set yet, ask which nearby place can be seen (the answer is saved so it's the same next time). The game then works out what can be seen or heard and hands it to 'Narration'."
     },
     {
       "id": "door",
@@ -36,17 +36,17 @@
     {
       "id": "narration",
       "title": "Narration",
-      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts, each its own entry (where the party is, the lore lines, the exits, what can be seen from here, the time, the weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, the chat's first narrated reply, or when the part of the day changed since the previous narrator reply was written; then the people-here block, built from the people label pieces); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, a look result, and so on), then any other thing that just happened (a temporary place that ran out, the place being gone, the map changing around the party, a wait, people back as they were), then on every turn without a move the stay-put line; Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules (always the last line of the block). Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
+      "flow": "Not a separate model call: this is the block of world facts the game adds to the narrator's own prompt every turn, so the story matches the map. It is put together in order: Step 1 the first line; then the game's own facts, each its own entry (where the party is, the lore lines, the exits, what can be seen from here, the time, the weather; the time-of-day nudge, Narration: let the time of day show, is added only on a move, a wait, the chat's first narrated reply, or when the part of the day changed since the previous narrator reply was written; then the people-here block, built from the people label pieces); Step 2 one 'what just happened' line chosen from the result of Player intent, Breaking through, Looking or Doors (a move, a journey, breaking through, a door, a door not on the map, looking around, a look result, and so on), then any other thing that just happened (a temporary place that ran out, told from pieces: how long it was meant to last, narration.ended, and the way out, narration.expiry_via; when it ran out and which message made it stay in the Activity log; the place being gone, the map changing around the party, a wait, people back as they were), then on every turn without a move the stay-put line; Step 3 things passed on the way (after a move); Step 4 a nudge to mention the exits; Step 5 the last line with the rules (always the last line of the block). Alongside it, after the latest message and in this order: the arrival reminder and who is already there (move turns); a failed attempt's result; who the player's [find] brought in; who came and went; who the player's [find] did not find, and who they are. This prompt does not tell the narrator how to report changes. After the reply, a separate tracker question reads the exchange. When a saved person is in the scene, the people-here block ({{npcs_present}} and {{npc_focus}}) is added with the world facts."
     },
     {
       "id": "npc",
       "title": "People",
-      "flow": "Runs when a saved person might be part of the turn. Step 1, only when the player's words do not already name one person who is here: a pick-one question asks who they are addressing or looking at (the keys are those people's ids, plus nobody). How deeply that person is described is decided from the words (a look or a talk is focused; a question about their past is deep), not a second question. The first time someone with no starting attitude is met, a separate pick-one assigns one, leaning toward indifferent. Remembering someone is its own JSON question: it reads the story since they showed up and answers with a name and one line. When the remember answer arrives, one more small JSON question (People: pick a daily pattern) chooses their daily pattern (day shift, night shift or passing through), a job (a room or an area) and a home (a room) from the listed places or off the map, and up to three favorite public spots; the game checks it, asks once more with the error if it does not fit, and otherwise falls back to passing through. The game expands the pattern into their schedule; the narrator never sees the pattern. After a story reply, the tracker question (npc.tracker) lists person, place, and wait changes from that exchange alone. The scene it reads is put together from its own pieces, each an entry: the place (npc.tracker_place), the time (npc.tracker_time), the weather (npc.tracker_weather), the people here (npc.tracker_people, one npc.tracker_person line each, with npc.tracker_unnamed for someone not known by name), the people just left behind (npc.tracker_left_person), person changes that just ran out (npc.tracker_expired), and what the game already did (npc.tracker_done). On a reply to a move it also lists the people just left behind (npc.tracker_left_behind); the tracker may say one of them came along (came_along), and the game then keeps them with the player until the next move is judged on its own. Following someone is not a tracker action (the narrator's tag still is). Appearance: each card's change is written by one compose call for its own field (People: light-touch edit or rewrite appearance fields, both with the shared People: how appearance is written), listing the active changes one line each (People: one active change in the appearance question); Looks is then summed up in its own call. NPC flagging off means it proposes no person updates; a written tag is still read. Map flagging off means it proposes no place updates."
+      "flow": "Runs when a saved person might be part of the turn. Step 1, only when the player's words do not already name one person who is here: a pick-one question asks who they are addressing or looking at (the keys are those people's ids, plus nobody). How deeply that person is described is decided from the words (a look or a talk is focused; a question about their past is deep), not a second question. The first time someone with no starting attitude is met, a separate pick-one assigns one, leaning toward indifferent; each answer's meaning is its own piece (People: first attitude, option ...), and so is the who question's nobody. Remembering someone is its own JSON question: it reads the story since they showed up and answers with a name and one line. When the remember answer arrives, one more small JSON question (People: pick a daily pattern) chooses their daily pattern (day shift, night shift or passing through), a job (a room or an area) and a home (a room) from the listed places or off the map, and up to three favorite public spots; the game checks it, asks once more with the error if it does not fit, and otherwise falls back to passing through. The game expands the pattern into their schedule; the narrator never sees the pattern. After a story reply, the tracker question (npc.tracker) lists person, place, and wait changes from that exchange alone. The scene it reads is put together from its own pieces, each an entry: the place (npc.tracker_place), the time (npc.tracker_time), the weather (npc.tracker_weather), the people here (npc.tracker_people, one npc.tracker_person line each, with npc.tracker_unnamed for someone not known by name), the people just left behind (npc.tracker_left_person), person changes that just ran out (npc.tracker_expired), and what the game already did (npc.tracker_done). On a reply to a move it also lists the people just left behind (npc.tracker_left_behind); the tracker may say one of them came along (came_along), and the game then keeps them with the player until the next move is judged on its own. Following someone is not a tracker action (the narrator's tag still is). Appearance: each card's change is written by one compose call for its own field (People: light-touch edit or rewrite appearance fields, both with the shared People: how appearance is written), listing the active changes one line each (People: one active change in the appearance question); Looks is then summed up in its own call. NPC flagging off means it proposes no person updates; a written tag is still read. Map flagging off means it proposes no place updates."
     },
     {
       "id": "change",
       "title": "Map changes",
-      "flow": "Runs when a message is flagged as changing the map: the flag button, a [ws_flag: …] tag in a reply, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. A change only to people is not a map change, so Step 1 answers no places for it. Both steps see the flag's note through one of three pieces, picked by who raised the change: the after-reply tracker ('The change to look for'), the player, or the narrator. A place the flag names (the tracker's or the player's hint) is passed on through its own piece (Map changes: the place the note mentions). Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make; the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
+      "flow": "Runs when a message is flagged as changing the map: the flag button, a [ws_flag: …] tag in a reply, or /ws-change. Step 1: given the story and an outline of the nearby map, the model answers in JSON which places changed. If none, it stops. A change only to people is not a map change, so Step 1 answers no places for it. Both steps see the flag's note through one of three pieces, picked by who raised the change: the after-reply tracker ('The change to look for'), the player, or the narrator. A place the flag names (the tracker's or the player's hint) is passed on through its own piece (Map changes: the place the note mentions). Step 2: the game sends just those places (plus neighbours and other mentions, via the pieces) and the list of map edits the editor can make (the piece Map changes: the list of map edits); the model answers with JSON edits, or says it can't express it, or that nothing changed. How changed descriptions are written comes from the Writing style entry 'Map changes: how descriptions are written'; the edit format stays locked here. The game test-applies the edits; if they don't fit the map, Step 2 is asked once more with the retry piece explaining the error. The result becomes a review card (or is kept at once if 'keep automatically' is on). Alongside: the review card's light touch / full rewrite switch asks once more for only the change's existing texts (Map changes: rewrite the texts) and keeps every other edit; the game rejects an answer that changes anything else. Alongside: when a temporary change runs out or is turned off and a later change still in force had rewritten the same text on top of it, one call (Map changes: rebuild a text after a change ran out) writes that text again from what it was before plus the changes still in force, before the narrator reads the place; the result is kept for that set of changes, so it is not asked again. If it fails, the narrator goes ahead with the plain replay and a card offers Check again."
     },
     {
       "id": "discover",
@@ -72,7 +72,7 @@
     "direction": "the exit or direction, e.g. \"north\", \"up\" or \"through the trapdoor\"",
     "door": "the door or exit being used, as the narrator line names it, e.g. \"north door\", \"door out\" or \"trapdoor\" (the line adds \"the\")",
     "draft": "your draft text for the field, or empty (the Expand with AI piece)",
-    "edit_types": "the list of map edit types the model may use (made by the game)",
+    "edit_types": "the list of map edits the model may use (the change.edit_types piece)",
     "end": "where the story text to look at ends",
     "error": "what was wrong with the last answer",
     "existing": "nearby places not yet connected to this room, offered as an alternative to a new room (empty when there are none)",
@@ -122,7 +122,7 @@
     "why": "why the door would not move (e.g. it is locked)",
     "reply": "The shared base reply line (pick.base_one, pick.base_json or pick.base_text) that ends this system prompt. Filled in by the game.",
     "amount": "The wait amount as the player wrote it, e.g. \"a bit over an hour\".",
-    "ended": "how a temporary change ran out, e.g. \"Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)\"",
+    "ended": "how long a temporary place was meant to last, as a plain fact (the narration.ended piece), e.g. \"it was only meant to last an hour\"",
     "change": "the summary of the map change that made the place",
     "excerpt": "a short excerpt of the chat message that made the place",
     "default": "the key to use when unsure (the way the party came in)",
@@ -190,7 +190,8 @@
     "people_lines": "the tracker's person lines, one per saved person here, or (none)",
     "disposition": "their attitude toward the player, with the reason in brackets, or (none)",
     "mentioned": "the place the note names, as written",
-    "message": "the player's latest message as they typed it (up to 1000 characters)"
+    "message": "the player's latest message as they typed it (up to 1000 characters)",
+    "leads_to": "where an exit leads, as the footer names it (a room, or a building)"
   },
   "prompts": [
     {
@@ -247,6 +248,37 @@
         }
       ],
       "text": "The player wrote: \"{{message}}\""
+    },
+    {
+      "id": "pick.exit",
+      "title": "Shared base: an exit as an option",
+      "description": "Piece: an exit offered as an option in the pick-one questions (Looking: at what, Doors: which door, Bracket command: which target) when where it leads is not shown.",
+      "group": "pick",
+      "piece": true,
+      "locked": "The game reads the option key back; this is only its meaning.",
+      "text": "the {{direction}} exit",
+      "placeholders": [
+        {
+          "name": "direction"
+        }
+      ]
+    },
+    {
+      "id": "pick.exit_to",
+      "title": "Shared base: an exit as an option, with where it leads",
+      "description": "Piece: the same, when where the exit leads is shown (the room, or the building).",
+      "group": "pick",
+      "piece": true,
+      "locked": "The game reads the option key back; this is only its meaning.",
+      "text": "the {{direction}} exit (to {{leads_to}})",
+      "placeholders": [
+        {
+          "name": "direction"
+        },
+        {
+          "name": "leads_to"
+        }
+      ]
     },
     {
       "id": "dig.system",
@@ -346,6 +378,26 @@
           "generated": true
         }
       ]
+    },
+    {
+      "id": "look.option_around",
+      "title": "Looking: option, around",
+      "description": "Piece: the meaning of the around option in Looking: at what (looking around in general).",
+      "group": "look",
+      "piece": true,
+      "locked": "The game reads the key (around) back; this is only its meaning.",
+      "text": "around here in general, nothing specific",
+      "placeholders": []
+    },
+    {
+      "id": "look.option_window",
+      "title": "Looking: option, window",
+      "description": "Piece: the meaning of the window option in Looking: at what, offered only when the player mentions a window or the room has a view.",
+      "group": "look",
+      "piece": true,
+      "locked": "The game reads the key (window) back; this is only its meaning.",
+      "text": "out a window or opening with no exit",
+      "placeholders": []
     },
     {
       "id": "look.closed_door",
@@ -450,6 +502,40 @@
         {
           "name": "options",
           "generated": true
+        }
+      ]
+    },
+    {
+      "id": "intent.exit_to",
+      "title": "Player intent: an exit in the list",
+      "description": "Piece: one line of the exits in Player intent: the question ({{exits}}), when where the exit leads is shown. An exit whose destination is hidden is listed by its name alone.",
+      "group": "intent",
+      "piece": true,
+      "locked": "The game fills the exit and where it leads from the map.",
+      "text": "{{direction}} (to {{leads_to}})",
+      "placeholders": [
+        {
+          "name": "direction"
+        },
+        {
+          "name": "leads_to"
+        }
+      ]
+    },
+    {
+      "id": "intent.exit_back",
+      "title": "Player intent: the exit they came in by",
+      "description": "Piece: the same, for the exit the party came in by.",
+      "group": "intent",
+      "piece": true,
+      "locked": "The game fills the exit and where it leads from the map.",
+      "text": "{{direction}} (to {{leads_to}}, where you came from)",
+      "placeholders": [
+        {
+          "name": "direction"
+        },
+        {
+          "name": "leads_to"
         }
       ]
     },
@@ -1138,6 +1224,44 @@
       ]
     },
     {
+      "id": "narration.ended",
+      "title": "Narration: how long a temporary place was meant to last",
+      "description": "Piece: the plain fact about a temporary place that ran out, filled in as {{ended}} in Narration: a temporary place ends and in Expiry: where the party ends up: how long it was set to last, in words. When it ran out and which message made it are bookkeeping: they stay in the Activity log and are never sent.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the change that ran out; the model reads it as fact.",
+      "text": "it was only meant to last {{duration}}",
+      "placeholders": [
+        {
+          "name": "duration"
+        }
+      ]
+    },
+    {
+      "id": "narration.ended_unknown",
+      "title": "Narration: a temporary place ran out (no duration known)",
+      "description": "Piece: the same fact when the game cannot tell which change made the place, so it has no duration to give.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills this from the change that ran out; the model reads it as fact.",
+      "text": "its time ran out",
+      "placeholders": []
+    },
+    {
+      "id": "narration.expiry_via",
+      "title": "Narration: the way out of a place that ran out",
+      "description": "Piece: the exit the way out of a temporary place that ran out goes through, in brackets: after each place in the options of Expiry: where the party ends up, and as {{via}} in Narration: a temporary place ends.",
+      "group": "narration",
+      "piece": true,
+      "locked": "The game fills the exit from the map.",
+      "text": "out through the {{direction}}",
+      "placeholders": [
+        {
+          "name": "direction"
+        }
+      ]
+    },
+    {
       "id": "expand.system",
       "title": "Expand with AI: system prompt",
       "description": "Used by Expand with AI. Step 1 of 1: the system prompt. For the \"Expand with AI\" button on description and notes fields. {{reply}} is the shared base line pick.base_text.",
@@ -1362,7 +1486,7 @@
     {
       "id": "change.system",
       "title": "Map changes: the patch (system prompt)",
-      "description": "Step 2 of 2: the system prompt for writing the edits. {{edit_types}} is the editor's list of edits, made by the game. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports; it is made from the code and cannot be edited here. {{style}} is the Writing style entry for how descriptions are written. {{reply}} is the shared base line pick.base_json.",
+      "description": "Step 2 of 2: the system prompt for writing the edits. Second call: writes the map change. {{edit_types}} is the list of map edits the game supports, the piece Map changes: the list of map edits. {{style}} is the Writing style entry for how descriptions are written. {{reply}} is the shared base line pick.base_json.",
       "group": "change",
       "locked": "The game reads the JSON edits in this exact format.",
       "text": "You turn a real change to places in a story, permanent or temporary, into a map patch. {{reply}}: {\"ops\": [...]}.\nADDR is a room's full address copied exactly from the map, e.g. \"riverton:drowned_rat/common_room\". AREA is a region id (\"riverton\") or subregion id (\"riverton:drowned_rat\"). Never invent addresses or ids: renaming a place changes its display name only, its address stays the same.\nAllowed ops (exactly what the map editor can do):\n{{edit_types}}\nExample, light touch, one room (a smashed bar): {\"ops\":[{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"<the same description with only the bar sentence changed>\"}]}\nExample, a full rewrite (a whole inn turned into a palace): {\"ops\":[{\"op\":\"update_area\",\"area\":\"riverton:drowned_rat\",\"name\":\"The Golden Palace\",\"lore\":\"<the area's whole notes, rewritten for the palace, keeping what still holds; then: formerly the Drowned Rat inn, turned into a palace by magic>\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/common_room\",\"text\":\"A gilded throne hall; an old brass rail shows under the gold leaf.\"},{\"op\":\"set_description\",\"loc\":\"riverton:drowned_rat/courtyard\",\"text\":\"...\"}]}\nupdate_area and append_lore are for a building that changed as a whole.\nA temporary but real change (a portal open for 1 hour, a room filled with smoke, a tunnel blocked for a day) counts: give its ops \"lasts\" with how long it holds, e.g. \"1h\", \"12h\", \"3d\". Any op may add \"lasts\". Use as few ops as possible. {{style}}\nExit names (the \"direction\", e.g. \"grate\", \"narrow door\") are hand-written: never rename them. A door's open/locked/blocked state and removing an exit apply to both sides; hidden, sight and text are per side. Only change what the story clearly changed. Moment-to-moment action that leaves no trace on a place is not a change. If nothing on the map changed, reply {\"ops\": []}.\nIf the story changed the map in a way none of these ops can express, do not force a wrong op: reply {\"cant\": \"one short sentence saying what can't be shown on the map\"}.",
@@ -1380,6 +1504,16 @@
           "generated": true
         }
       ]
+    },
+    {
+      "id": "change.edit_types",
+      "title": "Map changes: the list of map edits",
+      "description": "Piece: the map edits the change call may write, one line per edit, filled in as {{edit_types}} in Map changes: the patch (system prompt). ADDR is a room address, AREA a subregion or region id. Every edit the editor can make that the model may propose has its line here (a test checks).",
+      "group": "change",
+      "piece": true,
+      "locked": "The game reads the op names and JSON keys of the answer back; reword the notes in brackets, not the JSON.",
+      "text": "{\"op\":\"set_description\",\"loc\":ADDR,\"text\":\"...\"}\n{\"op\":\"append_description\",\"loc\":ADDR,\"text\":\"...\"}\n{\"op\":\"set_name\",\"loc\":ADDR,\"text\":\"New display name\"} (the address stays the same)\n{\"op\":\"set_lore\",\"area\":AREA,\"text\":\"...\"}\n{\"op\":\"append_lore\",\"area\":AREA,\"text\":\"...\"}\n{\"op\":\"update_area\",\"area\":AREA,\"name\":\"New display name\",\"lore\":\"...\"} (rename a whole building/area and/or rewrite its lore; give name, lore or both)\n{\"op\":\"block_exit\",\"loc\":ADDR,\"direction\":\"exit name\"} (door state, both sides)\n{\"op\":\"open_exit\",\"loc\":ADDR,\"direction\":\"exit name\"}\n{\"op\":\"lock_exit\",\"loc\":ADDR,\"direction\":\"exit name\"}\n{\"op\":\"unlock_exit\",\"loc\":ADDR,\"direction\":\"exit name\"}\n{\"op\":\"break_exit\",\"loc\":ADDR,\"direction\":\"exit name\"} (the door is gone; the way stays)\n{\"op\":\"remove_exit\",\"loc\":ADDR,\"direction\":\"exit name\"} (both sides: the way is gone)\n{\"op\":\"set_exit_description\",\"loc\":ADDR,\"direction\":\"exit name\",\"text\":\"...\"} (that side's exit text only)\n{\"op\":\"set_travel_time\",\"loc\":ADDR,\"direction\":\"exit name\",\"time\":\"10m\"} (both ways)\n{\"op\":\"remove_location\",\"loc\":ADDR} (the place is gone)\n{\"op\":\"merge\",\"locs\":[ADDR,...],\"into\":ADDR (one of locs, kept)} or {\"op\":\"merge\",\"locs\":[ADDR,...],\"name\":\"...\",\"description\":\"...\"} (existing rooms become one; never for making new rooms)\n{\"op\":\"set_expandable\",\"target\":ADDR or AREA,\"value\":true|false|\"inherit\"} (whether new rooms can be found there)\n{\"op\":\"set_fields\",\"target\":ADDR or AREA,\"fields\":{\"exposure\":\"outdoor|sheltered|enclosed|fixed\",\"insulation\":\"drafty|normal|cozy\",\"indoor_temp\":20,...}} (plain settings; null drops one)\n{\"op\":\"set_exit\",\"loc\":ADDR,\"direction\":\"exit name\",\"fields\":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))\n{\"op\":\"add_exit\",\"loc\":ADDR,\"direction\":\"exit name\",\"to\":ADDR,\"return_direction\":\"exit name back\",\"door\":true|false} (a new way between two rooms that already exist before this patch; not for a room made by create_place, whose exits already join it)\n{\"op\":\"move_location\",\"loc\":ADDR,\"area\":\"region:sub\"} (a room moves to another subregion, keeping its exits)\n{\"op\":\"move_area\",\"area\":\"region:sub\",\"region\":\"region\"} (a subregion moves to another region)\n{\"op\":\"create_place\",\"name\":\"...\",\"description\":\"...\",\"exits\":[{\"to\":ADDR,\"direction\":\"exit name from the new place\",\"return_direction\":\"exit name from ADDR to the new place\",\"door\":true|false}]} (a NEW room; each of its exits already makes the door pair both ways, so never add a separate add_exit for it; the engine makes its id and puts it in the area of its first exit's room unless you give \"area\"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; give it \"ref\":\"label\" and later ops in the same patch point at it with \"new:label\" wherever an address goes, e.g. {\"op\":\"set_fields\",\"target\":\"new:portal_room\",...} or an add_exit \"to\":\"new:portal_room\"; never guess the engine-made address)\n{\"op\":\"create_subregion\",\"region\":\"region\",\"name\":\"...\",\"lore\":\"...\",\"place\":{\"name\":\"...\",\"description\":\"...\",\"exits\":[...as create_place]}} (a new building/area with its first room; \"ref\":\"label\" lets later ops use \"new:label\" for that room)\n{\"op\":\"create_region\",\"name\":\"...\",\"lore\":\"...\",\"subregion\":{\"name\":\"...\",\"place\":{...}}} (a whole new region)\n{\"op\":\"remove_area\",\"area\":AREA,\"contents\":\"delete\"|\"move\",\"into\":AREA} (delete a subregion or region, or move its contents into another)",
+      "placeholders": []
     },
     {
       "id": "change.patch",
@@ -3443,6 +3577,16 @@
       ]
     },
     {
+      "id": "npc.who_nobody",
+      "title": "People: who is being addressed, option nobody",
+      "description": "Piece: the meaning of the nobody answer in People: who is being addressed (the other keys are the people here, by handle).",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (nobody) back; this is only its meaning.",
+      "text": "nobody in particular",
+      "placeholders": []
+    },
+    {
       "id": "npc.disposition",
       "title": "People: first attitude",
       "description": "Step 1 of 1 (the first time a saved person with no starting attitude is met): their attitude toward the player.",
@@ -3467,6 +3611,56 @@
           "generated": true
         }
       ]
+    },
+    {
+      "id": "npc.disposition_option.indifferent",
+      "title": "People: first attitude, option indifferent",
+      "description": "Piece: the meaning of the indifferent answer in People: first attitude.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (indifferent) back; this is only its meaning.",
+      "text": "the usual answer; no reason to feel strongly either way",
+      "placeholders": []
+    },
+    {
+      "id": "npc.disposition_option.unfriendly",
+      "title": "People: first attitude, option unfriendly",
+      "description": "Piece: the meaning of the unfriendly answer in People: first attitude.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (unfriendly) back; this is only its meaning.",
+      "text": "cold, short or suspicious",
+      "placeholders": []
+    },
+    {
+      "id": "npc.disposition_option.friendly",
+      "title": "People: first attitude, option friendly",
+      "description": "Piece: the meaning of the friendly answer in People: first attitude.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (friendly) back; this is only its meaning.",
+      "text": "warm, glad to see them",
+      "placeholders": []
+    },
+    {
+      "id": "npc.disposition_option.helpful",
+      "title": "People: first attitude, option helpful",
+      "description": "Piece: the meaning of the helpful answer in People: first attitude.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (helpful) back; this is only its meaning.",
+      "text": "goes out of their way to help",
+      "placeholders": []
+    },
+    {
+      "id": "npc.disposition_option.hostile",
+      "title": "People: first attitude, option hostile",
+      "description": "Piece: the meaning of the hostile answer in People: first attitude.",
+      "group": "npc",
+      "piece": true,
+      "locked": "The game reads the key (hostile) back; this is only its meaning.",
+      "text": "wants to harm them",
+      "placeholders": []
     },
     {
       "id": "npc.remember_system",
@@ -3531,7 +3725,7 @@
       "description": "Step 1 of 1: the system prompt for the daily pattern question, asked once a Remember card is ready. The game reads the JSON. One line per key.",
       "group": "npc",
       "locked": "The game reads the JSON answer with these keys and checks every place against the list.",
-      "text": "You choose the daily routine of a person the story has just met in a text adventure. The game turns your choice into their schedule.\n{{reply}}: {\"pattern\": \"day shift|night shift|passing through|unsure\", \"job\": \"KEY or offmap: short text or null\", \"job_activity\": \"a few words for what they do at work, or null\", \"home\": \"KEY or offmap: short text or null\", \"favorites\": [\"KEY\"]}.\n- pattern is day shift for someone who works in the day (a shopkeeper, a smith, a clerk), night shift for someone who works evenings and nights (a barkeep, a watchman, a cook at an inn), passing through for a traveller, a visitor or anyone not settled here, and unsure when the story gives no hint.\n- job is a room KEY when they work in one particular room (a shopkeeper at the counter), or an area KEY from the Areas list when their work moves them around a place (an innkeeper, a smith whose workplace is a whole building, a watchman on rounds); an area job means anywhere public in that area. job can also be offmap: and a few words, or null when you cannot tell.\n- home is a room KEY from the list, or offmap: and a few words for a place that is not on the list (at most 80 characters), or null when you cannot tell.\n- favorites are up to 3 KEYs of public places (not marked [private]) where they spend free time; an area KEY means anywhere public in that area.\nUse only KEYs from the list. No other keys.",
+      "text": "You choose the daily routine of a person the story has just met in a text adventure. The game turns your choice into their schedule.\n{{reply}}: {\"pattern\": \"day shift|night shift|passing through|unsure\", \"job\": \"KEY or offmap: short text or null\", \"job_activity\": \"a few words for what they do at work, or null\", \"home\": \"KEY or offmap: short text or null\", \"favorites\": [\"KEY\"]}.\n- pattern is day shift for someone who works in the day (a shopkeeper, a smith, a clerk), night shift for someone who works evenings and nights (a barkeep, a watchman, a cook at an inn), passing through for a traveller, a visitor or anyone not settled here, and unsure when the story gives no hint.\n- job is a room KEY when they work in one particular room (a shopkeeper at the counter), or an area KEY from the Areas list when their work moves them around a place (an innkeeper, a smith whose workplace is a whole building, a watchman on rounds); an area job means anywhere public in that area. job can also be offmap: and a few words, or null when you cannot tell.\n- job_activity is a few words for what they do at work (pours drinks, mends nets), or null when they have no job or you cannot tell.\n- home is a room KEY from the list, or offmap: and a few words for a place that is not on the list (at most 80 characters), or null when you cannot tell.\n- favorites are up to 3 KEYs of public places (not marked [private]) where they spend free time; an area KEY means anywhere public in that area.\nUse only KEYs from the list. No other keys.",
       "placeholders": [
         {
           "name": "reply",

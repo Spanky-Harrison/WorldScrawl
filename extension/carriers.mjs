@@ -126,7 +126,8 @@ export function parseJsonAnswer(text) {
 export const scopeSys = () => P('change.scope_system', { reply: baseReply('json') });
 /** The Writing style entry for map changes, with the shared timeless line (change.timeless) filled in. */
 export const changeStyle = () => P('change.style', { timeless: P('change.timeless') });
-export const patchSys = pl => P('change.system', { reply: baseReply('json'), edit_types: pl.opDocs(), style: changeStyle() });
+/** R8: the op list ({{edit_types}}) is its own entry, change.edit_types; plugin/shared/patches.mjs OPS is still what the engine accepts. */
+export const patchSys = () => P('change.system', { reply: baseReply('json'), edit_types: P('change.edit_types'), style: changeStyle() });
 /** Which note piece fills {{what}}: the player's (flag button, /ws-change, Edit's Change box), the tracker's, or else the narrator's (a ws_flag tag). */
 const whatPiece = f => (f.noteBy === 'player' || f.source === 'button' || f.source === 'command' ? 'change.what_player'
     : f.source === TRACKER_SOURCE ? 'change.what_tracker' : 'change.what_narrator');
@@ -227,7 +228,7 @@ async function analyzeFlag(id, { note } = {}) {
         const nearHere = f.loc ? await nearbyRooms({ address: f.loc }).catch(() => []) : [];
         for (let tries = 0; tries < 2; tries++) {
             if (!pl) throw new Error('the map tools (patches.mjs) could not be loaded from the server');
-            const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(pl), responseLength: 1200 })));
+            const ans = pl.readChangeAnswer(parseJsonAnswer(await askModel(c, 'the change', { prompt: patchQ(err), systemPrompt: patchSys(), responseLength: 1200 })));
             if (stale()) return;
             // Guards on the model's answer: a person-card write, or a player-only setting (private), is not applied and is named.
             const warns = [ans?.personClaims?.length && pl.personClaimWarning ? pl.personClaimWarning(ans.personClaims) : '', ans?.refused?.length && pl.refusedOpWarning ? pl.refusedOpWarning(ans.refused) : ''].filter(Boolean);

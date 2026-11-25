@@ -8,19 +8,23 @@ import { fetchLocationCached } from './footer.mjs';
 import { FLAGHINT_KEY, NUDGE_KEY, TOOL_NAMES, WORLD_KEY, ctx, isOn, settings, syncWorld } from './index.js';
 import { displayName, keyFor, optionLines, partyText } from './movement.mjs';
 import { isDirWord } from './brackets.mjs';
+import { durationWords } from './words.mjs';
 import { revealsDestination } from './shared.mjs';
 import { mapCtx, patchSig } from './patches.mjs';
 
 const expiryNarrated = new Set();
 const chatKey = () => { try { return String(ctx().getCurrentChatId?.() ?? ''); } catch { return ''; } };
 /** The places a run-out room's exits still reach, as pick-one keys (the way they came in first). */
-export const expiryOptions = list => { const taken = new Set(); return list.map(o => ({ key: keyFor(o.name ?? o.address, taken), label: `${o.name ?? o.address}${o.direction ? ` (out through the ${o.direction})` : ''}`, address: o.address, direction: o.direction ?? '' })); };
-export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', { party: partyText(), place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description ?? '', options: optionLines(opts), default: def ?? opts[0]?.key ?? '' });
+export const expiryOptions = list => { const taken = new Set(); return list.map(o => ({ key: keyFor(o.name ?? o.address, taken), label: `${o.name ?? o.address}${o.direction ? ` (${P('narration.expiry_via', { direction: o.direction })})` : ''}`, address: o.address, direction: o.direction ?? '' })); };
+/** R8: the plain fact the model gets about a run-out place (narration.ended: how long it was meant to last, in words), never
+ *  the server's bookkeeping line (change.ended: date, "lasted 1h", message number), which stays in the log and Activity. */
+export const endedFact = room => (Number(room?.change?.lasted) > 0 ? P('narration.ended', { duration: durationWords(room.change.lasted) }) : P('narration.ended_unknown'));
+export const expiryPickPrompt = (room, opts, def) => P('narration.expiry_pick', { party: partyText(), place: room.name ?? '', ended: endedFact(room), description: room.description ?? '', options: optionLines(opts), default: def ?? opts[0]?.key ?? '' });
 /** A short excerpt of the message that made the place (about 240 characters, one line). */
 export const excerptOf = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 240 ? `${t.slice(0, 237).replace(/\s+\S*$/, '')}...` : t; };
 export function expiryNarrationLine(room, to, via, who, excerpt) {
     const sum = room.change?.note || ''; // the story's own note; the engine summary ("Created place ...") stays off the narrator
-    return P('narration.expired', { place: room.name ?? '', ended: room.change?.ended ?? 'its time ran out', description: room.description || '(none)', change: sum || '(unknown)', excerpt: excerpt || '(none)', party: who, to: displayName(to), via: via ? ` (out through the ${via})` : '' });
+    return P('narration.expired', { place: room.name ?? '', ended: endedFact(room), description: room.description || '(none)', change: sum || '(unknown)', excerpt: excerpt || '(none)', party: who, to: displayName(to), via: via ? ` (${P('narration.expiry_via', { direction: via })})` : '' });
 }
 async function postExpiredNotice(from, toAddr, via) {
     const c = ctx(), to = await fetchLocationCached(toAddr);
