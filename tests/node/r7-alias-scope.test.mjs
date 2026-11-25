@@ -209,7 +209,7 @@ test('R7.4 learning a name: the tracker\'s name item for "a guard" lands on the 
 // ---- 5 and 8. Tier against level.
 const GATE = guard('guard_g', 'Corla', SQUARE, { unknownAs: 'the gate guard', aliases: ['gate guard'] });
 const DOCKER = guard('guard_d', 'Dace', DOCKS);
-test('R7.8 room beats a distant exact alias: [find] guard in the gate guard\'s square picks her (a loose match) over the Docks guard ("a guard", exact)', async () => {
+test('R7.8 room beats a distant generic label: [find] guard in the gate guard\'s square picks her (a loose match) over the Docks guard ("a guard", an exact unknownAs only, not a proper name)', async () => {
     const { c } = boot({ cards: [GATE, DOCKER], here: SQUARE });
     const { msg } = await bracket(c, '[find] guard');
     assert.equal(msg.extra[FOUND][0].id, 'guard_g');
@@ -344,4 +344,55 @@ test('R7 r2 a tie with no place: "(somewhere else)", entries that read the same 
     const mixed = (await bracket(c, '[find] a guard')).r.note;
     assert.equal(mixed, 'Which one? a guard (River Docks), a guard (somewhere else)');
     assert.doesNotMatch(mixed, REAL);
+});
+
+// ---- Round 3 (Knarfy, t460u): an exact proper name (real name or saved alias) names that person wherever they are.
+const TAM = guard('tam', 'Tam', DOCKS, { unknownAs: 'a net-mender' });
+const OLD_TAM = guard('old_tam', 'Old Tam', SQUARE, { unknownAs: 'an old fisherman' });
+test('R7 r3 [find] Tam with "Old Tam" in the room and Tam at the Docks: Tam (an exact name not yet learned), also via /ws-know and a tracker stamp', async () => {
+    let { c } = boot({ cards: [TAM, OLD_TAM], here: SQUARE });
+    const { r, msg } = await bracket(c, '[find] Tam');
+    assert.notEqual(r.kind, 'bracket_failed', r.note);
+    assert.equal(msg.extra[FOUND][0].id, 'tam', JSON.stringify(msg.extra[FOUND]));
+    assert.deepEqual(matchNotes(msg), [], 'a proper name is not a guess: no "nearest to you" note');
+    const k = say(c, 'I think about Tam.');
+    const rel = await scene.setRelOn(c.chat[k], 'Tam | met');
+    assert.equal(rel.ok, true, rel.reason);
+    assert.deepEqual(stamps(c.chat[k], 'npc_rel').map(s => s.id), ['tam']);
+    // The loose match still works when no proper name is typed: "old" reads Old Tam.
+    assert.equal(scene.resolveAt(c.chat, k, 'Old', [TAM, OLD_TAM]).person?.id, 'old_tam');
+    ({ c } = boot({ cards: [TAM, OLD_TAM], here: SQUARE, tracker: people({ id: 'Tam', action: 'fact', text: 'Mends nets at the piers.' }) }));
+    const id = await exchange(c, 'I ask Old Tam about his friend.', 'Old Tam says his friend mends nets down at the piers.');
+    assert.deepEqual(stamps(c.chat[id], 'npc_fact').map(s => s.id), ['tam'], JSON.stringify(c.chat[id].extra));
+});
+
+test('R7 r3 an exact saved alias elsewhere beats a loose match in the room', async () => {
+    const FAR_GATE = guard('guard_g', 'Corla', DOCKS, { unknownAs: 'a guard', aliases: ['gate guard'] });
+    const NORTH = guard('guard_n', 'Dace', SQUARE, { aliases: ['north gate guard'] });
+    const { c } = boot({ cards: [FAR_GATE, NORTH], here: SQUARE });
+    const { msg } = await bracket(c, '[find] gate guard');
+    assert.equal(msg.extra[FOUND][0].id, 'guard_g', JSON.stringify(msg.extra[FOUND]));
+});
+
+test('R7 r3 two people with the same exact real name: the nearer wins; equally far, "Which one?" with shown names only', async () => {
+    const TWIN = guard('guard_x', 'Bran', DOCKS);
+    let { c } = boot({ cards: [BRAN(SQUARE), TWIN], here: LANE });
+    let { r, msg } = await bracket(c, '[find] Bran');
+    assert.equal(msg.extra[FOUND][0].id, 'guard_a', JSON.stringify(msg.extra[FOUND]));
+    assert.deepEqual(matchNotes(msg), [], 'level 1: no note');
+    ({ c } = boot({ cards: [BRAN(SQUARE), TWIN], here: GREEN }));
+    ({ r, msg } = await bracket(c, '[find] Bran'));
+    assert.equal(r.kind, 'bracket_failed');
+    assert.equal(r.note, 'Which one? a guard (Village Square), a guard (River Docks)');
+    assert.doesNotMatch(r.note, REAL);
+    assert.equal(msg.extra[FOUND][0].id, '');
+});
+
+test('R7 r3 resolveAt with a negative message index notes on message 0 (noteAt clamped), not on the last message', async () => {
+    const { c } = boot({ here: TAVERN });
+    say(c, 'Hello.'); reply(c, 'The barkeep nods.');
+    const hit = scene.resolveAt(c.chat, -1, 'a guard', [BRAN(SQUARE), TOBIN(GREEN)]);
+    assert.equal(hit.person?.id, 'guard_a');
+    assert.equal(matchNotes(c.chat[0]).length, 1, JSON.stringify(callNotes(c.chat[0])));
+    assert.deepEqual(matchNotes(c.chat.at(-1)), []);
 });
