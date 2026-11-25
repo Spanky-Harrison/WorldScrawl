@@ -109,8 +109,10 @@ export function scopeLevel(here, { now = [], anchors = [] } = {}) {
 }
 /**
  * One person for the words `said`: {person, tie, level, biased}, a tie (no guess: stop) with person null, or undefined
- * for no match. With a scope, both tiers are gathered first: someone in the player's room wins at any tier (exact before
- * loose among them); otherwise exact beats loose at every wider level, and the nearest level of that tier wins.
+ * for no match. With a scope, both tiers are gathered first. A proper name (real name or saved alias) typed exactly wins
+ * outright when one person has it, wherever they are; several are ranked by level. Otherwise (generic labels: a bare
+ * unknownAs, and loose matches) someone in the player's room wins at either tier (exact before loose among them); then
+ * exact beats loose at every wider level, and the nearest level of that tier wins.
  */
 function matchSaid(said, list, scope = null) {
     const key = normName(said), bare = bareName(said);
@@ -130,8 +132,18 @@ function matchSaid(said, list, scope = null) {
     if (exact.length + loose.length === 0) return undefined;
     if (exact.length + loose.length === 1) return one(exact[0] ?? loose[0]);
     const level = new Map([...exact, ...loose].map(p => [p, scopeOfPerson(scope, p)]));
-    const room = [...exact, ...loose].filter(p => level.get(p) === 0);
+    // A proper name (the real name or a saved alias, typed exactly) names that person wherever they are: one such hit wins
+    // outright; several are ranked by the ladder. Only generic labels (a bare unknownAs) and loose matches are read by
+    // the room first. Unlearned real names still match here (inbound only; nothing is shown).
+    const proper = list.filter(p => namesOf(p).some(n => normName(n) === key));
+    if (proper.length === 1) return one(proper[0], { level: level.get(proper[0]) });
     let pool, best;
+    if (proper.length > 1) {
+        best = Math.min(...proper.map(p => level.get(p)));
+        pool = proper.filter(p => level.get(p) === best);
+        return pool.length === 1 ? one(pool[0], { level: best, biased: true }) : tie(pool, best);
+    }
+    const room = [...exact, ...loose].filter(p => level.get(p) === 0);
     if (room.length) { best = 0; const e = room.filter(p => exact.includes(p)); pool = e.length ? e : room; }
     else {
         const tier = exact.length ? exact : loose;
