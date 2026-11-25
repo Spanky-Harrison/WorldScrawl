@@ -463,7 +463,7 @@ const ext = await import('../../extension/index.js');
 const byId = Object.fromEntries(def.prompts.map(e => [e.id, e]));
 const texts = over => ({ ...Object.fromEntries(def.prompts.map(e => [e.id, e.text])), ...over });
 const USES = { 'pick.system': ['one', ext.pickSys], 'intent.system': ['one', ext.intentSys], 'dig.system': ['json', ext.digSys],
-    'change.scope_system': ['json', ext.scopeSys], 'change.system': ['json', () => ext.patchSys({ opDocs: () => 'OPS' })],
+    'change.scope_system': ['json', ext.scopeSys], 'change.system': ['json', () => ext.patchSys()],
     'discover.system': ['json', ext.discoverSys], 'expand.system': ['text', ext.expandSys] };
 
 test('the bases are locked and every generic system prompt uses one', () => {

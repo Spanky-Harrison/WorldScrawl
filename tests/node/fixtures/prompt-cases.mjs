@@ -33,7 +33,9 @@ const facts = [[null, false, {}], [move, false, { date: 'Morning, day 3', weathe
     [null, true, { newDoor: true }], [null, false, { newDoor: true }], [null, false, { door: { type: 'open_door', direction: 'north' } }], [null, false, { door: { type: 'close_door', direction: 'gate' } }],
     [null, false, { dig: { direction: 'hole', to_name: 'Cellar' } }], [null, false, { digFailed: true }], [null, false, { lookAround: true }], [{ ...trip, stopped: true }, false, {}],
     [null, false, { date: 'Noon, day 3' }]]; // R4 N8: a plain stay in the same part of the day: the time without the nudge
-const pl = opDocs => ({ opDocs });
+// R8: a run-out place as the server sends it (the bookkeeping line in ended, the duration in lasted) and its ways out.
+const ranOut = { name: 'Guest Room 1', description: 'A narrow room.', change: { msg: 5, note: 'the innkeeper shows them a room', summary: [], ended: 'Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)', lasted: 3600 } };
+const waysOut = [{ address: 'r:inn/hall', direction: 'door', name: 'Hall' }, { address: 'r:inn/yard', direction: 'window', name: 'Yard' }];
 export const cases = ({ ext, patches, placeform }) => ({
     'pick.system': ext.pickSys(),
     'dig.system': ext.digSys(),
@@ -59,7 +61,7 @@ export const cases = ({ ext, patches, placeform }) => ({
     'expand.bare': placeform.expandPrompt({}, {}),
     'change.scope.system': ext.scopeSys(),
     'change.scope': ext.scopePrompt(c1, { start: 3, id: 7, story: 'The inn burns.', what: 'Fire!' }),
-    'change.system': ext.patchSys(pl(patches.opDocs)),
+    'change.system': ext.patchSys(),
     'change.patch': patches.patchPrompt(pctx, { story: 'The inn burns.', what: 'Fire!', err: 'bad op', range: '#3-#7' }),
     'change.patch.bare': patches.patchPrompt({ outline: [] }, {}),
     'change.what.tracker': ext.flagWhat({ note: 'Fire!', hint: 'The Inn', source: 'tracker' }),
@@ -71,6 +73,20 @@ export const cases = ({ ext, patches, placeform }) => ({
     'discover.question.retry': ext.discoverPrompt(k, { exits: 'none', near: 'none', story: 'x', start: 2, id: 5, note: '', err: 'no name' }),
     'narration.exits_hint': ext.render('narration.exits_hint'),
     'pick.said': ext.render('pick.said', { message: 'I look around and head north.' }), // R6: the same line the intent, look, door, dig and travel cases quote as said
+    // R8: the expiry pick and line with the plain fact; the pieces moved out of code, each on its own.
+    'narration.expiry_pick': ext.expiryPickPrompt(ranOut, ext.expiryOptions(waysOut), 'hall'),
+    'narration.expired': ext.expiryNarrationLine(ranOut, { address: 'r:inn/hall', name: 'Hall' }, 'door', 'You', 'The innkeeper opens a door.'),
+    'narration.expired.unknown': ext.expiryNarrationLine({ name: 'Guest Room 1', description: '' }, { address: 'r:inn/hall', name: 'Hall' }, '', 'You', ''),
+    'npc.schedule_pick_system': ext.render('npc.schedule_pick_system', { reply: ext.render('pick.base_json') }),
+    'change.edit_types': ext.render('change.edit_types'),
+    'pick.exit': ext.render('pick.exit', { direction: 'trapdoor' }),
+    'pick.exit_to': ext.render('pick.exit_to', { direction: 'north', leads_to: 'Hall' }),
+    'look.option_around': ext.render('look.option_around'),
+    'look.option_window': ext.render('look.option_window'),
+    'intent.exit_to': ext.render('intent.exit_to', { direction: 'north', leads_to: 'Hall' }),
+    'intent.exit_back': ext.render('intent.exit_back', { direction: 'south', leads_to: 'Square' }),
+    'npc.disposition_options': ['indifferent', 'unfriendly', 'friendly', 'helpful', 'hostile'].map(k => `- ${k}: ${ext.render(`npc.disposition_option.${k}`)}`).join('\n'),
+    'npc.who_nobody': ext.render('npc.who_nobody'),
     'narration.arrival_reminder': ext.arrivalReminder(loc, move),
     'narration.new_door.tools': ext.newDoorLine('You', 'Hall', true),
     'narration.new_door': ext.newDoorLine('You', 'Hall', false),

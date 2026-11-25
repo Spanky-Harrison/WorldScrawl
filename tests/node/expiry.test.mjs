@@ -230,7 +230,7 @@ const ext = await import('../../extension/index.js');
 ext.setPrompts(def);
 const byId = Object.fromEntries(def.prompts.map(e => [e.id, e]));
 const src = extSource();
-const room = { name: 'Guest Room 1', description: 'A narrow room with a broken window.', change: { msg: 5, note: 'innkeeper shows them a room', summary: ['added place Guest Room 1', 'added exit door from Upstairs Rooms'], ended: 'Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)' } };
+const room = { name: 'Guest Room 1', description: 'A narrow room with a broken window.', change: { msg: 5, note: 'innkeeper shows them a room', summary: ['added place Guest Room 1', 'added exit door from Upstairs Rooms'], ended: 'Guest Room 1 expired at 9:00 PM, 3 Mar (lasted 1h, from message #5)', lasted: 3600 } };
 const options = [{ address: 'inn/upstairs', direction: 'door', name: 'Upstairs Rooms' }, { address: 'inn/yard', direction: 'window', name: 'Inn Yard' }];
 
 test('Narrate expiries is a setting, on by default, with a checkbox', () => {
@@ -247,7 +247,9 @@ test('the pick: nearby places as short keys, the way in first and the default', 
     const opts = ext.expiryOptions(options);
     assert.deepEqual(opts.map(o => o.key), ['upstairs_rooms', 'inn_yard']);
     const q = ext.expiryPickPrompt(room, opts, opts[0].key);
-    assert.match(q, /Guest Room 1, which is coming to an end: Guest Room 1 expired at 9:00 PM/);
+    // R8: the model gets the plain fact (narration.ended); the server's bookkeeping line (date, lasted 1h, message #5) stays out.
+    assert.match(q, /Guest Room 1, which is coming to an end: it was only meant to last an hour\./);
+    assert.doesNotMatch(q, /expired at|lasted|message #|9:00 PM/);
     assert.match(q, /- upstairs_rooms: Upstairs Rooms \(out through the door\)\n- inn_yard: Inn Yard \(out through the window\)/);
     assert.match(q, /If unsure: upstairs_rooms\./);
     // Lenient matching of the answer; nonsense is no match (asked once more, then the way in).
@@ -259,9 +261,13 @@ test('the narration line: what ran out, what made it, an excerpt, and where they
     const ex = ext.excerptOf(msg);
     assert.ok(ex.length <= 240 && ex.endsWith('...'), ex);
     const line = ext.expiryNarrationLine(room, { address: 'inn/upstairs', name: 'Upstairs Rooms' }, 'door', 'Ann', ex);
-    for (const w of ['Guest Room 1 has come to an end', 'lasted 1h, from message #5', 'A narrow room with a broken window.', 'How it came about: innkeeper shows them a room\n', `"${ex}"`, 'ended up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ended up'])
+    for (const w of ['Guest Room 1 has come to an end; it was only meant to last an hour.', 'A narrow room with a broken window.', 'How it came about: innkeeper shows them a room\n', `"${ex}"`, 'ended up in Upstairs Rooms (out through the door)', 'free to decide why and how', 'Do not change where Ann ended up'])
         assert.ok(line.includes(w), w);
     assert.ok(!line.includes('added place'), 'the engine summary stays off the narrator; the story note is enough');
+    assert.doesNotMatch(line, /expired at|lasted|message #|9:00 PM/, 'R8: no bookkeeping reaches the narrator');
+    // No change found for the room (no duration): the no-duration piece.
+    const bare = ext.expiryNarrationLine({ name: 'Guest Room 1', description: '' }, { address: 'inn/upstairs', name: 'Upstairs Rooms' }, '', 'Ann', '');
+    assert.ok(bare.includes('Guest Room 1 has come to an end; its time ran out.'), bare);
 });
 test('the reply carries the stamp; the context line stays as the fallback', () => {
     assert.match(src, /m\.extra\[LOC_KEY\] = told\.to/);

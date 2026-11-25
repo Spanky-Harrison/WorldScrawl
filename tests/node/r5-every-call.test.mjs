@@ -152,13 +152,18 @@ const SMOKE = 'Thick black smoke fills the low-beamed common room. A long oak ba
 const SMOKE_BOARDS = 'Thick black smoke fills the low-beamed common room. A long oak bar runs along one wall, splintered floorboards lie by the hearth, and a creaking staircase climbs to the rooms above.';
 const BOARDS = 'A low-beamed common room smelling of woodsmoke and spilled ale. A long oak bar runs along one wall, splintered floorboards lie by the hearth, and a creaking staircase climbs to the rooms above.';
 
+// What the pass types straight into a handler (not through the chat): data for R8 (c).
+const TYPED = ['she grinds knives', 'Riverton', 'A river town.', 'Hall', 'Long.', 'Dusty.', 'Attic'];
 /** The scripted pass. Returns every recorded call and narrator block. */
 async function pass(prompts) {
-    const all = { calls: [], blocks: [], marks: {} };
+    const all = { calls: [], blocks: [], marks: {}, data: [] };
     const run = async (opts, steps) => {
         const env = boot(prompts, opts);
+        const answers = { ...DEFAULT_ANSWERS };
+        const keepAnswers = env.rec.answers; env.rec.answers = new Proxy(keepAnswers, { set: (o, k, v) => { o[k] = v; answers[`${k}#${Object.keys(answers).length}`] = Array.isArray(v) ? [...v] : v; return true; } });
         await steps(env);
         all.calls.push(...env.rec.calls); all.blocks.push(...env.rec.blocks);
+        all.data.push(env.c.chat, answers, TYPED);
     };
     // Narrator: look, move, wait, sleep, find, not-found, doors.
     await run({}, async env => {
@@ -300,6 +305,13 @@ async function pass(prompts) {
             await turn(env, 'I look around.');
         });
     }
+    // R8: a timed new building runs out with the party in its room: the server finds no change that made that room itself,
+    // so the narrator and the pick get the no-duration fact (narration.ended_unknown).
+    const FAIR = patch('fair', 0, [{ op: 'create_subregion', region: 'riverton', id: 'fair', name: 'Fairground', lore: 'A travelling fair.', lasts: '1h',
+        place: { id: 'tent', name: 'Big Tent', description: 'Striped canvas over trodden grass.', exits: [{ direction: 'tent', to: SQUARE, return_direction: 'square' }, { direction: 'lane', to: LANE, return_direction: 'tent' }] } }], 'A fair sets up');
+    await run({ here: SQUARE, chat: [user('I step into the tent.', { worldscrawl_patches: [FAIR], worldscrawl_move: mv(SQUARE, 'riverton:fair/tent', 'tent', 'Village Square', 'Big Tent') }), ai('Canvas flaps around you.', { worldscrawl_location: 'riverton:fair/tent' })] }, async env => {
+        await turn(env, '[wait] 2h');
+    });
     // A change turned off under the party (relocation without expiry), and around it (aftermath: gone, lost exits).
     await run({ here: SQUARE, chat: [user('A stall goes up.', { worldscrawl_patches: [STALL()], worldscrawl_move: mv(SQUARE, BOOTH, 'into the stall', 'Village Square', 'Stall') }), ai('You are in the stall.', { worldscrawl_location: BOOTH })] }, async env => {
         await toggleChange(1, 'stall'); await settle();
@@ -411,10 +423,8 @@ const ALLOW = {
     'npc.appearance_intent_written': 'listed only when a change with the player\'s own written text is composed again with a later one; a kept edit bakes into the base here. Through intentLine and the compose call in r3-compose A2',
     'npc.appearance_intent_replace': 'listed only when a replaced base text is composed again with a later change; kept baselines bake into the base here. Through intentLine in r3-compose A2',
 };
-// Not asserted by (a), reported instead: text that is data or answer keys, not prompt wording.
-//  - OP_DOCS (the map-edit op list filled into {{edit_types}}) and the pick/intent answer keys and option labels ride
-//    inside placeholder values; (a) sees only text outside every entry. The player's quoted message is the pick.said
-//    entry since R6, so it is a marker like any other (no exception here).
+// (a) sees only text outside every entry. Text inside placeholder values is R8 (c), below: since R8 the map-edit op list
+// (change.edit_types) and the pick-one option meanings are entries too, and the player's quoted message is pick.said (R6).
 // The group 4 side calls (R5.4): the tracker retry, the own-field compose and the scope-switch rewrite are model calls too.
 const KINDS_REQUIRED = ['intent', 'intent: travel yes/no', 'wait amount', 'tracker', 'schedule', 'map expand', 'map rebuild', 'appearance compose',
     'looks summary', 'remember (prefetch)', 'discovery / dig', 'pick: look target', 'pick: closed door', 'pick: view', 'pick: door', 'pick: bracket target',
@@ -477,9 +487,9 @@ test('R5.2 (N1): one-time lines come before stay-put, and the rules line is last
 
 test('R5.3 / R5.3b (N5, N4): with the shipped prompts, the narrator gets durations in words and no handles; the tracker and the who pick keep theirs', { timeout: 120000 }, async () => {
     const { real } = await both();
-    // Queued (not R5): the server's `ended` note for a timed change, "X expired at <date> (lasted 1h, from message #1)",
-    // reaches narration.expired as a value; it is taken out here and reported.
-    const narrator = real.blocks.map(b => b.text).join('\n').replace(/expired at [^()]*\([a-z]+\)? ?\(lasted [^)]*\)/g, '');
+    // R8: no cut-out. The server's bookkeeping line for a timed change ("X expired at <date> (lasted 1h, from message #1)")
+    // no longer reaches the model; the narrator gets the plain fact (narration.ended).
+    const narrator = real.blocks.map(b => b.text).join('\n');
     assert.deepEqual(narrator.match(/.{0,80}(\b\d+h\d*m?\b|\b\d+m\b).{0,40}/g) ?? [], [], 'no 2h / 40m');
     assert.doesNotMatch(narrator, /\[p[0-9a-z]{4}\]/, 'no [pxxxx] handles');
     assert.doesNotMatch(narrator, /(?<!\bif )you can see/i);
@@ -517,17 +527,19 @@ test('R6 F3 / P5 / P6 on the shipped prompts: the Remember budget, the pattern q
     const sched = real.calls.find(c => c.kind === 'schedule');
     assert.ok(sched, 'the pass asks the pattern');
     const lines = sched.sys.split('\n');
-    assert.equal(lines.length, 7, sched.sys);
+    assert.equal(lines.length, 8, sched.sys);
     assert.match(lines[1], /^Reply with JSON only: \{"pattern": /);
-    assert.deepEqual(lines.slice(2, 6).map(l => l.split(' ')[1]), ['pattern', 'job', 'home', 'favorites']);
-    for (const l of lines.slice(2, 6)) assert.match(l, /^- [a-z]+ (is|are) /);
-    assert.equal(lines[6], 'Use only KEYs from the list. No other keys.');
+    // R8 P5: job_activity has its own line too, in the JSON key order.
+    assert.deepEqual(lines.slice(2, 7).map(l => l.split(' ')[1]), ['pattern', 'job', 'job_activity', 'home', 'favorites']);
+    for (const l of lines.slice(2, 7)) assert.match(l, /^- [a-z_]+ (is|are) /);
+    assert.equal(lines[7], 'Use only KEYs from the list. No other keys.');
+    assert.equal(lines[4], '- job_activity is a few words for what they do at work (pours drinks, mends nets), or null when they have no job or you cannot tell.');
     // The wording is the same as the one paragraph it was (R5), sentence for sentence.
     assert.equal(lines[0], 'You choose the daily routine of a person the story has just met in a text adventure. The game turns your choice into their schedule.');
     assert.match(lines[2], /, passing through for a traveller, a visitor or anyone not settled here, and unsure when the story gives no hint\.$/);
     assert.match(lines[3], /\(an innkeeper, a smith whose workplace is a whole building, a watchman on rounds\); an area job means anywhere public in that area\. job can also be offmap: and a few words, or null when you cannot tell\.$/);
-    assert.match(lines[4], /^- home is a room KEY from the list, or offmap: and a few words for a place that is not on the list \(at most 80 characters\), or null when you cannot tell\.$/);
-    assert.equal(lines[5], '- favorites are up to 3 KEYs of public places (not marked [private]) where they spend free time; an area KEY means anywhere public in that area.');
+    assert.match(lines[5], /^- home is a room KEY from the list, or offmap: and a few words for a place that is not on the list \(at most 80 characters\), or null when you cannot tell\.$/);
+    assert.equal(lines[6], '- favorites are up to 3 KEYs of public places (not marked [private]) where they spend free time; an area KEY means anywhere public in that area.');
     // P6: the tracker names it once, then says disposition; the people lines say Disposition; never "stance".
     const trackers = real.calls.filter(c => c.kind === 'tracker');
     assert.ok(trackers.length);
@@ -552,4 +564,161 @@ test('R5.4 dump', { skip: !DUMP }, async () => {
     console.log('UNREACHED', DEF.prompts.map(e => e.id).filter(id => !reached.has(id)).join(' '));
     for (const c of bare.calls) console.log('CALL', c.kind, JSON.stringify(c.sys).slice(0, 200), '||', JSON.stringify(c.prompt).slice(0, 400));
     for (const b of bare.blocks) console.log('BLOCK', b.key, JSON.stringify(b.text).slice(0, 600));
+});
+
+
+// ---- R8 (c): inside the placeholder values. (a) sees only text outside every entry; English the code builds and fills
+// into a placeholder (an option's meaning, a list line, a fallback) rides inside a value. Here every entry is its marker
+// followed by each placeholder wrapped as ⟨name⟩{{name}}⟨/⟩, so each value can be read on its own (an entry filled into
+// it shows as its marker, with its own values inside). What is left of a value once the entries it holds, the data
+// (every string in the world files, the cast, the chat, the stamps and the fake model's answers, whole or by sentence)
+// and the machine tokens (handles, keys, addresses, JSON keys, the intent answer keys the game parses back) are taken
+// out must be only punctuation and numbers, or words on the queued list below for that placeholder (each with its reason).
+const valuePrompts = def => ({ ...def, prompts: def.prompts.map(e => ({ ...e, text: MARK(e.id) + (e.placeholders ?? []).map(p => `⟨${p.name}⟩{{${p.name}}}⟨/⟩`).join('') })) });
+/** The text pieces of each placeholder value: [{id, name, text}], innermost (an entry filled in is cut out). */
+function valuesOf(text) {
+    const out = [], stack = [];
+    let cur = null;
+    for (const t of String(text).split(/(⟦[a-z_.]+⟧|⟨\w+⟩|⟨\/⟩)/)) {
+        let m;
+        if (!t) continue;
+        if ((m = /^⟦([a-z_.]+)⟧$/.exec(t))) cur = m[1];
+        else if ((m = /^⟨(\w+)⟩$/.exec(t))) stack.push({ id: cur, name: m[1] });
+        else if (t === '⟨/⟩') cur = stack.pop()?.id ?? null;
+        else if (stack.length) out.push({ ...stack.at(-1), text: t.replace(/\{\{\w+\}\}/g, ' ') });
+    }
+    return out;
+}
+function stringsIn(x, out = new Set()) {
+    if (typeof x === 'string') { out.add(x); try { const j = JSON.parse(x); if (j && typeof j === 'object') stringsIn(j, out); } catch { /* text */ } }
+    else if (Array.isArray(x)) for (const y of x) stringsIn(y, out);
+    else if (x && typeof x === 'object') for (const [k, v] of Object.entries(x)) { out.add(k); stringsIn(v, out); }
+    return out;
+}
+function worldStrings() {
+    const out = new Set();
+    const walk = d => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (f.isDirectory()) walk(p); else if (f.name.endsWith('.json')) stringsIn(JSON.parse(fs.readFileSync(p, 'utf8')), out); } };
+    walk(RIVERTON); stringsIn([HESK, BRYN], out);
+    return out;
+}
+const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Takes the data and the machine tokens out of a value, longest data first, whole words only. */
+function dataStripper(data) {
+    const spans = new Set();
+    for (const t of new Set([...worldStrings(), ...stringsIn(data)])) {
+        for (const piece of [t, ...t.split(/(?<=[.!?;])\s+|\n+/)]) {
+            const x = piece.trim().replace(/[.;]$/, '');
+            if (x.length < 2 || !/[A-Za-z]/.test(x) || x.length > 4000) continue;
+            // As written, capitalized at a sentence start, and with Hesk's name masked (the narrator gets her unknownAs).
+            const named = [HESK.unknownAs, HESK.name, BRYN.name].map(n => x.replace(/\{\{npc!?:\w+\}\}/g, n)); // a {{npc:id}} token in the world text, as shown
+            for (const y of new Set([x, x.split(HESK.name).join(HESK.unknownAs), ...named])) { spans.add(y); spans.add(y[0].toUpperCase() + y.slice(1)); spans.add(y[0].toLowerCase() + y.slice(1)); }
+        }
+    }
+    const list = [...spans].sort((a, b) => b.length - a.length);
+    const KEYS = [ext.LOOK, ext.OPEN_DOOR, ext.CLOSE_DOOR, ext.NEW_DOOR, 'new opening', 'stay', 'elsewhere', 'unclear'];
+    return v => {
+        let r = String(v);
+        for (const t of list) if (r.includes(t)) r = r.replace(new RegExp(`(?<![A-Za-z])${reEsc(t)}(?![A-Za-z])`, 'g'), ' ');
+        for (const k of KEYS) r = r.replace(new RegExp(`(?<![A-Za-z])${reEsc(k)}(?![A-Za-z])`, 'g'), ' ');
+        return r.replace(/"[A-Za-z_]+"\s*:/g, ' ') // JSON keys
+            .replace(/\bp[0-9a-z]{4}\b/g, ' ') // handles
+            .replace(/[\w.-]*[_:/][\w.:/-]*/g, ' ') // keys and addresses (snake_case, region:sub/room)
+            .replace(/\b[A-Z]{2,}\b/g, ' ') // ADDR, AREA, KEY
+            .replace(/\b(?:true|false|null)\b/g, ' '); // JSON literals
+    };
+}
+const wordsLeft = t => [...new Set(String(t).match(/[A-Za-z]+/g) ?? [])].filter(w => w.length > 1 || /[A-Za-z]/.test(w) && w !== 's');
+let valuePass = null;
+const valuesRun = () => valuePass ??= (async () => { const got = await pass(valuePrompts(DEF)); const strip = dataStripper(got.data); const found = new Map(); // placeholder name -> Map(word -> sample)
+    const add = (where, v) => { for (const w of wordsLeft(strip(v.text))) { if (!found.has(v.name)) found.set(v.name, new Map()); const m = found.get(v.name); if (!m.has(w)) m.set(w, `${v.id}.${v.name} (${where}): ${JSON.stringify(v.text.trim()).slice(0, 160)}`); } };
+    for (const c of got.calls) for (const v of [...valuesOf(c.prompt), ...valuesOf(c.sys)]) add(c.kind, v);
+    for (const b of got.blocks) for (const v of valuesOf(b.text)) add('narrator', v);
+    return { got, found }; })();
+test('R8 dump values', { skip: !DUMP }, async () => {
+    const { found } = await valuesRun();
+    for (const [name, m] of [...found].sort()) { console.log('##', name, JSON.stringify([...m.keys()])); for (const x of new Set(m.values())) console.log('   ', x); }
+});
+
+// Code-built English still inside a value, queued for later builds (R8 audit; each moves its words into entries as a whole,
+// too large to half-do here). Keyed by placeholder name, with the exact words left; the test fails when a word turns up that
+// is not listed (new code English), and when a listed word is no longer seen (the list must stay exact).
+const QUEUED = {
+    party: [['You', 'and'], 'partyText: "You", "You and the landlady" (movement.mjs)'],
+    pc: [['You'], 'partyText as the player character\'s name in the people lines'],
+    arrival: [['You', 'arrived', 'the', 'of', 'and'], 'the arrival sentence " You arrived in the X of Y." (brackets.mjs / movement.mjs)'],
+    where: [['the', 'of'], 'withArticle place phrase "the Common Room of The Drowned Rat" (brackets.mjs)'],
+    role: [['of'], 'the person\'s role phrase "the landlady of the Drowned Rat" (npc.mjs)'],
+    direction: [['through', 'the'], 'exit phrase "through the kitchen" for glimpses and lost exits (exitPhrase)'],
+    date: [['Saturday', 'morning', 'th', 'of', 'evening', 'afternoon', 'night', 'Sunday', 'dawn'], 'calendar describeDate (plugin/shared/calendar.mjs)'],
+    date_before: [['Saturday', 'morning', 'th', 'of', 'evening', 'night', 'dawn'], 'calendar describeDate'],
+    part: [['morning', 'evening', 'afternoon', 'night', 'dawn'], 'calendar part-of-day names'],
+    part_before: [['morning', 'evening', 'dawn', 'night'], 'calendar part-of-day names'],
+    duration: [['an', 'hour', 'a', 'minute', 'hours', 'less', 'than'], 'durationWords (words.mjs, R5 N5)'],
+    late: [['an', 'hour'], 'durationWords for an overdue person'],
+    weather: [['Weather', 'outside', 'Partly', 'cloudy', 'breezy', 'F', 'feels', 'like', 'humidity', 'Spring', 'Inside', 'the', 'wind', 'and', 'warm', 'Foggy', 'cool', 'Overcast', 'windy', 'freezing', 'it', 'is', 'damp'], 'the weather line (plugin/shared/weather.mjs)'],
+    disposition: [['just', 'met'], 'the tracker person line\'s "(just met)" reason'],
+    reason: [['just', 'met'], 'the narrator attitude line\'s "(just met)" reason'],
+    how: [['touch'], 'the appearance compose scope words "light touch" / "full rewrite"'],
+    error: [['the', 'was', 'not'], 'the retry errors ("the answer was not JSON") of the change and discovery calls'],
+    outline: [['blocked'], 'the map outline\'s "(blocked)" exit mark'],
+    place_list: [['anywhere', 'public', 'inside', 'the'], 'the schedule pick\'s area lines ("anywhere public inside the ...")'],
+    revert_ended: [['It', 'made', 'the'], 'the rebuild call\'s change lines ("It made the text:")'],
+    revert_kept: [['It', 'made', 'the'], 'the rebuild call\'s change lines'],
+    revert_text: [['the', 'of'], 'the rebuild call\'s "the description of X"'],
+    targets: [['the', 'of', 'with'], 'the full-rewrite targets ("1. the description of X. Answer with {...} Before the change:")'],
+    context: [['Connected'], 'the map window\'s Expand context ("Region:", "Connected places:"), built in plugin/ui/placeform.mjs'],
+};
+test('R8 (c): inside every placeholder value, what is left of the data is no English of the code\'s own, but the queued words', { timeout: 120000 }, async () => {
+    const { got, found } = await valuesRun();
+    assert.ok(got.calls.length > 100 && got.blocks.length > 50);
+    const extra = [], unused = [];
+    for (const [name, m] of found) for (const [w, where] of m) if (!QUEUED[name]?.[0].includes(w)) extra.push(`${w}: ${where}`);
+    for (const [name, [words]] of Object.entries(QUEUED)) for (const w of words) if (!found.get(name)?.has(w)) unused.push(`${name}: ${w}`);
+    assert.deepEqual(extra, [], 'code-built English inside a placeholder value');
+    assert.deepEqual(unused, [], 'queued words no longer seen (take them off the list)');
+});
+
+// ---- R8 on the shipped prompts and the marker passes.
+test('R8 ended: a run-out place reaches the narrator and the expiry pick as the plain fact; the bookkeeping line only in the Activity note', { timeout: 120000 }, async () => {
+    const { real, keep } = await both();
+    const narrator = real.blocks.map(b => b.text).join('\n');
+    assert.match(narrator, /Pop-up Stall \(Riverton Streets\) has come to an end; it was only meant to last an hour\./);
+    assert.match(narrator, /Big Tent \(Fairground\) has come to an end; its time ran out\./, 'no change made the room itself: narration.ended_unknown');
+    assert.match(narrator, /ended up in Village Square \(Riverton Streets\) \(out through the stall\)/);
+    const picks = real.calls.filter(c => c.kind === 'pick: expiry');
+    assert.ok(picks.some(c => /which is coming to an end: it was only meant to last an hour\.\n/.test(c.prompt)), picks.map(c => c.prompt).join('\n---\n'));
+    assert.ok(picks.some(c => /^- village_square_riverton_streets: Village Square \(Riverton Streets\) \(out through the stall\)$/m.test(c.prompt)));
+    // Nothing the model gets carries the date, the "lasted 1h" or the message number.
+    for (const t of [...real.calls.flatMap(c => [c.prompt, c.sys]), ...real.blocks.map(b => b.text)]) assert.doesNotMatch(t, /expired at|\(lasted |from message #/);
+    // The entries: the fact and the way out are markers inside both.
+    const kb = keep.blocks.map(b => b.text).join('\n'), kp = keep.calls.filter(c => c.kind === 'pick: expiry').map(c => c.prompt).join('\n');
+    for (const id of ['narration.ended', 'narration.ended_unknown', 'narration.expiry_via']) assert.match(kb, new RegExp(`⟦${id.replace('.', '\\.')}⟧`), id);
+    for (const id of ['narration.ended', 'narration.expiry_via']) assert.match(kp, new RegExp(`⟦${id.replace('.', '\\.')}⟧`), id);
+    // The bookkeeping line is the expiry note in the Activity log of the chat it happened in.
+    const notes = real.data.flatMap(d => (Array.isArray(d) ? d : [])).flatMap(m => Object.values(m?.extra?.worldscrawl_calls ?? {}).flat()).filter(n => n.kind === 'expiry');
+    assert.ok(notes.some(n => /^Pop-up Stall expired at .+ \(lasted 1h, from message #1\)$/.test(n.reason)), JSON.stringify(notes));
+});
+test('R8 option labels and the op list: the shipped text reads as before, and each comes from its entry', { timeout: 120000 }, async () => {
+    const { real, keep } = await both();
+    const has = (kind, re) => assert.ok(real.calls.some(c => c.kind === kind && re.test(c.prompt + '\n' + c.sys)), `${kind}: ${re}`);
+    has('pick: look target', /^- around: around here in general, nothing specific$/m);
+    has('pick: look target', /^- window: out a window or opening with no exit$/m);
+    has('pick: look target', /^- out: the out exit \(to Village Square\)$/m);
+    has('pick: look target', /^- trapdoor: the trapdoor exit$/m);
+    has('pick: door', /^- back: the back exit \(to Courtyard\)$/m);
+    has('pick: bracket target', /^- up: the up exit \(to Upstairs Rooms\)$/m);
+    has('intent', /^- out \(to Village Square, where you came from\)$/m);
+    has('intent', /^- up \(to Upstairs Rooms\)$/m);
+    has('pick: who', /^- nobody: nobody in particular$/m);
+    has('pick: disposition', /- indifferent: the usual answer; no reason to feel strongly either way\n- unfriendly: cold, short or suspicious\n- friendly: warm, glad to see them\n- helpful: goes out of their way to help\n- hostile: wants to harm them\n/);
+    const editTypes = DEF.prompts.find(e => e.id === 'change.edit_types').text;
+    assert.ok(real.calls.some(c => c.kind === 'map edit: the change' && c.sys.includes(`Allowed ops (exactly what the map editor can do):\n${editTypes}\n`)));
+    const keepHas = (kind, ids) => { const t = keep.calls.filter(c => c.kind === kind).map(c => c.prompt + c.sys).join('\n'); for (const id of ids) assert.ok(t.includes(MARK(id)), `${kind}: ${id}`); };
+    keepHas('pick: look target', ['look.option_around', 'look.option_window', 'pick.exit', 'pick.exit_to']);
+    keepHas('pick: door', ['pick.exit_to']);
+    keepHas('pick: bracket target', ['pick.exit_to']);
+    keepHas('intent', ['intent.exit_to', 'intent.exit_back']);
+    keepHas('pick: who', ['npc.who_nobody']);
+    keepHas('pick: disposition', ['npc.disposition_option.indifferent', 'npc.disposition_option.unfriendly', 'npc.disposition_option.friendly', 'npc.disposition_option.helpful', 'npc.disposition_option.hostile']);
+    keepHas('map edit: the change', ['change.edit_types']);
 });

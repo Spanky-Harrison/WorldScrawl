@@ -166,3 +166,44 @@ test('R6 F3: Approve with no card drawn (keepRemember asks itself) and a failed 
     assert.equal(stampsOf(c.chat[1], 'npc_create').length, 0);
     failedCard(remEl(draw([0, 1])), 'no card drawn');
 });
+
+// ---- R8: a failed Remember call's Activity note says why (the toast stays as it is).
+const { messageActivity } = await import('../../extension/activity.mjs');
+const failedReasons = c => callNotes(c.chat[1]).filter(n => /^remember/.test(n.kind) && n.status === 'failed').map(n => n.reason);
+const CAUSES = {
+    'cut off': /^no usable person: cut off \(the reply stopped before its JSON closed\)$/,
+    'not JSON': /^no usable person: not JSON \("Maren is a knife-grinder\."\)$/,
+    empty: /^no usable person: empty answer$/,
+    'model error': /^no usable person: the call failed \(the server is down\)$/,
+};
+for (const [what, bad] of Object.entries(BAD)) {
+    test(`R8: a Remember answer that is ${what}: the call note and the Activity log say so`, async () => {
+        const { c } = await rememberCard({ remember: () => bad });
+        const reasons = failedReasons(c);
+        assert.ok(reasons.length, 'a failed note');
+        for (const r of reasons) assert.match(r, CAUSES[what]);
+        const act = messageActivity(c.chat[1], 1).filter(e => e.kind === 'call' && /^remember/.test(e.label) && e.status === 'failed');
+        assert.ok(act.length && act.every(e => CAUSES[what].test(e.reason)), JSON.stringify(act));
+    });
+}
+test('R8: a Remember answer that is JSON without a name and a line says so', async () => {
+    const { c } = await rememberCard({ remember: () => JSON.stringify({ name: 'Maren', personality: {} }) });
+    assert.deepEqual(failedReasons(c), ['no usable person: no name or no one-line summary in the JSON']);
+});
+test('R8: a Remember call that times out says so (the side-call timer, shortened)', async () => {
+    const real = globalThis.setTimeout;
+    globalThis.setTimeout = (fn, ms, ...a) => real(fn, ms === 60000 ? 5 : ms, ...a);
+    try {
+        const { c } = await rememberCard({ remember: () => new Promise(() => {}) });
+        assert.deepEqual(failedReasons(c), ['no usable person: timed out (no answer in time)']);
+    } finally { globalThis.setTimeout = real; }
+});
+test('R8: Approve on a failed answer keeps the toast as it was, and the note names the cause', async () => {
+    const c = boot();
+    fakeModel(c, { remember: () => BAD.empty });
+    reply(c, 'Maren, the knife-grinder, works the wheel by the fire.');
+    await scene.offerRemember(c.chat[1], 'Maren');
+    await scene.keepRemember(1);
+    assert.ok(toasts.some(([k, t]) => k === 'warning' && t === "WorldScrawl: could not prepare Maren's card, so nothing was saved. Use Check again on the card."), JSON.stringify(toasts));
+    assert.deepEqual(failedReasons(c), ['no usable person: empty answer']);
+});
