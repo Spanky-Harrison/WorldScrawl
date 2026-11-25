@@ -6,19 +6,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { client, RIVERTON, TAVERN } from './helpers.mjs';
-import { OPS, OP_DOCS, opDocs, readChangeAnswer, personClaimWarning, applyPatch } from '../../plugin/shared/patches.mjs';
+import { OPS, readChangeAnswer, personClaimWarning, applyPatch } from '../../plugin/shared/patches.mjs';
 import { read_world_raw } from '../../plugin/world.mjs';
 
 const src = extSource();
 const c = client(RIVERTON);
 
-test('change prompt: every editor op is documented, generated from OPS (create_place included)', () => {
-    for (const o of OPS) if (o !== 'discover' && o !== 'set_private') assert.ok(OP_DOCS[o], `no prompt line for ${o}`);
-    assert.ok(!OP_DOCS.set_private && !/set_private/.test(opDocs()), 'private is the player\'s or author\'s call: not offered to the change model');
-    const d = opDocs();
+// R8: the op list is the prompt entry change.edit_types (a piece), one line per op the model may write, in OPS order.
+const EDIT_TYPES = JSON.parse(readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8')).prompts.find(e => e.id === 'change.edit_types');
+test('change prompt: every editor op is documented in change.edit_types, in OPS order (create_place included)', () => {
+    const d = EDIT_TYPES.text, lines = d.split('\n');
+    const want = OPS.filter(o => o !== 'discover' && o !== 'set_private');
+    assert.deepEqual(lines.map(l => /^\{"op":"([a-z_]+)"/.exec(l)?.[1]), want, 'one line per op, in OPS order');
+    assert.ok(!/set_private/.test(d), 'private is the player\'s or author\'s call: not offered to the change model');
     for (const o of ['create_place', 'create_subregion', 'create_region', 'add_exit', 'move_location', 'remove_area', 'set_exit']) assert.match(d, new RegExp(`"op":"${o}"`));
     assert.doesNotMatch(d, /"op":"discover"/);
-    assert.match(src, /edit_types: pl\.opDocs\(\)/, 'the extension prompt uses the generated list');
+    assert.ok(EDIT_TYPES.piece && EDIT_TYPES.locked && EDIT_TYPES.group === 'change');
+    assert.match(src, /edit_types: P\('change\.edit_types'\)/, 'the extension prompt fills the entry in');
     assert.doesNotMatch(src, /\{"op":"block_exit"\|"open_exit"/, 'no hand-written op list left');
     assert.match(readFileSync(new URL("../../plugin/prompts/default.json", import.meta.url), "utf8"), /\\"cant\\"/);
 });

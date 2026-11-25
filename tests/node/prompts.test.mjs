@@ -4,7 +4,7 @@ import { DEFAULT_PROMPTS } from './useprompts.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs, { readFileSync } from 'node:fs';
-import { opDocs as opDocs0, patchPrompt } from '../../plugin/shared/patches.mjs';
+import { patchPrompt } from '../../plugin/shared/patches.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { groupPrompts, isLocked } from '../../plugin/ui/prompteditor.mjs';
@@ -25,7 +25,7 @@ import { messageActivity } from '../../extension/activity.mjs';
 const src = extSource();
 
 const textOf = id => DEFAULT_PROMPTS.prompts.find(e => e.id === id).text;
-const sys = textOf('change.system').replace('{{edit_types}}', opDocs0()).replace('{{style}}', textOf('change.style').replace('{{timeless}}', textOf('change.timeless')));
+const sys = textOf('change.system').replace('{{edit_types}}', textOf('change.edit_types')).replace('{{style}}', textOf('change.style').replace('{{timeless}}', textOf('change.timeless')));
 
 test('patch prompt (R2 C4): descriptions are written as the place has always been, traces allowed, history in notes, no quoted ban phrases', () => {
     assert.match(sys, /write each description as if the place had always been this way: what a visitor finds there today/);
@@ -107,11 +107,12 @@ test('every entry has id, title, description, text and placeholders that match t
         assert.deepEqual(e.placeholders.map(p => p.name).sort(), uiPrompts.placeholdersIn(e.text).sort(), `placeholders of ${e.id}`);
     }
 });
-test('op docs are a generated placeholder, not text in the file', () => {
+test('op docs are their own piece (change.edit_types, R8), filled into change.system as {{edit_types}}', () => {
     const sys = def.prompts.find(e => e.id === 'change.system');
     assert.match(sys.text, /\{\{edit_types\}\}/);
     assert.ok(sys.placeholders.find(p => p.name === 'edit_types').generated);
     assert.ok(!sys.text.includes('"op":"add_exit"'));
+    assert.match(def.prompts.find(e => e.id === 'change.edit_types').text, /^\{"op":"set_description"/);
 });
 test('an override changes the prompt, values are not re-filled', () => {
     ext.setPrompts({ ...Object.fromEntries(def.prompts.map(e => [e.id, e.text])), 'dig.style': 'X {{who}} Y' });

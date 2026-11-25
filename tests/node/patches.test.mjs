@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { client, RIVERTON, TAVERN, SQUARE, YARD } from './helpers.mjs';
 import { apply_changes } from '../../plugin/changes.mjs';
 import { build_world, read_world_raw, WorldError } from '../../plugin/world.mjs';
-import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom, roomMatches, readChangeAnswer, opDocs, OPS } from '../../plugin/shared/patches.mjs';
+import { activeChanges, applyPatch, parseLasts, relocated, PatchError, resolveRoom, slugId, newRoomId, normalizeOp, noopOf, getRoom, roomMatches, readChangeAnswer, OPS } from '../../plugin/shared/patches.mjs';
 import fs from 'node:fs';
 import { cleanOp, formOps, checkOps, errorsByOp, blankOp, liveOps, editLine, OP_FIELDS } from '../../plugin/ui/patchform.mjs';
 import { blockDiff, fieldDiffs, mergeLines, exitState, wordDiff, moveGroups, inheritLine } from '../../plugin/ui/diffview.mjs';
@@ -279,7 +279,7 @@ test('a guessed address for a new place resolves to it', () => {
     assert.equal(made(r)[1].description, 'Guessed.');
 });
 test('the op docs say create_place makes the exit pair and explain ref / new:', () => {
-    const d = opDocs();
+    const d = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8')).prompts.find(e => e.id === 'change.edit_types').text;
     assert.match(d, /already makes the door pair/);
     assert.match(d, /never add a separate add_exit/);
     assert.match(d, /"new:label"/);

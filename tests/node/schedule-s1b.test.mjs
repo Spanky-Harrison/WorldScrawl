@@ -88,7 +88,7 @@ const factsText = async (blocks) => { await scene.applyFacts(); return Object.va
 const waitFor = async (c, text) => { const m = say(c, text); const r = await bracketIntent(m, parseBracket(text)); assert.notEqual(r.kind, 'bracket_failed', r.note); return m; };
 const appears = m => (m.extra?.[NPC_KEY] ?? []).filter(s => s.type === 'npc_appear');
 
-import { applyPatch, getRoom, privateByName, privateOf, PRIVATE_WORDS, OP_DOCS, opDocs, readChangeAnswer, refusedOpWarning } from '../../plugin/shared/patches.mjs';
+import { applyPatch, getRoom, privateByName, privateOf, PRIVATE_WORDS, readChangeAnswer, refusedOpWarning } from '../../plugin/shared/patches.mjs';
 import { build_world, read_world_raw } from '../../plugin/world.mjs';
 import { initialState, placeOps, areaOps, ROOM_FIELDS, AREA_FIELDS } from '../../plugin/ui/placeform.mjs';
 import { passingThrough } from '../../plugin/shared/npc.mjs';
@@ -183,8 +183,8 @@ test('map editor: the Private control on rooms and areas, with its inherited val
 });
 
 test('the change model cannot set private: not in its op list; a set_private op or a "private" field it writes is refused with a warning', () => {
-    assert.equal(OP_DOCS.set_private, undefined);
-    assert.doesNotMatch(opDocs(), /set_private|private/);
+    const editTypes = JSON.parse(fs.readFileSync(new URL('../../plugin/prompts/default.json', import.meta.url), 'utf8')).prompts.find(e => e.id === 'change.edit_types').text;
+    assert.doesNotMatch(editTypes, /set_private|private/);
     const r = readChangeAnswer({ ops: [
         { op: 'set_private', target: BAR, value: true },
         { op: 'set_description', loc: BAR, text: 'Smoky.' },
