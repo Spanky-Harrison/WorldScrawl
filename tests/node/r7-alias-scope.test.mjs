@@ -396,3 +396,35 @@ test('R7 r3 resolveAt with a negative message index notes on message 0 (noteAt c
     assert.equal(matchNotes(c.chat[0]).length, 1, JSON.stringify(callNotes(c.chat[0])));
     assert.deepEqual(matchNotes(c.chat.at(-1)), []);
 });
+
+test('R7 r3 two people share an exact real name (two Tams): the ladder runs among those two only; a loose match in the room never jumps ahead', async () => {
+    const TAM2 = guard('tam_2', 'Tam', GREEN, { unknownAs: 'a ferryman' });
+    // Old Tam (loose) is in the room; the Tams are at the Docks (level 2) and in Larkspur (3): the Docks Tam, with the note.
+    let { c } = boot({ cards: [TAM, TAM2, OLD_TAM], here: SQUARE });
+    let { r, msg } = await bracket(c, '[find] Tam');
+    assert.equal(msg.extra[FOUND][0].id, 'tam', JSON.stringify(msg.extra[FOUND]));
+    assert.deepEqual(matchNotes(msg).map(x => x.reason), ["'Tam' read as a net-mender at River Docks, nearest to you"]);
+    // One Tam in the room with Old Tam: that Tam.
+    ({ c } = boot({ cards: [guard('tam', 'Tam', SQUARE, { unknownAs: 'a net-mender' }), TAM2, OLD_TAM], here: SQUARE }));
+    ({ msg } = await bracket(c, '[find] Tam'));
+    assert.equal(msg.extra[FOUND][0].id, 'tam');
+    // Both Tams equally far (Riverton Docks and Village Square, the player in Larkspur, Old Tam beside the player): "Which one?".
+    ({ c } = boot({ cards: [TAM, guard('tam_2', 'Tam', SQUARE, { unknownAs: 'a ferryman' }), guard('old_tam', 'Old Tam', GREEN, { unknownAs: 'an old fisherman' })], here: GREEN }));
+    ({ r, msg } = await bracket(c, '[find] Tam'));
+    assert.equal(r.kind, 'bracket_failed');
+    assert.equal(r.note, 'Which one? a net-mender (River Docks), a ferryman (Village Square)');
+    assert.doesNotMatch(r.note, /\bTam\b/, 'unlearned names stay hidden');
+    assert.equal(msg.extra[FOUND][0].id, '');
+});
+
+test('R7 r3 the typed text is one person\'s real name and another\'s generic label: the real-name holder wins even with the label holder in the room', async () => {
+    const ROOK = guard('rook', 'Rook', DOCKS, { unknownAs: 'a dockhand' });
+    const CROW = guard('crow', 'Maddoc', SQUARE, { unknownAs: 'the rook' });
+    const { c } = boot({ cards: [ROOK, CROW], here: SQUARE });
+    const { msg } = await bracket(c, '[find] Rook');
+    assert.equal(msg.extra[FOUND][0].id, 'rook', JSON.stringify(msg.extra[FOUND]));
+    const k = say(c, 'I think about the rook.');
+    assert.equal(scene.resolveAt(c.chat, k, 'Rook', [ROOK, CROW]).person?.id, 'rook');
+    // Without the real-name holder, the label reads the one in the room.
+    assert.equal(scene.resolveAt(c.chat, k, 'the rook', [CROW, guard('crow_2', 'Ysolde', DOCKS, { unknownAs: 'the rook' })]).person?.id, 'crow');
+});
