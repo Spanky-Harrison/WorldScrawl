@@ -177,9 +177,11 @@ async function resolveMissingRoom(stored) {
         // then ONE narrator reply tells why and how: the one already running or about to run when it carries the line
         // (a wait's own reply), else one automatic reply. The reply that tells it carries the location stamp.
         expiryNarrated.add(once);
+        await ensurePrompts(); // the option labels are worded from prompt entries
         const opts = expiryOptions(r.body.options ?? []), room = r.body.expired_room ?? { name: stored };
         let dest = opts.find(o => o.address === to.address) ?? opts[0] ?? null;
-        await ensurePrompts();
+        // R8: the bookkeeping line (date, how long, which message) is for the player: the Activity log and the console.
+        if (room.change?.ended) noteCall(undefined, { kind: 'expiry', status: 'ok', reason: room.change.ended, once: true });
         if (opts.length > 1 && typeof c0.generateRaw === 'function') {
             try { dest = await askValid('expiry', expiryPickPrompt(room, opts, dest?.key), pickKey(opts)) ?? dest; } catch (e) { console.warn('[WorldScrawl] expiry pick failed:', e.message); }
         }
@@ -188,7 +190,7 @@ async function resolveMissingRoom(stored) {
         const via = (r.body.options ?? []).find(o => o.address === to.address)?.direction ?? '';
         const p = expiryPending = { chat: chatKey(), from: stored, to: to.address, via, line: '' };
         try { p.line = expiryNarrationLine(room, to, via, partyText(), excerptOf(c0.chat?.[room.change?.msg]?.mes)); } catch {}
-        console.warn(`[WorldScrawl] ${stored} expired; narrating the move to ${to.address}`);
+        console.warn(`[WorldScrawl] ${stored} expired${room.change?.ended ? ` (${room.change.ended})` : ''}; narrating the move to ${to.address}`);
         setTimeout(() => { triggerExpiryNarration(p).catch(e => console.error('[WorldScrawl] expiry narration', e)); }, 0);
         return to;
     }

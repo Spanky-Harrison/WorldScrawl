@@ -956,41 +956,9 @@ export function mentionsOf(raw, names, skip = new Set()) {
     return out;
 }
 
-/**
- * What the model is told about each op, generated into the change call's prompt from OPS, so anything the editor can do
- * the model can propose. ADDR is a room address, AREA a subregion ("region:sub") or region ("region"). Ops the model
- * never writes itself have no entry. New ops in OPS need a line here (a test checks).
- */
-export const OP_DOCS = {
-    set_description: '{"op":"set_description","loc":ADDR,"text":"..."}',
-    append_description: '{"op":"append_description","loc":ADDR,"text":"..."}',
-    set_name: '{"op":"set_name","loc":ADDR,"text":"New display name"} (the address stays the same)',
-    set_lore: '{"op":"set_lore","area":AREA,"text":"..."}',
-    append_lore: '{"op":"append_lore","area":AREA,"text":"..."}',
-    update_area: '{"op":"update_area","area":AREA,"name":"New display name","lore":"..."} (rename a whole building/area and/or rewrite its lore; give name, lore or both)',
-    block_exit: '{"op":"block_exit","loc":ADDR,"direction":"exit name"} (door state, both sides)',
-    open_exit: '{"op":"open_exit","loc":ADDR,"direction":"exit name"}',
-    lock_exit: '{"op":"lock_exit","loc":ADDR,"direction":"exit name"}',
-    unlock_exit: '{"op":"unlock_exit","loc":ADDR,"direction":"exit name"}',
-    break_exit: '{"op":"break_exit","loc":ADDR,"direction":"exit name"} (the door is gone; the way stays)',
-    remove_exit: '{"op":"remove_exit","loc":ADDR,"direction":"exit name"} (both sides: the way is gone)',
-    set_exit_description: '{"op":"set_exit_description","loc":ADDR,"direction":"exit name","text":"..."} (that side\'s exit text only)',
-    set_travel_time: '{"op":"set_travel_time","loc":ADDR,"direction":"exit name","time":"10m"} (both ways)',
-    remove_location: '{"op":"remove_location","loc":ADDR} (the place is gone)',
-    merge: '{"op":"merge","locs":[ADDR,...],"into":ADDR (one of locs, kept)} or {"op":"merge","locs":[ADDR,...],"name":"...","description":"..."} (existing rooms become one; never for making new rooms)',
-    set_expandable: '{"op":"set_expandable","target":ADDR or AREA,"value":true|false|"inherit"} (whether new rooms can be found there)',
-    set_fields: '{"op":"set_fields","target":ADDR or AREA,"fields":{"exposure":"outdoor|sheltered|enclosed|fixed","insulation":"drafty|normal|cozy","indoor_temp":20,...}} (plain settings; null drops one)',
-    set_exit: '{"op":"set_exit","loc":ADDR,"direction":"exit name","fields":{...}} (per side: direction, description, type, sight, sound, traversal, hidden, obscured; shared by the pair: travel_time, barrier (the door object, or null for none))',
-    add_exit: '{"op":"add_exit","loc":ADDR,"direction":"exit name","to":ADDR,"return_direction":"exit name back","door":true|false} (a new way between two rooms that already exist before this patch; not for a room made by create_place, whose exits already join it)',
-    move_location: '{"op":"move_location","loc":ADDR,"area":"region:sub"} (a room moves to another subregion, keeping its exits)',
-    move_area: '{"op":"move_area","area":"region:sub","region":"region"} (a subregion moves to another region)',
-    create_place: '{"op":"create_place","name":"...","description":"...","exits":[{"to":ADDR,"direction":"exit name from the new place","return_direction":"exit name from ADDR to the new place","door":true|false}]} (a NEW room; each of its exits already makes the door pair both ways, so never add a separate add_exit for it; the engine makes its id and puts it in the area of its first exit\'s room unless you give "area"; several create_place ops make several rooms, e.g. three rooms off a hub, each with its own exit names; give it "ref":"label" and later ops in the same patch point at it with "new:label" wherever an address goes, e.g. {"op":"set_fields","target":"new:portal_room",...} or an add_exit "to":"new:portal_room"; never guess the engine-made address)',
-    create_subregion: '{"op":"create_subregion","region":"region","name":"...","lore":"...","place":{"name":"...","description":"...","exits":[...as create_place]}} (a new building/area with its first room; "ref":"label" lets later ops use "new:label" for that room)',
-    create_region: '{"op":"create_region","name":"...","lore":"...","subregion":{"name":"...","place":{...}}} (a whole new region)',
-    remove_area: '{"op":"remove_area","area":AREA,"contents":"delete"|"move","into":AREA} (delete a subregion or region, or move its contents into another)',
-};
-/** The op list for the change call's prompt, one line per op in OPS (in that order). */
-export const opDocs = () => OPS.filter(o => OP_DOCS[o]).map(o => OP_DOCS[o]).join('\n');
+// R8: what the model is told about each op is the prompt entry change.edit_types (plugin/prompts/default.json), one line
+// per op the model may write; a test checks that every op in OPS but discover and set_private has its line there.
+
 // Card-field writes a place answer must not apply. A later schedule knock-on is an npc_schedule stamp
 // from its own caller, not one of these, so this list does not close that door.
 const PERSON_CARD_OPS = new Set(['update_npc', 'set_npc', 'update_person', 'set_person', 'npc_fact', 'npc_appearance', 'npc_memory', 'npc_disposition', 'set_personality', 'set_appearance']);

@@ -13,16 +13,17 @@ import { revealsDestination } from './shared.mjs';
 export const LOOK = 'look', OPEN_DOOR = 'open a door', CLOSE_DOOR = 'close a door', NEW_DOOR = 'try another door';
 export const DOOR_OPEN_RE = /\b(?:open|opens|opened|opening|unlatch\w*|unbar\w*)\b/i;
 export const DOOR_CLOSE_RE = /\b(?:close|closes|closed|closing|shut|shuts|shutting|slam|slams|slammed|slamming)\b/i;
-export const NO_EXIT = 'out a window or opening with no exit';
-const exitTargetLabel = e => `the ${e.direction} exit${revealsDestination(e) ? ` (to ${destLabel(e)})` : ''}`;
-export const AROUND = 'around here in general, nothing specific';
+// R8: the option labels are prompt entries (pieces); the keys stay the game's own.
+export const NO_EXIT = () => P('look.option_window');
+const exitTargetLabel = e => (revealsDestination(e) ? P('pick.exit_to', { direction: e.direction, leads_to: destLabel(e) }) : P('pick.exit', { direction: e.direction }));
+export const AROUND = () => P('look.option_around');
 export const WINDOW_WORD_RE = /\b(?:windows?|shutters?|outside|outdoors|openings?|balcon(?:y|ies)|portholes?|skylights?)\b/i;
 /** Offer the window option only when the player mentions one, or the room already has a view. */
 export const offerWindow = (loc, text) => WINDOW_WORD_RE.test(String(text ?? '')) || (loc.views ?? []).length > 0;
 /** Options: `around`, then one key per exit, then (maybe) `window`, last. */
 export function lookOptions(exits, withWindow = true) {
     const taken = new Set(['around', 'window']);
-    return [{ key: 'around', label: AROUND }, ...exits.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })), ...(withWindow ? [{ key: 'window', label: NO_EXIT }] : [])];
+    return [{ key: 'around', label: AROUND() }, ...exits.map(e => ({ key: keyFor(e.direction, taken), label: exitTargetLabel(e), exit: e })), ...(withWindow ? [{ key: 'window', label: NO_EXIT() }] : [])];
 }
 export function lookTargetPrompt(loc, said, exits, withWindow = true) {
     return P('look.target', { party: partyText(), place: displayName(loc), said, options: optionLines(lookOptions(exits, withWindow)) });
@@ -149,7 +150,7 @@ async function parseIntent(msg) {
     const exitLines = exitLabels(loc.exits, n => n).map((lbl, i) => {
         const e = loc.exits[i];
         const nm = lbl.length > e.direction.length ? lbl.slice(e.direction.length) : destLabel(e); // same label as the footer: room, or building (+ room / region)
-        return `- ${e.direction}${revealsDestination(e) ? ` (to ${nm}${e.to === prev ? ', where you came from' : ''})` : ''}`;
+        return `- ${revealsDestination(e) ? P(e.to === prev ? 'intent.exit_back' : 'intent.exit_to', { direction: e.direction, leads_to: nm }) : e.direction}`;
     });
     const prompt = intentPrompt({ loc, exitLines, said, moveDirs, movePlaces, canOpen, canLook, canOpenDoor, canCloseDoor, canNewDoor, onlyLook, options });
     const answer = await gen('intent', { prompt, systemPrompt: intentSys(), responseLength: 48 });
