@@ -5,11 +5,11 @@ import { noticeIdOf, newNoticeId, decisionOf, markDecided, unmarkDecided, once }
 import { render as P, cards as C, npc as Npc } from './shared.mjs';
 import { PLAYER, positionOf } from './actors.mjs';
 import { authorRecord, freeId, nameIn, normName, resolveSchedulePlace } from './shared.mjs';
-import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
+import { NPC_KEY, FOUND_KEY, SUGGEST_AFTER, personPlaces, declinesInScene, focusRules, framesOf, absentAt, npcAt, npcPlayState, npcSlices, npcWhy, narratorView, unsavedPeople, whoAt, presentAt, readBack, readRememberAnswer, fileDiff, npcTiers, askedLoreNames,  judgeFound, appearanceFor, stampsOn, offMapReport, scheduleAt, flaggedPeople, sceneStartOf, loreFor, addLoreRequest, activeLore, loreRequests, lastsMinutes, FACT_NO_END, factHasEnd, comingsAndGoings, parseRelArg, alreadyShown, effectFields, effectSetKey, resolveAppearance, rebuildInputs, planAppearanceRebuild, acceptAppearanceRebuild, classifyAppearanceReply, planLooksSummary, acceptLooksSummary } from './npc.mjs';
 import { bumpEpoch, decideNpc, epochOf as ownerEpoch, fillCandidate, makeOwner, recompose, refreshSiblings, reviewTyped } from './owners.mjs';
 import { NPC_EXPIRED_KIND, describeExpiries, expiryKey, expiryNarratorNote, expiryNoticeText, expiryWindow, noticedExpiries, personExpiriesBetween } from './npcexpiry.mjs';
 import { isOwnerStamp, messageKey } from './replay.mjs';
-import { capFirst, configureNames, findPerson, handleOf, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
+import { capFirst, configureNames, handleOf, placeLevel, resolvePerson, scopeLevel, judgeLearn, maskForModel, maskText, nameLeaks, saidNameOf, shownName } from './names.mjs';
 import { LOOK_AROUND_RE, arrival, arrivalReminder, attemptLines, factsText } from './brackets.mjs';
 import { parseJsonAnswer } from './carriers.mjs';
 import { calendarLib, chatElapsed, clockAt, defaultWorldId, gameDate, gameDateAt, loadCalendar, narratorWeather, placeWeatherNow, rememberWorlds, worldCasts, worldTimes } from './clock.mjs';
@@ -193,6 +193,59 @@ function npcEnv(chat, loc) {
         } : null,
     };
 }
+/**
+ * R7, the scope a name is resolved in: the player's room and the clock at message `at` (the command's or the reply's,
+ * never live now, so a rebuild, re-run or swipe of that message resolves the same way). `from` replaces the player's
+ * room (came_along: the room the party just left). levelOf feeds the ladder in resolvePerson; whereOf names the place
+ * that set a person's level, for the "Which one?" notice and the Activity note.
+ */
+function personScope(chat, at, { from = '' } = {}) {
+    const env = npcEnv(chat, null);
+    const when = Math.max(0, at);
+    const here = from || env.playerAt(when);
+    const placesOf = p => personPlaces(p, when, env);
+    const best = p => {
+        const { now, anchors } = placesOf(p);
+        return [...now.map(a => [a, placeLevel(here, a)]), ...anchors.map(a => [a, placeLevel(here, a) + 1])].sort((x, y) => x[1] - y[1])[0]?.[0] ?? '';
+    };
+    return { at: when, here, levelOf: p => scopeLevel(here, placesOf(p)), whereOf: p => { const a = best(p); return a ? env.names(a) : ''; } };
+}
+/** Where a tied person is: the place that set their level, or "somewhere else" when they have none (as /ws-find says). */
+const whoWhere = (scope, p) => `${shownName(p)} (${scope.whereOf(p) || 'somewhere else'})`;
+/**
+ * "Which one? the guard (Village Square), the guard (Larkspur Green)": shown names only (the name portal). Two entries
+ * that still read the same (same label, same place) get the person's handle, as prompts list people (labelOf), so the
+ * choices stay distinct and the player can answer with it.
+ */
+const whichOne = (scope, tie) => {
+    const shown = tie.map(p => whoWhere(scope, p));
+    return `Which one? ${shown.map((t, i) => (shown.indexOf(t) !== shown.lastIndexOf(t) ? `${t} [${handleOf(tie[i].id)}]` : t)).join(', ')}`;
+};
+/**
+ * resolvePerson in the scope at message `at`. A pick the ladder made at the town level or wider is noted in the Activity
+ * log ("'a guard' read as the guard at Village Square, nearest to you"). The note goes on `noteAt`, the message being
+ * resolved for (came_along resolves in the previous message's scope but belongs to this reply); `once`, so re-applying
+ * the same reply does not add it again. {person, tie, level, biased, scope}.
+ */
+function resolveAt(chat, at, text, people, { from = '', noteAt = Math.max(0, at) } = {}) {
+    const scope = personScope(chat, at, { from });
+    const r = resolvePerson(text, people, scope);
+    if (r.person && r.biased && r.level >= 2) {
+        const w = scope.whereOf(r.person);
+        noteCall(noteAt, { kind: 'person match', status: 'ok', once: true, reason: `'${String(text ?? '').trim()}' read as ${shownName(r.person)}${w ? ` at ${w}` : ''}, nearest to you` });
+    }
+    return { ...r, scope };
+}
+/**
+ * R7: the scope for a came_along item on the reply at `id`: the message before the turn's move (the last one the party
+ * spent in the old room) and that room, so the people just left behind (leftBehind: present there then) are at the room
+ * level, and someone due in the new room is not.
+ */
+function alongScopeOf(chat, id) {
+    const start = turnStartOf(chat, id);
+    const before = Math.max(0, start - 1);
+    return [before, { from: positionOf(chat, before, PLAYER)?.address || '' }];
+}
 /** Stubs with lore the narrator may ask for: someone is off in them now, or a request this scene already named them. */
 function loreChain(loc) {
     const base = [...(loc?.lore_chain ?? [])];
@@ -248,10 +301,11 @@ async function learnName(msg, { target, heard = '', source = 'bracket' } = {}) {
     const cast = castPack()?.npcs ?? [];
     const folded = [...(framesOf(chat, at, cast).at(-1)?.values() ?? [])];
     const people = folded.length ? folded : cast;
-    const person = findPerson(target, people);
+    const hit = resolveAt(chat, at, target, people);
+    const person = hit.person;
     const player = source === 'bracket';
     if (!person) {
-        const reason = `No saved person is called "${String(target ?? '').trim()}".`;
+        const reason = hit.tie.length ? whichOne(hit.scope, hit.tie) : `No saved person is called "${String(target ?? '').trim()}".`;
         if (!player) noteCall(at, { kind: 'name learn', status: 'skipped', reason: `${source}: ${reason}` });
         return { ok: false, reason };
     }
@@ -317,8 +371,9 @@ async function setRelOn(msg, arg) {
     const chat = ctx().chat ?? [];
     const id = Math.max(0, chat.indexOf(msg));
     const folded = [...(framesOf(chat, id, castPack()?.npcs ?? []).at(-1)?.values() ?? [])];
-    const n = findPerson(name, folded);
-    if (!n) return { ok: false, reason: `No saved person is called ${name}.` };
+    const hit = resolveAt(chat, id, name, folded);
+    const n = hit.person;
+    if (!n) return { ok: false, reason: hit.tie.length ? whichOne(hit.scope, hit.tie) : `No saved person is called ${name}.` };
     addNpcStamp(msg, { type: 'npc_rel', id: n.id, who: PLAYER, state });
     syncSwipeExtra(msg);
     await ctx().saveChat?.();
@@ -347,8 +402,9 @@ async function applyFound(msg, names, source, { slash = false } = {}) {
     const prev = (msg.extra[FOUND_KEY] ?? []).filter(f => (f?.swipe ?? 0) !== swipe || f.source !== source);
     const decisions = [];
     for (const nm of list) {
-        const n = findPerson(nm, folded);
-        if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: `No saved person is called "${nm}".`, source, where: '', place: '', ...(slash ? { slash: true } : {}) }); continue; }
+        const hit = resolveAt(chat, at, nm, folded);
+        const n = hit.person;
+        if (!n) { decisions.push({ swipe, name: nm, id: '', ok: false, reason: hit.tie.length ? whichOne(hit.scope, hit.tie) : `No saved person is called "${nm}".`, source, where: '', place: '', ...(slash ? { slash: true } : {}) }); continue; }
         const j = judgeFound(n, env.clock(at), env.playerAt(at), env, { at, player: source === 'bracket' });
         decisions.push({ swipe, name: n.name, id: n.id, ok: !!j.ok, ...(j.here ? { here: true } : {}), ...(j.moved ? { moved: true } : {}), reason: j.reason, ...(j.detail ? { detail: j.detail } : {}), source, where: j.where ?? '', place: j.place ?? '', ...(slash ? { slash: true } : {}) }); // name-ok: found card (player-facing)
         // Right here: nothing to stamp. A might block: a whole-block appearance stamp. An off-map entry (tracker, flag): a found room for its where label.
@@ -1251,4 +1307,4 @@ function retryAppearance(msgId, npcId, key) {
     }).then(r => r ?? { ok: false, error: 'Already retrying.' });
 }
 
-export { REMEMBER_KEY, APPEAR_KEY, runFind, rememberStory, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };
+export { REMEMBER_KEY, APPEAR_KEY, runFind, alongScopeOf, personScope, resolveAt, whichOne, rememberStory, personExpiryTurn, rememberWith, editExpiryRevert, editKeptAppearance, npcBefore, freshPersonExpiries, personExpiriesIn, postPersonExpiryNotices, setRelOn, addNpcStamp, applyFacts, applyFound, castPack, discardRemember, exportNpc, keepRemember, learnName, learnNameOn, learnSaidNames, loreChain, mapActivity, mapInspect, mapNpcs, matchStubLore, maybeSuggest, npcChatEdit, npcClock, npcEnv, offerRemember, prefetchRemember, prepareNpcs, requestLore, retryRemember, toolNpcStamp, ensureAppearanceRebuilds, retryAppearance, appearJobs, decideNpc, fillCandidate, makeOwner, recompose, settleNpc };

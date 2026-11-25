@@ -15,7 +15,7 @@ import { FLAG_KEY, PATCH_KEY, WAIT_KEY, WAITCARD_KEY, broadcastMapState, ctx, is
 import { roomOptions } from './looking.mjs';
 import { matchKey, optionLines, stamp } from './movement.mjs';
 import { FLAG_TAG, mapCtx, openEditor, openForms, previewOps, swipeOf } from './patches.mjs';
-import { APPEAR_KEY, REMEMBER_KEY, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, leftBehind, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
+import { APPEAR_KEY, REMEMBER_KEY, alongScopeOf, resolveAt, addNpcStamp, applyFacts, applyFound, castPack, ensureAppearanceRebuilds, freshPersonExpiries, personExpiryTurn, invalidateAppearance, learnName, learnSaidNames, leftBehind, listedPeople, maybeSuggest, npcClock, npcEnv, refreshLivePlaces, requestLore, toolNpcStamp } from './scene.mjs';
 import { decideNpc, epochOf, fillCandidate, findStamp, makeOwner } from './owners.mjs';
 import { appearanceScope, fieldUnchanged, junkAppearanceIntent } from './npceffects.mjs';
 import { messageKey, pinBaseline, readBaselineMap, reviewFields } from './replay.mjs';
@@ -325,7 +325,12 @@ async function applyPersonStamps(id, stamped) {
     };
     for (const s0 of stamped) {
         const warnFrom = s0.source === TRACKER_SOURCE ? TRACKER_SOURCE : '';
-        const t = findPerson(s0.id, folded)?.id ?? null;
+        // R7: a label that fits several people is read by the scope ladder at this reply. came_along is read from the
+        // room the party just left (its candidates were there), at the message before the move.
+        const [scopeAt, scopeOpts] = s0.type === 'npc_along' ? alongScopeOf(c.chat, id) : [id, {}];
+        const hit = resolveAt(c.chat, scopeAt, s0.id, folded, { ...scopeOpts, noteAt: id });
+        const t = hit.person?.id ?? null;
+        if (!t && hit.tie.length) { warn(`Warning: a person update did not land: "${s0.id}" matches ${hit.tie.length} saved people ${LEVEL_WHERE[hit.level] ?? 'here'}; not applied.`, warnFrom); continue; }
         if (!t) { warn(`Warning: a person update did not land: no saved person has the id "${s0.id}".`, warnFrom); continue; }
         let s = t === s0.id ? s0 : { ...s0, id: t };
         const cur = folded.find(n => n.id === t) || npcAt(c.chat, id, castPack()?.npcs ?? [], t);
@@ -466,6 +471,8 @@ function guardOwners(id, people, present = null) {
     }
     return out;
 }
+/** Where the tied people of a person update are, by their ladder level (the R7 warning). */
+const LEVEL_WHERE = ['here', 'in this area', 'in this region', 'elsewhere'];
 /** The people just left behind and the people here, in alongCheck's shape, for the reply at `id`. */
 function alongContext(chat, id, loc = null) {
     const shape = p => ({ id: handleOf(p.id), npcId: p.id, name: shownName(p), label: shownName(p), aliases: [...(p.aliases ?? [])], unknownAs: p.unknownAs || '', nameKnown: p.known?.known !== false });
